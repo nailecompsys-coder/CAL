@@ -1,0 +1,29 @@
+# Standalone Cal API — no external Docker networks required.
+# Use on a host that does NOT have atlas-net / atlas_default:
+#   CAL_APP_VERSION=$(tr -d '[:space:]' < VERSION) docker compose -f docker-compose.standalone.yml up --build -d
+# Or: make deploy-cal-standalone
+services:
+  cal_api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_VERSION: ${CAL_APP_VERSION:-unknown}
+    image: cal_api:local
+    pull_policy: build
+    container_name: cal_api
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:3005:3005"
+    networks:
+      - cal_internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  cal_internal:
+    driver: bridge

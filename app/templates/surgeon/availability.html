@@ -1,0 +1,117 @@
+{% extends "base_surgeon.html" %}
+{% block title %}My Availability{% endblock %}
+
+{% block content %}
+<div class="px-4 pt-12 pb-4 sm:pt-4 sticky top-0 z-10" style="background: rgba(255,255,255,.80); backdrop-filter: blur(22px) saturate(1.8); -webkit-backdrop-filter: blur(22px) saturate(1.8); border-bottom: 1px solid rgba(20,48,90,.12);">
+  <div>
+    <h1 class="text-slate-800 text-lg font-bold">My Availability</h1>
+    <p class="text-slate-400 text-xs">Next 4 weeks · toggle days you're available</p>
+  </div>
+</div>
+
+{% if request.query_params.get('saved') %}
+<div class="mx-4 mt-3 bg-green-50 border border-green-200 rounded-xl px-4 py-3 flex items-center gap-2 text-green-700 text-sm">
+  <i class="fa-solid fa-circle-check"></i> Availability saved.
+</div>
+{% endif %}
+
+{% if request.query_params.get('warn') %}
+<div class="mx-4 mt-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-start gap-2 text-amber-800 text-sm">
+  <i class="fa-solid fa-triangle-exclamation text-amber-500 mt-0.5 flex-shrink-0"></i>
+  <div><strong>Scheduling conflict:</strong> {{ request.query_params.get('warn') }}</div>
+</div>
+{% endif %}
+
+<form method="POST" action="/surgeon/availability/save">
+<div class="px-4 mt-4 pb-32 space-y-4">
+
+  {% for week in weeks %}
+  {% set week_start = week[0].date %}
+  {% set week_end = week[-1].date %}
+  <div class="rounded-2xl border border-slate-200 overflow-hidden" style="background: rgba(255,255,255,.85); backdrop-filter: blur(12px) saturate(1.6); -webkit-backdrop-filter: blur(12px) saturate(1.6);">
+    <div class="px-4 py-2.5 border-b border-slate-100 flex items-center justify-between" style="background: rgba(244,246,249,.80);">
+      <p class="text-xs font-bold text-slate-500 uppercase tracking-wide">
+        {{ week_start.strftime('%b %-d') }} – {{ week_end.strftime('%b %-d') }}
+      </p>
+      <div class="flex gap-2">
+        <button type="button" class="text-xs text-blue-600 font-semibold hover:text-blue-800 px-2 py-0.5 rounded-lg hover:bg-blue-50"
+          onclick="setWeek(this, true)">All on</button>
+        <button type="button" class="text-xs text-slate-400 font-semibold hover:text-slate-600 px-2 py-0.5 rounded-lg hover:bg-slate-100"
+          onclick="setWeek(this, false)">All off</button>
+      </div>
+    </div>
+    <div class="divide-y divide-slate-100">
+      {% for day in week %}
+      {% set is_today = day.date == today %}
+      {% set date_key = day.date.isoformat() %}
+      <div class="px-4 py-3 flex items-center gap-3 {% if is_today %}bg-blue-50/40{% endif %}">
+        {# Day label #}
+        <div class="w-10 flex-shrink-0 text-center">
+          <p class="text-[11px] font-bold uppercase {% if is_today %}text-blue-500{% else %}text-slate-400{% endif %}">{{ day.date.strftime('%a') }}</p>
+          <p class="text-base font-bold {% if is_today %}text-blue-600{% else %}text-slate-700{% endif %} leading-tight">{{ day.date.strftime('%-d') }}</p>
+        </div>
+
+        {# Time inputs #}
+        <div class="flex-1" id="times_{{ date_key }}"
+             style="{% if not day.is_available %}opacity:0.25; pointer-events:none;{% endif %}">
+          <div class="flex items-center gap-1.5">
+            <input type="time" name="start_{{ date_key }}"
+                   value="{{ day.start_time.strftime('%H:%M') if day.start_time else '07:00' }}"
+                   class="text-xs text-slate-600 border border-slate-200 rounded-lg px-2 py-1 bg-white focus:ring-1 focus:ring-blue-400 focus:outline-none w-[80px]">
+            <span class="text-slate-300 text-xs">–</span>
+            <input type="time" name="end_{{ date_key }}"
+                   value="{{ day.end_time.strftime('%H:%M') if day.end_time else '17:00' }}"
+                   class="text-xs text-slate-600 border border-slate-200 rounded-lg px-2 py-1 bg-white focus:ring-1 focus:ring-blue-400 focus:outline-none w-[80px]">
+          </div>
+        </div>
+
+        {# Unavailable label #}
+        <div class="flex-1" id="offlabel_{{ date_key }}"
+             style="{% if day.is_available %}display:none;{% endif %}">
+          <span class="text-xs text-slate-400 italic">Unavailable</span>
+        </div>
+
+        {# Toggle #}
+        <label class="relative flex-shrink-0 cursor-pointer" style="width:48px;height:28px;">
+          <input type="checkbox" name="avail_{{ date_key }}" value="1"
+                 {% if day.is_available %}checked{% endif %}
+                 onchange="toggleDay('{{ date_key }}', this.checked)"
+                 class="sr-only peer">
+          <div class="w-full h-full rounded-full bg-slate-200 peer-checked:bg-blue-500 transition-colors duration-200"></div>
+          <div class="absolute top-[3px] left-[3px] w-[22px] h-[22px] bg-white rounded-full shadow-sm transition-transform duration-200 peer-checked:translate-x-[20px]"></div>
+        </label>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+
+</div>
+
+<div class="fixed bottom-[64px] left-0 right-0 px-4 pb-3 pt-3" style="background: linear-gradient(to top, rgba(234,243,255,.97) 65%, transparent);">
+  <button type="submit"
+          class="w-full text-white py-3.5 rounded-2xl font-bold text-sm active:scale-[0.98] transition-transform"
+          style="background: linear-gradient(155deg, #1a7cf8, #0044c0); box-shadow: 0 6px 22px rgba(0,70,200,.30);">
+    <i class="fa-solid fa-floppy-disk mr-2"></i> Save Availability
+  </button>
+</div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleDay(dateKey, checked) {
+  const times  = document.getElementById('times_' + dateKey);
+  const offLbl = document.getElementById('offlabel_' + dateKey);
+  if (times)  { times.style.opacity = checked ? '1' : '0.25'; times.style.pointerEvents = checked ? 'auto' : 'none'; }
+  if (offLbl) { offLbl.style.display = checked ? 'none' : ''; }
+}
+
+function setWeek(btn, on) {
+  btn.closest('.rounded-2xl').querySelectorAll('input[type=checkbox]').forEach(cb => {
+    cb.checked = on;
+    toggleDay(cb.name.replace('avail_', ''), on);
+  });
+}
+</script>
+{% endblock %}

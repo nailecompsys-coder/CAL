@@ -1,0 +1,64 @@
+{% extends "base_admin.html" %}
+{% block title %}Patients{% endblock %}
+
+{% block content %}
+<header class="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 flex-shrink-0">
+  <div>
+    <h1 class="text-xl font-bold text-slate-800">Patient Assignments</h1>
+    <p class="text-sm text-slate-500">{{ view_date.strftime('%A, %B %-d, %Y') }}</p>
+  </div>
+  <div class="flex items-center gap-2">
+    <a href="/admin/patients?for_date={{ (view_date - view_date.__class__(view_date.year, view_date.month, view_date.day).__class__.fromordinal(view_date.toordinal() - 1)).isoformat() }}"
+      class="bg-slate-100 text-slate-600 text-sm px-3 py-2 rounded-lg hover:bg-slate-200"><i class="fa-solid fa-chevron-left"></i></a>
+    <input type="date" value="{{ view_date.isoformat() }}"
+      onchange="window.location='/admin/patients?for_date='+this.value"
+      class="bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+    <a href="/admin/patients?for_date={{ (view_date + view_date.__class__(view_date.year, view_date.month, view_date.day).__class__.fromordinal(view_date.toordinal() + 1) - view_date.__class__(view_date.year, view_date.month, view_date.day)).isoformat() }}"
+      class="bg-slate-100 text-slate-600 text-sm px-3 py-2 rounded-lg hover:bg-slate-200"><i class="fa-solid fa-chevron-right"></i></a>
+  </div>
+</header>
+
+<div class="p-6">
+  <form method="post" action="/admin/patients/save">
+    <input type="hidden" name="for_date" value="{{ view_date.isoformat() }}" />
+    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <table class="w-full">
+        <thead>
+          <tr class="bg-slate-50 border-b border-slate-200">
+            <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Surgeon</th>
+            <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-32">Patient Count</th>
+            <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Notes</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          {% for s in surgeons %}
+          {% set a = assign_map.get(s.id) %}
+          <tr class="hover:bg-slate-50">
+            <td class="px-5 py-3">
+              <div class="flex items-center gap-3">
+                <div class="w-8 h-8 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0 bg-slate-600">{{ s.initials }}</div>
+                <p class="font-medium text-slate-800 text-sm">{{ s.full_name }}</p>
+              </div>
+            </td>
+            <td class="px-5 py-3">
+              <input type="number" name="patient_count_{{ s.id }}" min="0" max="99"
+                value="{{ a.patient_count if a else 0 }}"
+                class="w-24 px-3 py-2 rounded-lg border border-slate-200 text-sm text-center focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </td>
+            <td class="px-5 py-3">
+              <input type="text" name="notes_{{ s.id }}"
+                value="{{ a.notes if a else '' }}"
+                placeholder="Room, procedure type..."
+                class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="mt-4 flex justify-end">
+      <button type="submit" class="bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">Save Assignments</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

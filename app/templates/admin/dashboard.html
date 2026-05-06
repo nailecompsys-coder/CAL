@@ -1,0 +1,269 @@
+{% extends "base_admin.html" %}
+{% block title %}Dashboard{% endblock %}
+
+{% block head %}
+<style>
+  @keyframes bento-in {
+    from { opacity: 0; transform: translateY(14px) scale(0.985); }
+    to   { opacity: 1; transform: translateY(0)   scale(1);     }
+  }
+  @keyframes breathe {
+    0%, 100% { opacity: 1;   transform: scale(1);    }
+    50%      { opacity: 0.35; transform: scale(0.7); }
+  }
+  @keyframes shimmer {
+    from { background-position: -200% 0; }
+    to   { background-position:  200% 0; }
+  }
+  .bento-card {
+    animation: bento-in 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation-delay: calc(var(--i, 0) * 70ms);
+  }
+  .breathe-dot { animation: breathe 2.4s ease-in-out infinite; }
+  .bento-action { transition: transform 0.12s ease, opacity 0.12s ease; }
+  .bento-action:active { transform: scale(0.96); opacity: 0.75; }
+  @media (prefers-reduced-motion: reduce) {
+    .bento-card  { animation: none; }
+    .breathe-dot { animation: none; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<header class="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 flex-shrink-0">
+  <div>
+    <h1 class="text-xl font-bold text-slate-800">Dashboard</h1>
+    <p class="text-sm text-slate-500">{{ today.strftime('%A, %B %-d, %Y') }}</p>
+  </div>
+  <a href="/admin/call-schedule" class="bg-blue-600 text-white text-sm px-4 py-2 rounded-xl hover:bg-blue-700 bento-action flex items-center gap-2 font-medium">
+    <i class="fa-solid fa-plus"></i> Assign On-Call
+  </a>
+</header>
+
+<div class="p-5 space-y-4">
+
+  <!-- ── Stat band (4 equal bento cells) ─────────────────────────── -->
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+
+    <!-- On-Call Today — dark accent cell -->
+    <div class="bento-card rounded-[1.75rem] bg-slate-800 p-5 flex flex-col gap-3 shadow-[0_4px_24px_rgba(0,0,0,0.12)]" style="--i:0">
+      <div class="flex items-center justify-between">
+        <p class="text-xs font-semibold uppercase tracking-widest text-slate-400">On-Call Today</p>
+        <span class="relative flex h-2.5 w-2.5">
+          <span class="breathe-dot absolute inline-flex h-full w-full rounded-full {% if on_call_today %}bg-emerald-400{% else %}bg-rose-400{% endif %}"></span>
+          <span class="relative inline-flex rounded-full h-2.5 w-2.5 {% if on_call_today %}bg-emerald-400{% else %}bg-rose-400{% endif %}"></span>
+        </span>
+      </div>
+      <p class="text-5xl font-bold text-white leading-none tabular-nums">{{ on_call_today|length }}</p>
+      {% if on_call_today %}
+      <p class="text-xs text-emerald-400 font-medium flex items-center gap-1.5">
+        <i class="fa-solid fa-circle-check"></i> Coverage assigned
+      </p>
+      {% else %}
+      <p class="text-xs text-rose-400 font-medium flex items-center gap-1.5">
+        <i class="fa-solid fa-triangle-exclamation"></i> No one assigned
+      </p>
+      {% endif %}
+    </div>
+
+    <!-- Available Today -->
+    <div class="bento-card rounded-[1.75rem] bg-white border border-slate-200/80 p-5 flex flex-col gap-3 shadow-[0_4px_24px_rgba(0,0,0,0.05)]" style="--i:1">
+      <p class="text-xs font-semibold uppercase tracking-widest text-slate-400">Available Today</p>
+      <div class="flex items-end gap-2">
+        <p class="text-5xl font-bold text-slate-800 leading-none tabular-nums">{{ available_count }}</p>
+        <p class="text-lg text-slate-400 font-medium mb-0.5">/ {{ active_count }}</p>
+      </div>
+      {% if off_ids %}
+      <p class="text-xs text-rose-500 font-medium flex items-center gap-1.5">
+        <i class="fa-solid fa-umbrella-beach"></i> {{ off_ids|length }} out today
+      </p>
+      {% else %}
+      <p class="text-xs text-slate-400 flex items-center gap-1.5">
+        <i class="fa-solid fa-users"></i> All physicians in
+      </p>
+      {% endif %}
+    </div>
+
+    <!-- Days Off Pending -->
+    <div class="bento-card rounded-[1.75rem] p-5 flex flex-col gap-3 shadow-[0_4px_24px_rgba(0,0,0,0.05)] {% if pending_daysoff %}bg-amber-50 border border-amber-200/60{% else %}bg-white border border-slate-200/80{% endif %}" style="--i:2">
+      <p class="text-xs font-semibold uppercase tracking-widest {% if pending_daysoff %}text-amber-500{% else %}text-slate-400{% endif %}">Pending Approvals</p>
+      <p class="text-5xl font-bold leading-none tabular-nums {% if pending_daysoff %}text-amber-500{% else %}text-slate-800{% endif %}">{{ pending_daysoff|length }}</p>
+      {% if pending_daysoff %}
+      <a href="/admin/daysoff" class="text-xs text-amber-600 font-medium flex items-center gap-1.5 hover:text-amber-700">
+        <i class="fa-solid fa-clock"></i> Review requests →
+      </a>
+      {% else %}
+      <p class="text-xs text-slate-400 flex items-center gap-1.5">
+        <i class="fa-solid fa-circle-check"></i> All clear
+      </p>
+      {% endif %}
+    </div>
+
+    <!-- Meetings This Week -->
+    <div class="bento-card rounded-[1.75rem] bg-white border border-slate-200/80 p-5 flex flex-col gap-3 shadow-[0_4px_24px_rgba(0,0,0,0.05)]" style="--i:3">
+      <p class="text-xs font-semibold uppercase tracking-widest text-slate-400">Meetings This Week</p>
+      <p class="text-5xl font-bold text-slate-800 leading-none tabular-nums">{{ upcoming_meetings|length }}</p>
+      {% if upcoming_meetings %}
+      <p class="text-xs text-blue-600 font-medium flex items-center gap-1.5">
+        <i class="fa-solid fa-calendar-days"></i> Next: {{ upcoming_meetings[0].date.strftime('%a, %b %-d') }}
+      </p>
+      {% else %}
+      <p class="text-xs text-slate-400 flex items-center gap-1.5">
+        <i class="fa-solid fa-calendar-xmark"></i> None this week
+      </p>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- ── Main content row ──────────────────────────────────────────── -->
+  <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+
+    <!-- Today's Coverage — spans 7 cols -->
+    <div class="bento-card lg:col-span-7 rounded-[1.75rem] bg-white border border-slate-200/80 shadow-[0_4px_24px_rgba(0,0,0,0.05)] overflow-hidden" style="--i:4">
+      <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+        <div class="flex items-center gap-2.5">
+          <div class="w-7 h-7 rounded-xl bg-slate-800 flex items-center justify-center flex-shrink-0">
+            <i class="fa-solid fa-shield-halved text-white text-xs"></i>
+          </div>
+          <h2 class="font-semibold text-slate-800">Today's Coverage</h2>
+        </div>
+        <a href="/admin/calendar" class="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1">
+          Calendar <i class="fa-solid fa-arrow-right text-[10px]"></i>
+        </a>
+      </div>
+
+      <div class="p-4 space-y-2.5">
+        {% if on_call_today %}
+          {% for r in on_call_today %}
+          <div class="flex items-center gap-3 bg-gradient-to-r from-slate-50 to-blue-50/40 border border-slate-200/60 rounded-2xl px-4 py-3">
+            <div class="w-10 h-10 rounded-2xl flex items-center justify-center font-bold text-sm text-slate-600 flex-shrink-0 staff-avatar">
+              {{ r.surgeon.initials }}
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="font-semibold text-slate-800 text-sm truncate">{{ r.surgeon.full_name }}</p>
+              <p class="text-xs text-blue-600 font-medium">{{ r.call_group.name if r.call_group else 'On-Call' }}</p>
+            </div>
+            <span class="bg-emerald-100 text-emerald-700 text-xs font-bold px-3 py-1 rounded-full flex-shrink-0">Active</span>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="flex items-center gap-3 bg-rose-50 border border-rose-100 rounded-2xl px-4 py-3.5">
+            <div class="w-10 h-10 rounded-2xl bg-rose-100 flex items-center justify-center flex-shrink-0">
+              <i class="fa-solid fa-triangle-exclamation text-rose-500"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="font-semibold text-rose-700 text-sm">No On-Call Coverage</p>
+              <p class="text-xs text-rose-400">Not assigned for today</p>
+            </div>
+            <a href="/admin/call-schedule" class="bento-action text-xs bg-rose-600 text-white px-3 py-1.5 rounded-xl hover:bg-rose-700 font-medium flex-shrink-0">Assign</a>
+          </div>
+        {% endif %}
+      </div>
+
+      {% if off_ids %}
+      <div class="px-5 pb-5">
+        <div class="bg-slate-50 rounded-2xl px-4 py-3 border border-slate-100">
+          <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-widest mb-2">Out Today</p>
+          <div class="flex flex-wrap gap-1.5">
+            {% for surgeon in surgeons %}
+            {% if surgeon.id in off_ids %}
+            <span class="text-xs bg-white text-rose-500 border border-rose-100 px-2.5 py-1 rounded-full font-medium shadow-sm">
+              <i class="fa-solid fa-umbrella-beach text-[10px] mr-1"></i>{{ surgeon.full_name }}
+            </span>
+            {% endif %}
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Right rail — spans 5 cols -->
+    <div class="lg:col-span-5 flex flex-col gap-4">
+
+      <!-- Upcoming Meetings -->
+      <div class="bento-card rounded-[1.75rem] bg-white border border-slate-200/80 shadow-[0_4px_24px_rgba(0,0,0,0.05)] overflow-hidden" style="--i:5">
+        <div class="px-6 py-4 border-b border-slate-100 flex items-center gap-2.5">
+          <div class="w-7 h-7 rounded-xl bg-blue-600 flex items-center justify-center flex-shrink-0">
+            <i class="fa-solid fa-users-rectangle text-white text-xs"></i>
+          </div>
+          <h2 class="font-semibold text-slate-800">Upcoming Meetings</h2>
+          {% if upcoming_meetings %}
+          <span class="ml-auto text-xs bg-blue-50 text-blue-600 border border-blue-100 px-2 py-0.5 rounded-full font-semibold">{{ upcoming_meetings|length }}</span>
+          {% endif %}
+        </div>
+        <div class="divide-y divide-slate-100">
+          {% for m in upcoming_meetings %}
+          <div class="px-5 py-3 flex items-start gap-3">
+            <div class="flex-shrink-0 w-10 text-center pt-0.5">
+              <p class="text-[10px] text-slate-400 font-semibold uppercase leading-none">{{ m.date.strftime('%b') }}</p>
+              <p class="text-lg font-bold text-slate-800 leading-tight">{{ m.date.strftime('%-d') }}</p>
+            </div>
+            <div class="flex-1 min-w-0 py-0.5">
+              <p class="text-sm font-medium text-slate-800 truncate">{{ m.title }}</p>
+              <p class="text-xs text-slate-500 truncate">
+                {{ m.date.strftime('%A') }}{% if m.start_time %} · {{ m.start_time.strftime('%-I:%M %p') }}{% endif %}{% if m.location_text %} · {{ m.location_text }}{% endif %}
+              </p>
+            </div>
+          </div>
+          {% else %}
+          <div class="px-5 py-8 text-center">
+            <i class="fa-solid fa-calendar-xmark text-slate-200 text-3xl mb-2 block"></i>
+            <p class="text-sm text-slate-400">No meetings this week</p>
+          </div>
+          {% endfor %}
+        </div>
+        {% if upcoming_meetings %}
+        <div class="px-5 py-3 border-t border-slate-100">
+          <a href="/admin/meetings" class="text-xs text-blue-600 hover:text-blue-700 font-medium">View all meetings →</a>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Pending Approvals (only shown when pending exist) -->
+      {% if pending_daysoff %}
+      <div class="bento-card rounded-[1.75rem] bg-white border border-amber-200/60 shadow-[0_4px_24px_rgba(0,0,0,0.05)] overflow-hidden" style="--i:6">
+        <div class="px-6 py-4 border-b border-amber-100/80 flex items-center gap-2.5">
+          <div class="w-7 h-7 rounded-xl bg-amber-500 flex items-center justify-center flex-shrink-0">
+            <i class="fa-solid fa-clock text-white text-xs"></i>
+          </div>
+          <h2 class="font-semibold text-slate-800">Pending Approvals</h2>
+          <span class="ml-auto text-xs bg-amber-100 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full font-bold">{{ pending_daysoff|length }}</span>
+        </div>
+        <div class="divide-y divide-slate-100">
+          {% for d in pending_daysoff[:4] %}
+          <div class="px-5 py-3 flex items-center gap-3">
+            <div class="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold flex-shrink-0 staff-avatar">
+              {{ d.surgeon.initials }}
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-slate-800 truncate">{{ d.surgeon.full_name }}</p>
+              <p class="text-xs text-slate-500">{{ d.start_date.strftime('%b %-d') }}{% if d.start_date != d.end_date %} – {{ d.end_date.strftime('%b %-d') }}{% endif %}{% if d.reason %} · {{ d.reason }}{% endif %}</p>
+            </div>
+            <div class="flex gap-1 flex-shrink-0">
+              <form method="post" action="/admin/daysoff/{{ d.id }}/approve">
+                <button class="bento-action w-7 h-7 bg-emerald-100 text-emerald-700 rounded-xl flex items-center justify-center hover:bg-emerald-200" title="Approve">
+                  <i class="fa-solid fa-check text-xs"></i>
+                </button>
+              </form>
+              <form method="post" action="/admin/daysoff/{{ d.id }}/deny">
+                <button class="bento-action w-7 h-7 bg-rose-100 text-rose-700 rounded-xl flex items-center justify-center hover:bg-rose-200" title="Deny">
+                  <i class="fa-solid fa-xmark text-xs"></i>
+                </button>
+              </form>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="px-5 py-3 border-t border-amber-100/80">
+          <a href="/admin/daysoff" class="text-xs text-amber-600 hover:text-amber-700 font-medium">
+            {% if pending_daysoff|length > 4 %}View all {{ pending_daysoff|length }} requests →{% else %}Manage requests →{% endif %}
+          </a>
+        </div>
+      </div>
+      {% endif %}
+
+    </div><!-- /right rail -->
+  </div><!-- /main content row -->
+</div>
+{% endblock %}

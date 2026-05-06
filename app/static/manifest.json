@@ -1,0 +1,35 @@
+{
+  "id": "/surgeon/schedule",
+  "name": "Mid Florida Surgical",
+  "short_name": "MFS Cal",
+  "description": "Surgeon scheduling — Orlando & Lake County",
+  "start_url": "/surgeon/schedule",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
+  "orientation": "portrait",
+  "background_color": "#E8F2FC",
+  "theme_color": "#14305A",
+  "icons": [
+    {
+      "src": "/static/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "categories": ["medical", "productivity"],
+  "lang": "en-US"
+}

@@ -1,0 +1,103 @@
+{% extends "base_admin.html" %}
+{% block title %}Call Groups{% endblock %}
+
+{% block content %}
+<header class="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 flex-shrink-0">
+  <div>
+    <h1 class="text-xl font-bold text-slate-800">Call Groups</h1>
+    <p class="text-sm text-slate-500">Groups for call schedule (e.g. Orlando Hospitals, Winter Garden). Each group can have multiple locations.</p>
+  </div>
+  <a href="/admin/call-schedule" class="text-sm text-slate-600 hover:text-blue-600">← Call Schedule</a>
+</header>
+
+{% if request.query_params.get('msg') == 'created' %}
+<div class="mx-6 mt-4 bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-green-700 text-sm">Call group created.</div>
+{% elif request.query_params.get('msg') == 'updated' %}
+<div class="mx-6 mt-4 bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-green-700 text-sm">Call group updated.</div>
+{% elif request.query_params.get('msg') == 'deleted' %}
+<div class="mx-6 mt-4 bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-green-700 text-sm">Call group deleted.</div>
+{% elif request.query_params.get('msg') == 'location_added' %}
+<div class="mx-6 mt-4 bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-green-700 text-sm">Location added to group.</div>
+{% elif request.query_params.get('msg') == 'location_removed' %}
+<div class="mx-6 mt-4 bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-green-700 text-sm">Location removed from group.</div>
+{% endif %}
+
+<div class="p-6 max-w-3xl space-y-6">
+  <!-- Add new group -->
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm">
+    <div class="px-5 py-4 border-b border-slate-100">
+      <h2 class="font-semibold text-slate-800">Add call group</h2>
+      <p class="text-xs text-slate-500 mt-0.5">Create a group (e.g. Orlando Hospitals) and attach locations below.</p>
+    </div>
+    <form method="post" action="/admin/call-groups/create" class="p-5 flex flex-wrap items-end gap-4">
+      <div class="flex-1 min-w-[200px]">
+        <label class="block text-xs font-semibold text-slate-600 mb-1 uppercase tracking-wide">Name</label>
+        <input type="text" name="name" required placeholder="e.g. Orlando Hospitals"
+          class="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      </div>
+      <div class="w-24">
+        <label class="block text-xs font-semibold text-slate-600 mb-1 uppercase tracking-wide">Order</label>
+        <input type="number" name="sort_order" value="0" min="0"
+          class="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      </div>
+      <button type="submit" class="bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700">Add group</button>
+    </form>
+  </div>
+
+  <!-- List groups -->
+  {% for g in call_groups %}
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm">
+    <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
+      <div>
+        <h2 class="font-semibold text-slate-800">{{ g.name }}</h2>
+        <p class="text-xs text-slate-500">Sort order: {{ g.sort_order }}</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <form method="post" action="/admin/call-groups/{{ g.id }}/update" class="flex items-center gap-2">
+          <input type="text" name="name" value="{{ g.name }}" class="px-2 py-1.5 rounded border border-slate-200 text-sm w-48" />
+          <input type="number" name="sort_order" value="{{ g.sort_order }}" min="0" class="w-14 px-2 py-1.5 rounded border border-slate-200 text-sm" />
+          <button type="submit" class="text-xs text-blue-600 hover:text-blue-800 font-medium">Save</button>
+        </form>
+        <form method="post" action="/admin/call-groups/{{ g.id }}/delete" onsubmit="return confirm('Delete this call group?');">
+          <button type="submit" class="text-xs text-rose-500 hover:text-rose-700 font-medium">Delete</button>
+        </form>
+      </div>
+    </div>
+    <div class="p-5">
+      <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Locations in this group</p>
+      <ul class="space-y-1.5 mb-4">
+        {% for gl in g.locations %}
+        <li class="flex items-center justify-between text-sm">
+          <span class="text-slate-700">{{ gl.location.name }}{% if gl.location.location_type %} <span class="text-slate-400">({{ gl.location.location_type }})</span>{% endif %}</span>
+          <form method="post" action="/admin/call-groups/{{ g.id }}/locations/remove">
+            <input type="hidden" name="location_id" value="{{ gl.location_id }}" />
+            <button type="submit" class="text-rose-500 hover:text-rose-700 text-xs">Remove</button>
+          </form>
+        </li>
+        {% else %}
+        <li class="text-slate-500 text-sm">No locations yet. Add below.</li>
+        {% endfor %}
+      </ul>
+      <form method="post" action="/admin/call-groups/{{ g.id }}/locations/add" class="flex items-center gap-2">
+        <select name="location_id" class="rounded-lg border border-slate-200 px-3 py-2 text-sm flex-1 max-w-xs">
+          <option value="">Select location…</option>
+          {% for loc in locations %}
+          {% if loc.id not in g._location_ids %}
+          <option value="{{ loc.id }}">{{ loc.name }} ({{ loc.location_type or 'clinic' }})</option>
+          {% endif %}
+          {% endfor %}
+        </select>
+        <button type="submit" class="bg-slate-100 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-200">Add location</button>
+      </form>
+      {% if locations and (g._location_ids | length) >= locations | length %}
+      <p class="text-xs text-slate-400 mt-2">All locations are in this group.</p>
+      {% endif %}
+    </div>
+  </div>
+  {% else %}
+  <div class="bg-slate-50 rounded-xl border border-slate-200 p-8 text-center text-slate-500 text-sm">
+    No call groups yet. Create one above; then use the Call Schedule and pick a group to assign Primary/Backup/NO call per day.
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,236 @@
+{% extends "base_surgeon.html" %}
+{% block title %}Days Off{% endblock %}
+
+{% macro condensed_dates(req) %}
+  {%- set s = req.start_date -%}
+  {%- set e = req.end_date -%}
+  {%- if s == e -%}
+    {{ s.strftime('%-m/%-d') }}
+  {%- elif s.month == e.month -%}
+    {{ s.strftime('%-m/%-d') }}-{{ e.strftime('%-d') }}
+  {%- else -%}
+    {{ s.strftime('%-m/%-d') }}-{{ e.strftime('%-m/%-d') }}
+  {%- endif -%}
+{% endmacro %}
+
+{% macro condensed_line(req) %}
+  {{- req.surgeon.initials }} {{ condensed_dates(req) -}}
+  {%- if req.notes %} · {{ req.notes }}{% endif -%}
+{% endmacro %}
+
+{% block content %}
+<div class="px-4 pt-12 pb-3 sm:pt-4 sticky top-0 z-10"
+     style="background:rgba(255,255,255,.82);backdrop-filter:blur(22px) saturate(1.8);-webkit-backdrop-filter:blur(22px) saturate(1.8);border-bottom:1px solid rgba(20,48,90,.10);">
+  <h1 class="text-slate-800 text-lg font-bold">Days Off</h1>
+  <p class="text-slate-400 text-xs">{{ display_range_label }} · tap + to request time off</p>
+</div>
+
+{% if request.query_params.get('submitted') %}
+<div class="mx-4 mt-3 bg-green-50 border border-green-200 rounded-2xl px-4 py-3 flex items-center gap-2 text-green-700 text-sm">
+  <i class="fa-solid fa-circle-check text-green-500"></i>
+  <span>Request submitted — pending Shannon's approval.</span>
+</div>
+{% endif %}
+
+{% if request.query_params.get('warn') %}
+<div class="mx-4 mt-2 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 flex items-start gap-2 text-amber-800 text-sm">
+  <i class="fa-solid fa-triangle-exclamation text-amber-500 mt-0.5 flex-shrink-0"></i>
+  <div><strong>Heads up:</strong> {{ request.query_params.get('warn') }}</div>
+</div>
+{% endif %}
+
+{# ── Rolling section list ─────────────────────────────────────── #}
+<div class="px-4 mt-4 pb-36 space-y-2">
+  {% for section in sections %}
+  <div class="rounded-2xl border border-slate-200 overflow-hidden divide-y divide-slate-100"
+       style="background:rgba(255,255,255,.90);backdrop-filter:blur(12px) saturate(1.6);-webkit-backdrop-filter:blur(12px) saturate(1.6);">
+
+    {# Section header #}
+    <div class="px-4 py-2" style="background:rgba(240,245,252,.88);">
+      <p class="text-[11px] font-bold text-slate-500 uppercase tracking-widest">{{ section.header }}</p>
+    </div>
+
+    {# Filled request rows (max 6) #}
+    {% for req in section.requests[:6] %}
+    <div class="px-4 py-2.5 flex items-center gap-3
+                {% if req.surgeon_id == surgeon.id %}bg-blue-50/30{% endif %}">
+      <div class="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0
+        {% if req.status == 'approved' %}bg-green-100{% else %}bg-slate-100{% endif %}">
+        {% if req.status == 'approved' %}
+        <i class="fa-solid fa-check text-green-600" style="font-size:10px;"></i>
+        {% else %}
+        <div class="w-2 h-2 rounded-full bg-amber-400"></div>
+        {% endif %}
+      </div>
+      <span class="text-sm font-medium text-slate-700 flex-1 truncate">{{ condensed_line(req) }}</span>
+      {% if req.surgeon_id == surgeon.id %}
+      <span class="text-[10px] font-bold text-blue-400 uppercase tracking-wide flex-shrink-0">You</span>
+      {% endif %}
+    </div>
+    {% endfor %}
+
+    {# Blank rows to fill to 6 #}
+    {% set filled = section.requests[:6]|length %}
+    {% for i in range(6 - filled) %}
+    <div class="px-4 py-2.5 flex items-center gap-3" style="opacity:{{ 0.5 if i == 0 else 0.25 }};">
+      <div class="w-5 h-5 rounded-full border-2 border-dashed border-slate-300 flex-shrink-0"></div>
+    </div>
+    {% endfor %}
+
+  </div>
+  {% endfor %}
+</div>
+
+{# ── Floating action button ───────────────────────────────────── #}
+<button onclick="openForm()"
+        class="fixed z-20 flex items-center justify-center text-white text-lg active:scale-95 transition-transform"
+        style="bottom:calc(72px + env(safe-area-inset-bottom) + 16px);right:16px;width:52px;height:52px;border-radius:50%;background:linear-gradient(155deg,#1a7cf8,#0044c0);box-shadow:0 6px 24px rgba(0,70,200,.38);">
+  <i class="fa-solid fa-plus"></i>
+</button>
+
+{# ── Request Form Modal (bottom sheet) ───────────────────────── #}
+<div id="request-modal" class="fixed inset-0 z-50 hidden" aria-modal="true">
+  {# Backdrop #}
+  <div class="absolute inset-0 bg-black/30 backdrop-blur-sm" onclick="closeForm()"></div>
+
+  {# Sheet #}
+  <div id="request-sheet"
+       class="absolute bottom-0 left-0 right-0 rounded-t-3xl overflow-hidden"
+       style="background:rgba(250,252,255,.98);backdrop-filter:blur(20px);transform:translateY(100%);transition:transform .35s cubic-bezier(0.32,0.72,0,1);max-height:90vh;overflow-y:auto;">
+
+    {# Handle #}
+    <div class="flex justify-center pt-3 pb-1 sticky top-0 z-10"
+         style="background:rgba(250,252,255,.98);">
+      <div class="w-10 h-1 rounded-full bg-slate-300"></div>
+    </div>
+
+    <div class="px-5 pb-2 pt-1 flex items-center justify-between sticky top-6 z-10"
+         style="background:rgba(250,252,255,.98);">
+      <h2 class="text-base font-bold text-slate-800">Request Time Off</h2>
+      <button onclick="closeForm()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center active:bg-slate-200">
+        <i class="fa-solid fa-xmark text-slate-500 text-sm"></i>
+      </button>
+    </div>
+
+    <form method="POST" action="/surgeon/request-off" class="px-5 pb-10 space-y-4">
+
+      {# Date row #}
+      <div class="flex gap-3">
+        <div class="flex-1">
+          <label class="block text-xs font-semibold text-slate-500 mb-1.5">Start</label>
+          <input type="date" name="start_date" id="start_date" required min="{{ today.isoformat() }}"
+                 class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div class="flex-1">
+          <label class="block text-xs font-semibold text-slate-500 mb-1.5">End</label>
+          <input type="date" name="end_date" id="end_date" required min="{{ today.isoformat() }}"
+                 class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+      </div>
+
+      {# Duration preview #}
+      <div id="duration-preview" class="hidden bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 flex items-center gap-2">
+        <i class="fa-solid fa-calendar-check text-blue-500 text-xs"></i>
+        <span id="duration-text" class="text-blue-700 text-sm font-medium"></span>
+      </div>
+
+      {# Request type chips #}
+      <div>
+        <label class="block text-xs font-semibold text-slate-500 mb-2">Type</label>
+        <div class="grid grid-cols-3 gap-2">
+          {% for val, icon, label in [
+            ('Day Off',         'fa-umbrella-beach',  'Day Off'),
+            ('No Call',         'fa-bell-slash',      'No Call'),
+            ('Vacation',        'fa-plane',           'Vacation'),
+            ('CME / Conference','fa-graduation-cap',  'CME'),
+            ('Partial Day',     'fa-clock',           'Partial Day'),
+            ('Medical',         'fa-kit-medical',     'Medical'),
+          ] %}
+          <label class="chip flex flex-col items-center gap-1 border border-slate-200 rounded-xl px-2 py-2.5 cursor-pointer text-center transition-all">
+            <input type="radio" name="reason" value="{{ val }}" class="sr-only" {% if loop.first %}checked{% endif %}>
+            <i class="fa-solid {{ icon }} text-slate-400 text-sm chip-icon"></i>
+            <span class="text-[11px] text-slate-600 font-semibold leading-tight chip-label">{{ label }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+
+      {# Notes #}
+      <div>
+        <label class="block text-xs font-semibold text-slate-500 mb-1.5">Notes <span class="font-normal text-slate-300">(optional)</span></label>
+        <input type="text" name="notes" placeholder="e.g. out by 9am · no call only · CME Orlando"
+               class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+
+      <button type="submit"
+              class="w-full text-white py-3.5 rounded-2xl font-bold text-sm active:scale-[0.98] transition-transform"
+              style="background:linear-gradient(155deg,#1a7cf8,#0044c0);box-shadow:0 6px 22px rgba(0,70,200,.28);">
+        <i class="fa-solid fa-paper-plane mr-2"></i> Submit Request
+      </button>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Bottom sheet open/close ─────────────────────────────────
+const modal = document.getElementById('request-modal');
+const sheet = document.getElementById('request-sheet');
+const startIn = document.getElementById('start_date');
+const endIn   = document.getElementById('end_date');
+
+function openForm() {
+  // Pre-fill to today so date picker opens at current month
+  if (!startIn.value) {
+    startIn.value = '{{ today.isoformat() }}';
+    endIn.value   = '{{ today.isoformat() }}';
+    endIn.min     = startIn.value;
+    updatePreview();
+  }
+  modal.classList.remove('hidden');
+  requestAnimationFrame(() => sheet.style.transform = 'translateY(0)');
+}
+function closeForm() {
+  sheet.style.transform = 'translateY(100%)';
+  setTimeout(() => modal.classList.add('hidden'), 360);
+}
+
+// ── Date preview ─────────────────────────────────────────────
+const preview = document.getElementById('duration-preview');
+const prevTxt = document.getElementById('duration-text');
+function updatePreview() {
+  const s = startIn.value, e = endIn.value;
+  if (!s || !e) { preview.classList.add('hidden'); return; }
+  const sd = new Date(s + 'T00:00:00'), ed = new Date(e + 'T00:00:00');
+  if (ed < sd) { endIn.value = s; return updatePreview(); }
+  const days = Math.round((ed - sd) / 86400000) + 1;
+  const fmt = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  prevTxt.textContent = days === 1 ? fmt(sd) : `${fmt(sd)} – ${fmt(ed)} · ${days} days`;
+  preview.classList.remove('hidden');
+}
+startIn.addEventListener('change', () => { endIn.min = startIn.value; updatePreview(); });
+endIn.addEventListener('change', updatePreview);
+
+// ── Chip selection ────────────────────────────────────────────
+document.querySelectorAll('.chip input[type=radio]').forEach(r => {
+  r.addEventListener('change', styleChips);
+});
+function styleChips() {
+  document.querySelectorAll('.chip').forEach(c => {
+    const inp  = c.querySelector('input');
+    const icon = c.querySelector('.chip-icon');
+    if (inp.checked) {
+      c.classList.add('border-blue-500', 'bg-blue-50');
+      icon.classList.replace('text-slate-400', 'text-blue-500');
+    } else {
+      c.classList.remove('border-blue-500', 'bg-blue-50');
+      icon.classList.replace('text-blue-500', 'text-slate-400');
+    }
+  });
+}
+styleChips();
+
+{% if request.query_params.get('open') %}openForm();{% endif %}
+</script>
+{% endblock %}

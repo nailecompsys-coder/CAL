@@ -1,0 +1,363 @@
+{% extends "base_admin.html" %}
+{% block title %}Locations{% endblock %}
+
+{% block content %}
+<header class="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 flex-shrink-0">
+  <div>
+    <h1 class="text-xl font-bold text-slate-800">Locations</h1>
+    <p class="text-sm text-slate-500">
+      {{ locations | selectattr('location_type', 'equalto', 'clinic') | list | length }} clinics ·
+      {{ locations | selectattr('location_type', 'equalto', 'hospital') | list | length }} hospitals
+    </p>
+  </div>
+  <button onclick="openAddModal()"
+    class="bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2">
+    <i class="fa-solid fa-plus"></i> Add Location
+  </button>
+</header>
+
+{% if request.query_params.get('msg') == 'added' %}
+<div class="mx-6 mt-4 bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-green-700 text-sm"><i class="fa-solid fa-circle-check mr-2"></i>Location added.</div>
+{% elif request.query_params.get('msg') == 'updated' %}
+<div class="mx-6 mt-4 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-blue-700 text-sm"><i class="fa-solid fa-circle-check mr-2"></i>Location updated.</div>
+{% elif request.query_params.get('msg') == 'deleted' %}
+<div class="mx-6 mt-4 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3 text-rose-700 text-sm"><i class="fa-solid fa-trash mr-2"></i>Location removed.</div>
+{% elif request.query_params.get('msg') == 'palette_unknown' %}
+<div class="mx-6 mt-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-amber-800 text-sm"><i class="fa-solid fa-palette mr-2"></i>This location name does not have a standardized CAL color yet. Add it to the locked location palette before saving.</div>
+{% endif %}
+
+<div class="p-6 space-y-6">
+
+  <!-- Clinics -->
+  <div>
+    <div class="flex items-center gap-3 mb-3">
+      <div class="flex items-center gap-2">
+        <i class="fa-solid fa-clinic-medical text-teal-600"></i>
+        <h2 class="font-bold text-slate-700">Clinics / Offices</h2>
+        <span class="bg-teal-100 text-teal-700 text-xs font-bold px-2 py-0.5 rounded-full">
+          {{ locations | selectattr('location_type', 'equalto', 'clinic') | selectattr('is_active') | list | length }} active
+        </span>
+      </div>
+      <div class="flex-1 h-px bg-slate-200"></div>
+    </div>
+    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <table class="w-full">
+        <thead>
+          <tr class="border-b border-slate-100 bg-slate-50">
+            <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Name</th>
+            <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Address</th>
+            <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Phone</th>
+            <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Color</th>
+            <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
+            <th class="px-5 py-3"></th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          {% for loc in locations if loc.location_type == 'clinic' %}
+          <tr class="hover:bg-slate-50 {% if not loc.is_active %}opacity-50{% endif %}">
+            <td class="px-5 py-3">
+              <div class="flex items-center gap-2">
+                <i class="fa-solid fa-clinic-medical text-slate-500 text-xs w-4 flex-shrink-0" title="Clinic"></i>
+                <div class="w-3 h-3 rounded-full flex-shrink-0 dot-gradient shadow-sm" style="--dot-c: {{ loc.color or '#0ea5e9' }}"></div>
+                <span class="font-medium text-slate-800 text-sm">{{ loc.name }}</span>
+              </div>
+            </td>
+            <td class="px-5 py-3 text-sm text-slate-600">
+              {{ loc.address or '—' }}{% if loc.city %}, {{ loc.city }}{% endif %}
+            </td>
+            <td class="px-5 py-3 text-sm text-slate-500">{{ loc.phone or '—' }}</td>
+            <td class="px-5 py-3">
+              <div class="w-6 h-6 rounded-full border-2 border-white shadow-sm dot-gradient" style="--dot-c: {{ loc.color or '#0ea5e9' }}"></div>
+            </td>
+            <td class="px-5 py-3">
+              {% if loc.is_active %}
+              <span class="text-xs font-medium px-2 py-0.5 rounded-full status-approved">Active</span>
+              {% else %}
+              <span class="bg-slate-100 text-slate-500 text-xs font-medium px-2 py-0.5 rounded-full">Inactive</span>
+              {% endif %}
+            </td>
+            <td class="px-5 py-3">
+              <div class="flex gap-1 justify-end">
+                <button onclick="openEditModal({{ loc.id }}, '{{ loc.name|replace("'","\\'")|safe }}', '{{ loc.address or ''|replace("'","\\'")|safe }}', '{{ loc.city or '' }}', '{{ loc.phone or '' }}', '{{ loc.location_type }}')"
+                  class="w-7 h-7 bg-slate-100 text-slate-600 rounded-lg hover:bg-blue-100 hover:text-blue-600 flex items-center justify-center" title="Edit">
+                  <i class="fa-solid fa-pen text-xs"></i>
+                </button>
+                <form method="post" action="/admin/locations/{{ loc.id }}/toggle">
+                  <button class="w-7 h-7 {% if loc.is_active %}bg-slate-100 text-slate-500 hover:bg-amber-100 hover:text-amber-600{% else %}bg-green-100 text-green-600 hover:bg-green-200{% endif %} rounded-lg flex items-center justify-center" title="Toggle">
+                    <i class="fa-solid fa-power-off text-xs"></i>
+                  </button>
+                </form>
+                <form method="post" action="/admin/locations/{{ loc.id }}/delete"
+                  onsubmit="return confirm('Delete {{ loc.name }}? This will remove it from all clinic schedules.')">
+                  <button class="w-7 h-7 bg-slate-100 text-slate-400 rounded-lg hover:bg-rose-100 hover:text-rose-600 flex items-center justify-center" title="Delete">
+                    <i class="fa-solid fa-trash text-xs"></i>
+                  </button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6" class="px-5 py-8 text-center text-slate-400 text-sm">No clinics yet. Add one above.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Hospitals -->
+  <div>
+    <div class="flex items-center gap-3 mb-3">
+      <div class="flex items-center gap-2">
+        <i class="fa-solid fa-hospital text-blue-600"></i>
+        <h2 class="font-bold text-slate-700">Hospitals / Surgery Centers</h2>
+        <span class="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-0.5 rounded-full">
+          {{ locations | selectattr('location_type', 'equalto', 'hospital') | selectattr('is_active') | list | length }} active
+        </span>
+      </div>
+      <div class="flex-1 h-px bg-slate-200"></div>
+    </div>
+    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <table class="w-full">
+        <thead>
+          <tr class="border-b border-slate-100 bg-slate-50">
+            <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Name</th>
+            <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Address</th>
+            <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Phone</th>
+            <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Color</th>
+            <th class="text-left px-5 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
+            <th class="px-5 py-3"></th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          {% for loc in locations if loc.location_type == 'hospital' %}
+          <tr class="hover:bg-slate-50 {% if not loc.is_active %}opacity-50{% endif %}">
+            <td class="px-5 py-3">
+              <div class="flex items-center gap-2">
+                <i class="fa-solid fa-hospital text-slate-500 text-xs w-4 flex-shrink-0" title="Hospital"></i>
+                <div class="w-3 h-3 rounded-full flex-shrink-0 dot-gradient shadow-sm" style="--dot-c: {{ loc.color or '#3b82f6' }}"></div>
+                <span class="font-medium text-slate-800 text-sm">{{ loc.name }}</span>
+              </div>
+            </td>
+            <td class="px-5 py-3 text-sm text-slate-600">
+              {{ loc.address or '—' }}{% if loc.city %}, {{ loc.city }}{% endif %}
+            </td>
+            <td class="px-5 py-3 text-sm text-slate-500">{{ loc.phone or '—' }}</td>
+            <td class="px-5 py-3">
+              <div class="w-6 h-6 rounded-full border-2 border-white shadow-sm dot-gradient" style="--dot-c: {{ loc.color or '#3b82f6' }}"></div>
+            </td>
+            <td class="px-5 py-3">
+              {% if loc.is_active %}
+              <span class="text-xs font-medium px-2 py-0.5 rounded-full status-approved">Active</span>
+              {% else %}
+              <span class="bg-slate-100 text-slate-500 text-xs font-medium px-2 py-0.5 rounded-full">Inactive</span>
+              {% endif %}
+            </td>
+            <td class="px-5 py-3">
+              <div class="flex gap-1 justify-end">
+                <button onclick="openEditModal({{ loc.id }}, '{{ loc.name|replace("'","\\'")|safe }}', '{{ loc.address or ''|replace("'","\\'")|safe }}', '{{ loc.city or '' }}', '{{ loc.phone or '' }}', '{{ loc.location_type }}')"
+                  class="w-7 h-7 bg-slate-100 text-slate-600 rounded-lg hover:bg-blue-100 hover:text-blue-600 flex items-center justify-center" title="Edit">
+                  <i class="fa-solid fa-pen text-xs"></i>
+                </button>
+                <form method="post" action="/admin/locations/{{ loc.id }}/toggle">
+                  <button class="w-7 h-7 {% if loc.is_active %}bg-slate-100 text-slate-500 hover:bg-amber-100 hover:text-amber-600{% else %}bg-green-100 text-green-600 hover:bg-green-200{% endif %} rounded-lg flex items-center justify-center" title="Toggle">
+                    <i class="fa-solid fa-power-off text-xs"></i>
+                  </button>
+                </form>
+                <form method="post" action="/admin/locations/{{ loc.id }}/delete"
+                  onsubmit="return confirm('Delete {{ loc.name }}?')">
+                  <button class="w-7 h-7 bg-slate-100 text-slate-400 rounded-lg hover:bg-rose-100 hover:text-rose-600 flex items-center justify-center" title="Delete">
+                    <i class="fa-solid fa-trash text-xs"></i>
+                  </button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6" class="px-5 py-8 text-center text-slate-400 text-sm">No hospitals added yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<!-- Add Modal -->
+<div id="add-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden">
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6 max-h-[90vh] overflow-y-auto">
+    <div class="flex items-center justify-between mb-5">
+      <h3 class="font-bold text-slate-800 text-lg">Add Location</h3>
+      <button onclick="document.getElementById('add-modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+    </div>
+    <form method="post" action="/admin/locations/add" class="space-y-4">
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Type *</label>
+        <div class="flex gap-3">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input id="add-type-clinic" type="radio" name="location_type" value="clinic" checked class="accent-teal-600" />
+            <span class="text-sm text-slate-700"><i class="fa-solid fa-clinic-medical text-teal-600 mr-1"></i>Clinic / Office</span>
+          </label>
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input id="add-type-hospital" type="radio" name="location_type" value="hospital" class="accent-blue-600" />
+            <span class="text-sm text-slate-700"><i class="fa-solid fa-hospital text-blue-600 mr-1"></i>Hospital</span>
+          </label>
+        </div>
+      </div>
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Name *</label>
+        <input id="add-loc-name" type="text" name="name" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="e.g. Advent Health Winter Garden Clinic" /></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="block text-xs font-medium text-slate-600 mb-1">Address</label>
+          <input type="text" name="address" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
+        <div><label class="block text-xs font-medium text-slate-600 mb-1">City</label>
+          <input type="text" name="city" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
+      </div>
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Phone</label>
+        <input type="tel" name="phone" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="(407) 555-0100" /></div>
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-2">Assigned Color</label>
+        <div class="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+          <div id="add-loc-color-swatch" class="w-6 h-6 rounded-full border border-white shadow-sm dot-gradient flex-shrink-0" style="--dot-c: #D9E4EA"></div>
+          <div class="min-w-0">
+            <div id="add-loc-color-hex" class="text-sm font-medium text-slate-700">#D9E4EA</div>
+            <div id="add-loc-color-help" class="text-xs text-slate-500">CAL assigns colors automatically from the locked location palette.</div>
+          </div>
+        </div>
+      </div>
+      <div class="flex gap-2 mt-2">
+        <button type="submit" class="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">Add Location</button>
+        <button type="button" onclick="document.getElementById('add-modal').classList.add('hidden')" class="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-200">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Edit Modal -->
+<div id="edit-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden">
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6 max-h-[90vh] overflow-y-auto">
+    <div class="flex items-center justify-between mb-5">
+      <h3 class="font-bold text-slate-800 text-lg">Edit Location</h3>
+      <button onclick="document.getElementById('edit-modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+    </div>
+    <form id="edit-loc-form" method="post" action="" class="space-y-4">
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Type *</label>
+        <div class="flex gap-3">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input id="edit-type-clinic" type="radio" name="location_type" value="clinic" class="accent-teal-600" />
+            <span class="text-sm text-slate-700"><i class="fa-solid fa-clinic-medical text-teal-600 mr-1"></i>Clinic / Office</span>
+          </label>
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input id="edit-type-hospital" type="radio" name="location_type" value="hospital" class="accent-blue-600" />
+            <span class="text-sm text-slate-700"><i class="fa-solid fa-hospital text-blue-600 mr-1"></i>Hospital</span>
+          </label>
+        </div>
+      </div>
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Name *</label>
+        <input id="edit-loc-name" type="text" name="name" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="block text-xs font-medium text-slate-600 mb-1">Address</label>
+          <input id="edit-loc-address" type="text" name="address" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
+        <div><label class="block text-xs font-medium text-slate-600 mb-1">City</label>
+          <input id="edit-loc-city" type="text" name="city" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
+      </div>
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Phone</label>
+        <input id="edit-loc-phone" type="tel" name="phone" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-2">Assigned Color</label>
+        <div class="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+          <div id="edit-loc-color-swatch" class="w-6 h-6 rounded-full border border-white shadow-sm dot-gradient flex-shrink-0" style="--dot-c: #D9E4EA"></div>
+          <div class="min-w-0">
+            <div id="edit-loc-color-hex" class="text-sm font-medium text-slate-700">#D9E4EA</div>
+            <div id="edit-loc-color-help" class="text-xs text-slate-500">CAL assigns colors automatically from the locked location palette.</div>
+          </div>
+        </div>
+      </div>
+      <div class="flex gap-2 mt-2">
+        <button type="submit" class="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">Save Changes</button>
+        <button type="button" onclick="document.getElementById('edit-modal').classList.add('hidden')" class="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-200">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const LOCATION_PALETTE = {{ location_palette | tojson }};
+const DEFAULT_LOCATION_COLOR = '#D9E4EA';
+
+function normalizeLocationName(name) {
+  return (name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function resolveLocationColor(name, locationType) {
+  const normalized = normalizeLocationName(name);
+  if (!normalized) return null;
+  if (LOCATION_PALETTE[normalized]) return LOCATION_PALETTE[normalized];
+  if (normalized === 'float') return LOCATION_PALETTE['float'];
+
+  const families = {
+    'altamonte': { clinic: '#D8F6F0', hospital: '#79CDBD' },
+    'apopka': { clinic: '#DDF2FC', hospital: '#7CBFDE' },
+    'minneola': { clinic: '#FDE9DD', hospital: '#E8A17C' },
+    'winter garden': { clinic: '#FCE2E8', hospital: '#E48EA6' },
+  };
+
+  const suffixes = [' office', ' clinic', ' or'];
+  for (const suffix of suffixes) {
+    if (normalized.endsWith(suffix)) {
+      const site = normalized.slice(0, -suffix.length).trim();
+      if (families[site]) return families[site][locationType] || null;
+    }
+  }
+  if (families[normalized]) return families[normalized][locationType] || null;
+  return null;
+}
+
+function updateColorPreview(prefix) {
+  const nameInput = document.getElementById(`${prefix}-loc-name`);
+  const clinicInput = document.getElementById(`${prefix}-type-clinic`);
+  const swatch = document.getElementById(`${prefix}-loc-color-swatch`);
+  const hex = document.getElementById(`${prefix}-loc-color-hex`);
+  const help = document.getElementById(`${prefix}-loc-color-help`);
+  const locationType = clinicInput && clinicInput.checked ? 'clinic' : 'hospital';
+  const color = resolveLocationColor(nameInput ? nameInput.value : '', locationType);
+
+  swatch.style.setProperty('--dot-c', color || DEFAULT_LOCATION_COLOR);
+  hex.textContent = color || 'No standardized color yet';
+  help.textContent = color
+    ? 'CAL assigns this location color automatically from the locked palette.'
+    : 'This name is not in the locked CAL palette yet and cannot be saved until it is added.';
+}
+
+function openAddModal() { document.getElementById('add-modal').classList.remove('hidden'); }
+
+function openEditModal(id, name, address, city, phone, type) {
+  document.getElementById('edit-loc-form').action = '/admin/locations/' + id + '/edit';
+  document.getElementById('edit-loc-name').value = name;
+  document.getElementById('edit-loc-address').value = address;
+  document.getElementById('edit-loc-city').value = city;
+  document.getElementById('edit-loc-phone').value = phone;
+  document.getElementById('edit-type-clinic').checked = (type === 'clinic');
+  document.getElementById('edit-type-hospital').checked = (type === 'hospital');
+  updateColorPreview('edit');
+  document.getElementById('edit-modal').classList.remove('hidden');
+}
+
+['add', 'edit'].forEach(prefix => {
+  const nameInput = document.getElementById(`${prefix}-loc-name`);
+  const clinicInput = document.getElementById(`${prefix}-type-clinic`);
+  const hospitalInput = document.getElementById(`${prefix}-type-hospital`);
+  if (nameInput) nameInput.addEventListener('input', () => updateColorPreview(prefix));
+  if (clinicInput) clinicInput.addEventListener('change', () => updateColorPreview(prefix));
+  if (hospitalInput) hospitalInput.addEventListener('change', () => updateColorPreview(prefix));
+  updateColorPreview(prefix);
+});
+
+['add-modal','edit-modal'].forEach(id => {
+  document.getElementById(id).addEventListener('click', function(e) {
+    if (e.target === this) this.classList.add('hidden');
+  });
+});
+</script>
+{% endblock %}

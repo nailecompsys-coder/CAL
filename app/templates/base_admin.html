@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Mid Florida Surgical{% endblock %} — Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/tailwind.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  {% block head %}{% endblock %}
+  <style>
+    body { font-family: -apple-system, 'DM Sans', BlinkMacSystemFont, sans-serif; }
+    .sidebar-link { display:flex;align-items:center;gap:.75rem;padding:.625rem 1rem;border-radius:.5rem;color:rgba(200,222,255,.70);font-size:.875rem;font-weight:500;text-decoration:none;transition:background .15s; }
+    .sidebar-link:hover { background:rgba(255,255,255,.10);color:#fff; }
+    .sidebar-link.active { background:#0066CC;color:#fff; }
+    .sidebar-link .badge { margin-left:auto;background:#FF9500;color:#fff;font-size:.65rem;border-radius:9999px;padding:0 5px;line-height:1.4; }
+    /* Gradient avatars/blocks — use --avatar-c or --block-c (hex) for a soft gradient */
+    .avatar-gradient { background: linear-gradient(145deg, var(--avatar-c) 0%, color-mix(in srgb, var(--avatar-c) 55%, white) 100%) !important; }
+    /* Staff / surgeon initials — neutral; facility blocks keep location colors */
+    .staff-avatar {
+      background: #f1f5f9 !important;
+      color: #334155 !important;
+      border: 1px solid #e2e8f0;
+    }
+    .block-gradient { background: linear-gradient(145deg, var(--block-c) 0%, color-mix(in srgb, var(--block-c) 65%, white) 100%) !important; }
+    .dot-gradient { background: linear-gradient(145deg, var(--dot-c) 0%, color-mix(in srgb, var(--dot-c) 60%, white) 100%) !important; }
+    /* Status pills — subtle gradients */
+    .status-approved { background: linear-gradient(145deg, #86efac 0%, #bbf7d0 100%); color: #166534; }
+    .status-pending { background: linear-gradient(145deg, #fde047 0%, #fef08a 100%); color: #854d0e; }
+    .status-denied { background: linear-gradient(145deg, #fca5a5 0%, #fecaca 100%); color: #991b1b; }
+    /* Color picker row */
+    .color-picker-row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+    .color-picker-row input[type="color"] { width: 2.5rem; height: 2.5rem; padding: 2px; border: 1px solid #e2e8f0; border-radius: 0.5rem; cursor: pointer; background: none; }
+    .color-picker-row input[type="text"].color-hex { width: 6rem; font-family: ui-monospace, monospace; font-size: 0.8rem; }
+  </style>
+</head>
+<body class="bg-slate-100 font-sans">
+<div class="flex h-screen overflow-hidden">
+
+  <!-- Sidebar overlay (mobile tap-to-close) -->
+  <div id="sidebar-overlay" class="fixed inset-0 bg-black/50 z-20 hidden lg:hidden" onclick="closeSidebar()"></div>
+
+  <!-- Sidebar -->
+  <aside id="sidebar" class="fixed lg:static inset-y-0 left-0 w-64 bg-slate-800 flex flex-col flex-shrink-0 z-30 transform -translate-x-full lg:translate-x-0 transition-transform duration-200">
+    <div class="px-6 py-5 border-b border-slate-700">
+      <div class="flex items-center gap-2">
+        {% if settings and settings.logo_filename %}
+        <img src="/static/uploads/{{ settings.logo_filename }}" alt="Logo" class="h-8 object-contain flex-shrink-0" />
+        {% else %}
+        <div class="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center flex-shrink-0">
+          <i class="fa-solid fa-scalpel text-white text-sm"></i>
+        </div>
+        {% endif %}
+        <div class="min-w-0">
+          <p class="text-white font-bold text-sm leading-tight truncate">{% if settings %}{{ settings.practice_name }}{% else %}Mid Florida Surgical{% endif %}</p>
+          <p class="text-slate-400 text-xs">Admin Portal</p>
+        </div>
+        <button onclick="closeSidebar()" class="ml-auto text-slate-400 hover:text-white lg:hidden flex-shrink-0">
+          <i class="fa-solid fa-xmark text-lg"></i>
+        </button>
+      </div>
+    </div>
+
+    <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+      <a href="/admin/dashboard" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/dashboard' %}active{% endif %}">
+        <i class="fa-solid fa-gauge-high" style="width:1rem;text-align:center"></i> Dashboard
+      </a>
+      <a href="/admin/calendar" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/calendar' %}active{% endif %}">
+        <i class="fa-solid fa-calendar-days" style="width:1rem;text-align:center"></i> Calendar
+      </a>
+      <a href="/admin/surgeons" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/surgeons' %}active{% endif %}">
+        <i class="fa-solid fa-user-doctor" style="width:1rem;text-align:center"></i> Physicians
+      </a>
+      <a href="/admin/clinic-schedule" onclick="closeSidebar()" class="sidebar-link {% if '/clinic-schedule' in request.url.path %}active{% endif %}">
+        <i class="fa-solid fa-calendar-check" style="width:1rem;text-align:center"></i> Schedule
+      </a>
+      <a href="/admin/call-schedule" onclick="closeSidebar()" class="sidebar-link {% if '/call-schedule' in request.url.path %}active{% endif %}">
+        <i class="fa-solid fa-bell" style="width:1rem;text-align:center"></i> Call Schedule
+      </a>
+      <a href="/admin/schedule-templates" onclick="closeSidebar()" class="sidebar-link {% if '/schedule-templates' in request.url.path %}active{% endif %}">
+        <i class="fa-solid fa-table-cells" style="width:1rem;text-align:center"></i> Templates
+      </a>
+      <a href="/admin/meetings" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/meetings' %}active{% endif %}">
+        <i class="fa-solid fa-users-rectangle" style="width:1rem;text-align:center"></i> Meetings
+      </a>
+      <a href="/admin/daysoff" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/daysoff' %}active{% endif %}">
+        <i class="fa-solid fa-umbrella-beach" style="width:1rem;text-align:center"></i> Days Off
+        {% if pending_count and pending_count > 0 %}<span class="badge">{{ pending_count }}</span>{% endif %}
+      </a>
+      <a href="/admin/patients" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/patients' %}active{% endif %}">
+        <i class="fa-solid fa-hospital-user" style="width:1rem;text-align:center"></i> Patients
+      </a>
+      <a href="/admin/locations" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/locations' %}active{% endif %}">
+        <i class="fa-solid fa-location-dot" style="width:1rem;text-align:center"></i> Locations
+      </a>
+      <div class="border-t border-slate-700 my-2"></div>
+      <a href="/admin/settings" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/settings' %}active{% endif %}">
+        <i class="fa-solid fa-gear" style="width:1rem;text-align:center"></i> Settings
+      </a>
+    </nav>
+
+    <div class="px-4 py-3 border-t border-slate-700 space-y-2">
+      <div class="flex items-center justify-between gap-2 flex-wrap">
+        <span class="inline-flex items-center gap-1 flex-wrap">
+          <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-700 text-slate-300" title="App version">v{{ app_version|default('?') }}</span>
+          {% if app_version and 'beta' in app_version|lower %}
+          <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-amber-500/25 text-amber-200 border border-amber-400/40">Beta</span>
+          {% endif %}
+        </span>
+        {% if wasabi_configured %}
+        <span class="text-xs flex items-center gap-1 text-emerald-400" title="Wasabi backup configured">
+          <i class="fa-solid fa-cloud-arrow-up"></i> Backup
+        </span>
+        {% else %}
+        <span class="text-xs text-amber-400/90" title="Add WASABI_BUCKET, WASABI_KEY_ID, WASABI_SECRET to .env">Backup off</span>
+        {% endif %}
+      </div>
+      <div class="flex items-center gap-3">
+        <div class="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold">
+          {{ admin.username[:2].upper() }}
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-white text-sm font-medium truncate">{{ admin.username }}</p>
+          <p class="text-slate-400 text-xs">{{ admin.role }}</p>
+        </div>
+        <a href="/admin/logout" class="text-slate-400 hover:text-white" title="Logout">
+          <i class="fa-solid fa-right-from-bracket text-sm"></i>
+        </a>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <main class="flex-1 overflow-y-auto flex flex-col min-w-0">
+    <!-- Mobile top bar -->
+    <div class="lg:hidden bg-slate-800 px-4 py-3 flex items-center gap-3 flex-shrink-0">
+      <button onclick="openSidebar()" class="text-white w-8 h-8 flex items-center justify-center">
+        <i class="fa-solid fa-bars text-lg"></i>
+      </button>
+      <span class="text-white font-semibold text-sm flex-1">Mid Florida Surgical</span>
+      {% if pending_count and pending_count > 0 %}
+      <a href="/admin/daysoff" class="bg-amber-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{{ pending_count }} pending</a>
+      {% endif %}
+    </div>
+    {% block content %}{% endblock %}
+  </main>
+</div>
+
+<script>
+function openSidebar() {
+  document.getElementById('sidebar').classList.remove('-translate-x-full');
+  document.getElementById('sidebar-overlay').classList.remove('hidden');
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.add('-translate-x-full');
+  document.getElementById('sidebar-overlay').classList.add('hidden');
+}
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

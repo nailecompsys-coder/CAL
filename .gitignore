@@ -1,0 +1,31 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Python cache and virtualenvs
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+
+# Local tooling state
+.cursor/
+.vscode/
+.idea/
+memory.md
+
+# Mutable uploads and local scratch
+app/static/uploads/
+*.log
+*.pid
+*.bak
+*.bak-*
+*.tmp
+
+# OS noise
+.DS_Store
+Thumbs.db
+._*
+

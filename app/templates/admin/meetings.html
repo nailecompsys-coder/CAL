@@ -1,0 +1,220 @@
+{% extends "base_admin.html" %}
+{% block title %}Meetings{% endblock %}
+
+{% block content %}
+<header class="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 flex-shrink-0">
+  <div>
+    <h1 class="text-xl font-bold text-slate-800">Meetings</h1>
+    <p class="text-sm text-slate-500">{{ meetings|length }} upcoming</p>
+  </div>
+  <button onclick="document.getElementById('create-modal').classList.remove('hidden')"
+    class="bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2">
+    <i class="fa-solid fa-plus"></i> Schedule Meeting
+  </button>
+</header>
+
+{% if request.query_params.get('warn') %}
+<div class="mx-6 mt-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-start gap-2 text-amber-800 text-sm">
+  <i class="fa-solid fa-triangle-exclamation text-amber-500 mt-0.5 flex-shrink-0"></i>
+  <div><strong>Scheduling conflict:</strong> {{ request.query_params.get('warn') }}</div>
+</div>
+{% endif %}
+
+<div class="p-6 space-y-3">
+  {% set current_month = namespace(val='') %}
+  {% for m in meetings %}
+  {% set month = m.date.strftime('%B %Y') %}
+  {% if month != current_month.val %}
+  {% set current_month.val = month %}
+  <div class="flex items-center gap-3 {% if not loop.first %}mt-6{% endif %} mb-2">
+    <h2 class="font-bold text-slate-600 text-sm">{{ month }}</h2>
+    <div class="flex-1 h-px bg-slate-200"></div>
+  </div>
+  {% endif %}
+  <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+    <div class="flex items-stretch">
+      <div class="w-1 bg-slate-500 flex-shrink-0"></div>
+      <div class="flex-1 px-5 py-4">
+        <div class="flex items-start justify-between gap-4">
+          <div class="flex-1">
+            {% if m.recurrence_rule %}<div class="mb-1"><span class="bg-slate-100 text-slate-600 text-xs font-semibold px-2 py-0.5 rounded-full">{{ m.recurrence_rule | title }}</span></div>{% endif %}
+            <h3 class="font-bold text-slate-800">{{ m.title }}</h3>
+            <div class="flex items-center gap-4 mt-1.5 text-sm text-slate-500 flex-wrap">
+              <span><i class="fa-solid fa-calendar mr-1.5"></i>{{ m.date.strftime('%a, %b %-d') }}{% if m.start_time %} · {{ m.start_time.strftime('%-I:%M %p') }}{% if m.end_time %} – {{ m.end_time.strftime('%-I:%M %p') }}{% endif %}{% endif %}</span>
+              {% if m.location_text %}<span><i class="fa-solid fa-location-dot mr-1.5"></i>{{ m.location_text }}</span>{% endif %}
+            </div>
+            <div class="flex items-center gap-1.5 mt-2.5 flex-wrap">
+              {% for a in m.attendees %}
+              <div class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold bg-[#F4F6F9] text-[#4A6080] border border-slate-200/90">
+                {{ a.surgeon.initials }}
+              </div>
+              {% else %}
+              <span class="text-xs text-slate-400 italic">All surgeons</span>
+              {% endfor %}
+            </div>
+            {% if m.notes %}<p class="text-xs text-slate-400 mt-1.5">{{ m.notes }}</p>{% endif %}
+          </div>
+          <div class="flex items-center gap-2 flex-shrink-0">
+            <button
+              type="button"
+              class="w-8 h-8 bg-slate-100 text-slate-500 rounded-lg hover:bg-blue-100 hover:text-blue-700 flex items-center justify-center"
+              onclick="openEditModal(this)"
+              data-meeting-id="{{ m.id }}"
+              data-title="{{ m.title }}"
+              data-date="{{ m.date.isoformat() }}"
+              data-start-time="{{ m.start_time.strftime('%H:%M') if m.start_time else '' }}"
+              data-end-time="{{ m.end_time.strftime('%H:%M') if m.end_time else '' }}"
+              data-location-text="{{ m.location_text or '' }}"
+              data-recurrence-rule="{{ m.recurrence_rule or 'none' }}"
+              data-notes="{{ m.notes or '' }}"
+              data-attendee-ids="{% for a in m.attendees %}{{ a.surgeon_id }}{% if not loop.last %},{% endif %}{% endfor %}">
+              <i class="fa-solid fa-pen text-xs"></i>
+            </button>
+            <form method="post" action="/admin/meetings/{{ m.id }}/delete" onsubmit="return confirm('Delete this meeting?')">
+              <button class="w-8 h-8 bg-slate-100 text-slate-500 rounded-lg hover:bg-rose-100 hover:text-rose-600 flex items-center justify-center flex-shrink-0">
+                <i class="fa-solid fa-trash text-xs"></i>
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <div class="text-center py-12 text-slate-400">
+    <i class="fa-solid fa-calendar-xmark text-4xl mb-3 block"></i>
+    No upcoming meetings
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Create Meeting Modal -->
+<div id="create-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden">
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
+    <div class="flex items-center justify-between mb-5">
+      <h3 class="font-bold text-slate-800 text-lg">Schedule Meeting</h3>
+      <button onclick="document.getElementById('create-modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+    </div>
+    <form method="post" action="/admin/meetings/add" class="space-y-4">
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Title</label>
+        <input type="text" name="title" required class="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="e.g. M&M Conference" /></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="block text-xs font-medium text-slate-600 mb-1">Date</label>
+          <input type="date" name="meeting_date" required class="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
+        <div><label class="block text-xs font-medium text-slate-600 mb-1">Location</label>
+          <input type="text" name="location_text" class="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Conference Room A" /></div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="block text-xs font-medium text-slate-600 mb-1">Start Time</label>
+          <input type="time" name="start_time" class="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
+        <div><label class="block text-xs font-medium text-slate-600 mb-1">End Time</label>
+          <input type="time" name="end_time" class="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
+      </div>
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Recurrence</label>
+        <select name="recurrence_rule" class="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <option value="none">One-time</option><option value="weekly">Weekly</option><option value="biweekly">Bi-weekly</option><option value="monthly">Monthly</option>
+        </select></div>
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-2">Invite Surgeons <span class="text-slate-400">(leave all unchecked = all invited)</span></label>
+        <div class="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
+          {% for s in surgeons %}
+          <label class="inline-flex items-center gap-1.5 cursor-pointer">
+            <input type="checkbox" name="attendee_ids" value="{{ s.id }}" class="rounded" />
+            <div class="flex items-center gap-1">
+              <div class="w-5 h-5 rounded-full text-white text-xs flex items-center justify-center font-bold bg-slate-600">{{ s.initials[0] }}</div>
+              <span class="text-xs text-slate-700">{{ s.last_name }}</span>
+            </div>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Notes</label>
+        <textarea name="notes" rows="2" class="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"></textarea></div>
+      <div class="flex gap-2 mt-5">
+        <button type="submit" class="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">Create Meeting</button>
+        <button type="button" onclick="document.getElementById('create-modal').classList.add('hidden')" class="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-lg text-sm font-medium">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Edit Meeting Modal -->
+<div id="edit-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden" onclick="if (event.target === this) closeEditModal()">
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
+    <div class="flex items-center justify-between mb-5">
+      <h3 class="font-bold text-slate-800 text-lg">Edit Meeting</h3>
+      <button type="button" onclick="closeEditModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+    </div>
+    <form id="edit-form" method="post" action="" class="space-y-4">
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Title</label>
+        <input type="text" name="title" id="edit-title" required class="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="block text-xs font-medium text-slate-600 mb-1">Date</label>
+          <input type="date" name="meeting_date" id="edit-date" required class="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
+        <div><label class="block text-xs font-medium text-slate-600 mb-1">Location</label>
+          <input type="text" name="location_text" id="edit-location-text" class="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="block text-xs font-medium text-slate-600 mb-1">Start Time</label>
+          <input type="time" name="start_time" id="edit-start-time" class="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
+        <div><label class="block text-xs font-medium text-slate-600 mb-1">End Time</label>
+          <input type="time" name="end_time" id="edit-end-time" class="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
+      </div>
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Recurrence</label>
+        <select name="recurrence_rule" id="edit-recurrence-rule" class="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <option value="none">One-time</option><option value="weekly">Weekly</option><option value="biweekly">Bi-weekly</option><option value="monthly">Monthly</option>
+        </select></div>
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-2">Invite Surgeons <span class="text-slate-400">(leave all unchecked = all invited)</span></label>
+        <div class="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
+          {% for s in surgeons %}
+          <label class="inline-flex items-center gap-1.5 cursor-pointer">
+            <input type="checkbox" name="attendee_ids" value="{{ s.id }}" class="rounded edit-attendee" />
+            <div class="flex items-center gap-1">
+              <div class="w-5 h-5 rounded-full text-white text-xs flex items-center justify-center font-bold bg-slate-600">{{ s.initials[0] }}</div>
+              <span class="text-xs text-slate-700">{{ s.last_name }}</span>
+            </div>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Notes</label>
+        <textarea name="notes" id="edit-notes" rows="2" class="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"></textarea></div>
+      <div class="flex gap-2 mt-5">
+        <button type="submit" class="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">Save Changes</button>
+        <button type="button" onclick="closeEditModal()" class="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-lg text-sm font-medium">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function closeEditModal() {
+  document.getElementById('edit-modal').classList.add('hidden');
+}
+
+function openEditModal(button) {
+  const ids = (button.dataset.attendeeIds || '')
+    .split(',')
+    .map(v => v.trim())
+    .filter(Boolean);
+
+  document.getElementById('edit-form').action = '/admin/meetings/' + button.dataset.meetingId + '/edit';
+  document.getElementById('edit-title').value = button.dataset.title || '';
+  document.getElementById('edit-date').value = button.dataset.date || '';
+  document.getElementById('edit-start-time').value = button.dataset.startTime || '';
+  document.getElementById('edit-end-time').value = button.dataset.endTime || '';
+  document.getElementById('edit-location-text').value = button.dataset.locationText || '';
+  document.getElementById('edit-recurrence-rule').value = button.dataset.recurrenceRule || 'none';
+  document.getElementById('edit-notes').value = button.dataset.notes || '';
+
+  document.querySelectorAll('.edit-attendee').forEach(function(input) {
+    input.checked = ids.includes(input.value);
+  });
+
+  document.getElementById('edit-modal').classList.remove('hidden');
+}
+</script>
+{% endblock %}

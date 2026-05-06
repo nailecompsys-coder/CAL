@@ -1,0 +1,783 @@
+{% extends "base_surgeon.html" %}
+{% block title %}My Schedule{% endblock %}
+
+{% block head %}
+<style>
+  /* Schedule — Apple-like motion (respects prefers-reduced-motion in base) */
+  @keyframes scheduleHeroIn {
+    from { opacity: 0; transform: translateY(14px) scale(0.985); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes scheduleRowIn {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: none; }
+  }
+  .schedule-hero {
+    animation: scheduleHeroIn 0.58s var(--ease-ios-out, cubic-bezier(0.32, 0.72, 0, 1)) both;
+  }
+  .schedule-day-row {
+    opacity: 0;
+    animation: scheduleRowIn 0.44s var(--ease-ios-out, cubic-bezier(0.32, 0.72, 0, 1)) forwards;
+    animation-delay: var(--row-delay, 0ms);
+  }
+  .schedule-day-card {
+    transition: box-shadow 0.28s var(--ease-ios-in-out, cubic-bezier(0.4, 0, 0.2, 1)),
+                transform 0.2s var(--ease-ios-out, cubic-bezier(0.32, 0.72, 0, 1)),
+                border-color 0.22s ease;
+    box-shadow: 0 1px 2px rgba(20, 48, 90, 0.04);
+  }
+  .schedule-day-card:hover { box-shadow: 0 8px 24px rgba(20, 48, 90, 0.08); }
+  .schedule-day-card:active { transform: scale(0.987); }
+  #day-sheet, #hospital-sheet {
+    transition: transform var(--dur-md, 0.42s) var(--ease-ios-out, cubic-bezier(0.32, 0.72, 0, 1)) !important;
+  }
+  #day-sheet {
+    top: 0 !important;
+    bottom: 0 !important;
+    min-height: 100dvh !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    border-radius: 0 !important;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  #day-sheet-backdrop { z-index: 47; }
+  #day-sheet { z-index: 48; }
+  .schedule-main-body {
+    transition: max-height 0.38s var(--ease-ios-out, cubic-bezier(0.32, 0.72, 0, 1));
+    max-height: 560px;
+    overflow: hidden;
+  }
+  .schedule-day-module.collapsed .schedule-main-body {
+    max-height: 2.75rem;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .schedule-main-body { transition: none; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- ========== TOP BAR ========== -->
+<div class="px-4 pt-12 pb-4 sm:pt-4 sticky top-0 z-10" style="background: rgba(255,255,255,.80); backdrop-filter: blur(22px) saturate(1.8); -webkit-backdrop-filter: blur(22px) saturate(1.8); border-bottom: 1px solid rgba(20,48,90,.12);">
+  <div>
+    <p id="greeting" class="text-[10px] font-semibold uppercase tracking-[0.12em]" style="color:#7A90A8;">Good morning</p>
+    <h1 class="text-lg font-bold leading-tight" style="color:#14305A;">{{ surgeon.full_name }}</h1>
+  </div>
+</div>
+
+<!-- Add to Home Screen — Safari / Chrome (dismiss stored per session) -->
+<div id="pwa-install-hint" class="hidden mx-4 mt-3 rounded-2xl border border-slate-200/90 bg-white/85 backdrop-blur-xl px-4 py-3.5 shadow-sm text-sm text-slate-700" style="-webkit-backdrop-filter: blur(20px) saturate(1.5);">
+  <div class="flex gap-3 items-start">
+    <div class="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center flex-shrink-0 shadow-md shadow-blue-600/25">
+      <i class="fa-solid fa-arrow-up-from-bracket text-sm"></i>
+    </div>
+    <div class="min-w-0 flex-1">
+      <p class="font-semibold text-slate-800 text-sm tracking-tight">Add to Home Screen</p>
+      <p class="text-xs text-slate-600 mt-1 leading-relaxed"><span class="font-medium text-slate-700">iPhone / iPad:</span> Tap <strong>Share</strong> <i class="fa-solid fa-arrow-up-from-bracket text-slate-400 text-[10px]"></i> then <strong>Add to Home Screen</strong>. Opens full-screen with the home screen icon.</p>
+      <button type="button" onclick="dismissPwaHint()" class="mt-2.5 text-xs font-semibold text-blue-600 active:opacity-70" style="touch-action: manipulation;">Dismiss</button>
+    </div>
+  </div>
+</div>
+
+{% if request.query_params.get('requested') %}
+<div class="mx-4 mt-3 bg-green-50 border border-green-200 rounded-xl px-4 py-3 flex items-center gap-2 text-green-700 text-sm">
+  <i class="fa-solid fa-circle-check"></i> Days off request submitted.
+</div>
+{% endif %}
+
+<!-- ========== TODAY CARD ========== -->
+{% set td = today_summary %}
+<div class="px-4 mt-4">
+  <div class="schedule-hero rounded-2xl p-4 text-white" style="background: linear-gradient(155deg, #1a7cf8, #0044c0); box-shadow: 0 8px 32px rgba(0,70,200,.35);">
+    <p class="text-[10px] font-bold uppercase tracking-[0.14em] mb-1" style="color:rgba(200,222,255,.85);">Today scheduled events</p>
+    <p class="text-xs font-medium mb-3" style="color:rgba(200,222,255,.75);">{{ today.strftime('%A, %B %-d') }}</p>
+    {% if td.rotations %}
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center"><i class="fa-solid fa-bell"></i></div>
+      <div>
+        <p class="font-bold">On-Call</p>
+        <p class="text-blue-200 text-xs">You are on call today</p>
+      </div>
+      <span class="ml-auto bg-amber-400 text-amber-900 text-xs font-bold px-2.5 py-1 rounded-full">Active</span>
+    </div>
+    {% elif td.day_off %}
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center"><i class="fa-solid fa-umbrella-beach"></i></div>
+      <div>
+        <p class="font-bold">Day Off</p>
+        <p class="text-blue-200 text-xs">{{ td.day_off.reason or 'Approved' }}</p>
+      </div>
+    </div>
+    {% elif td.clinics %}
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center"><i class="fa-solid {% if (td.clinics[0].assignment_type or 'assigned') == 'off' %}fa-bed{% else %}fa-map-location-dot{% endif %}"></i></div>
+      <div>
+        <p class="font-bold">{% if (td.clinics[0].assignment_type or 'assigned') == 'off' %}OFF{% else %}{{ td.clinics[0].location.name }}{% endif %}</p>
+        <p class="text-blue-200 text-xs">{{ 'AM Session' if td.clinics[0].session == 'am' else 'PM Session' if td.clinics[0].session == 'pm' else 'Full Day' }}{% if td.clinics|length > 1 %} + {{ td.clinics|length - 1 }} more{% endif %}</p>
+      </div>
+    </div>
+    {% elif td.patients and td.patients.patient_count > 0 %}
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center"><i class="fa-solid fa-hospital-user"></i></div>
+      <div>
+        <p class="font-bold">{{ td.patients.patient_count }} Patients</p>
+        <p class="text-blue-200 text-xs">Patient rounds today</p>
+      </div>
+    </div>
+    {% elif td.meetings %}
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center"><i class="fa-solid fa-users"></i></div>
+      <div>
+        <p class="font-bold">{{ td.meetings[0].title }}</p>
+        <p class="text-blue-200 text-xs">{% if td.meetings[0].start_time %}{{ td.meetings[0].start_time.strftime('%-I:%M %p') }}{% else %}Today{% endif %}{% if td.meetings|length > 1 %} + {{ td.meetings|length - 1 }} more{% endif %}</p>
+      </div>
+    </div>
+    {% else %}
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center"><i class="fa-solid fa-circle-check"></i></div>
+      <div>
+        <p class="font-bold">No scheduled events</p>
+        <p class="text-blue-200 text-xs">Enjoy your day</p>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ========== WEEK NAV ========== -->
+<div class="px-4 mt-5 flex items-center justify-between">
+  <a href="/surgeon/schedule?week_offset={{ week_offset - 1 }}"
+     class="w-9 h-9 bg-white border border-slate-200 rounded-xl flex items-center justify-center shadow-sm active:scale-95 transition-transform">
+    <i class="fa-solid fa-chevron-left text-slate-500 text-xs"></i>
+  </a>
+  <div class="text-center">
+    <p class="text-slate-800 font-semibold text-sm">
+      {% if week_offset == 0 %}This Week
+      {% elif week_offset == 1 %}Next Week
+      {% elif week_offset == -1 %}Last Week
+      {% else %}{{ week_days[0].strftime('%b %-d') }} – {{ week_days[6].strftime('%b %-d') }}
+      {% endif %}
+    </p>
+    <p class="text-slate-400 text-xs">{{ week_days[0].strftime('%b %-d') }} – {{ week_days[6].strftime('%b %-d') }}</p>
+  </div>
+  <div class="flex items-center gap-1.5">
+    {% if week_offset != 0 %}
+    <a href="/surgeon/schedule" class="text-xs text-blue-600 font-semibold bg-blue-50 border border-blue-100 px-2.5 py-1.5 rounded-lg active:scale-95 transition-transform">Today</a>
+    {% endif %}
+    <a href="/surgeon/schedule?week_offset={{ week_offset + 1 }}"
+       class="w-9 h-9 bg-white border border-slate-200 rounded-xl flex items-center justify-center shadow-sm active:scale-95 transition-transform">
+      <i class="fa-solid fa-chevron-right text-slate-500 text-xs"></i>
+    </a>
+  </div>
+</div>
+
+<!-- ========== DAY LIST ========== -->
+<div class="px-4 mt-3 space-y-2.5 pb-6">
+  {% for i in range(week_summary|length) %}
+  {% set day_data = week_summary[i] %}
+  {% set day = day_data.date %}
+  {% set is_today = day == today %}
+  {% set is_weekend = day.weekday() >= 5 %}
+  {% set slots = day_data.slots %}
+  {% set call_rail = day_data.call_rail_slots %}
+  {% set off_list = day_data.off_surgeons %}
+  {% set off_show = 4 %}
+
+  <div class="schedule-day-row schedule-day-module flex gap-1.5 items-stretch" data-schedule-row="{{ i }}" style="--row-delay: {{ loop.index0 * 42 }}ms;">
+    <button type="button" class="w-7 flex-shrink-0 rounded-xl border border-slate-200/90 bg-white/70 flex flex-col items-center justify-center gap-0.5 text-slate-400 active:bg-slate-100 touch-manipulation self-center min-h-[4.5rem]"
+            onclick="toggleScheduleRowCollapse({{ i }}); event.stopPropagation();" aria-label="Collapse or expand day row">
+      <i class="fa-solid fa-chevron-up text-[9px] opacity-70"></i>
+      <i class="fa-solid fa-chevron-down text-[9px] opacity-70"></i>
+    </button>
+
+    <div class="schedule-day-card schedule-main-pill flex-1 min-w-0 rounded-2xl border overflow-hidden text-left {% if is_today %}border-blue-300 ring-1 ring-blue-200/50{% else %}border-slate-200{% endif %}"
+         role="button" tabindex="0"
+         style="background: rgba(255,255,255,.82); backdrop-filter: blur(14px) saturate(1.65); -webkit-backdrop-filter: blur(14px) saturate(1.65); touch-action: manipulation;"
+         onclick="openDayView({{ i }})"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openDayView({{ i }});}">
+      <div class="schedule-main-body">
+        <div class="px-3 pt-2 pb-1 border-b border-slate-100/80 {% if is_today %}bg-blue-50/50{% elif is_weekend %}bg-slate-50/80{% else %}bg-white/40{% endif %}">
+          <p class="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1">Who is off</p>
+          <div class="flex flex-wrap gap-1 items-center min-h-[1.25rem]">
+            {% if off_list|length == 0 %}
+            <span class="text-xs text-slate-400">—</span>
+            {% else %}
+            {% for s in off_list[:off_show] %}
+            <span class="text-[10px] font-bold text-slate-600 bg-slate-100 border border-slate-200/80 px-1.5 py-0.5 rounded-md">{{ s.initials }}{% if s.id == surgeon.id %}<span class="text-blue-600 font-semibold"> · you</span>{% endif %}</span>
+            {% endfor %}
+            {% if off_list|length > off_show %}
+            <span class="text-[10px] font-semibold text-slate-400">+{{ off_list|length - off_show }}</span>
+            {% endif %}
+            {% endif %}
+          </div>
+        </div>
+        <div class="flex gap-2 px-3 py-2 {% if is_today %}bg-blue-50/30{% elif is_weekend %}bg-slate-50/50{% endif %}">
+          <div class="text-center w-11 flex-shrink-0 pt-0.5">
+            <p class="text-[10px] font-bold {% if is_today %}text-blue-500{% elif is_weekend %}text-slate-400{% else %}text-slate-400{% endif %} uppercase tracking-wide">{{ day.strftime('%a') }}</p>
+            <p class="text-xl font-bold {% if is_today %}text-blue-600{% elif is_weekend %}text-slate-400{% else %}text-slate-800{% endif %} leading-none">{{ day.strftime('%-d') }}</p>
+          </div>
+          <div class="flex-1 min-w-0 space-y-2">
+            <div>
+              <p class="text-[9px] font-bold uppercase text-slate-400 mb-1">AM</p>
+              <div class="flex flex-wrap gap-1">
+                {% if slots.am|length == 0 %}<span class="text-xs text-slate-300">—</span>{% endif %}
+                {% for line in slots.am %}
+                <span class="text-[10px] font-semibold px-2 py-0.5 rounded-lg max-w-full truncate {% if line.neutral %}bg-slate-100 text-slate-600 border border-slate-200/80{% else %}text-white{% endif %}"
+                      {% if not line.neutral %}style="background:{{ line.color }};"{% endif %}
+                      {% if line.hospital %}onclick="event.stopPropagation(); openHospitalView({{ i }});"{% endif %}>{{ line.text }}</span>
+                {% endfor %}
+              </div>
+            </div>
+            <div>
+              <p class="text-[9px] font-bold uppercase text-slate-400 mb-1">PM</p>
+              <div class="flex flex-wrap gap-1">
+                {% if slots.pm|length == 0 %}<span class="text-xs text-slate-300">—</span>{% endif %}
+                {% for line in slots.pm %}
+                <span class="text-[10px] font-semibold px-2 py-0.5 rounded-lg max-w-full truncate {% if line.neutral %}bg-slate-100 text-slate-600 border border-slate-200/80{% else %}text-white{% endif %}"
+                      {% if not line.neutral %}style="background:{{ line.color }};"{% endif %}
+                      {% if line.hospital %}onclick="event.stopPropagation(); openHospitalView({{ i }});"{% endif %}>{{ line.text }}</span>
+                {% endfor %}
+              </div>
+            </div>
+            {% if slots.footer|length > 0 %}
+            <div class="pt-1 border-t border-slate-100/90">
+              <p class="text-[9px] font-bold uppercase text-slate-400 mb-1">Meetings / personal</p>
+              <div class="flex flex-wrap gap-1">
+                {% for row in slots.footer %}
+                <span class="text-[10px] font-medium px-2 py-0.5 rounded-lg {% if row.kind == 'personal' %}bg-slate-100 text-slate-600 border border-slate-200/80{% else %}bg-slate-100 text-slate-600 border border-slate-200/80{% endif %}">{% if row.kind == 'meeting' %}📋 {% endif %}{% if row.kind == 'personal' %}✦ {% endif %}{{ row.text }}</span>
+                {% endfor %}
+              </div>
+            </div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="w-[5.35rem] flex-shrink-0 flex flex-col gap-1 justify-stretch" onclick="event.stopPropagation();" aria-label="Practice call by group">
+      {% if call_rail|length == 0 %}
+      <div class="flex-1 min-h-[3.35rem] rounded-xl border border-slate-200/90 bg-white/85 flex flex-col items-center justify-center text-center px-1 py-1 shadow-sm">
+        <span class="text-[8px] font-bold text-slate-400 uppercase tracking-tight leading-none">Call</span>
+        <span class="text-[10px] font-bold text-slate-400 mt-1">—</span>
+      </div>
+      {% else %}
+      {% for slot in call_rail %}
+      <div class="flex-1 min-h-[3.35rem] rounded-xl border border-slate-200/90 bg-white/85 flex flex-col items-center justify-center text-center px-0.5 py-1 shadow-sm">
+        <span class="text-[7px] font-bold text-slate-400 uppercase tracking-tight leading-tight line-clamp-2 px-0.5 max-w-full" title="{{ slot.group_label }}">{{ slot.group_label }}</span>
+        <span class="text-[11px] font-bold text-slate-800 leading-tight mt-0.5">{{ slot.primary_initials if slot.primary_initials is not none else '—' }}</span>
+        {% if slot.backup_initials %}
+        <span class="text-[8px] font-semibold text-slate-500 leading-none mt-0.5">Bak {{ slot.backup_initials }}</span>
+        {% endif %}
+      </div>
+      {% endfor %}
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- ========== DAY VIEW (FULL SCREEN) ========== -->
+<div id="day-sheet-backdrop" class="fixed inset-0 bg-black/40 hidden" onclick="closeDaySheet()"></div>
+<div id="day-sheet" class="fixed left-0 right-0 z-50 flex flex-col translate-y-full overflow-hidden"
+     style="background: rgba(250,252,255,.98); backdrop-filter: blur(28px) saturate(1.8); -webkit-backdrop-filter: blur(28px) saturate(1.8); display: flex; flex-direction: column;">
+
+  <div class="flex items-center justify-between px-4 pt-2 pb-2 flex-shrink-0 border-b border-slate-100">
+    <div class="min-w-0 pr-2">
+      <p id="sheet-day-name" class="text-lg font-bold text-slate-800 leading-tight"></p>
+      <p id="sheet-day-full" class="text-xs text-slate-500"></p>
+    </div>
+    <button type="button" onclick="closeDaySheet()" class="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 flex-shrink-0" style="touch-action: manipulation;" aria-label="Close">
+      <i class="fa-solid fa-xmark text-lg"></i>
+    </button>
+  </div>
+
+  <div class="px-4 py-2 border-b border-slate-100 flex items-center justify-between gap-2 flex-shrink-0 bg-slate-50/50">
+    <p class="text-[10px] font-bold uppercase tracking-wider text-slate-500">Personal items</p>
+    <button type="button" id="sheet-add-personal-btn" class="text-xs font-bold text-blue-600 px-2 py-1 rounded-lg active:opacity-70" style="touch-action: manipulation;">+ Add</button>
+  </div>
+  <div id="sheet-personal-list" class="px-4 py-2 border-b border-slate-100 text-sm space-y-1.5 flex-shrink-0 max-h-[30vh] overflow-y-auto"></div>
+
+  <div id="sheet-allday" class="px-4 pt-2 space-y-1.5 flex-shrink-0"></div>
+
+  <div id="day-sheet-scroll" class="flex-1 min-h-0 overflow-y-auto" style="padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));">
+    <div class="relative" style="padding-left: 52px; padding-right: 12px; padding-top: 8px; padding-bottom: 32px;">
+      <div id="sheet-time-labels" class="absolute left-0 top-0 bottom-0 w-12 pointer-events-none" style="padding-top:8px;padding-bottom:32px;"></div>
+      <div id="sheet-grid" class="relative" style="height: 780px;">
+        <div id="sheet-gridlines"></div>
+        <div id="sheet-events" class="absolute inset-0"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== HOSPITAL (SURGICAL) SCHEDULE SHEET ========== -->
+<div id="hospital-sheet-backdrop" class="fixed inset-0 bg-black/40 z-40 hidden" onclick="closeHospitalSheet()"></div>
+<div id="hospital-sheet" class="fixed bottom-0 left-0 right-0 z-50 rounded-t-3xl overflow-hidden translate-y-full flex flex-col"
+     style="background: rgba(250,252,255,.97); backdrop-filter: blur(28px) saturate(1.8); -webkit-backdrop-filter: blur(28px) saturate(1.8); height: 88vh; max-height: 88vh; padding-top: env(safe-area-inset-top);">
+  <div class="flex justify-center pt-3 pb-1 flex-shrink-0">
+    <div class="w-10 h-1 rounded-full bg-slate-300"></div>
+  </div>
+  <div class="px-5 py-3 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
+    <div>
+      <p id="hospital-sheet-day-name" class="text-lg font-bold text-slate-800"></p>
+      <p id="hospital-sheet-day-full" class="text-sm text-slate-500"></p>
+    </div>
+    <button onclick="closeHospitalSheet()" class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500" style="touch-action: manipulation;">
+      <i class="fa-solid fa-xmark text-sm"></i>
+    </button>
+  </div>
+  <div class="flex-1 min-h-0 overflow-y-auto px-4 py-4" style="-webkit-overflow-scrolling: touch; padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));">
+    <div id="hospital-sheet-timeline" class="space-y-2"></div>
+  </div>
+</div>
+
+<!-- ========== SURGICAL CASE NOTES MODAL ========== -->
+<div id="case-notes-backdrop" class="fixed inset-0 bg-black/40 z-[60] hidden" onclick="closeCaseNotesModal()"></div>
+<div id="case-notes-modal" class="fixed inset-0 z-[70] flex items-center justify-center p-4 hidden">
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[85vh] overflow-hidden flex flex-col">
+    <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
+      <h3 class="font-bold text-slate-800">Surgery — Add notes</h3>
+      <button type="button" onclick="closeCaseNotesModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="p-5 flex-1 overflow-y-auto">
+      <p id="case-notes-patient" class="font-semibold text-slate-800 text-sm"></p>
+      <p id="case-notes-procedure" class="text-slate-600 text-sm mt-0.5"></p>
+      <p id="case-notes-room" class="text-slate-500 text-xs mt-0.5"></p>
+      <form method="post" id="case-notes-form" action="" class="mt-4">
+        <label class="block text-xs font-semibold text-slate-600 mb-1">My notes</label>
+        <textarea name="surgeon_notes" id="case-notes-textarea" rows="4" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Add your notes…"></textarea>
+        <div class="flex gap-2 mt-3">
+          <button type="submit" class="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">Save</button>
+          <button type="button" onclick="closeCaseNotesModal()" class="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-lg text-sm font-medium">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ========== PERSONAL ITEM MODAL ========== -->
+<div id="personal-item-backdrop" class="fixed inset-0 bg-black/40 z-[60] hidden" onclick="closePersonalModal()"></div>
+<div id="personal-item-modal" class="fixed inset-0 z-[65] flex items-end sm:items-center justify-center p-0 sm:p-4 hidden">
+  <div class="bg-white rounded-t-3xl sm:rounded-2xl shadow-xl w-full sm:max-w-md max-h-[90dvh] overflow-hidden flex flex-col" style="padding-bottom: env(safe-area-inset-bottom);">
+    <div class="px-5 py-4 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
+      <h3 class="font-bold text-slate-800">Personal item</h3>
+      <button type="button" onclick="closePersonalModal()" class="text-slate-400 hover:text-slate-600 w-10 h-10 flex items-center justify-center" aria-label="Close"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <form id="personal-item-form" class="p-5 flex-1 overflow-y-auto space-y-3" onsubmit="submitPersonalItem(event)">
+      <input type="hidden" id="personal-item-date" value="" />
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1">Title</label>
+        <input type="text" id="personal-item-title" required maxlength="255" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="e.g. Pick up labs" />
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Start (optional)</label>
+          <input type="time" id="personal-item-start" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">End (optional)</label>
+          <input type="time" id="personal-item-end" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-600 mb-1">Notes (optional)</label>
+        <textarea id="personal-item-notes" rows="2" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"></textarea>
+      </div>
+      <div class="flex gap-2 pt-2">
+        <button type="submit" class="flex-1 bg-blue-600 text-white py-2.5 rounded-xl text-sm font-semibold">Save</button>
+        <button type="button" onclick="closePersonalModal()" class="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-xl text-sm font-semibold">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<!-- Week data for JS timeline — server-rendered JSON, no XSS risk -->
+<script type="application/json" id="week-data">{{ week_json | safe }}</script>
+
+<script>
+// Fix greeting to client local time
+(function() {
+  const h = new Date().getHours();
+  const el = document.getElementById('greeting');
+  if (el) el.textContent = (h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening').toUpperCase() + ',';
+})();
+
+function dismissPwaHint() {
+  try { sessionStorage.setItem('pwa-hint-dismissed', '1'); } catch (e) {}
+  const el = document.getElementById('pwa-install-hint');
+  if (el) el.classList.add('hidden');
+}
+(function showInstallHint() {
+  try {
+    const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    if (standalone) return;
+    if (sessionStorage.getItem('pwa-hint-dismissed')) return;
+    const el = document.getElementById('pwa-install-hint');
+    if (el) el.classList.remove('hidden');
+  } catch (e) {}
+})();
+
+// Push notifications
+async function subscribePush() {
+  if (!('Notification' in window) || !('serviceWorker' in navigator)) return;
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') return;
+  const reg = await navigator.serviceWorker.ready;
+  const keyResp = await fetch('/api/vapid-public-key', {
+    headers: { Accept: 'application/json' }
+  });
+  const { publicKey } = await keyResp.json();
+  if (!publicKey) return;
+  const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: publicKey });
+  await fetch('/api/push/subscribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(sub.toJSON())
+  });
+}
+subscribePush();
+
+// ===== Day Timeline View =====
+const weekData = JSON.parse(document.getElementById('week-data').textContent);
+// Clinical Trust — non–clinic/hospital timeline blocks (--bg-grouped, --text-2)
+const CAL_NEUTRAL_BG = '#F4F6F9';
+const CAL_NEUTRAL_TEXT = '#4A6080';
+const TL_START = 7 * 60;  // 7:00 AM in minutes
+const TL_END   = 20 * 60; // 8:00 PM in minutes
+const PX_PER_MIN = 1;     // 1 pixel per minute → total height = 780px
+let currentDayIndex = null;
+
+function toMins(hhmm) {
+  if (!hhmm) return null;
+  const [h, m] = hhmm.split(':').map(Number);
+  return h * 60 + m;
+}
+
+function fmtTime(hhmm) {
+  if (!hhmm) return '';
+  const mins = toMins(hhmm);
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  const ampm = h < 12 ? 'AM' : 'PM';
+  const h12 = h % 12 || 12;
+  return m === 0 ? `${h12} ${ampm}` : `${h12}:${String(m).padStart(2, '0')} ${ampm}`;
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function toggleScheduleRowCollapse(i) {
+  const row = document.querySelector('[data-schedule-row="' + i + '"]');
+  if (row) row.classList.toggle('collapsed');
+}
+
+function renderPersonalSheetList(d) {
+  const el = document.getElementById('sheet-personal-list');
+  const items = d.personalItems || [];
+  if (!items.length) {
+    el.innerHTML = '<p class="text-xs text-slate-400 py-1">No personal items yet. Tap Add to create one.</p>';
+    return;
+  }
+  el.innerHTML = items.map(function(p) {
+    const timeL = (p.start || p.end) ? ((p.start || '') + (p.end ? '–' + p.end : '')) : 'All day';
+    return '<div class="flex items-start justify-between gap-2 rounded-xl bg-slate-50 border border-slate-100 px-3 py-2">' +
+      '<div class="min-w-0 flex-1">' +
+      '<p class="text-sm font-semibold text-slate-800">' + escapeHtml(p.title) + '</p>' +
+      '<p class="text-[10px] text-slate-500 mt-0.5">' + escapeHtml(timeL) + '</p>' +
+      '</div>' +
+      '<button type="button" class="text-xs font-bold text-red-600 px-2 py-1 flex-shrink-0" onclick="event.stopPropagation(); deletePersonalItem(' + p.id + ')">Remove</button>' +
+      '</div>';
+  }).join('');
+}
+
+function openPersonalModal(dateIso) {
+  document.getElementById('personal-item-date').value = dateIso;
+  document.getElementById('personal-item-title').value = '';
+  document.getElementById('personal-item-start').value = '';
+  document.getElementById('personal-item-end').value = '';
+  document.getElementById('personal-item-notes').value = '';
+  document.getElementById('personal-item-backdrop').classList.remove('hidden');
+  document.getElementById('personal-item-modal').classList.remove('hidden');
+}
+
+function closePersonalModal() {
+  document.getElementById('personal-item-backdrop').classList.add('hidden');
+  document.getElementById('personal-item-modal').classList.add('hidden');
+}
+
+async function submitPersonalItem(ev) {
+  ev.preventDefault();
+  const date = document.getElementById('personal-item-date').value;
+  const title = document.getElementById('personal-item-title').value.trim();
+  const start = document.getElementById('personal-item-start').value || null;
+  const end = document.getElementById('personal-item-end').value || null;
+  const notes = document.getElementById('personal-item-notes').value.trim() || null;
+  const r = await fetch('/surgeon/api/day-items', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ date: date, title: title, notes: notes, start_time: start, end_time: end })
+  });
+  if (!r.ok) { alert('Could not save item.'); return; }
+  closePersonalModal();
+  location.reload();
+}
+
+async function deletePersonalItem(id) {
+  if (!confirm('Remove this personal item?')) return;
+  const r = await fetch('/surgeon/api/day-items/' + id, {
+    method: 'DELETE',
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json' }
+  });
+  if (!r.ok) { alert('Could not remove.'); return; }
+  location.reload();
+}
+
+function openDayView(idx) {
+  const d = weekData[idx];
+  if (!d) return;
+  currentDayIndex = idx;
+
+  document.getElementById('sheet-day-name').textContent = d.dayName;
+  document.getElementById('sheet-day-full').textContent = d.dayFull;
+
+  document.getElementById('sheet-add-personal-btn').onclick = function() { openPersonalModal(d.date); };
+  renderPersonalSheetList(d);
+
+  // All-day banners (neutral — color reserved for clinic/hospital placement)
+  const bannerStyle = `background:${CAL_NEUTRAL_BG};color:${CAL_NEUTRAL_TEXT};border:1px solid rgba(20,48,90,.12);`;
+  let banners = '';
+  for (const cg of (d.callGroupRail || [])) {
+    const pri = (cg.primaryInitials && String(cg.primaryInitials).trim()) ? cg.primaryInitials : '—';
+    const bak = (cg.backupInitials && String(cg.backupInitials).trim()) ? cg.backupInitials : '';
+    const bakTxt = bak ? ' · Bak ' + escapeHtml(bak) : '';
+    banners += `<div class="rounded-xl px-3 py-2 text-sm font-semibold flex flex-col gap-0.5" style="${bannerStyle}"><span class="text-[10px] font-bold uppercase opacity-75 tracking-wide leading-tight">${escapeHtml(cg.groupName)}</span><span><i class="fa-solid fa-phone text-[10px] mr-1 opacity-70"></i><span class="font-bold">${escapeHtml(pri)}</span>${bakTxt}</span></div>`;
+  }
+  for (const r of d.rotations) {
+    banners += `<div class="rounded-xl px-3 py-2 text-sm font-semibold flex items-center gap-2" style="${bannerStyle}"><i class="fa-solid fa-bell text-xs"></i>${r.label}</div>`;
+  }
+  if (d.dayOff) {
+    banners += `<div class="rounded-xl px-3 py-2 text-sm font-semibold flex items-center gap-2" style="${bannerStyle}"><i class="fa-solid fa-umbrella-beach text-xs"></i>Day Off${d.dayOff.reason !== 'Day Off' ? ' — ' + d.dayOff.reason : ''}</div>`;
+  }
+  for (const m of d.meetings) {
+    if (m.allDay) {
+      banners += `<div class="rounded-xl px-3 py-2 text-sm font-semibold flex items-center gap-2" style="${bannerStyle}"><i class="fa-solid fa-users text-xs"></i>${m.title}${m.location ? ' — ' + m.location : ''}</div>`;
+    }
+  }
+  for (const p of (d.personalItems || [])) {
+    if (!p.start) {
+      banners += `<div class="rounded-xl px-3 py-2 text-sm font-semibold flex items-center gap-2" style="${bannerStyle}"><i class="fa-solid fa-star text-xs"></i>${escapeHtml(p.title)}</div>`;
+    }
+  }
+  const alldayEl = document.getElementById('sheet-allday');
+  alldayEl.innerHTML = banners;
+  alldayEl.style.paddingBottom = banners ? '12px' : '0';
+
+  // Time labels (7 AM – 8 PM)
+  let labelsHtml = '';
+  for (let h = 7; h <= 20; h++) {
+    const top = (h * 60 - TL_START) * PX_PER_MIN;
+    const label = h === 12 ? '12 PM' : h < 12 ? `${h} AM` : `${h - 12} PM`;
+    labelsHtml += `<div style="position:absolute;font-size:10px;color:#94A3B8;font-weight:500;top:${top}px;right:4px;transform:translateY(-50%);width:44px;text-align:right;">${label}</div>`;
+  }
+  document.getElementById('sheet-time-labels').innerHTML = labelsHtml;
+
+  // Grid lines (solid on hour, dashed on half-hour)
+  let gridHtml = '';
+  for (let h = 7; h <= 20; h++) {
+    const top = (h * 60 - TL_START) * PX_PER_MIN;
+    gridHtml += `<div style="position:absolute;left:0;right:0;top:${top}px;border-top:1px solid #E2E8F0;"></div>`;
+  }
+  for (let h = 7; h < 20; h++) {
+    const top = (h * 60 + 30 - TL_START) * PX_PER_MIN;
+    gridHtml += `<div style="position:absolute;left:0;right:0;top:${top}px;border-top:1px dashed #F1F5F9;"></div>`;
+  }
+  document.getElementById('sheet-gridlines').innerHTML = gridHtml;
+
+  // Event blocks
+  let eventsHtml = '';
+
+  // Clinic blocks
+  for (const cs of d.clinics) {
+    const startM = toMins(cs.start);
+    const endM = toMins(cs.end);
+    if (startM == null) continue;
+    const top = (startM - TL_START) * PX_PER_MIN;
+    const blockH = (endM - startM) * PX_PER_MIN;
+    const sessionLabel = cs.session === 'am' ? 'AM Session' : cs.session === 'pm' ? 'PM Session' : 'Full Day';
+    eventsHtml += `<div style="position:absolute;left:2px;right:2px;top:${top}px;height:${blockH}px;background:${cs.color};border-radius:12px;padding:8px 12px;overflow:hidden;color:#fff;">
+      <p style="font-weight:700;font-size:13px;line-height:1.2;margin:0;">${cs.name}</p>
+      <p style="font-size:11px;opacity:.85;margin:2px 0 0;">${sessionLabel} · ${fmtTime(cs.start)}–${fmtTime(cs.end)}</p>
+    </div>`;
+  }
+
+  // Meeting blocks (timed only)
+  for (const m of d.meetings) {
+    if (m.allDay || !m.start) continue;
+    const startM = toMins(m.start);
+    const endM = m.end ? toMins(m.end) : startM + 60;
+    const top = (startM - TL_START) * PX_PER_MIN;
+    const blockH = Math.max((endM - startM) * PX_PER_MIN, 30);
+    eventsHtml += `<div style="position:absolute;left:2px;right:2px;top:${top}px;height:${blockH}px;background:${CAL_NEUTRAL_BG};border-radius:12px;padding:8px 12px;overflow:hidden;color:${CAL_NEUTRAL_TEXT};border:1px solid rgba(20,48,90,.1);">
+      <p style="font-weight:700;font-size:13px;line-height:1.2;margin:0;">📋 ${m.title}</p>
+      ${m.location ? `<p style="font-size:11px;opacity:.85;margin:2px 0 0;">${m.location}</p>` : ''}
+    </div>`;
+  }
+
+  // Patients block (assume 9 AM if no time)
+  if (d.patients && d.patients.count > 0) {
+    const top = (9 * 60 - TL_START) * PX_PER_MIN;
+    eventsHtml += `<div style="position:absolute;left:2px;right:2px;top:${top}px;height:60px;background:${CAL_NEUTRAL_BG};border-radius:12px;padding:8px 12px;overflow:hidden;color:${CAL_NEUTRAL_TEXT};border:1px solid rgba(20,48,90,.1);">
+      <p style="font-weight:700;font-size:13px;line-height:1.2;margin:0;">🏥 ${d.patients.count} Patients</p>
+      <p style="font-size:11px;opacity:.85;margin:2px 0 0;">Patient rounds</p>
+    </div>`;
+  }
+
+  // Surgical cases (hospital schedule) — location color when OR/site is linked
+  if (d.surgeries && d.surgeries.length > 0) {
+    for (const s of d.surgeries) {
+      const startM = toMins(s.start);
+      const endM = s.end ? toMins(s.end) : startM + 60;
+      if (startM == null) continue;
+      const top = (startM - TL_START) * PX_PER_MIN;
+      const blockH = Math.max((endM - startM) * PX_PER_MIN, 36);
+      const sxBg = s.color || CAL_NEUTRAL_BG;
+      const sxFg = s.color ? '#fff' : CAL_NEUTRAL_TEXT;
+      const sxBorder = s.color ? '' : 'border:1px solid rgba(20,48,90,.1);';
+      eventsHtml += `<div style="position:absolute;left:2px;right:2px;top:${top}px;height:${blockH}px;background:${sxBg};border-radius:12px;padding:8px 12px;overflow:hidden;color:${sxFg};${sxBorder}">
+        <p style="font-weight:700;font-size:12px;line-height:1.2;margin:0;">🏥 ${escapeHtml(s.patientName) || 'Surgery'}</p>
+        <p style="font-size:11px;opacity:.9;margin:2px 0 0;">${escapeHtml(s.procedure) || ''}</p>
+        ${s.room ? `<p style="font-size:10px;opacity:.8;margin:1px 0 0;">${escapeHtml(s.room)}</p>` : ''}
+      </div>`;
+    }
+  }
+
+  for (const p of (d.personalItems || [])) {
+    if (!p.start) continue;
+    const startM = toMins(p.start);
+    const endM = p.end ? toMins(p.end) : startM + 30;
+    if (startM == null) continue;
+    const top = (startM - TL_START) * PX_PER_MIN;
+    const blockH = Math.max((endM - startM) * PX_PER_MIN, 28);
+    eventsHtml += `<div style="position:absolute;left:2px;right:2px;top:${top}px;height:${blockH}px;background:${CAL_NEUTRAL_BG};border-radius:12px;padding:8px 12px;overflow:hidden;color:${CAL_NEUTRAL_TEXT};border:1px dashed rgba(20,48,90,.2);">
+      <p style="font-weight:700;font-size:12px;margin:0;">✦ ${escapeHtml(p.title)}</p>
+    </div>`;
+  }
+
+  document.getElementById('sheet-events').innerHTML = eventsHtml;
+
+  // Show sheet
+  const sheet = document.getElementById('day-sheet');
+  document.getElementById('day-sheet-backdrop').classList.remove('hidden');
+  requestAnimationFrame(() => { sheet.style.transform = 'translateY(0)'; });
+
+  // Scroll to first event (or 7 AM)
+  setTimeout(() => {
+    const scrollEl = document.getElementById('day-sheet-scroll');
+    let scrollTarget = 0;
+    if (d.clinics.length > 0) {
+      const firstStart = toMins(d.clinics[0].start);
+      if (firstStart != null) scrollTarget = Math.max(0, (firstStart - TL_START) * PX_PER_MIN - 40);
+    } else if (d.meetings.length > 0 && d.meetings[0].start) {
+      const firstStart = toMins(d.meetings[0].start);
+      if (firstStart != null) scrollTarget = Math.max(0, (firstStart - TL_START) * PX_PER_MIN - 40);
+    }
+    scrollEl.scrollTop = scrollTarget;
+  }, 320);
+}
+
+function closeDaySheet() {
+  currentDayIndex = null;
+  const sheet = document.getElementById('day-sheet');
+  sheet.style.transform = 'translateY(100%)';
+  setTimeout(() => document.getElementById('day-sheet-backdrop').classList.add('hidden'), 300);
+}
+
+// ===== Hospital (surgical) schedule sheet =====
+function openHospitalView(idx) {
+  const d = weekData[idx];
+  if (!d) return;
+  document.getElementById('hospital-sheet-day-name').textContent = d.dayName;
+  document.getElementById('hospital-sheet-day-full').textContent = d.dayFull + ' — Surgical schedule';
+  const container = document.getElementById('hospital-sheet-timeline');
+  const surgeries = d.surgeries || [];
+  let html = '';
+  if (surgeries.length === 0) {
+    html = '<p class="text-slate-500 text-sm py-4">No surgical cases this day.</p>';
+  }
+  try {
+    for (const s of surgeries) {
+      const room = s.room ? ` · ${s.room}` : '';
+      html += `<button type="button" onclick='openCaseNotesModal(${s.id}, ${JSON.stringify(s.patientName || '')}, ${JSON.stringify(s.procedure || '')}, ${JSON.stringify(s.room || '')}, ${JSON.stringify(s.surgeonNotes || '')})' class="w-full text-left rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:border-sky-300 hover:bg-sky-50/50 transition-colors touch-manipulation">
+      <div class="flex items-start gap-3">
+        <div class="flex-shrink-0 w-14 text-left">
+          <span class="text-sm font-bold text-slate-800">${fmtTime(s.start)}</span>
+          ${s.end ? `<span class="block text-xs text-slate-500">– ${fmtTime(s.end)}</span>` : ''}
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="font-semibold text-slate-800 text-sm">${escapeHtml(s.patientName) || '—'}</p>
+          <p class="text-slate-600 text-sm mt-0.5">${escapeHtml(s.procedure) || '—'}</p>
+          ${s.room ? `<p class="text-slate-500 text-xs mt-0.5">${escapeHtml(s.room)}</p>` : ''}
+          ${s.surgeonNotes ? `<p class="text-sky-600 text-xs mt-1 italic">My notes: ${escapeHtml(s.surgeonNotes)}</p>` : ''}
+        </div>
+        <i class="fa-solid fa-chevron-right text-slate-300 text-xs flex-shrink-0 mt-1"></i>
+      </div>
+    </button>`;
+    }
+  } catch (buildErr) {
+    html = '<p class="text-slate-500 text-sm py-4">No surgical cases this day.</p>';
+  }
+  container.innerHTML = html;
+  const sheetEl = document.getElementById('hospital-sheet');
+  const backdropEl = document.getElementById('hospital-sheet-backdrop');
+  backdropEl.classList.remove('hidden');
+  sheetEl.classList.remove('translate-y-full');
+  sheetEl.style.transform = '';
+}
+
+function closeHospitalSheet() {
+  document.getElementById('hospital-sheet').style.transform = 'translateY(100%)';
+  setTimeout(() => document.getElementById('hospital-sheet-backdrop').classList.add('hidden'), 300);
+}
+
+function openCaseNotesModal(caseId, patientName, procedure, room, surgeonNotes) {
+  document.getElementById('case-notes-form').action = '/surgeon/surgical-case/' + caseId + '/notes';
+  document.getElementById('case-notes-patient').textContent = patientName || '—';
+  document.getElementById('case-notes-procedure').textContent = procedure || '—';
+  document.getElementById('case-notes-room').textContent = room ? 'Room: ' + room : '';
+  document.getElementById('case-notes-textarea').value = surgeonNotes || '';
+  document.getElementById('case-notes-backdrop').classList.remove('hidden');
+  document.getElementById('case-notes-modal').classList.remove('hidden');
+}
+
+function closeCaseNotesModal() {
+  document.getElementById('case-notes-backdrop').classList.add('hidden');
+  document.getElementById('case-notes-modal').classList.add('hidden');
+}
+
+// Swipe-down to dismiss
+(function() {
+  const sheet = document.getElementById('day-sheet');
+  let startY = 0;
+  sheet.addEventListener('touchstart', e => { startY = e.touches[0].clientY; }, { passive: true });
+  sheet.addEventListener('touchmove', e => {
+    const dy = e.touches[0].clientY - startY;
+    if (dy > 0) sheet.style.transform = `translateY(${dy}px)`;
+  }, { passive: true });
+  sheet.addEventListener('touchend', e => {
+    const dy = e.changedTouches[0].clientY - startY;
+    if (dy > 100) { closeDaySheet(); } else { sheet.style.transform = 'translateY(0)'; }
+  });
+})();
+</script>
+{% endblock %}

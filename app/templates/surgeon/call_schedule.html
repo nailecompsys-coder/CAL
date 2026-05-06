@@ -1,0 +1,160 @@
+{% extends "base_surgeon.html" %}
+{% block title %}Call Schedule{% endblock %}
+
+{% block content %}
+<!-- ========== TOP BAR ========== -->
+<div class="px-4 pt-12 pb-4 sm:pt-4 sticky top-0 z-10" style="background: rgba(255,255,255,.80); backdrop-filter: blur(22px) saturate(1.8); -webkit-backdrop-filter: blur(22px) saturate(1.8); border-bottom: 1px solid rgba(20,48,90,.12);">
+  <div class="flex items-start justify-between gap-3">
+    <div>
+      <p class="text-xs font-medium" style="color:#7A90A8;">Practice</p>
+      <h1 class="text-lg font-bold leading-tight" style="color:#14305A;">Call Schedule</h1>
+    </div>
+    <div class="inline-flex rounded-xl border border-slate-200 bg-white/90 p-0.5 text-[11px] font-semibold shadow-sm flex-shrink-0">
+      <a href="/surgeon/call-schedule?week_offset={{ week_offset }}"
+         class="px-2.5 py-1.5 rounded-lg {% if schedule_view == 'week' %}bg-blue-50 text-blue-700{% else %}text-slate-500{% endif %}">Week</a>
+      <a href="/surgeon/call-schedule?week_offset={{ week_offset }}&schedule_view=30d"
+         class="px-2.5 py-1.5 rounded-lg {% if schedule_view == '30d' %}bg-blue-50 text-blue-700{% else %}text-slate-500{% endif %}">30 days</a>
+    </div>
+  </div>
+</div>
+
+<!-- ========== WEEK NAV ========== -->
+<div class="px-4 mt-4 flex items-center justify-between">
+  <a href="/surgeon/call-schedule?week_offset={{ week_offset - 1 }}{% if schedule_view == '30d' %}&schedule_view=30d{% endif %}"
+     class="w-9 h-9 bg-white border border-slate-200 rounded-xl flex items-center justify-center shadow-sm active:scale-95 transition-transform">
+    <i class="fa-solid fa-chevron-left text-slate-500 text-xs"></i>
+  </a>
+  <div class="text-center">
+    <p class="text-slate-800 font-semibold text-sm">
+      {% if week_offset == 0 %}This Week
+      {% elif week_offset == 1 %}Next Week
+      {% elif week_offset == -1 %}Last Week
+      {% else %}{{ schedule_days[0].strftime('%b %-d') }} – {{ schedule_days[-1].strftime('%b %-d') }}
+      {% endif %}
+      {% if schedule_view == '30d' %}<span class="block text-xs font-normal text-slate-500">30-day window</span>{% endif %}
+    </p>
+    <p class="text-slate-400 text-xs">{{ schedule_days[0].strftime('%b %-d') }} – {{ schedule_days[-1].strftime('%b %-d, %Y') }}</p>
+  </div>
+  <div class="flex items-center gap-1.5">
+    {% if week_offset != 0 %}
+    <a href="/surgeon/call-schedule{% if schedule_view == '30d' %}?schedule_view=30d{% endif %}" class="text-xs text-blue-600 font-semibold bg-blue-50 border border-blue-100 px-2.5 py-1.5 rounded-lg active:scale-95 transition-transform">Today</a>
+    {% endif %}
+    <a href="/surgeon/call-schedule?week_offset={{ week_offset + 1 }}{% if schedule_view == '30d' %}&schedule_view=30d{% endif %}"
+       class="w-9 h-9 bg-white border border-slate-200 rounded-xl flex items-center justify-center shadow-sm active:scale-95 transition-transform">
+      <i class="fa-solid fa-chevron-right text-slate-500 text-xs"></i>
+    </a>
+  </div>
+</div>
+
+{% if schedule_view == '30d' %}
+<!-- ========== 30-DAY CALENDAR GRID (Mon–Sun rows, like month grid) ========== -->
+<div class="px-4 mt-4 pb-6">
+  <div class="grid grid-cols-7 gap-1 mb-2">
+    {% for wd in ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] %}
+    <div class="text-center text-[10px] font-bold uppercase tracking-wide text-slate-400 py-1">{{ wd }}</div>
+    {% endfor %}
+  </div>
+  <div class="grid grid-cols-7 gap-1.5">
+    {% for day in schedule_days %}
+        {% set is_today = day == today %}
+        {% set is_weekend = day.weekday() >= 5 %}
+        <div class="rounded-xl border-2 overflow-hidden min-h-[6.5rem] flex flex-col {% if is_today %}border-blue-400 ring-1 ring-blue-200{% else %}border-slate-300{% endif %}"
+             style="background: rgba(255,255,255,.92); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);">
+          <div class="px-1.5 py-1 text-center border-b border-slate-200 {% if is_today %}bg-blue-50{% elif is_weekend %}bg-slate-100{% else %}bg-white/80{% endif %}">
+            <span class="text-sm font-bold {% if is_today %}text-blue-600{% elif is_weekend %}text-slate-500{% else %}text-slate-800{% endif %}">{{ day.strftime('%-d') }}</span>
+          </div>
+          <div class="flex-1 px-0.5 py-1 flex flex-col gap-0.5 justify-start text-[8px] leading-tight overflow-hidden">
+            {% if call_group_rows|length == 0 %}
+            <div class="text-slate-400 text-center py-1">—</div>
+            {% else %}
+            {% for g, _ in call_group_rows %}
+            {% set slot = merged_slot_index.get(g.id, {}).get(day, {}) %}
+            {% set pr = slot.get('primary') %}
+            {% set bk = slot.get('backup') %}
+            <div class="truncate border-b border-slate-100/90 last:border-0 pb-0.5 last:pb-0">
+              <div class="text-[7px] font-bold text-slate-400 truncate leading-tight" title="{{ g.name }}">{{ g.name }}</div>
+              <div class="font-bold text-slate-800 leading-none mt-0.5">
+                {% if pr and pr.surgeon %}{{ pr.surgeon.initials }}{% elif pr and not pr.surgeon_id %}NC{% else %}—{% endif %}{% if bk and bk.surgeon %}<span class="text-slate-500 font-semibold">/{{ bk.surgeon.initials }}</span>{% elif bk and not bk.surgeon_id %}<span class="text-slate-500 font-semibold">/NC</span>{% endif %}
+              </div>
+            </div>
+            {% endfor %}
+            {% endif %}
+          </div>
+        </div>
+    {% endfor %}
+    {% set _n = schedule_days|length %}
+    {% set _pad = (7 - (_n % 7)) % 7 %}
+    {% for _ in range(_pad) %}
+        <div class="min-h-[5.75rem] rounded-xl border border-dashed border-slate-200/80 bg-slate-100/40"></div>
+    {% endfor %}
+  </div>
+</div>
+{% else %}
+<!-- ========== DAY CARDS (week) — one block per CallGroup ========== -->
+<div class="px-4 mt-4 space-y-3 pb-6">
+  {% for day in schedule_days %}
+  {% set is_today = day == today %}
+  {% set is_weekend = day.weekday() >= 5 %}
+  <div class="rounded-2xl overflow-hidden border {% if is_today %}border-blue-300{% else %}border-slate-200{% endif %}"
+       style="background: rgba(255,255,255,.75); backdrop-filter: blur(12px) saturate(1.6); -webkit-backdrop-filter: blur(12px) saturate(1.6);">
+    <div class="px-4 py-3 {% if is_today %}bg-blue-50{% elif is_weekend %}bg-slate-50{% endif %} border-b border-slate-100">
+      <div class="flex items-center gap-3">
+        <div class="text-center w-12 flex-shrink-0">
+          <p class="text-xs font-semibold {% if is_today %}text-blue-500{% elif is_weekend %}text-slate-400{% else %}text-slate-500{% endif %} uppercase">{{ day.strftime('%a') }}</p>
+          <p class="text-lg font-bold {% if is_today %}text-blue-600{% elif is_weekend %}text-slate-400{% else %}text-slate-700{% endif %} leading-none">{{ day.strftime('%-d') }}</p>
+        </div>
+        <div class="text-sm text-slate-600">{{ day.strftime('%B %-d') }}</div>
+      </div>
+    </div>
+    <div class="px-4 py-3 space-y-4">
+      {% if call_group_rows|length == 0 %}
+      <p class="text-sm text-slate-400 italic">No call groups configured.</p>
+      {% else %}
+      {% for g, _ in call_group_rows %}
+      {% set slot = merged_slot_index.get(g.id, {}).get(day, {}) %}
+      {% set primary = slot.get('primary') %}
+      {% set backup = slot.get('backup') %}
+      <div class="border-t border-slate-100 first:border-t-0 first:pt-0 pt-3 first:mt-0 mt-0">
+        <p class="text-xs font-bold text-slate-700 mb-2">{{ g.name }}</p>
+        <div class="flex items-center gap-2 mb-1">
+          <div class="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"></div>
+          <span class="text-[10px] font-semibold text-slate-500 uppercase">Primary</span>
+        </div>
+        {% if primary and primary.surgeon %}
+        <div class="rounded-xl px-3 py-2.5 flex items-center gap-2 bg-[#F4F6F9] border border-slate-200/90">
+          <div class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold bg-slate-600">{{ primary.surgeon.initials }}</div>
+          <div>
+            <p class="font-semibold text-slate-800 text-sm">{{ primary.surgeon.full_name }}{% if primary.surgeon.suffix %} {{ primary.surgeon.suffix }}{% endif %}</p>
+          </div>
+        </div>
+        {% elif primary and not primary.surgeon_id %}
+        <p class="text-sm text-slate-500 italic pl-1">No call (NC)</p>
+        {% else %}
+        <p class="text-sm text-slate-400 italic pl-1">Not assigned</p>
+        {% endif %}
+
+        <div class="flex items-center gap-2 pt-2 mb-1">
+          <div class="w-2 h-2 rounded-full bg-slate-400 flex-shrink-0"></div>
+          <span class="text-[10px] font-semibold text-slate-500 uppercase">Backup</span>
+        </div>
+        {% if backup and backup.surgeon %}
+        <div class="rounded-xl px-3 py-2.5 flex items-center gap-2 bg-[#F4F6F9] border border-slate-200/90">
+          <div class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold bg-slate-600">{{ backup.surgeon.initials }}</div>
+          <div>
+            <p class="font-semibold text-slate-800 text-sm">{{ backup.surgeon.full_name }}{% if backup.surgeon.suffix %} {{ backup.surgeon.suffix }}{% endif %}</p>
+          </div>
+        </div>
+        {% elif backup and not backup.surgeon_id %}
+        <p class="text-sm text-slate-500 italic pl-1">No backup (NC)</p>
+        {% else %}
+        <p class="text-sm text-slate-400 italic pl-1">Not assigned</p>
+        {% endif %}
+      </div>
+      {% endfor %}
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

@@ -35,10 +35,12 @@ echo "==> Building cal_api from $ROOT"
 # which eliminates the BuildKit stale-tag problem. apt and pip layers are reused when
 # Dockerfile/requirements.txt are unchanged (code-only changes rebuild in ~15-30s).
 if use_standalone; then
-  echo "==> Using docker-compose.standalone.yml (atlas networks missing or CAL_STANDALONE=1). For atlas stack: create networks or CAL_STANDALONE=0"
+  echo "==> Using docker-compose.standalone.yml (atlas networks missing or CAL_STANDALONE=1)."
+  echo "==> This path brings up both cal_postgres and cal_api on the standalone VM."
   docker compose -f docker-compose.standalone.yml stop cal_api 2>/dev/null || true
   docker compose -f docker-compose.standalone.yml rm -f cal_api 2>/dev/null || true
   docker rmi -f cal_api:local 2>/dev/null || true
+  docker compose -f docker-compose.standalone.yml up -d cal_postgres
   docker compose -f docker-compose.standalone.yml build cal_api
   docker compose -f docker-compose.standalone.yml up -d cal_api
 else

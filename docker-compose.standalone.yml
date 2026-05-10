@@ -3,6 +3,24 @@
 #   CAL_APP_VERSION=$(tr -d '[:space:]' < VERSION) docker compose -f docker-compose.standalone.yml up --build -d
 # Or: make deploy-cal-standalone
 services:
+  cal_postgres:
+    image: postgres:16-alpine
+    container_name: cal_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${CAL_DB_NAME:-cal_prod}
+      POSTGRES_USER: ${CAL_DB_USER:-cal_app}
+      POSTGRES_PASSWORD: ${CAL_DB_PASSWORD:-change_me_cal_db_password}
+    volumes:
+      - cal_postgres_data:/var/lib/postgresql/data
+    networks:
+      - cal_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${CAL_DB_USER:-cal_app} -d ${CAL_DB_NAME:-cal_prod}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   cal_api:
     build:
       context: .
@@ -14,6 +32,9 @@ services:
     container_name: cal_api
     restart: unless-stopped
     env_file: .env
+    depends_on:
+      cal_postgres:
+        condition: service_healthy
     ports:
       - "127.0.0.1:3005:3005"
     networks:
@@ -27,3 +48,6 @@ services:
 networks:
   cal_internal:
     driver: bridge
+
+volumes:
+  cal_postgres_data:

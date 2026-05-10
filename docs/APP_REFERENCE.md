@@ -66,6 +66,7 @@ make deploy-cal
 
 - **`docker-compose.yml`** — production stack; expects external networks **`atlas-net`** and **`atlas_default`**. Build arg **`CAL_APP_VERSION`** is set from **`VERSION`** by the rebuild script.
 - **`docker-compose.standalone.yml`** — isolated VM stack with `cal_postgres` + `cal_api` on an internal bridge network. Used automatically if those atlas networks are missing, or force with **`CAL_STANDALONE=1`** / **`make deploy-cal-standalone`**.
+- **Host cutover helper:** `deploy/cutover_to_cal_vm.sh` rewrites host nginx to proxy `cal.midfloridasurgical.com` to the CAL VM without a DNS change.
 
 **Other commands:** `make verify-cal`, `make bump-only`, `make compile`.
 

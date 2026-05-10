@@ -42,11 +42,11 @@ if use_standalone; then
   docker rmi -f cal_api:local 2>/dev/null || true
   docker compose -f docker-compose.standalone.yml up -d cal_postgres
   docker compose -f docker-compose.standalone.yml build cal_api
-  docker compose -f docker-compose.standalone.yml up -d cal_api
+  docker compose -f docker-compose.standalone.yml up -d --no-build cal_api
 else
   docker compose build cal_api
   echo "==> Starting cal_api (docker-compose.yml + atlas networks)"
-  docker compose up -d cal_api
+  docker compose up -d --no-build cal_api
 fi
 
 echo "==> Waiting for /health …"

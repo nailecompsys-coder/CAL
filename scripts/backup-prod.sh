@@ -68,12 +68,18 @@ database_port=${DB_PORT}
 EOF
 
 echo "Creating CAL database dump ..."
-PGPASSWORD="${DB_PASSWORD}" pg_dump \
-  -h "${DB_HOST}" \
-  -p "${DB_PORT}" \
-  -U "${DB_USER}" \
-  "${DB_NAME}" \
-  | gzip > "${BACKUP_DIR}/db.sql.gz"
+if docker ps -a --format '{{.Names}}' | grep -q '^cal_postgres$'; then
+  docker exec -e PGPASSWORD="${DB_PASSWORD}" cal_postgres \
+    pg_dump -U "${DB_USER}" "${DB_NAME}" \
+    | gzip > "${BACKUP_DIR}/db.sql.gz"
+else
+  PGPASSWORD="${DB_PASSWORD}" pg_dump \
+    -h "${DB_HOST}" \
+    -p "${DB_PORT}" \
+    -U "${DB_USER}" \
+    "${DB_NAME}" \
+    | gzip > "${BACKUP_DIR}/db.sql.gz"
+fi
 echo "  OK: ${BACKUP_DIR}/db.sql.gz"
 
 echo "Saving git-tracked files snapshot ..."

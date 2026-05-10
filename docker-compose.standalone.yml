@@ -36,7 +36,7 @@ services:
       cal_postgres:
         condition: service_healthy
     ports:
-      - "127.0.0.1:3005:3005"
+      - "${CAL_BIND_HOST:-0.0.0.0}:3005:3005"
     networks:
       - cal_internal
     healthcheck:

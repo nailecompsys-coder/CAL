@@ -7,6 +7,11 @@ ENV_FILE="${ROOT_DIR}/.env"
 BACKUP_DIR="${HOME}/cal-backups/${TIMESTAMP}"
 WASABI_DEST="${CAL_WASABI_DEST:-wasabi:mfsa-cal/cal-backups/${TIMESTAMP}}"
 
+if [[ "${EUID}" -ne 0 ]] && ! docker ps >/dev/null 2>&1; then
+  echo "Docker is not accessible as $(whoami); re-running backup with sudo ..."
+  exec sudo -E "$0" "$@"
+fi
+
 mkdir -p "${BACKUP_DIR}"
 
 if [[ ! -f "${ENV_FILE}" ]]; then

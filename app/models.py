@@ -265,6 +265,7 @@ class DayOff(Base):
     start_time = Column(Time)
     end_time = Column(Time)
     is_full_day = Column(Boolean, default=True, server_default="true")
+    segments = Column(Text)
     status = Column(String(16), default="pending")  # pending | approved | denied
     notes = Column(Text)  # surgeon's note
     admin_note = Column(Text)  # admin's response

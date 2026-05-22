@@ -3,19 +3,21 @@
 Import call rotations from monthly CSV files into surgical_cal.call_rotations.
 Covers May through November 2026 (April already imported via admin UI).
 
-Run: python3 /home/dnaile748/cal/scripts/import_call_rotations.py
+Run from the CAL repo root: python3 scripts/import_call_rotations.py
 """
 import csv
 import os
 import re
 import sys
 from datetime import date, datetime
+from pathlib import Path
 
 import psycopg2
 
 # -- Configuration -----------------------------------------------------------
 
-IMPORTS_DIR = "/home/dnaile748/cal/imports"
+ROOT_DIR = Path(__file__).resolve().parents[1]
+IMPORTS_DIR = ROOT_DIR / "imports"
 
 # Surgeon initials → DB id
 INITIALS = {
@@ -70,7 +72,7 @@ def parse_initials(cell: str) -> list[tuple[str, str]]:
 def find_csv(month_suffix: str) -> str | None:
     for fname in os.listdir(IMPORTS_DIR):
         if fname.endswith(f"- {month_suffix}.csv") or fname.endswith(f"- {month_suffix}"):
-            return os.path.join(IMPORTS_DIR, fname)
+            return str(IMPORTS_DIR / fname)
     return None
 
 
@@ -164,7 +166,7 @@ def parse_month_csv(filepath: str, year: int, month: int) -> list[dict]:
 
 def main():
     # Read DATABASE_URL from .env
-    env_path = "/home/dnaile748/cal/.env"
+    env_path = ROOT_DIR / ".env"
     db_url = ""
     with open(env_path) as f:
         for line in f:
@@ -172,7 +174,7 @@ def main():
                 db_url = line.split("=", 1)[1].strip()
                 break
     # postgresql://cal_user:password@host:port/dbname — swap docker host for localhost
-    db_url_local = db_url.replace("atlas-postgres", "127.0.0.1")
+    db_url_local = db_url.replace("atlas-postgres", "127.0.0.1").replace("cal_postgres", "127.0.0.1")
 
     conn = psycopg2.connect(db_url_local)
     cur = conn.cursor()

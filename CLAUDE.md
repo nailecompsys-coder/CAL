@@ -22,16 +22,16 @@ Call schedule and surgical calendar management for MFSA.
 | Backend | FastAPI (Python 3.11) |
 | Templating | Jinja2 (server-rendered — no React, no Vite, no build step) |
 | Auth | Cookie-based JWT — `admin_token` / `surgeon_token`, bcrypt 4.0.1 |
-| Database | PostgreSQL `surgical_cal` on `atlas-postgres` (shared container) |
-| Container | `cal_api` Docker, `127.0.0.1:3005` |
-| Networks | `atlas-net` + `atlas_default` (both external, created by Atlas compose) |
+| Database | Target prod: PostgreSQL `cal_prod` in `cal_postgres`; legacy prod: `surgical_cal` on shared `atlas-postgres` |
+| Container | `cal_api` Docker, port `3005` |
+| Networks | Target prod: standalone `cal_internal`; legacy prod: `atlas-net` + `atlas_default` |
 
 ---
 
 ## Project Structure
 
 ```
-/home/dnaile748/cal/
+/opt/cal/
 ├── app/
 │   ├── main.py              ← entry point — lifespan, create_all, middleware
 │   ├── auth.py              ← JWT, bcrypt, magic link, device sessions
@@ -61,8 +61,8 @@ Call schedule and surgical calendar management for MFSA.
 │   └── PALETTES.md          ← design tokens — Cal uses Clinical Trust
 ├── VERSION                  ← current build version (e.g. 1.3.5-beta.1+20260327T200551Z)
 ├── Dockerfile
-├── docker-compose.yml
-├── docker-compose.standalone.yml ← fallback if atlas networks are missing
+├── docker-compose.yml            ← legacy llm-core / Atlas stack
+├── docker-compose.standalone.yml ← target prod VM stack: cal_postgres + cal_api
 ├── .env                     ← secrets — NEVER commit
 ├── memory.md                ← session state — update before closing
 └── requirements.txt         ← all versions pinned
@@ -76,9 +76,11 @@ Call schedule and surgical calendar management for MFSA.
 
 ## Database
 
-- **Container:** `atlas-postgres` — shared across Atlas, Cal, and RVU
-- **Database:** `surgical_cal`
-- **Connect:** `127.0.0.1:5432` (host) or `atlas-postgres:5432` (inside Docker)
+- **Target prod container:** `cal_postgres` on `192.168.5.62`
+- **Target prod database:** `cal_prod`
+- **Target prod connect:** `cal_postgres:5432` from `cal_api`
+- **Legacy container:** `atlas-postgres` — shared across Atlas, Cal, and RVU on `192.168.20.10`
+- **Legacy database:** `surgical_cal`
 - **ORM:** SQLAlchemy — `Base.metadata.create_all` on app startup
 
 ### Core Tables
@@ -94,8 +96,8 @@ surgeon_day_items
 rvu_scans          ← owned by RVU app, lives in this DB (RVU adds it on startup)
 ```
 
-> ⚠️ `atlas-postgres` also hosts `atlas` (Open WebUI) and the orphaned `snapsendseen` v1 DB.
-> NEVER run `docker compose down` from `~/atlas/` without Don confirming — it kills this DB.
+> ⚠️ On legacy `llm-core`, `atlas-postgres` also hosts `atlas` (Open WebUI) and the orphaned `snapsendseen` v1 DB.
+> NEVER run `docker compose down` from `~/atlas/` without Don confirming.
 
 ---
 
@@ -113,7 +115,7 @@ rvu_scans          ← owned by RVU app, lives in this DB (RVU adds it on startu
 **Always use the rebuild script. Never use bare `docker compose up --build`.**
 
 ```bash
-cd /home/dnaile748/cal
+cd /opt/cal
 ./scripts/rebuild-cal-api.sh
 ```
 
@@ -140,6 +142,8 @@ NO_BUMP=1 ./scripts/rebuild-cal-api.sh
 ```bash
 CAL_STANDALONE=1 ./scripts/rebuild-cal-api.sh
 ```
+
+Target production on `192.168.5.62` should use the standalone stack.
 
 **View logs:**
 ```bash
@@ -206,7 +210,9 @@ RVU (`/home/dnaile748/rvu/`) is a **separate app** that uses Cal's auth by desig
 
 ## Server Context
 
-- **Server:** `llm-core` at 192.168.20.10
+- **Target production server:** `cal-prod-vm` at 192.168.5.62
+- **Legacy server:** `llm-core` at 192.168.20.10
 - **Full server doc:** `/home/dnaile748/SERVER_MASTER.md`
-- **This app path:** `/home/dnaile748/cal/`
-- **Domain:** `cal.midfloridasurgical.com` → WAN IP 50.192.210.75 → host nginx → 127.0.0.1:3005
+- **Target app path:** `/opt/cal/`
+- **Legacy app path:** `/home/dnaile748/cal/`
+- **Domain:** `cal.midfloridasurgical.com` → `.5.x` edge nginx at `192.168.5.75` → `http://192.168.5.62:3005/` after cutover

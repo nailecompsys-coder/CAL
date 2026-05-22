@@ -6,17 +6,19 @@ into surgical_cal.days_off.
 Only imports rows marked ✅ (approved). Pending/unapproved rows are printed
 so staff can review and add manually if needed.
 
-Run: python3 /home/dnaile748/cal/scripts/import_days_off.py
+Run from the CAL repo root: python3 scripts/import_days_off.py
 """
 import csv
 import re
 import sys
 from datetime import date, timedelta
+from pathlib import Path
 
 import psycopg2
 
-IMPORTS_DIR = "/home/dnaile748/cal/imports"
-CSV_FILE = f"{IMPORTS_DIR}/2026 MFSA Call Schedule - Doc_PA Request.csv"
+ROOT_DIR = Path(__file__).resolve().parents[1]
+IMPORTS_DIR = ROOT_DIR / "imports"
+CSV_FILE = IMPORTS_DIR / "2026 MFSA Call Schedule - Doc_PA Request.csv"
 
 # Surgeon last-name → id mapping (all 15 people)
 NAME_TO_ID = {
@@ -177,14 +179,14 @@ def parse_date_range(text: str, context_month: int) -> list[tuple[date, date, st
 
 
 def main():
-    env_path = "/home/dnaile748/cal/.env"
+    env_path = ROOT_DIR / ".env"
     db_url = ""
     with open(env_path) as f:
         for line in f:
             if line.startswith("DATABASE_URL="):
                 db_url = line.split("=", 1)[1].strip()
                 break
-    db_url_local = db_url.replace("atlas-postgres", "127.0.0.1")
+    db_url_local = db_url.replace("atlas-postgres", "127.0.0.1").replace("cal_postgres", "127.0.0.1")
     conn = psycopg2.connect(db_url_local)
     cur = conn.cursor()
 

@@ -49,7 +49,7 @@ After code/template changes, rebuild so the image matches the repo (avoids stale
 Run from the **cal repo on the server** (e.g. `~/cal` on `llm-core`), not a placeholder path:
 
 ```bash
-cd ~/cal   # or: cd /home/dnaile748/cal
+cd /opt/cal   # target production VM: 192.168.5.62
 make deploy-cal
 # or: ./scripts/rebuild-cal-api.sh
 ```
@@ -64,9 +64,8 @@ make deploy-cal
 
 **Compose files:**
 
-- **`docker-compose.yml`** — production stack; expects external networks **`atlas-net`** and **`atlas_default`**. Build arg **`CAL_APP_VERSION`** is set from **`VERSION`** by the rebuild script.
-- **`docker-compose.standalone.yml`** — isolated VM stack with `cal_postgres` + `cal_api` on an internal bridge network. `CAL_BIND_HOST` defaults to `0.0.0.0` so the old host nginx can proxy to the VM over the LAN during cutover. Used automatically if those atlas networks are missing, or force with **`CAL_STANDALONE=1`** / **`make deploy-cal-standalone`**.
-- **Host cutover helper:** `deploy/cutover_to_cal_vm.sh` rewrites host nginx to proxy `cal.midfloridasurgical.com` to the CAL VM without a DNS change.
+- **`docker-compose.yml`** — legacy `llm-core`/Atlas stack; expects external networks **`atlas-net`** and **`atlas_default`**. Build arg **`CAL_APP_VERSION`** is set from **`VERSION`** by the rebuild script.
+- **`docker-compose.standalone.yml`** — target production VM stack for `192.168.5.62`; runs **`cal_postgres`** and **`cal_api`** on an internal bridge network, with `cal_api` exposed as `${CAL_BIND_HOST:-0.0.0.0}:3005:3005`. Used automatically if Atlas networks are missing, or force with **`CAL_STANDALONE=1`** / **`make deploy-cal-standalone`**.
 
 **Other commands:** `make verify-cal`, `make bump-only`, `make compile`.
 
@@ -75,6 +74,15 @@ make deploy-cal
 - **Verify without rebuilding:** `./scripts/verify-cal-api.sh` — fails if `GET /health` `version` ≠ `VERSION`.
 - **Dockerfile:** `python:3.11-slim`, `libpq-dev`, `postgresql-client`, `uvicorn app.main:app --host 0.0.0.0 --port 3005 --workers 2`.
 - **Health:** `GET /health` → `{"status":"ok","version":"..."}`. Header **`X-App-Version`** matches (e.g. `curl -sI http://127.0.0.1:3005/health`).
+
+### Production host migration
+
+- Current live host: `192.168.20.10` (`llm-core`), app root `/home/dnaile748/cal`.
+- Target production host: `192.168.5.62` (`cal-prod-vm`), app root `/opt/cal`.
+- Edge host: `192.168.5.75` handles the `.5.x` app VMs (`.60`, `.61`, `.62`).
+- Target edge upstream on `.75`: `http://192.168.5.62:3005/`.
+- Cutover helper: run `deploy/cutover_to_cal_vm.sh 192.168.5.62` on edge host `.75` after target `/health`, database parity, and login smoke tests pass.
+- Rollback is the saved nginx config under `/root/cal-cutover-backups/<timestamp>/` plus reload nginx.
 
 ### First-time DB
 

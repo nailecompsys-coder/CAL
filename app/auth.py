@@ -178,6 +178,9 @@ def get_current_surgeon(
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Bearer "):
             token = auth_header[7:].strip()
+    # Some reverse proxies strip Authorization on redirects; native app duplicates JWT here.
+    if not token:
+        token = (request.headers.get("X-CAL-Device-Token") or "").strip()
 
     if not token:
         _raise_html_or_json_auth_error(request, "/surgeon/register")

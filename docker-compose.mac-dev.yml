@@ -1,0 +1,53 @@
+services:
+  cal_db:
+    image: postgres:16-alpine
+    container_name: cal_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${CAL_DB_NAME:-surgical_cal}
+      POSTGRES_USER: ${CAL_DB_USER:-cal_user}
+      POSTGRES_PASSWORD: ${CAL_DB_PASSWORD:-cal_local_dev_change_me}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - cal_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${CAL_DB_USER:-cal_user} -d ${CAL_DB_NAME:-surgical_cal}"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    networks:
+      - cal_internal
+
+  cal_api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_VERSION: ${CAL_APP_VERSION:-mac-dev}
+    image: cal_api:local
+    container_name: cal_api
+    restart: unless-stopped
+    env_file: .env.mac-dev
+    environment:
+      DATABASE_URL: postgresql://${CAL_DB_USER:-cal_user}:${CAL_DB_PASSWORD:-cal_local_dev_change_me}@cal_db:5432/${CAL_DB_NAME:-surgical_cal}
+    depends_on:
+      cal_db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3005:3005"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 6
+    networks:
+      - cal_internal
+
+volumes:
+  cal_db_data:
+    driver: local
+
+networks:
+  cal_internal:
+    driver: bridge

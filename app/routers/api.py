@@ -120,6 +120,7 @@ def _native_surgeon_rank_key(surgeon: Surgeon | None) -> tuple:
 
 
 def _serialize_day_off(row: DayOff) -> dict:
+    segments = _day_off_segments(row)
     return {
         "id": row.id,
         "surgeonId": row.surgeon_id,
@@ -135,7 +136,65 @@ def _serialize_day_off(row: DayOff) -> dict:
         "isFullDay": row.is_full_day if row.is_full_day is not None else True,
         "start": _fmt_time(row.start_time),
         "end": _fmt_time(row.end_time),
+        "segments": segments,
     }
+
+
+def _day_off_segments(row: DayOff) -> list[dict]:
+    if row.segments:
+        try:
+            parsed = json.loads(row.segments)
+            if isinstance(parsed, list):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+    segments = []
+    current = row.start_date
+    while current <= row.end_date:
+        segments.append({
+            "date": current.isoformat(),
+            "isFullDay": row.is_full_day if row.is_full_day is not None else True,
+            "start": _fmt_time(row.start_time),
+            "end": _fmt_time(row.end_time),
+        })
+        current += timedelta(days=1)
+    return segments
+
+
+def _segment_for_date(row: DayOff, d: date) -> dict | None:
+    for segment in _day_off_segments(row):
+        if segment.get("date") == d.isoformat():
+            return segment
+    return None
+
+
+def _normalize_day_off_segments(sd: date, ed: date, is_full_day: bool, start: str | None, end: str | None, raw: list | None) -> list[dict]:
+    by_date = {str(item.get("date")): item for item in raw or [] if isinstance(item, dict)}
+    segments = []
+    current = sd
+    while current <= ed:
+        item = by_date.get(current.isoformat(), {})
+        full = item.get("isFullDay", is_full_day)
+        start_value = None if full else (item.get("start") or start)
+        end_value = None if full else (item.get("end") or end)
+        segments.append({
+            "date": current.isoformat(),
+            "isFullDay": bool(full),
+            "start": start_value,
+            "end": end_value,
+        })
+        current += timedelta(days=1)
+    return segments
+
+
+def _validate_day_off_segments(segments: list[dict]) -> None:
+    for segment in segments:
+        if segment.get("isFullDay"):
+            continue
+        start_t = _parse_hhmm(str(segment.get("start") or ""))
+        end_t = _parse_hhmm(str(segment.get("end") or ""))
+        if not start_t or not end_t or end_t <= start_t:
+            raise HTTPException(400, "Partial days need a valid start and end time.")
 
 
 def _serialize_native_alert(row: NativeScheduleAlert) -> dict:
@@ -663,13 +722,18 @@ def native_home(
     def blocked_by_my_day_off(item_date: date, start_t: str | None = None, end_t: str | None = None) -> bool:
         for off in my_day_off_rows:
             if off.start_date <= item_date <= off.end_date:
-                if off.is_full_day or not off.start_time or not off.end_time:
+                segment = _segment_for_date(off, item_date)
+                if segment and segment.get("isFullDay"):
+                    return True
+                seg_start = _parse_hhmm(segment.get("start")) if segment else off.start_time
+                seg_end = _parse_hhmm(segment.get("end")) if segment else off.end_time
+                if not seg_start or not seg_end:
                     return True
                 if not start_t:
                     return True
                 item_start = _parse_hhmm(start_t)
                 item_end = _parse_hhmm(end_t) or item_start
-                if item_start and item_end and item_start < off.end_time and item_end > off.start_time:
+                if item_start and item_end and item_start < seg_end and item_end > seg_start:
                     return True
         return False
 
@@ -696,14 +760,16 @@ def native_home(
         span = max(d.start_date, start_date)
         span_end = min(d.end_date, end_date)
         while span <= span_end:
+            segment = _segment_for_date(d, span) or {}
+            is_full = segment.get("isFullDay", d.is_full_day if d.is_full_day is not None else True)
             by_date[span.isoformat()]["items"].append({
                 "id": f"off-{d.id}-{span.isoformat()}",
                 "type": "dayoff",
                 "title": "Day Off",
                 "subtitle": f"{d.reason or ''}{' · pending' if d.status == 'pending' else ''}".strip(" ·"),
-                "start": _fmt_time(d.start_time),
-                "end": _fmt_time(d.end_time),
-                "allDay": d.is_full_day if d.is_full_day is not None else True,
+                "start": None if is_full else segment.get("start") or _fmt_time(d.start_time),
+                "end": None if is_full else segment.get("end") or _fmt_time(d.end_time),
+                "allDay": is_full,
             })
             span += timedelta(days=1)
 
@@ -951,6 +1017,7 @@ class NativeRequestOffBody(BaseModel):
     is_full_day: bool = True
     start: str | None = None
     end: str | None = None
+    segments: list[dict] | None = None
 
 
 @router.post("/native/request-off")
@@ -966,10 +1033,11 @@ def native_request_off(
     if body.end_date < body.start_date:
         raise HTTPException(400, "End date must be the same day or after the start date.")
 
-    start_t = None if body.is_full_day else _parse_hhmm(body.start)
-    end_t = None if body.is_full_day else _parse_hhmm(body.end)
-    if not body.is_full_day and (not start_t or not end_t or end_t <= start_t):
-        raise HTTPException(400, "Partial day requests need a valid start and end time.")
+    segments = _normalize_day_off_segments(body.start_date, body.end_date, body.is_full_day, body.start, body.end, body.segments)
+    _validate_day_off_segments(segments)
+    first_partial = next((s for s in segments if not s.get("isFullDay")), None)
+    start_t = _parse_hhmm(first_partial.get("start")) if first_partial else None
+    end_t = _parse_hhmm(first_partial.get("end")) if first_partial else None
 
     conflict_msgs = check_conflicts(
         surgeon.id,
@@ -1000,6 +1068,7 @@ def native_request_off(
         is_full_day=body.is_full_day,
         start_time=start_t,
         end_time=end_t,
+        segments=json.dumps(segments),
         status="pending",
     )
     db.add(row)
@@ -1032,10 +1101,11 @@ def native_update_request_off(
     if body.end_date < body.start_date:
         raise HTTPException(400, "End date must be the same day or after the start date.")
 
-    start_t = None if body.is_full_day else _parse_hhmm(body.start)
-    end_t = None if body.is_full_day else _parse_hhmm(body.end)
-    if not body.is_full_day and (not start_t or not end_t or end_t <= start_t):
-        raise HTTPException(400, "Partial day requests need a valid start and end time.")
+    segments = _normalize_day_off_segments(body.start_date, body.end_date, body.is_full_day, body.start, body.end, body.segments)
+    _validate_day_off_segments(segments)
+    first_partial = next((s for s in segments if not s.get("isFullDay")), None)
+    start_t = _parse_hhmm(first_partial.get("start")) if first_partial else None
+    end_t = _parse_hhmm(first_partial.get("end")) if first_partial else None
 
     conflict_msgs = check_conflicts(
         surgeon.id,
@@ -1066,6 +1136,7 @@ def native_update_request_off(
     row.is_full_day = body.is_full_day
     row.start_time = start_t
     row.end_time = end_t
+    row.segments = json.dumps(segments)
     row.status = "pending"
     row.admin_note = None
     db.commit()

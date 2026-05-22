@@ -37,6 +37,10 @@ def run_migration():
             ADD COLUMN IF NOT EXISTS is_full_day BOOLEAN DEFAULT TRUE
         """))
         conn.execute(text("""
+            ALTER TABLE days_off
+            ADD COLUMN IF NOT EXISTS segments TEXT
+        """))
+        conn.execute(text("""
             CREATE TABLE IF NOT EXISTS native_push_tokens (
                 id SERIAL PRIMARY KEY,
                 surgeon_id INTEGER NOT NULL REFERENCES surgeons(id) ON DELETE CASCADE,

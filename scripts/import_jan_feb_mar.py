@@ -2,16 +2,18 @@
 """
 Import Jan, Feb, Mar 2026 on-call schedules.
 Only takes the FIRST surgeon initial per cell (one assignment per group per day).
-Run: python3 /home/dnaile748/cal/scripts/import_jan_feb_mar.py
+Run from the CAL repo root: python3 scripts/import_jan_feb_mar.py
 """
 import csv
 import re
 import sys
 from datetime import date
+from pathlib import Path
 
 import psycopg2
 
-IMPORTS_DIR = "/home/dnaile748/cal/imports"
+ROOT_DIR = Path(__file__).resolve().parents[1]
+IMPORTS_DIR = ROOT_DIR / "imports"
 
 # Surgeon initials → DB id
 INITIALS = {
@@ -22,9 +24,9 @@ INITIALS = {
 GROUP_IDS = {"WG": 1, "ALT": 2}
 
 MONTHS = [
-    ("Jan", f"{IMPORTS_DIR}/2026 MFSA Call Schedule - Jan.csv", 2026, 1, ","),
-    ("Feb", f"{IMPORTS_DIR}/2026 MFSA Call Schedule - Feb.csv", 2026, 2, ","),
-    ("Mar", f"{IMPORTS_DIR}/2026 MFSA Call Schedule - Mar.tsv", 2026, 3, "\t"),
+    ("Jan", IMPORTS_DIR / "2026 MFSA Call Schedule - Jan.csv", 2026, 1, ","),
+    ("Feb", IMPORTS_DIR / "2026 MFSA Call Schedule - Feb.csv", 2026, 2, ","),
+    ("Mar", IMPORTS_DIR / "2026 MFSA Call Schedule - Mar.tsv", 2026, 3, "\t"),
 ]
 
 
@@ -115,14 +117,14 @@ def parse_month(filepath: str, year: int, month: int, delimiter: str) -> list[di
 
 
 def main():
-    env_path = "/home/dnaile748/cal/.env"
+    env_path = ROOT_DIR / ".env"
     db_url = ""
     with open(env_path) as f:
         for line in f:
             if line.startswith("DATABASE_URL="):
                 db_url = line.split("=", 1)[1].strip()
                 break
-    db_url_local = db_url.replace("atlas-postgres", "127.0.0.1")
+    db_url_local = db_url.replace("atlas-postgres", "127.0.0.1").replace("cal_postgres", "127.0.0.1")
 
     conn = psycopg2.connect(db_url_local)
     cur = conn.cursor()

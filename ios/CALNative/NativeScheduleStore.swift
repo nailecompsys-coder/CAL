@@ -27,7 +27,7 @@ final class NativeScheduleStore: ObservableObject {
     }
   }
 
-  func bootstrapLookahead(containing date: Date, daysAhead: Int = 60) async {
+  func bootstrapLookahead(containing date: Date, daysAhead: Int = 30) async {
     if sessionToken == nil {
       sessionToken = CALKeychain.readSessionToken()
     }
@@ -66,7 +66,7 @@ final class NativeScheduleStore: ObservableObject {
     }
   }
 
-  func loadLookahead(containing date: Date, daysAhead: Int = 60) async {
+  func loadLookahead(containing date: Date, daysAhead: Int = 30) async {
     guard let token = sessionToken, !token.isEmpty else {
       days = ScheduleFixtures.week(containing: date)
       statusMessage = nil

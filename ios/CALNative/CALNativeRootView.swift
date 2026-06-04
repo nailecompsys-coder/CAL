@@ -314,20 +314,35 @@ private struct DayScheduleDashboard: View {
     return byId.values.sorted { $0.date < $1.date }
   }
 
-  private var nextMeetingDay: ScheduleDay? {
-    nextDay { !$0.meetings.isEmpty }
+  private var nextMeeting: (date: Date, content: String)? {
+    nextAgendaItem { day in
+      day.meetings.first.map(Self.meetingSummary)
+    }
   }
 
-  private var nextPersonalDay: ScheduleDay? {
-    nextDay { !$0.personalItems.isEmpty }
+  private var nextPersonal: (date: Date, content: String)? {
+    nextAgendaItem { day in
+      day.personalItems.first
+    }
   }
 
-  private func nextDay(where predicate: (ScheduleDay) -> Bool) -> ScheduleDay? {
+  private func nextAgendaItem(_ contentForDay: (ScheduleDay) -> String?) -> (date: Date, content: String)? {
     let calendar = Calendar.current
     let start = calendar.startOfDay(for: day.date)
-    return orderedDays.first { candidate in
-      calendar.startOfDay(for: candidate.date) > start && predicate(candidate)
+    let end = calendar.date(byAdding: .day, value: 30, to: start) ?? start
+
+    for candidate in orderedDays {
+      let candidateDate = calendar.startOfDay(for: candidate.date)
+      guard candidateDate > start, candidateDate <= end else {
+        continue
+      }
+
+      if let content = contentForDay(candidate), !content.isEmpty {
+        return (candidate.date, content)
+      }
     }
+
+    return nil
   }
 
   var body: some View {
@@ -369,8 +384,8 @@ private struct DayScheduleDashboard: View {
           AgendaPreviewRows(
             todayContent: day.meetings.isEmpty ? nil : day.meetings.map(Self.meetingSummary).joined(separator: ", "),
             emptyTodayText: "none",
-            nextDate: nextMeetingDay?.date,
-            nextContent: nextMeetingDay?.meetings.map(Self.meetingSummary).joined(separator: ", "),
+            nextDate: nextMeeting?.date,
+            nextContent: nextMeeting?.content,
             systemImage: "person.2"
           )
         }
@@ -379,8 +394,8 @@ private struct DayScheduleDashboard: View {
           AgendaPreviewRows(
             todayContent: day.personalItems.isEmpty ? nil : day.personalItems.joined(separator: ", "),
             emptyTodayText: "none",
-            nextDate: nextPersonalDay?.date,
-            nextContent: nextPersonalDay?.personalItems.joined(separator: ", "),
+            nextDate: nextPersonal?.date,
+            nextContent: nextPersonal?.content,
             systemImage: "note.text"
           )
         }

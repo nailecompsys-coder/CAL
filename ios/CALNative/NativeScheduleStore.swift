@@ -38,8 +38,20 @@ final class NativeScheduleStore: ObservableObject {
   }
 
   func load(containing date: Date, scope: ScheduleScope) async {
+    let range = DateRange(containing: date, scope: scope)
+    await loadRange(start: range.start, end: range.end, fallbackDate: date)
+  }
+
+  func loadLookahead(containing date: Date, daysAhead: Int = 30) async {
+    let calendar = Calendar.current
+    let start = calendar.startOfDay(for: date)
+    let end = calendar.date(byAdding: .day, value: daysAhead, to: start) ?? start
+    await loadRange(start: start, end: end, fallbackDate: date)
+  }
+
+  private func loadRange(start: Date, end: Date, fallbackDate: Date) async {
     guard let token = sessionToken, !token.isEmpty else {
-      days = ScheduleFixtures.week(containing: date)
+      days = ScheduleFixtures.week(containing: fallbackDate)
       statusMessage = nil
       return
     }
@@ -49,52 +61,24 @@ final class NativeScheduleStore: ObservableObject {
     defer { isLoading = false }
 
     do {
-      let range = DateRange(containing: date, scope: scope)
-      let home = try await client.fetchHome(token: token, start: range.start, end: range.end)
-      currentSurgeon = home.surgeon
-      surgeons = home.surgeons ?? []
-      days = home.days.map { $0.scheduleDay }
-      timeOffRequests = home.requests.map(\.timeOffRequest)
-      patientToday = home.patients?.today.patientSummary
-      patientUpcoming = home.patients?.upcoming.map(\.patientSummary) ?? []
+      let home = try await client.fetchHome(token: token, start: start, end: end)
+      apply(home)
       statusMessage = "Synced \(Date().formatted(.dateTime.hour().minute().second()))"
     } catch {
       if days.isEmpty {
-        days = ScheduleFixtures.week(containing: date)
+        days = ScheduleFixtures.week(containing: fallbackDate)
       }
       statusMessage = "Live sync failed. Showing preview data. \(error.localizedDescription)"
     }
   }
 
-  func loadLookahead(containing date: Date, daysAhead: Int = 30) async {
-    guard let token = sessionToken, !token.isEmpty else {
-      days = ScheduleFixtures.week(containing: date)
-      statusMessage = nil
-      return
-    }
-
-    isLoading = true
-    statusMessage = "Syncing schedule..."
-    defer { isLoading = false }
-
-    do {
-      let calendar = Calendar.current
-      let start = calendar.startOfDay(for: date)
-      let end = calendar.date(byAdding: .day, value: daysAhead, to: start) ?? start
-      let home = try await client.fetchHome(token: token, start: start, end: end)
-      currentSurgeon = home.surgeon
-      surgeons = home.surgeons ?? []
-      days = home.days.map { $0.scheduleDay }
-      timeOffRequests = home.requests.map(\.timeOffRequest)
-      patientToday = home.patients?.today.patientSummary
-      patientUpcoming = home.patients?.upcoming.map(\.patientSummary) ?? []
-      statusMessage = "Synced \(Date().formatted(.dateTime.hour().minute().second()))"
-    } catch {
-      if days.isEmpty {
-        days = ScheduleFixtures.week(containing: date)
-      }
-      statusMessage = "Live sync failed. Showing preview data. \(error.localizedDescription)"
-    }
+  private func apply(_ home: NativeHomeResponse) {
+    currentSurgeon = home.surgeon
+    surgeons = home.surgeons ?? []
+    days = home.days.map { $0.scheduleDay }
+    timeOffRequests = home.requests.map(\.timeOffRequest)
+    patientToday = home.patients?.today.patientSummary
+    patientUpcoming = home.patients?.upcoming.map(\.patientSummary) ?? []
   }
 
   func requestOtp(email: String) async -> Bool {

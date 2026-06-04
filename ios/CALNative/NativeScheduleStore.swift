@@ -27,6 +27,16 @@ final class NativeScheduleStore: ObservableObject {
     }
   }
 
+  func bootstrapLookahead(containing date: Date, daysAhead: Int = 60) async {
+    if sessionToken == nil {
+      sessionToken = CALKeychain.readSessionToken()
+    }
+    hasBootstrapped = true
+    if sessionToken != nil {
+      await loadLookahead(containing: date, daysAhead: daysAhead)
+    }
+  }
+
   func load(containing date: Date, scope: ScheduleScope) async {
     guard let token = sessionToken, !token.isEmpty else {
       days = ScheduleFixtures.week(containing: date)
@@ -41,6 +51,37 @@ final class NativeScheduleStore: ObservableObject {
     do {
       let range = DateRange(containing: date, scope: scope)
       let home = try await client.fetchHome(token: token, start: range.start, end: range.end)
+      currentSurgeon = home.surgeon
+      surgeons = home.surgeons ?? []
+      days = home.days.map { $0.scheduleDay }
+      timeOffRequests = home.requests.map(\.timeOffRequest)
+      patientToday = home.patients?.today.patientSummary
+      patientUpcoming = home.patients?.upcoming.map(\.patientSummary) ?? []
+      statusMessage = "Synced \(Date().formatted(.dateTime.hour().minute().second()))"
+    } catch {
+      if days.isEmpty {
+        days = ScheduleFixtures.week(containing: date)
+      }
+      statusMessage = "Live sync failed. Showing preview data. \(error.localizedDescription)"
+    }
+  }
+
+  func loadLookahead(containing date: Date, daysAhead: Int = 60) async {
+    guard let token = sessionToken, !token.isEmpty else {
+      days = ScheduleFixtures.week(containing: date)
+      statusMessage = nil
+      return
+    }
+
+    isLoading = true
+    statusMessage = "Syncing schedule..."
+    defer { isLoading = false }
+
+    do {
+      let calendar = Calendar.current
+      let start = calendar.startOfDay(for: date)
+      let end = calendar.date(byAdding: .day, value: daysAhead, to: start) ?? start
+      let home = try await client.fetchHome(token: token, start: start, end: end)
       currentSurgeon = home.surgeon
       surgeons = home.surgeons ?? []
       days = home.days.map { $0.scheduleDay }

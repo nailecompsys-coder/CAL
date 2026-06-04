@@ -15,7 +15,7 @@ struct CALNativeRootView: View {
       }
     }
     .task {
-      await store.bootstrap(containing: Date(), scope: .month)
+      await store.bootstrapLookahead(containing: Date())
     }
   }
 }
@@ -38,10 +38,6 @@ struct ScheduleHomeView: View {
 
   private var visibleMonth: [MonthCell] {
     store.month(containing: selectedDate)
-  }
-
-  private var dataScope: ScheduleScope {
-    scope == .day ? .month : scope
   }
 
   var body: some View {
@@ -163,7 +159,7 @@ struct ScheduleHomeView: View {
 
           Button {
             Task {
-              await store.load(containing: selectedDate, scope: dataScope)
+              await loadCurrentScope()
             }
           } label: {
             Image(systemName: "arrow.clockwise")
@@ -214,12 +210,16 @@ struct ScheduleHomeView: View {
       }
       .onChange(of: selectedDate) { nextDate in
         Task {
-          await store.load(containing: nextDate, scope: dataScope)
+          await loadCurrentScope(containing: nextDate)
         }
       }
       .onChange(of: scope) { nextScope in
         Task {
-          await store.load(containing: selectedDate, scope: nextScope == .day ? .month : nextScope)
+          if nextScope == .day {
+            await store.loadLookahead(containing: selectedDate)
+          } else {
+            await store.load(containing: selectedDate, scope: nextScope)
+          }
         }
       }
     }
@@ -234,6 +234,15 @@ struct ScheduleHomeView: View {
   private func shiftSelection(byMonths months: Int) {
     withAnimation(.snappy(duration: 0.2)) {
       selectedDate = Calendar.current.date(byAdding: .month, value: months, to: selectedDate) ?? selectedDate
+    }
+  }
+
+  private func loadCurrentScope(containing date: Date? = nil) async {
+    let targetDate = date ?? selectedDate
+    if scope == .day {
+      await store.loadLookahead(containing: targetDate)
+    } else {
+      await store.load(containing: targetDate, scope: scope)
     }
   }
 

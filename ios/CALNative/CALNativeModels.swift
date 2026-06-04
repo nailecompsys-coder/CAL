@@ -68,6 +68,7 @@ struct ScheduleDay: Identifiable {
   let date: Date
   let assignments: [ScheduleAssignment]
   let off: [String]
+  let requestedOff: [String]
   let mySchedule: [DoctorScheduleItem]
   let meetings: [DoctorScheduleItem]
   let personalItems: [String]
@@ -225,6 +226,7 @@ enum ScheduleFixtures {
       date: date,
       assignments: assignments,
       off: offInitials(for: dayNumber),
+      requestedOff: [],
       mySchedule: doctorSchedule(for: dayNumber),
       meetings: meetings(for: dayNumber),
       personalItems: personalItems(for: dayNumber)
@@ -468,6 +470,7 @@ struct NativeDayResponse: Decodable {
   let dayFull: String?
   let items: [NativeScheduleItemResponse]?
   let offSurgeons: [NativeOffSurgeonResponse]
+  let requestedOffSurgeons: [NativeOffSurgeonResponse]?
   let callAssignments: [NativeCallAssignmentResponse]
 
   var scheduleDay: ScheduleDay {
@@ -485,6 +488,7 @@ struct NativeDayResponse: Decodable {
       date: parsedDate,
       assignments: callAssignments.map { $0.scheduleAssignment(dateKey: date) },
       off: offSurgeons.map(\.initials),
+      requestedOff: (requestedOffSurgeons ?? []).map(\.initials),
       mySchedule: scheduleItems.isEmpty ? ScheduleFixtures.doctorScheduleFallback(for: parsedDate) : scheduleItems,
       meetings: meetingItems,
       personalItems: personal

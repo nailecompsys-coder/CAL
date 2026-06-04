@@ -60,7 +60,8 @@
 
       {# Day cells #}
       {% for day in schedule_days %}
-      <div class="rounded-lg border {% if day == today %}border-blue-300 bg-blue-50/40{% elif day.weekday() >= 5 %}border-slate-100 bg-slate-50/60{% else %}border-slate-200 bg-white{% endif %} overflow-hidden">
+      {% set off_bucket = day_off_by_date.get(day, {'pending': [], 'approved': []}) %}
+      <div class="rounded-lg border min-h-[7.5rem] {% if day == today %}border-blue-300 bg-blue-50/40{% elif day.weekday() >= 5 %}border-slate-100 bg-slate-50/60{% else %}border-slate-200 bg-white{% endif %} overflow-hidden">
         {# Date header #}
         <div class="px-1.5 pt-1 pb-0.5">
           <span class="text-[11px] font-bold {% if day == today %}text-blue-600{% elif day.weekday() >= 5 %}text-slate-400{% else %}text-slate-700{% endif %}">{{ day.strftime('%-d') }}</span>
@@ -99,6 +100,32 @@
           {% endif %}
           {% endfor %}
         </div>
+        {% if off_bucket.pending or off_bucket.approved %}
+        <div class="mx-1 mb-1 border-t border-slate-200/80 pt-1 space-y-0.5">
+          {% if off_bucket.pending %}
+          <div class="flex items-start gap-1">
+            <span class="text-[8px] font-bold uppercase text-amber-700 leading-[1.15] w-6 flex-shrink-0">Req</span>
+            <div class="flex flex-wrap gap-0.5 min-w-0">
+              {% for s in off_bucket.pending %}
+              <span title="{{ s.full_name }} requested off"
+                    class="inline-flex items-center rounded-full bg-amber-100 border border-amber-300 px-1 py-0.5 text-[9px] font-bold leading-none text-amber-800">{{ s.initials }}</span>
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
+          {% if off_bucket.approved %}
+          <div class="flex items-start gap-1">
+            <span class="text-[8px] font-bold uppercase text-emerald-700 leading-[1.15] w-6 flex-shrink-0">Off</span>
+            <div class="flex flex-wrap gap-0.5 min-w-0">
+              {% for s in off_bucket.approved %}
+              <span title="{{ s.full_name }} approved off"
+                    class="inline-flex items-center rounded-full bg-emerald-100 border border-emerald-300 px-1 py-0.5 text-[9px] font-bold leading-none text-emerald-800">{{ s.initials }}</span>
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
+        </div>
+        {% endif %}
       </div>
       {% endfor %}
 

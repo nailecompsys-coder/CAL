@@ -53,6 +53,18 @@ router = APIRouter(prefix="/admin")
 _settings_cache: SiteSettings | None = None
 
 
+def _surgeon_sort_key(s):
+    is_physician = (getattr(s, "staff_type", None) or "physician") == "physician"
+    rank = getattr(s, "sort_order", 0) or 0
+    return (
+        0 if is_physician else 1,
+        rank if is_physician and rank > 0 else 999999,
+        (s.last_name or "").lower(),
+        (s.first_name or "").lower(),
+        getattr(s, "id", 0),
+    )
+
+
 def _get_settings(db: Session) -> SiteSettings:
     """Return site settings for the current request. Always load from current session so the instance is attached (avoids DetachedInstanceError in templates)."""
     global _settings_cache
@@ -81,18 +93,7 @@ def _base(request: Request, admin: AdminUser, db: Session | None = None, **kwarg
 
 def _sort_surgeons_physicians_first(surgeons: list) -> list:
     """Physicians first by practice rank, then by name; staff after that."""
-    def _key(s):
-        is_physician = (getattr(s, "staff_type", None) or "physician") == "physician"
-        rank = getattr(s, "sort_order", 0) or 0
-        return (
-            0 if is_physician else 1,
-            rank if is_physician and rank > 0 else 999999,
-            (s.last_name or "").lower(),
-            (s.first_name or "").lower(),
-            getattr(s, "id", 0),
-        )
-
-    return sorted(surgeons, key=_key)
+    return sorted(surgeons, key=_surgeon_sort_key)
 
 
 def _next_physician_sort_order(db: Session) -> int:
@@ -425,6 +426,39 @@ def call_schedule_page(
                         merged_rotations[d] = rot
         group_rows.append((g, merged_rotations))
 
+    day_off_rows = (
+        db.query(DayOff)
+        .options(joinedload(DayOff.surgeon))
+        .filter(
+            DayOff.start_date <= schedule_days[-1],
+            DayOff.end_date >= schedule_days[0],
+            DayOff.status.in_(["pending", "approved"]),
+        )
+        .all()
+    )
+    day_off_by_date: dict[date, dict[str, list[Surgeon]]] = {
+        day: {"pending": [], "approved": []} for day in schedule_days
+    }
+    seen_day_off_initials: dict[date, dict[str, set[str]]] = {
+        day: {"pending": set(), "approved": set()} for day in schedule_days
+    }
+    for row in day_off_rows:
+        if not row.surgeon or not row.surgeon.is_active:
+            continue
+        status = "approved" if row.status == "approved" else "pending"
+        start = max(row.start_date, schedule_days[0])
+        end = min(row.end_date, schedule_days[-1])
+        current = start
+        while current <= end:
+            initials = (row.surgeon.initials or "").strip()
+            if initials and initials not in seen_day_off_initials[current][status]:
+                day_off_by_date[current][status].append(row.surgeon)
+                seen_day_off_initials[current][status].add(initials)
+            current += timedelta(days=1)
+    for status_groups in day_off_by_date.values():
+        for surgeons_for_status in status_groups.values():
+            surgeons_for_status.sort(key=_surgeon_sort_key)
+
     locations = db.query(Location).filter(Location.is_active == True).order_by(Location.name).all()
     hospital_locations = [loc for loc in locations if getattr(loc, "location_type", None) == "hospital"]
 
@@ -436,6 +470,7 @@ def call_schedule_page(
         month_offset=month_offset,
         month_label=month_label,
         pad_start=pad_start,
+        day_off_by_date=day_off_by_date,
         call_groups=call_groups,
         locations=locations,
         today=today,

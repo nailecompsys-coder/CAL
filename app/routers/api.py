@@ -708,7 +708,7 @@ def native_home(
     days = []
     current = start_date
     while current <= end_date:
-        days.append({**_date_label(current), "items": [], "offSurgeons": [], "callAssignments": []})
+        days.append({**_date_label(current), "items": [], "offSurgeons": [], "requestedOffSurgeons": [], "callAssignments": []})
         current += timedelta(days=1)
     by_date = {d["date"]: d for d in days}
 
@@ -904,7 +904,7 @@ def native_home(
             by_date[r.date.isoformat()]["callAssignments"].append(assignment)
 
     off_rows = db.query(DayOff).options(joinedload(DayOff.surgeon)).filter(
-        DayOff.status == "approved",
+        DayOff.status.in_(["pending", "approved"]),
         DayOff.start_date <= end_date,
         DayOff.end_date >= start_date,
     ).all()
@@ -915,7 +915,8 @@ def native_home(
         span_end = min(off.end_date, end_date)
         while span <= span_end:
             if span.isoformat() in by_date:
-                by_date[span.isoformat()]["offSurgeons"].append({
+                bucket = "offSurgeons" if off.status == "approved" else "requestedOffSurgeons"
+                by_date[span.isoformat()][bucket].append({
                     "initials": off.surgeon.initials,
                     "displayName": off.surgeon.full_name,
                     "isSelf": off.surgeon_id == surgeon.id,
@@ -925,11 +926,12 @@ def native_home(
             span += timedelta(days=1)
 
     for day in days:
-        day["offSurgeons"].sort(key=lambda row: (
-            0 if row.get("staffType") == "physician" else 1,
-            row.get("sortOrder") or 999999,
-            row["initials"],
-        ))
+        for key in ("offSurgeons", "requestedOffSurgeons"):
+            day[key].sort(key=lambda row: (
+                0 if row.get("staffType") == "physician" else 1,
+                row.get("sortOrder") or 999999,
+                row["initials"],
+            ))
     call_schedule = [
         {**_date_label(start_date + timedelta(days=i)), "assignments": call_by_date.get((start_date + timedelta(days=i)).isoformat(), [])}
         for i in range((end_date - start_date).days + 1)

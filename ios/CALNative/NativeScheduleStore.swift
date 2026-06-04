@@ -17,14 +17,13 @@ final class NativeScheduleStore: ObservableObject {
 
   private let client = NativeCALClient()
   private let actions = NativeScheduleActions()
+  private let session = NativeSessionService()
   private var projection: NativeScheduleProjection {
     NativeScheduleProjection(days: days)
   }
 
   func bootstrap(containing date: Date, scope: ScheduleScope) async {
-    if sessionToken == nil {
-      sessionToken = CALKeychain.readSessionToken()
-    }
+    restoreStoredTokenIfNeeded()
     hasBootstrapped = true
     if sessionToken != nil {
       await load(containing: date, scope: scope)
@@ -32,9 +31,7 @@ final class NativeScheduleStore: ObservableObject {
   }
 
   func bootstrapLookahead(containing date: Date, daysAhead: Int = 30) async {
-    if sessionToken == nil {
-      sessionToken = CALKeychain.readSessionToken()
-    }
+    restoreStoredTokenIfNeeded()
     hasBootstrapped = true
     if sessionToken != nil {
       await loadLookahead(containing: date, daysAhead: daysAhead)
@@ -94,7 +91,7 @@ final class NativeScheduleStore: ObservableObject {
     defer { authBusy = false }
 
     do {
-      let message = try await client.requestOtp(email: normalizedEmail)
+      let message = try await session.requestOtp(email: normalizedEmail)
       authMessage = message.isEmpty ? "Code sent." : message
       return true
     } catch {
@@ -113,8 +110,7 @@ final class NativeScheduleStore: ObservableObject {
     defer { authBusy = false }
 
     do {
-      let token = try await client.verifyOtp(email: normalizedEmail, code: normalizedCode)
-      try CALKeychain.saveSessionToken(token)
+      let token = try await session.verifyOtp(email: normalizedEmail, code: normalizedCode)
       sessionToken = token
       authMessage = nil
       await load(containing: Date(), scope: .week)
@@ -124,7 +120,7 @@ final class NativeScheduleStore: ObservableObject {
   }
 
   func logout() {
-    CALKeychain.deleteSessionToken()
+    session.clearToken()
     sessionToken = nil
     days = []
     timeOffRequests = []
@@ -168,6 +164,12 @@ final class NativeScheduleStore: ObservableObject {
 
   func setStatusMessage(_ message: String) {
     statusMessage = message
+  }
+
+  private func restoreStoredTokenIfNeeded() {
+    if sessionToken == nil {
+      sessionToken = session.storedToken()
+    }
   }
 
   func eligibleCoveringSurgeons(for assignment: ScheduleAssignment) -> [NativeSurgeon] {

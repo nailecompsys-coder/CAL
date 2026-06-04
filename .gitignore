@@ -18,6 +18,10 @@ memory.md
 
 # Mutable uploads and local scratch
 app/static/uploads/
+cal_live.dump
+cal_live.sql
+*.dump
+*.sql
 *.log
 *.pid
 *.bak

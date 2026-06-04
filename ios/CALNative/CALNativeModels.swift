@@ -478,7 +478,7 @@ struct NativeDayResponse: Decodable {
       .compactMap { $0.meetingItem(dateKey: date) }
     let personal = (items ?? [])
       .filter { $0.type == "personal" }
-      .map { $0.title }
+      .map(\.personalDisplayTitle)
 
     return ScheduleDay(
       id: dateKey(parsedDate),
@@ -587,6 +587,12 @@ struct NativeScheduleItemResponse: Decodable {
     )
   }
 
+  var personalDisplayTitle: String {
+    [title, displayTime(start)]
+      .filter { !$0.isEmpty }
+      .joined(separator: " ")
+  }
+
   private var displayTitle: String {
     switch type {
     case "clinic":
@@ -615,20 +621,13 @@ struct NativeScheduleItemResponse: Decodable {
 
   private func displayTime(_ value: String?) -> String {
     guard let value, !value.isEmpty else { return "" }
-    switch value {
-    case "07:00":
-      return "7:00"
-    case "08:00":
-      return "8:00"
-    case "12:00":
-      return "12:00"
-    case "13:00":
-      return "1:00"
-    case "17:00":
-      return "5:00"
-    default:
+    let parts = value.split(separator: ":")
+    guard let hourText = parts.first, let hour24 = Int(hourText) else {
       return value
     }
+    let minute = parts.count > 1 ? String(parts[1]) : "00"
+    let hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12
+    return "\(hour12):\(minute)"
   }
 }
 

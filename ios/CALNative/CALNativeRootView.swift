@@ -15,7 +15,7 @@ struct CALNativeRootView: View {
       }
     }
     .task {
-      await store.bootstrap(containing: Date(), scope: .week)
+      await store.bootstrap(containing: Date(), scope: .month)
     }
   }
 }
@@ -40,6 +40,10 @@ struct ScheduleHomeView: View {
     store.month(containing: selectedDate)
   }
 
+  private var dataScope: ScheduleScope {
+    scope == .day ? .month : scope
+  }
+
   var body: some View {
     NavigationView {
       ZStack {
@@ -60,6 +64,7 @@ struct ScheduleHomeView: View {
           if scope == .day {
             DayScheduleDashboard(
               day: selectedDay,
+              days: store.days,
               statusMessage: nonSyncedStatusMessage,
               previousAction: { shiftSelection(by: -1) },
               nextAction: { shiftSelection(by: 1) },
@@ -158,7 +163,7 @@ struct ScheduleHomeView: View {
 
           Button {
             Task {
-              await store.load(containing: selectedDate, scope: scope)
+              await store.load(containing: selectedDate, scope: dataScope)
             }
           } label: {
             Image(systemName: "arrow.clockwise")
@@ -209,12 +214,12 @@ struct ScheduleHomeView: View {
       }
       .onChange(of: selectedDate) { nextDate in
         Task {
-          await store.load(containing: nextDate, scope: scope)
+          await store.load(containing: nextDate, scope: dataScope)
         }
       }
       .onChange(of: scope) { nextScope in
         Task {
-          await store.load(containing: selectedDate, scope: nextScope)
+          await store.load(containing: selectedDate, scope: nextScope == .day ? .month : nextScope)
         }
       }
     }
@@ -288,10 +293,33 @@ private struct DayScheduleSections: View {
 
 private struct DayScheduleDashboard: View {
   let day: ScheduleDay
+  let days: [ScheduleDay]
   let statusMessage: String?
   let previousAction: () -> Void
   let nextAction: () -> Void
   let coverAction: (ScheduleAssignment) -> Void
+
+  private var orderedDays: [ScheduleDay] {
+    var byId = Dictionary(uniqueKeysWithValues: days.map { ($0.id, $0) })
+    byId[day.id] = day
+    return byId.values.sorted { $0.date < $1.date }
+  }
+
+  private var nextMeetingDay: ScheduleDay? {
+    nextDay { !$0.meetings.isEmpty }
+  }
+
+  private var nextPersonalDay: ScheduleDay? {
+    nextDay { !$0.personalItems.isEmpty }
+  }
+
+  private func nextDay(where predicate: (ScheduleDay) -> Bool) -> ScheduleDay? {
+    let calendar = Calendar.current
+    let start = calendar.startOfDay(for: day.date)
+    return orderedDays.first { candidate in
+      calendar.startOfDay(for: candidate.date) > start && predicate(candidate)
+    }
+  }
 
   var body: some View {
     ScrollView {
@@ -329,29 +357,88 @@ private struct DayScheduleDashboard: View {
         }
 
         DashboardSection(title: "Meetings", tint: ClinicalPalette.lavender) {
-          if day.meetings.isEmpty {
-            EmptyDashboardRow(title: "No meetings")
-          } else {
-            ForEach(day.meetings) { meeting in
-              MeetingRow(item: meeting)
-            }
-          }
+          AgendaPreviewRows(
+            todayContent: day.meetings.isEmpty ? nil : day.meetings.map(Self.meetingSummary).joined(separator: ", "),
+            emptyTodayText: "none",
+            nextDate: nextMeetingDay?.date,
+            nextContent: nextMeetingDay?.meetings.map(Self.meetingSummary).joined(separator: ", "),
+            systemImage: "person.2"
+          )
         }
 
         DashboardSection(title: "Personal Items", tint: ClinicalPalette.mint) {
-          if day.personalItems.isEmpty {
-            EmptyDashboardRow(title: "No personal items")
-          } else {
-            ForEach(day.personalItems, id: \.self) { item in
-              Label(item, systemImage: "note.text")
-                .font(.caption)
-            }
-          }
+          AgendaPreviewRows(
+            todayContent: day.personalItems.isEmpty ? nil : day.personalItems.joined(separator: ", "),
+            emptyTodayText: "none",
+            nextDate: nextPersonalDay?.date,
+            nextContent: nextPersonalDay?.personalItems.joined(separator: ", "),
+            systemImage: "note.text"
+          )
         }
       }
       .padding(.horizontal, 16)
       .padding(.top, 8)
       .padding(.bottom, 18)
+    }
+  }
+
+  private static func meetingSummary(_ item: DoctorScheduleItem) -> String {
+    [item.timeRange, item.title, item.subtitle]
+      .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+      .joined(separator: " ")
+  }
+}
+
+private struct AgendaPreviewRows: View {
+  let todayContent: String?
+  let emptyTodayText: String
+  let nextDate: Date?
+  let nextContent: String?
+  let systemImage: String
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 5) {
+      AgendaPreviewRow(
+        prefix: "Today:",
+        content: todayContent ?? emptyTodayText,
+        systemImage: systemImage,
+        isMuted: todayContent == nil
+      )
+
+      if let nextDate, let nextContent, !nextContent.isEmpty {
+        AgendaPreviewRow(
+          prefix: nextDate.formatted(.dateTime.month(.defaultDigits).day()),
+          content: nextContent,
+          systemImage: "calendar",
+          isMuted: false
+        )
+      }
+    }
+  }
+}
+
+private struct AgendaPreviewRow: View {
+  let prefix: String
+  let content: String
+  let systemImage: String
+  let isMuted: Bool
+
+  var body: some View {
+    Label {
+      HStack(alignment: .firstTextBaseline, spacing: 4) {
+        Text(prefix)
+          .fontWeight(.semibold)
+          .foregroundStyle(isMuted ? ClinicalPalette.muted : ClinicalPalette.ink)
+        Text(content)
+          .foregroundStyle(isMuted ? ClinicalPalette.muted : ClinicalPalette.ink)
+          .lineLimit(2)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      .font(.caption)
+    } icon: {
+      Image(systemName: systemImage)
+        .font(.caption2.weight(.semibold))
+        .foregroundStyle(ClinicalPalette.teal)
     }
   }
 }

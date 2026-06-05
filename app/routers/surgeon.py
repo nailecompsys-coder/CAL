@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import date, datetime, time as time_type, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func as sql_func, or_
 from sqlalchemy.orm import Session, joinedload
@@ -494,22 +494,6 @@ def schedule(request: Request, week_offset: int = 0, db: Session = Depends(get_d
             week_json=week_json,
         ),
     )
-
-
-@router.post("/surgical-case/{case_id:int}/notes")
-def save_surgical_case_notes(
-    case_id: int,
-    surgeon_notes: str = Form(""),
-    db: Session = Depends(get_db),
-    auth=Depends(get_current_surgeon),
-):
-    surgeon, _ = auth
-    c = db.get(SurgicalCase, case_id)
-    if not c or c.surgeon_id != surgeon.id:
-        raise HTTPException(404, "Case not found")
-    c.surgeon_notes = surgeon_notes.strip() or None
-    db.commit()
-    return RedirectResponse("/surgeon/schedule", status_code=303)
 
 
 @router.get("/call-schedule", response_class=HTMLResponse)

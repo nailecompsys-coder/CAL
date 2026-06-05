@@ -16,7 +16,7 @@ from .routers import (
     admin_locations, admin_meetings, admin_patients, admin_settings, admin_surgeons,
     admin_schedule_templates, admin_surgical_schedule, api, auth, native_api, surgeon,
     surgeon_availability, surgeon_day_items, surgeon_otp, surgeon_request_off,
-    surgeon_patients, surgeon_surgical_cases,
+    surgeon_patients, surgeon_schedule, surgeon_surgical_cases,
 )
 from . import migrate_call_groups
 
@@ -87,6 +87,7 @@ app.include_router(admin_patients.router)
 app.include_router(admin_settings.router)
 app.include_router(admin_surgical_schedule.router)
 app.include_router(surgeon.router)
+app.include_router(surgeon_schedule.router)
 app.include_router(surgeon_availability.router)
 app.include_router(surgeon_day_items.router)
 app.include_router(surgeon_surgical_cases.router)

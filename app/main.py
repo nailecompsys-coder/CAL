@@ -11,7 +11,7 @@ from .location_palette import ensure_location_palette_seeded
 from . import migrate_surgeon_sort_order
 from . import migrate_clinic_schedule_off
 from . import migrate_native_parity
-from .routers import admin, admin_call_groups, admin_daysoff, admin_locations, admin_meetings, admin_patients, admin_settings, admin_surgeons, admin_surgical_schedule, api, auth, native_api, surgeon
+from .routers import admin, admin_call_groups, admin_call_schedule, admin_daysoff, admin_locations, admin_meetings, admin_patients, admin_settings, admin_surgeons, admin_surgical_schedule, api, auth, native_api, surgeon
 from .routers.surgeon import otp_router
 from . import migrate_call_groups
 
@@ -71,6 +71,7 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(admin_surgeons.router)
+app.include_router(admin_call_schedule.router)
 app.include_router(admin_call_groups.router)
 app.include_router(admin_daysoff.router)
 app.include_router(admin_locations.router)

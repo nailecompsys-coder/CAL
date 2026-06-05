@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import type { NativeDay, NativeDayOffRequest, NativeHome, NativeScheduleAlert, NativeScheduleItem } from "../../types/cal";
 
-type TabKey = "schedule" | "request" | "patients";
+type TabKey = "schedule" | "request";
 
 type RequestDraft = {
   startDate: string;
@@ -47,7 +47,6 @@ type ScheduleScreenProps = {
 const tabs: { key: TabKey; label: string; icon: string }[] = [
   { key: "schedule", label: "Schedule", icon: "▦" },
   { key: "request", label: "Days Off", icon: "▲" },
-  { key: "patients", label: "Patients", icon: "♟" },
 ];
 
 export function ScheduleScreen(props: ScheduleScreenProps) {
@@ -114,7 +113,6 @@ export function ScheduleScreen(props: ScheduleScreenProps) {
             busy={busy}
           />
         ) : null}
-        {home && activeTab === "patients" ? <PatientsTab home={home} /> : null}
       </ScrollView>
 
       <View style={styles.bottomNav}>
@@ -952,29 +950,6 @@ function RequestOffSheet({
   );
 }
 
-function PatientsTab({ home }: { home: NativeHome }) {
-  return (
-    <View>
-      <Text style={styles.sectionTitle}>Today</Text>
-      <View style={styles.listCard}>
-        <Text style={styles.itemTitle}>{home.patients.today.count} patients</Text>
-        {home.patients.today.location ? <Text style={styles.meta}>{home.patients.today.location}</Text> : null}
-        {home.patients.today.notes ? <Text style={styles.note}>{home.patients.today.notes}</Text> : null}
-      </View>
-
-      <Text style={styles.sectionTitle}>Upcoming</Text>
-      {home.patients.upcoming.length === 0 ? <Text style={styles.emptySmall}>No upcoming patient assignments.</Text> : null}
-      {home.patients.upcoming.map((row) => (
-        <View key={row.date} style={styles.listCard}>
-          <Text style={styles.itemTitle}>{formatDisplayDate(row.date)}: {row.count} patients</Text>
-          {row.location ? <Text style={styles.meta}>{row.location}</Text> : null}
-          {row.notes ? <Text style={styles.note}>{row.notes}</Text> : null}
-        </View>
-      ))}
-    </View>
-  );
-}
-
 function periodForItem(item: NativeScheduleItem): "am" | "pm" {
   if (item.allDay || !item.start) return "am";
   return Number(item.start.slice(0, 2)) < 12 ? "am" : "pm";
@@ -990,7 +965,6 @@ function shortTitle(item: NativeScheduleItem): string {
   if (item.type === "dayoff") return "Day off";
   if (item.type === "meeting") return `Mtg: ${item.title.length > 12 ? `${item.title.slice(0, 11)}...` : item.title}`;
   if (item.type === "surgery") return "Surgery";
-  if (item.type === "patients") return item.title;
   return item.title.length > 18 ? `${item.title.slice(0, 17)}...` : item.title;
 }
 
@@ -1033,7 +1007,6 @@ function labelForType(type: NativeScheduleItem["type"]): string {
     oncall: "Call",
     dayoff: "Off",
     meeting: "Meeting",
-    patients: "Patients",
     clinic: "Clinic",
     surgery: "Surgery",
     personal: "Personal",
@@ -1046,7 +1019,6 @@ function colorForType(type: NativeScheduleItem["type"]): string {
     oncall: "#f59e0b",
     dayoff: "#dbeafe",
     meeting: "#ddd6fe",
-    patients: "#bae6fd",
     clinic: "#f8d9c7",
     surgery: "#fecaca",
     personal: "#e2e8f0",

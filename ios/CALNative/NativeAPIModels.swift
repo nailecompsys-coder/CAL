@@ -83,7 +83,7 @@ struct NativeScheduleItemResponse: Decodable {
   let notes: String?
 
   func doctorScheduleItem(dateKey: String) -> DoctorScheduleItem? {
-    guard !["personal", "meeting", "oncall", "dayoff", "patients"].contains(type), allDay != true else {
+    guard !["personal", "meeting", "oncall", "dayoff"].contains(type), allDay != true else {
       return nil
     }
 

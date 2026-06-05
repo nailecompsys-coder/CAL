@@ -25,7 +25,7 @@ import {
 } from './src/services/calApi';
 import type { NativeDayOffRequest, NativeHome } from './src/types/cal';
 
-type TabKey = 'schedule' | 'request' | 'patients';
+type TabKey = 'schedule' | 'request';
 
 export default function App() {
   const [email, setEmail] = useState('');

@@ -43,7 +43,6 @@ export type NativeScheduleItem = {
     | "oncall"
     | "dayoff"
     | "meeting"
-    | "patients"
     | "clinic"
     | "surgery"
     | "personal";
@@ -149,21 +148,6 @@ export type NativeCallDay = {
   }[];
 };
 
-export type NativePatients = {
-  today: {
-    date: string;
-    count: number;
-    notes: string;
-    location: string;
-  };
-  upcoming: {
-    date: string;
-    count: number;
-    notes: string;
-    location: string;
-  }[];
-};
-
 export type NativeScheduleAlert = {
   id: number;
   title: string;
@@ -204,7 +188,6 @@ export type NativeHome = {
     staffType: string;
     sortOrder?: number;
   }[];
-  patients: NativePatients;
 };
 
 export type NativeRequestOffResponse = {

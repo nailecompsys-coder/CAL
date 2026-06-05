@@ -1,5 +1,5 @@
 """Native iOS API endpoints."""
-from datetime import UTC, date, datetime
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -8,9 +8,10 @@ from sqlalchemy.orm import Session
 from ..auth import get_current_surgeon
 from ..conflicts import check_conflicts
 from ..database import get_db
-from ..models import Availability, NativePushToken, NativeScheduleAlert, SurgicalCase
+from ..models import Availability, SurgicalCase
 from ..native_call_coverage_service import assign_native_call_coverage, cancel_native_call_coverage
 from ..native_home_service import build_native_home
+from ..native_misc_service import mark_alerts_read, save_push_token
 from ..native_request_off_service import (
     NativeRequestOffInput,
     cancel_native_request_off as cancel_native_request_off_service,
@@ -42,15 +43,7 @@ def native_mark_alerts_read(
     auth=Depends(get_current_surgeon),
 ):
     surgeon, _ = auth
-    rows = db.query(NativeScheduleAlert).filter(
-        NativeScheduleAlert.surgeon_id == surgeon.id,
-        NativeScheduleAlert.read_at.is_(None),
-    ).all()
-    now = datetime.now(UTC).replace(tzinfo=None)
-    for row in rows:
-        row.read_at = now
-    db.commit()
-    return {"ok": True, "count": len(rows)}
+    return mark_alerts_read(db, surgeon.id)
 
 
 class NativeRequestOffBody(BaseModel):
@@ -232,20 +225,4 @@ def native_push_token(
     token = body.token.strip()
     if not token:
         raise HTTPException(400, "Push token is required")
-    row = db.query(NativePushToken).filter(NativePushToken.token == token).first()
-    if row:
-        row.surgeon_id = surgeon.id
-        row.device_id = device.id if device else None
-        row.platform = body.platform or "ios"
-        row.is_active = True
-        row.updated_at = datetime.now(UTC).replace(tzinfo=None)
-    else:
-        db.add(NativePushToken(
-            surgeon_id=surgeon.id,
-            device_id=device.id if device else None,
-            token=token,
-            platform=body.platform or "ios",
-            is_active=True,
-        ))
-    db.commit()
-    return {"ok": True}
+    return save_push_token(db, surgeon, device, token, body.platform)

@@ -1,5 +1,4 @@
 """Service builder for the native iOS home payload."""
-from collections import defaultdict
 from datetime import date, timedelta
 
 from sqlalchemy.orm import Session, joinedload
@@ -11,7 +10,6 @@ from .models import (
     CallRotation,
     ClinicSchedule,
     DayOff,
-    NativeScheduleAlert,
     Surgeon,
     SurgeonDayItem,
     SurgicalCase,
@@ -25,11 +23,10 @@ from .native_support import (
     native_surgeon_rank_key,
     parse_hhmm,
     segment_for_date,
-    serialize_call_assignment,
     serialize_day_off,
-    serialize_native_alert,
     session_times,
 )
+from .native_home_sections import build_native_call_schedule, native_alerts
 
 
 class NativeHomeService:
@@ -55,8 +52,8 @@ class NativeHomeService:
         availability = self._availability()
         requests = self._requests()
         call_groups = self._call_groups()
-        call_schedule = self._call_schedule()
-        alerts = self._alerts()
+        call_schedule = build_native_call_schedule(self.db, self.surgeon, self.start_date, self.end_date, self.by_date)
+        alerts = native_alerts(self.db, self.surgeon)
 
         return {
             "surgeon": {"id": self.surgeon.id, "name": self.surgeon.full_name, "staffType": self.surgeon.staff_type},
@@ -259,61 +256,6 @@ class NativeHomeService:
     def _call_groups(self) -> list[CallGroup]:
         return self.db.query(CallGroup).order_by(CallGroup.sort_order, CallGroup.name, CallGroup.id).all()
 
-    def _call_schedule(self) -> list[dict]:
-        rotations = self.db.query(CallRotation).options(
-            joinedload(CallRotation.surgeon),
-            joinedload(CallRotation.call_group),
-            joinedload(CallRotation.coverages).joinedload(CallCoverage.covering_surgeon),
-        ).filter(
-            CallRotation.date >= self.start_date,
-            CallRotation.date <= self.end_date,
-        ).order_by(CallRotation.date, CallRotation.call_group_id, CallRotation.id).all()
-        call_by_date: dict[str, list[dict]] = defaultdict(list)
-        for rotation in rotations:
-            assignment = serialize_call_assignment(rotation, self.surgeon.id)
-            key = rotation.date.isoformat()
-            call_by_date[key].append(assignment)
-            if key in self.by_date:
-                self.by_date[key]["callAssignments"].append(assignment)
-
-        self._append_off_surgeons()
-        return [
-            {**date_label(self.start_date + timedelta(days=i)), "assignments": call_by_date.get((self.start_date + timedelta(days=i)).isoformat(), [])}
-            for i in range((self.end_date - self.start_date).days + 1)
-        ]
-
-    def _append_off_surgeons(self) -> None:
-        off_rows = self.db.query(DayOff).options(joinedload(DayOff.surgeon)).filter(
-            DayOff.status.in_(["pending", "approved"]),
-            DayOff.start_date <= self.end_date,
-            DayOff.end_date >= self.start_date,
-        ).all()
-        for off in off_rows:
-            if not off.surgeon or not off.surgeon.is_active:
-                continue
-            span = max(off.start_date, self.start_date)
-            span_end = min(off.end_date, self.end_date)
-            while span <= span_end:
-                key = span.isoformat()
-                if key in self.by_date:
-                    bucket = "offSurgeons" if off.status == "approved" else "requestedOffSurgeons"
-                    self.by_date[key][bucket].append({
-                        "initials": off.surgeon.initials,
-                        "displayName": off.surgeon.full_name,
-                        "isSelf": off.surgeon_id == self.surgeon.id,
-                        "sortOrder": off.surgeon.sort_order or 0,
-                        "staffType": off.surgeon.staff_type or "",
-                    })
-                span += timedelta(days=1)
-
-        for day in self.days:
-            for key in ("offSurgeons", "requestedOffSurgeons"):
-                day[key].sort(key=lambda row: (
-                    0 if row.get("staffType") == "physician" else 1,
-                    row.get("sortOrder") or 999999,
-                    row["initials"],
-                ))
-
     def _surgeons(self) -> list[dict]:
         return [
             {"id": row.id, "name": row.full_name, "initials": row.initials, "staffType": row.staff_type, "sortOrder": row.sort_order or 0}
@@ -322,20 +264,6 @@ class NativeHomeService:
                 key=native_surgeon_rank_key,
             )
         ]
-
-    def _alerts(self) -> dict:
-        unread_alert_count = self.db.query(NativeScheduleAlert).filter(
-            NativeScheduleAlert.surgeon_id == self.surgeon.id,
-            NativeScheduleAlert.read_at.is_(None),
-        ).count()
-        recent_alerts = self.db.query(NativeScheduleAlert).filter(
-            NativeScheduleAlert.surgeon_id == self.surgeon.id,
-        ).order_by(NativeScheduleAlert.created_at.desc(), NativeScheduleAlert.id.desc()).limit(20).all()
-        return {
-            "unreadCount": unread_alert_count,
-            "recent": [serialize_native_alert(row) for row in recent_alerts],
-        }
-
 
 def build_native_home(db: Session, surgeon: Surgeon, start_date: date, end_date: date) -> dict:
     return NativeHomeService(db, surgeon, start_date, end_date).build()

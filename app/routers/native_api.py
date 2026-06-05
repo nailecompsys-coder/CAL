@@ -19,7 +19,7 @@ from ..native_request_off_service import (
 )
 from ..native_support import parse_hhmm
 from ..push import send_native_push_to_surgeon
-from .api import _parse_iso_date_range
+from .api_common import parse_iso_date_range
 
 router = APIRouter(prefix="/api/native")
 
@@ -32,7 +32,7 @@ def native_home(
     auth=Depends(get_current_surgeon),
 ):
     surgeon, _ = auth
-    start_date, end_date = _parse_iso_date_range(start, end)
+    start_date, end_date = parse_iso_date_range(start, end)
     return build_native_home(db, surgeon, start_date, end_date)
 
 

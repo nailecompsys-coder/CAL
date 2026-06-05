@@ -1,7 +1,5 @@
 """Admin portal day-off management routes."""
 
-import calendar as _calendar
-from collections import defaultdict
 from datetime import date
 from typing import Optional
 
@@ -9,12 +7,20 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
+from ..admin_dayoff_service import (
+    add_approved_dayoff,
+    approve_dayoff as approve_dayoff_service,
+    bulk_approve_dayoffs,
+    delete_dayoff as delete_dayoff_service,
+    deny_dayoff as deny_dayoff_service,
+    edit_dayoff as edit_dayoff_service,
+    pending_conflict_map,
+    resolved_months,
+)
 from ..auth import get_current_admin
-from ..conflicts import check_conflicts
 from ..database import get_db
 from ..jinja_env import templates
-from ..models import CallRotation, DayOff, Surgeon
-from ..push import send_push_to_surgeon
+from ..models import DayOff, Surgeon
 from .admin import _base, _sort_surgeons_physicians_first, _warn_redirect
 
 router = APIRouter(prefix="/admin")
@@ -32,22 +38,8 @@ def daysoff_page(request: Request, surgeon_id: Optional[int] = None, db: Session
     pending = q.filter(DayOff.status == "pending").order_by(DayOff.start_date).all()
     resolved = q.filter(DayOff.status != "pending").order_by(DayOff.start_date).all()
 
-    month_map: dict = defaultdict(list)
-    for dayoff in resolved:
-        month_map[(dayoff.start_date.year, dayoff.start_date.month)].append(dayoff)
-    months = [
-        {"label": f"{_calendar.month_name[mo].upper()} {yr}", "records": recs}
-        for (yr, mo), recs in sorted(month_map.items())
-    ]
-
-    conflict_map = {}
-    for dayoff in pending:
-        conflicts = db.query(CallRotation).filter(
-            CallRotation.surgeon_id == dayoff.surgeon_id,
-            CallRotation.date >= dayoff.start_date,
-            CallRotation.date <= dayoff.end_date,
-        ).all()
-        conflict_map[dayoff.id] = conflicts
+    months = resolved_months(resolved)
+    conflict_map = pending_conflict_map(db, pending)
 
     return templates.TemplateResponse("admin/daysoff.html", _base(
         request, admin, db=db,
@@ -77,52 +69,15 @@ def add_dayoff(
         raise HTTPException(400, "Invalid date") from exc
     if end < start:
         end = start
-    dayoff = DayOff(
-        surgeon_id=surgeon_id,
-        start_date=start,
-        end_date=end,
-        reason=reason,
-        notes=notes or None,
-        status="approved",
-        approved_by=admin.id,
-    )
-    db.add(dayoff)
-    db.commit()
-    send_push_to_surgeon(surgeon_id, "Day Off Added",
-                         f"Admin added approved time off: {start.strftime('%b %d')}–{end.strftime('%b %d')}.", db)
-    conflicts = check_conflicts(
-        surgeon_id, start, end, db,
-        exclude_dayoff_id=dayoff.id,
-        target_entity={"type": "day_off", "start_date": start, "end_date": end},
-    )
-    surgeon = db.get(Surgeon, surgeon_id)
-    if surgeon and conflicts:
-        conflicts = [f"{surgeon.full_name}: " + c for c in conflicts]
+    conflicts = add_approved_dayoff(db, surgeon_id, start, end, reason, notes, admin.id)
     return _warn_redirect("/admin/daysoff", conflicts)
 
 
 @router.post("/daysoff/{dayoff_id}/approve")
 def approve_dayoff(dayoff_id: int, db: Session = Depends(get_db), admin=Depends(get_current_admin)):
-    dayoff = db.get(DayOff, dayoff_id)
-    if not dayoff:
+    conflicts = approve_dayoff_service(db, dayoff_id, admin.id)
+    if conflicts is None:
         return RedirectResponse("/admin/daysoff", status_code=303)
-    dayoff.status = "approved"
-    dayoff.approved_by = admin.id
-    db.commit()
-    send_push_to_surgeon(dayoff.surgeon_id, "Days Off Approved",
-                         f"Your request for {dayoff.start_date.strftime('%b %d')}–{dayoff.end_date.strftime('%b %d')} was approved.", db)
-    conflicts = check_conflicts(
-        dayoff.surgeon_id, dayoff.start_date, dayoff.end_date, db,
-        exclude_dayoff_id=dayoff.id,
-        target_entity={
-            "type": "day_off",
-            "start_date": dayoff.start_date,
-            "end_date": dayoff.end_date,
-        },
-    )
-    surgeon = db.get(Surgeon, dayoff.surgeon_id)
-    if surgeon and conflicts:
-        conflicts = [f"{surgeon.full_name}: " + c for c in conflicts]
     return _warn_redirect("/admin/daysoff", conflicts)
 
 
@@ -132,29 +87,13 @@ def bulk_approve_daysoff(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    approved = 0
-    for dayoff_id in ids:
-        dayoff = db.get(DayOff, dayoff_id)
-        if dayoff and dayoff.status == "pending":
-            dayoff.status = "approved"
-            dayoff.approved_by = admin.id
-            db.commit()
-            send_push_to_surgeon(dayoff.surgeon_id, "Days Off Approved",
-                                 f"Your request for {dayoff.start_date.strftime('%b %d')}–{dayoff.end_date.strftime('%b %d')} was approved.", db)
-            approved += 1
+    approved = bulk_approve_dayoffs(db, ids, admin.id)
     return RedirectResponse(f"/admin/daysoff?msg=bulk_approved&n={approved}", status_code=303)
 
 
 @router.post("/daysoff/{dayoff_id}/deny")
 def deny_dayoff(dayoff_id: int, admin_note: str = Form(""), db: Session = Depends(get_db), admin=Depends(get_current_admin)):
-    dayoff = db.get(DayOff, dayoff_id)
-    if dayoff:
-        dayoff.status = "denied"
-        dayoff.admin_note = admin_note or None
-        dayoff.approved_by = admin.id
-        db.commit()
-        msg = admin_note if admin_note else f"Your request for {dayoff.start_date.strftime('%b %d')}–{dayoff.end_date.strftime('%b %d')} was not approved."
-        send_push_to_surgeon(dayoff.surgeon_id, "Days Off Request", msg, db)
+    deny_dayoff_service(db, dayoff_id, admin_note, admin.id)
     return RedirectResponse("/admin/daysoff", status_code=303)
 
 
@@ -168,24 +107,17 @@ def edit_dayoff(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    dayoff = db.get(DayOff, dayoff_id)
-    if dayoff:
-        try:
-            dayoff.start_date = date.fromisoformat(start_date)
-            dayoff.end_date = date.fromisoformat(end_date)
-        except ValueError:
-            return RedirectResponse("/admin/daysoff", status_code=303)
-        dayoff.reason = reason
-        dayoff.notes = notes
-        db.commit()
+    try:
+        start = date.fromisoformat(start_date)
+        end = date.fromisoformat(end_date)
+    except ValueError:
+        return RedirectResponse("/admin/daysoff", status_code=303)
+    edit_dayoff_service(db, dayoff_id, start, end, reason, notes)
     return RedirectResponse("/admin/daysoff", status_code=303)
 
 
 @router.post("/daysoff/{dayoff_id}/delete")
 def delete_dayoff(dayoff_id: int, db: Session = Depends(get_db), admin=Depends(get_current_admin)):
-    dayoff = db.get(DayOff, dayoff_id)
-    if not dayoff:
+    if not delete_dayoff_service(db, dayoff_id):
         return RedirectResponse("/admin/daysoff?msg=not_found", status_code=303)
-    db.delete(dayoff)
-    db.commit()
     return RedirectResponse("/admin/daysoff", status_code=303)

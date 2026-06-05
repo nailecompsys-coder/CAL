@@ -30,7 +30,7 @@ class NativeCallCoverageContractTest(unittest.TestCase):
         try:
             original, first_cover, second_cover, group, rotation = self._seed_rotation(db)
 
-            with patch("app.routers.api.send_native_push_to_surgeon"):
+            with patch("app.native_call_coverage_service.send_native_push_to_surgeon"):
                 first_response = native_call_coverage(
                     NativeCallCoverageBody(rotation_id=rotation.id, covering_surgeon_id=first_cover.id, notes="Swap one"),
                     db=db,
@@ -46,7 +46,7 @@ class NativeCallCoverageContractTest(unittest.TestCase):
             self.assertEqual(first_assignment["surgeonId"], first_cover.id)
             first_coverage_id = first_assignment["coverageId"]
 
-            with patch("app.routers.api.send_native_push_to_surgeon"):
+            with patch("app.native_call_coverage_service.send_native_push_to_surgeon"):
                 second_response = native_call_coverage(
                     NativeCallCoverageBody(rotation_id=rotation.id, covering_surgeon_id=second_cover.id, notes="Swap two"),
                     db=db,

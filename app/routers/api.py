@@ -2,7 +2,7 @@
 import json
 import re
 from collections import defaultdict
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -12,22 +12,21 @@ from sqlalchemy.orm import Session, joinedload
 from ..auth import get_current_admin, get_current_surgeon
 from ..database import get_db
 from ..models import (
-    Availability, CallCoverage, CallRotation, ClinicSchedule, DayOff, Meeting,
+    Availability, CallRotation, ClinicSchedule, DayOff, Meeting,
     NativePushToken, NativeScheduleAlert, PatientAssignment, PushSubscription, Surgeon, SurgicalCase,
 )
 from ..push import VAPID_PUBLIC_KEY
 from ..push import send_native_push_to_surgeon
 from ..conflicts import check_conflicts
+from ..native_call_coverage_service import assign_native_call_coverage, cancel_native_call_coverage
 from ..native_home_service import build_native_home
 from ..native_support import (
-    active_coverage_for_rotation as _active_coverage_for_rotation,
     date_label as _date_label,
     fmt_time as _fmt_time,
     meetings_for_surgeon as _meetings_for_surgeon,
     normalize_day_off_segments as _normalize_day_off_segments,
     parse_hhmm as _parse_hhmm,
     segment_for_date as _segment_for_date,
-    serialize_call_assignment as _serialize_call_assignment,
     serialize_day_off as _serialize_day_off,
     validate_day_off_segments as _validate_day_off_segments,
 )
@@ -623,18 +622,6 @@ class NativeCallCoverageBody(BaseModel):
     notes: str = ""
 
 
-def _native_call_rotation_for_response(db: Session, rotation_id: int) -> CallRotation | None:
-    return db.query(CallRotation).options(
-        joinedload(CallRotation.surgeon),
-        joinedload(CallRotation.call_group),
-        joinedload(CallRotation.coverages).joinedload(CallCoverage.covering_surgeon),
-    ).filter(CallRotation.id == rotation_id).first()
-
-
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
-
-
 @router.post("/native/call-coverage")
 def native_call_coverage(
     body: NativeCallCoverageBody,
@@ -642,54 +629,14 @@ def native_call_coverage(
     auth=Depends(get_current_surgeon),
 ):
     surgeon, _ = auth
-    rotation = _native_call_rotation_for_response(db, body.rotation_id)
-    if not rotation:
-        raise HTTPException(404, "Call assignment not found")
-    covering_id = body.covering_surgeon_id or surgeon.id
-    covering = db.get(Surgeon, covering_id)
-    if not covering or not covering.is_active:
-        raise HTTPException(400, "Covering surgeon is not active")
-    original_staff_type = rotation.surgeon.staff_type if rotation.surgeon else surgeon.staff_type
-    if covering.staff_type != original_staff_type:
-        role = "surgeon" if original_staff_type == "physician" else "PA/staff"
-        raise HTTPException(400, f"Coverage must be assigned to another {role}.")
-
-    existing = db.query(CallCoverage).filter(
-        CallCoverage.call_rotation_id == rotation.id,
-        CallCoverage.status == "active",
-    ).first()
-    if existing:
-        existing.status = "canceled"
-        existing.canceled_at = _utc_now()
-
-    coverage = CallCoverage(
-        call_rotation_id=rotation.id,
-        original_surgeon_id=rotation.surgeon_id,
-        covering_surgeon_id=covering.id,
-        requested_by_surgeon_id=surgeon.id,
-        notes=body.notes.strip() or None,
-        status="active",
-    )
-    db.add(coverage)
-    db.commit()
-    db.refresh(coverage)
-    if rotation.surgeon_id:
-        send_native_push_to_surgeon(
-            rotation.surgeon_id,
-            "On-call coverage updated",
-            f"{covering.initials} is covering {rotation.date.strftime('%b %-d')}",
-            db,
-            {"type": "call_coverage", "rotationId": rotation.id},
-        )
-    send_native_push_to_surgeon(
-        covering.id,
-        "On-call coverage assigned",
-        f"You are covering {rotation.call_group.name if rotation.call_group else 'call'} on {rotation.date.strftime('%b %-d')}",
+    assignment = assign_native_call_coverage(
         db,
-        {"type": "call_coverage", "rotationId": rotation.id},
+        requesting_surgeon=surgeon,
+        rotation_id=body.rotation_id,
+        covering_surgeon_id=body.covering_surgeon_id,
+        notes=body.notes,
     )
-    rotation = _native_call_rotation_for_response(db, rotation.id)
-    return {"ok": True, "assignment": _serialize_call_assignment(rotation, surgeon.id)}
+    return {"ok": True, "assignment": assignment}
 
 
 @router.post("/native/call-coverage/{coverage_id:int}/cancel")
@@ -699,14 +646,8 @@ def native_cancel_call_coverage(
     auth=Depends(get_current_surgeon),
 ):
     surgeon, _ = auth
-    coverage = db.get(CallCoverage, coverage_id)
-    if not coverage or coverage.status != "active":
-        raise HTTPException(404, "Coverage not found")
-    coverage.status = "canceled"
-    coverage.canceled_at = _utc_now()
-    db.commit()
-    rotation = _native_call_rotation_for_response(db, coverage.call_rotation_id)
-    return {"ok": True, "assignment": _serialize_call_assignment(rotation, surgeon.id)}
+    assignment = cancel_native_call_coverage(db, requesting_surgeon=surgeon, coverage_id=coverage_id)
+    return {"ok": True, "assignment": assignment}
 
 
 class NativeAvailabilityRow(BaseModel):

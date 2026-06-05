@@ -14,7 +14,7 @@ from ..conflicts import check_conflicts
 from ..database import get_db
 from ..jinja_env import templates
 from ..models import CallGroup, CallRotation, DayOff, Surgeon
-from .surgeon import _base
+from .surgeon_context import base_context
 
 router = APIRouter(prefix="/surgeon")
 
@@ -126,7 +126,7 @@ def request_off_page(request: Request, db: Session = Depends(get_db), auth=Depen
 
     return templates.TemplateResponse(
         "surgeon/request_off.html",
-        _base(
+        base_context(
             request,
             surgeon,
             device=device,

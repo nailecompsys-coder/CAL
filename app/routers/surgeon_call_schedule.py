@@ -14,7 +14,7 @@ from ..call_schedule_utils import (
 from ..database import get_db
 from ..jinja_env import templates
 from ..models import CallGroup, CallRotation
-from .surgeon import _base
+from .surgeon_context import base_context
 
 router = APIRouter(prefix="/surgeon")
 
@@ -60,7 +60,7 @@ def call_schedule_page(
 
     return templates.TemplateResponse(
         "surgeon/call_schedule.html",
-        _base(
+        base_context(
             request,
             surgeon,
             device=device,

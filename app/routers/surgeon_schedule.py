@@ -28,7 +28,7 @@ from ..models import (
     SurgeonDayItem,
     SurgicalCase,
 )
-from .surgeon import _base, _serialize_personal
+from .surgeon_context import base_context, serialize_personal_item
 
 router = APIRouter(prefix="/surgeon")
 
@@ -122,7 +122,7 @@ def _serialize_day(
             for sc in surgeries
         ],
         "offSurgeons": [_serialize_off(s, viewer_id) for s in off_surgeons],
-        "personalItems": [_serialize_personal(p) for p in personal_items],
+        "personalItems": [serialize_personal_item(p) for p in personal_items],
     }
 
 
@@ -441,7 +441,7 @@ def schedule(request: Request, week_offset: int = 0, db: Session = Depends(get_d
 
     return templates.TemplateResponse(
         "surgeon/schedule.html",
-        _base(
+        base_context(
             request,
             surgeon,
             device=device,

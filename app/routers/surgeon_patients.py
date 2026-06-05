@@ -9,7 +9,7 @@ from ..auth import get_current_surgeon
 from ..database import get_db
 from ..jinja_env import templates
 from ..models import PatientAssignment
-from .surgeon import _base
+from .surgeon_context import base_context
 
 router = APIRouter(prefix="/surgeon")
 
@@ -29,5 +29,5 @@ def patients_page(request: Request, db: Session = Depends(get_db), auth=Depends(
     ).order_by(PatientAssignment.date).all()
     return templates.TemplateResponse(
         "surgeon/patients.html",
-        _base(request, surgeon, device=device, today_assignment=today_assignment, upcoming=upcoming),
+        base_context(request, surgeon, device=device, today_assignment=today_assignment, upcoming=upcoming),
     )

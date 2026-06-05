@@ -11,7 +11,7 @@ from ..conflicts import check_conflicts
 from ..database import get_db
 from ..jinja_env import templates
 from ..models import Availability
-from .surgeon import _base
+from .surgeon_context import base_context
 
 router = APIRouter(prefix="/surgeon")
 
@@ -39,7 +39,7 @@ def availability_page(request: Request, db: Session = Depends(get_db), auth=Depe
         })
 
     weeks = [days[i:i+7] for i in range(0, len(days), 7)]
-    return templates.TemplateResponse("surgeon/availability.html", _base(request, surgeon, device=device, weeks=weeks))
+    return templates.TemplateResponse("surgeon/availability.html", base_context(request, surgeon, device=device, weeks=weeks))
 
 
 @router.post("/availability/save")

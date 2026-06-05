@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from ..auth import get_current_surgeon
 from ..database import get_db
 from ..models import SurgeonDayItem
-from .surgeon import _serialize_personal
+from .surgeon_context import serialize_personal_item
 
 router = APIRouter(prefix="/surgeon")
 
@@ -73,7 +73,7 @@ def api_create_day_item(
     db.add(row)
     db.commit()
     db.refresh(row)
-    return JSONResponse({"ok": True, "item": _serialize_personal(row)})
+    return JSONResponse({"ok": True, "item": serialize_personal_item(row)})
 
 
 @router.patch("/api/day-items/{item_id:int}")
@@ -105,7 +105,7 @@ def api_patch_day_item(
         row.sort_order = body.sort_order
     db.commit()
     db.refresh(row)
-    return JSONResponse({"ok": True, "item": _serialize_personal(row)})
+    return JSONResponse({"ok": True, "item": serialize_personal_item(row)})
 
 
 @router.delete("/api/day-items/{item_id:int}")

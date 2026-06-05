@@ -2,7 +2,7 @@
 import json
 import re
 from collections import defaultdict
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -623,6 +623,18 @@ class NativeCallCoverageBody(BaseModel):
     notes: str = ""
 
 
+def _native_call_rotation_for_response(db: Session, rotation_id: int) -> CallRotation | None:
+    return db.query(CallRotation).options(
+        joinedload(CallRotation.surgeon),
+        joinedload(CallRotation.call_group),
+        joinedload(CallRotation.coverages).joinedload(CallCoverage.covering_surgeon),
+    ).filter(CallRotation.id == rotation_id).first()
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
 @router.post("/native/call-coverage")
 def native_call_coverage(
     body: NativeCallCoverageBody,
@@ -630,7 +642,7 @@ def native_call_coverage(
     auth=Depends(get_current_surgeon),
 ):
     surgeon, _ = auth
-    rotation = db.query(CallRotation).options(joinedload(CallRotation.surgeon), joinedload(CallRotation.call_group)).get(body.rotation_id)
+    rotation = _native_call_rotation_for_response(db, body.rotation_id)
     if not rotation:
         raise HTTPException(404, "Call assignment not found")
     covering_id = body.covering_surgeon_id or surgeon.id
@@ -648,7 +660,7 @@ def native_call_coverage(
     ).first()
     if existing:
         existing.status = "canceled"
-        existing.canceled_at = datetime.utcnow()
+        existing.canceled_at = _utc_now()
 
     coverage = CallCoverage(
         call_rotation_id=rotation.id,
@@ -676,11 +688,7 @@ def native_call_coverage(
         db,
         {"type": "call_coverage", "rotationId": rotation.id},
     )
-    rotation = db.query(CallRotation).options(
-        joinedload(CallRotation.surgeon),
-        joinedload(CallRotation.call_group),
-        joinedload(CallRotation.coverages).joinedload(CallCoverage.covering_surgeon),
-    ).get(rotation.id)
+    rotation = _native_call_rotation_for_response(db, rotation.id)
     return {"ok": True, "assignment": _serialize_call_assignment(rotation, surgeon.id)}
 
 
@@ -695,13 +703,9 @@ def native_cancel_call_coverage(
     if not coverage or coverage.status != "active":
         raise HTTPException(404, "Coverage not found")
     coverage.status = "canceled"
-    coverage.canceled_at = datetime.utcnow()
+    coverage.canceled_at = _utc_now()
     db.commit()
-    rotation = db.query(CallRotation).options(
-        joinedload(CallRotation.surgeon),
-        joinedload(CallRotation.call_group),
-        joinedload(CallRotation.coverages).joinedload(CallCoverage.covering_surgeon),
-    ).get(coverage.call_rotation_id)
+    rotation = _native_call_rotation_for_response(db, coverage.call_rotation_id)
     return {"ok": True, "assignment": _serialize_call_assignment(rotation, surgeon.id)}
 
 

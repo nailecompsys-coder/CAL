@@ -19,7 +19,7 @@
   .fc-event-pill { display:inline-flex;align-items:center;padding:1px 4px;border-radius:4px;font-weight:600;white-space:nowrap;max-width:100%; }
   .fc-event-pill--dayoff { font-size:0.7rem; }
   .fc-event-pill--oncall, .fc-event-pill--clinic { font-size:0.68rem; }
-  .fc-event-pill--meeting, .fc-event-pill--surgery, .fc-event-pill--patients { font-size:0.65rem; }
+  .fc-event-pill--meeting, .fc-event-pill--surgery { font-size:0.65rem; }
 </style>
 {% endblock %}
 
@@ -239,7 +239,7 @@ function setFilter(f) {
 
 function showModal(event) {
   const p = event.extendedProps || {};
-  const typeLabels = { oncall: 'Call (hospital group)', dayoff: 'Days off', meeting: 'Meeting', patients: 'Patients', clinic: 'Clinic', surgery: 'Surgery', unavailable: 'Unavailable' };
+  const typeLabels = { oncall: 'Call (hospital group)', dayoff: 'Days off', meeting: 'Meeting', clinic: 'Clinic', surgery: 'Surgery', unavailable: 'Unavailable' };
   let title = event.title || '';
   if (p.type === 'dayoff') title = 'Days off';
   else if (p.type === 'oncall' && p.role === 'nc') title = 'No call';
@@ -251,7 +251,6 @@ function showModal(event) {
   if (p.call_group) body += `<p><i class="fa-solid fa-shield mr-2 text-slate-400"></i>${p.call_group}</p>`;
   if (p.role && p.role !== 'nc') body += `<p><i class="fa-solid fa-phone mr-2 text-slate-400"></i>${p.role}</p>`;
   if (p.location) body += `<p><i class="fa-solid fa-location-dot mr-2 text-slate-400"></i>${p.location}</p>`;
-  if (p.count != null) body += `<p><i class="fa-solid fa-hospital-user mr-2 text-slate-400"></i>${p.count} patients</p>`;
   if (p.procedure) body += `<p><i class="fa-solid fa-syringe mr-2 text-slate-400"></i>${p.procedure}</p>`;
   if (p.patient_name) body += `<p><i class="fa-solid fa-user mr-2 text-slate-400"></i>${p.patient_name}</p>`;
   if (p.reason) body += `<p><i class="fa-solid fa-note-sticky mr-2 text-slate-400"></i>${p.reason}</p>`;

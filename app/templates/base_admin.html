@@ -88,9 +88,6 @@
         <i class="fa-solid fa-umbrella-beach" style="width:1rem;text-align:center"></i> Days Off
         {% if pending_count and pending_count > 0 %}<span class="badge">{{ pending_count }}</span>{% endif %}
       </a>
-      <a href="/admin/patients" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/patients' %}active{% endif %}">
-        <i class="fa-solid fa-hospital-user" style="width:1rem;text-align:center"></i> Patients
-      </a>
       <a href="/admin/locations" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/locations' %}active{% endif %}">
         <i class="fa-solid fa-location-dot" style="width:1rem;text-align:center"></i> Locations
       </a>

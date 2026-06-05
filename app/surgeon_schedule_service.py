@@ -18,7 +18,6 @@ from .models import (
     DayOff,
     Meeting,
     MeetingAttendee,
-    PatientAssignment,
     Surgeon,
     SurgeonDayItem,
     SurgicalCase,
@@ -57,7 +56,6 @@ def _serialize_day(
     rotations,
     day_off,
     meetings,
-    patients,
     clinics,
     surgeries,
     off_surgeons,
@@ -87,7 +85,6 @@ def _serialize_day(
             }
             for m in meetings
         ],
-        "patients": {"count": patients.patient_count} if (patients and patients.patient_count > 0) else None,
         "clinics": [
             {
                 "name": "OFF" if (cs.assignment_type or "assigned") == "off" else cs.location.name,
@@ -245,10 +242,6 @@ def _compute_schedule_slots(ws: dict) -> dict:
         else:
             pm.append(line)
 
-    if ws["patients"] and ws["patients"].patient_count > 0:
-        n = ws["patients"].patient_count
-        am.append({"text": f"{n} patients", "neutral": True, "color": None, "hospital": False})
-
     for sc in ws["surgeries"]:
         st = sc.start_time
         h = st.hour if st else 8
@@ -310,16 +303,6 @@ def build_surgeon_schedule_view(db: Session, surgeon, week_offset: int = 0) -> d
         )
         .all()
     )
-    patient_by_day = _first_row_by_day(
-        db.query(PatientAssignment)
-        .filter(
-            PatientAssignment.surgeon_id == surgeon.id,
-            PatientAssignment.date >= summary_start,
-            PatientAssignment.date <= summary_end,
-        )
-        .order_by(PatientAssignment.date, PatientAssignment.id)
-        .all()
-    )
     meetings_by_day = _bucket_rows_by_day(
         _meetings_for_surgeon_in_range(db, surgeon.id, summary_start, summary_end)
     )
@@ -373,7 +356,6 @@ def build_surgeon_schedule_view(db: Session, surgeon, week_offset: int = 0) -> d
             "rotations": rotations_by_day.get(day, []),
             "day_off": my_off_by_day.get(day),
             "meetings": meetings_by_day.get(day, []),
-            "patients": patient_by_day.get(day),
             "clinics": clinics_by_day.get(day, []),
             "surgeries": surgeries_by_day.get(day, []),
         })
@@ -399,7 +381,6 @@ def build_surgeon_schedule_view(db: Session, surgeon, week_offset: int = 0) -> d
             "rotations": rotations_by_day.get(today, []),
             "day_off": my_off_by_day.get(today),
             "meetings": meetings_by_day.get(today, []),
-            "patients": patient_by_day.get(today),
             "clinics": clinics_by_day.get(today, []),
             "surgeries": surgeries_by_day.get(today, []),
         }
@@ -408,7 +389,6 @@ def build_surgeon_schedule_view(db: Session, surgeon, week_offset: int = 0) -> d
         "rotations": today_bucket["rotations"],
         "day_off": today_bucket["day_off"],
         "meetings": today_bucket["meetings"],
-        "patients": today_bucket["patients"],
         "clinics": today_bucket["clinics"],
         "surgeries": today_bucket["surgeries"],
     }
@@ -419,7 +399,6 @@ def build_surgeon_schedule_view(db: Session, surgeon, week_offset: int = 0) -> d
             ws["rotations"],
             ws["day_off"],
             ws["meetings"],
-            ws["patients"],
             ws["clinics"],
             ws["surgeries"],
             ws["off_surgeons"],

@@ -11,7 +11,7 @@ from ..auth import get_current_admin, get_current_surgeon
 from ..database import get_db
 from ..models import (
     Availability, CallRotation, ClinicSchedule, DayOff, Meeting,
-    PatientAssignment, PushSubscription, Surgeon,
+    PushSubscription, Surgeon,
 )
 from ..push import VAPID_PUBLIC_KEY
 from ..native_support import (
@@ -90,7 +90,7 @@ def get_events(
     start_date, end_date = _parse_iso_date_range(start, end)
 
     events = []
-    SORT_DAYOFF, SORT_NOCALL, SORT_CALL, SORT_CLINIC, SORT_MTG, SORT_SURG, SORT_PTS = 0, 1, 2, 3, 4, 5, 6
+    SORT_DAYOFF, SORT_NOCALL, SORT_CALL, SORT_CLINIC, SORT_MTG, SORT_SURG = 0, 1, 2, 3, 4, 5
 
     # Days off (approved) — grouped by date, one event per day at top of cell
     daysoff = db.query(DayOff).filter(
@@ -190,27 +190,6 @@ def get_events(
             "color": NEUTRAL_CAL_BG,
             "textColor": NEUTRAL_CAL_TEXT,
             "extendedProps": {"type": "meeting", "location": m.location_text or "", "meeting_title": m.title or "", "sort_key": SORT_MTG},
-        })
-
-    # Patient assignments
-    assignments = db.query(PatientAssignment).filter(
-        PatientAssignment.date >= start_date,
-        PatientAssignment.date <= end_date,
-    ).all()
-    for a in assignments:
-        s = a.surgeon
-        try:
-            init = s.initials
-        except Exception:
-            init = ((s.first_name or "?")[0] + (s.last_name or "?")[0]).upper()
-        short = f"{init} {a.patient_count}pts"
-        events.append({
-            "id": f"pt-{a.id}",
-            "title": short,
-            "start": f"{a.date.isoformat()}T09:00:00",
-            "color": NEUTRAL_CAL_BG,
-            "textColor": NEUTRAL_CAL_TEXT,
-            "extendedProps": {"type": "patients", "surgeon": s.full_name, "surgeon_id": s.id, "count": a.patient_count, "sort_key": SORT_PTS},
         })
 
     # Clinic schedule
@@ -371,19 +350,6 @@ def get_my_events(
             "id": f"mtg-{m.id}", "title": f"📋 {m.title}",
             "start": start_dt,
             "end": f"{m.date.isoformat()}T{m.end_time.isoformat()}" if m.end_time else None,
-            "color": NEUTRAL_CAL_BG,
-            "textColor": NEUTRAL_CAL_TEXT,
-        })
-
-    assignments = db.query(PatientAssignment).filter(
-        PatientAssignment.surgeon_id == surgeon.id,
-        PatientAssignment.date >= start_date,
-        PatientAssignment.date <= end_date,
-    ).all()
-    for a in assignments:
-        events.append({
-            "id": f"pt-{a.id}", "title": f"🏥 {a.patient_count} patients",
-            "start": f"{a.date.isoformat()}T09:00:00",
             "color": NEUTRAL_CAL_BG,
             "textColor": NEUTRAL_CAL_TEXT,
         })

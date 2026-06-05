@@ -69,7 +69,6 @@ class Surgeon(Base):
     days_off = relationship("DayOff", back_populates="surgeon", cascade="all, delete-orphan")
     meeting_attendees = relationship("MeetingAttendee", back_populates="surgeon", cascade="all, delete-orphan")
     availability = relationship("Availability", back_populates="surgeon", cascade="all, delete-orphan")
-    patient_assignments = relationship("PatientAssignment", back_populates="surgeon", cascade="all, delete-orphan")
     push_subscriptions = relationship("PushSubscription", back_populates="surgeon", cascade="all, delete-orphan")
     native_push_tokens = relationship("NativePushToken", back_populates="surgeon", cascade="all, delete-orphan")
     native_schedule_alerts = relationship("NativeScheduleAlert", back_populates="surgeon", cascade="all, delete-orphan")
@@ -320,20 +319,6 @@ class MeetingAttendee(Base):
 
     meeting = relationship("Meeting", back_populates="attendees")
     surgeon = relationship("Surgeon", back_populates="meeting_attendees")
-
-
-class PatientAssignment(Base):
-    __tablename__ = "patient_assignments"
-    id = Column(Integer, primary_key=True)
-    surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=False)
-    date = Column(Date, nullable=False)
-    patient_count = Column(Integer, default=0)
-    notes = Column(Text)
-    location_id = Column(Integer, ForeignKey("locations.id"))
-    created_at = Column(DateTime, server_default=func.now())
-
-    surgeon = relationship("Surgeon", back_populates="patient_assignments")
-    location = relationship("Location")
 
 
 class ClinicSchedule(Base):

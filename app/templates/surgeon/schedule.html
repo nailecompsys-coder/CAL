@@ -118,14 +118,6 @@
         <p class="text-blue-200 text-xs">{{ 'AM Session' if td.clinics[0].session == 'am' else 'PM Session' if td.clinics[0].session == 'pm' else 'Full Day' }}{% if td.clinics|length > 1 %} + {{ td.clinics|length - 1 }} more{% endif %}</p>
       </div>
     </div>
-    {% elif td.patients and td.patients.patient_count > 0 %}
-    <div class="flex items-center gap-3">
-      <div class="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center"><i class="fa-solid fa-hospital-user"></i></div>
-      <div>
-        <p class="font-bold">{{ td.patients.patient_count }} Patients</p>
-        <p class="text-blue-200 text-xs">Patient rounds today</p>
-      </div>
-    </div>
     {% elif td.meetings %}
     <div class="flex items-center gap-3">
       <div class="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center"><i class="fa-solid fa-users"></i></div>
@@ -631,15 +623,6 @@ function openDayView(idx) {
     eventsHtml += `<div style="position:absolute;left:2px;right:2px;top:${top}px;height:${blockH}px;background:${CAL_NEUTRAL_BG};border-radius:12px;padding:8px 12px;overflow:hidden;color:${CAL_NEUTRAL_TEXT};border:1px solid rgba(20,48,90,.1);">
       <p style="font-weight:700;font-size:13px;line-height:1.2;margin:0;">📋 ${m.title}</p>
       ${m.location ? `<p style="font-size:11px;opacity:.85;margin:2px 0 0;">${m.location}</p>` : ''}
-    </div>`;
-  }
-
-  // Patients block (assume 9 AM if no time)
-  if (d.patients && d.patients.count > 0) {
-    const top = (9 * 60 - TL_START) * PX_PER_MIN;
-    eventsHtml += `<div style="position:absolute;left:2px;right:2px;top:${top}px;height:60px;background:${CAL_NEUTRAL_BG};border-radius:12px;padding:8px 12px;overflow:hidden;color:${CAL_NEUTRAL_TEXT};border:1px solid rgba(20,48,90,.1);">
-      <p style="font-weight:700;font-size:13px;line-height:1.2;margin:0;">🏥 ${d.patients.count} Patients</p>
-      <p style="font-size:11px;opacity:.85;margin:2px 0 0;">Patient rounds</p>
     </div>`;
   }
 

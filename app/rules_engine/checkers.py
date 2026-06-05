@@ -1,89 +1,21 @@
 """Rule checker functions. Each yields zero or more Conflict objects."""
 from datetime import date, time, datetime, timedelta
-from typing import Any, Iterator, Optional
+from typing import Iterator, Optional
 
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
 from .registry import CLINIC_AM_END, CLINIC_PM_END, CLINIC_PM_START, Conflict, _session_end_time, _session_start_time
-
-
-def _exclude_entity(
-    exclude_entity: Optional[tuple[str, int]],
-    entity_type: str,
-    entity_id: int,
-) -> bool:
-    """True if this entity should be excluded from conflict check (e.g. the one being saved)."""
-    if not exclude_entity:
-        return False
-    etype, eid = exclude_entity
-    return etype == entity_type and eid == entity_id
-
-
-def _target_type(target_entity: Optional[dict]) -> Optional[str]:
-    return (target_entity or {}).get("type")
-
-
-def _target_dates(target_entity: Optional[dict], start_date: date, end_date: date) -> tuple[date, date]:
-    if not target_entity:
-        return start_date, end_date
-    return (
-        target_entity.get("start_date", target_entity.get("date", start_date)),
-        target_entity.get("end_date", target_entity.get("date", end_date)),
-    )
-
-
-def _session_range(d: date, session: str | None) -> tuple[datetime, datetime]:
-    normalized = (session or "full").lower()
-    return (
-        datetime.combine(d, _session_start_time(normalized)),
-        datetime.combine(d, _session_end_time(normalized)),
-    )
-
-
-def _case_range(sc) -> tuple[datetime, datetime]:
-    start_dt = datetime.combine(sc.date, sc.start_time)
-    end_dt = datetime.combine(sc.date, sc.end_time) if sc.end_time else start_dt + timedelta(hours=1)
-    return start_dt, end_dt
-
-
-def _meeting_range(m) -> tuple[datetime, datetime]:
-    if m.start_time is None:
-        start_dt = datetime.combine(m.date, time(0, 0))
-        return start_dt, start_dt + timedelta(days=1)
-    start_dt = datetime.combine(m.date, m.start_time)
-    end_dt = datetime.combine(m.date, m.end_time) if m.end_time else start_dt + timedelta(hours=1)
-    return start_dt, end_dt
-
-
-def _target_range_on_day(target_entity: Optional[dict], day: date) -> Optional[tuple[datetime, datetime]]:
-    if not target_entity:
-        return None
-    ttype = _target_type(target_entity)
-    if ttype == "clinic_schedule":
-        return _session_range(day, target_entity.get("session"))
-    if ttype == "surgical_case":
-        start_t = target_entity.get("start_time")
-        if not start_t:
-            return None
-        start_dt = datetime.combine(day, start_t)
-        end_t = target_entity.get("end_time")
-        end_dt = datetime.combine(day, end_t) if end_t else start_dt + timedelta(hours=1)
-        return start_dt, end_dt
-    if ttype == "meeting":
-        start_t = target_entity.get("start_time")
-        if start_t is None:
-            start_dt = datetime.combine(day, time(0, 0))
-            return start_dt, start_dt + timedelta(days=1)
-        start_dt = datetime.combine(day, start_t)
-        end_t = target_entity.get("end_time")
-        end_dt = datetime.combine(day, end_t) if end_t else start_dt + timedelta(hours=1)
-        return start_dt, end_dt
-    return None
-
-
-def _ranges_overlap(a_start: datetime, a_end: datetime, b_start: datetime, b_end: datetime) -> bool:
-    return a_start < b_end and b_start < a_end
+from .checker_helpers import (
+    case_range,
+    exclude_entity as _exclude_entity,
+    meeting_range,
+    ranges_overlap,
+    session_range,
+    target_dates,
+    target_range_on_day,
+    target_type,
+)
 
 
 # ─── Overlap rules ───────────────────────────────────────────────────────────
@@ -98,7 +30,7 @@ def check_overlap_day_off(
     target_entity: Optional[dict] = None,
 ) -> Iterator[Conflict]:
     from ..models import DayOff
-    target_start, target_end = _target_dates(target_entity, start_date, end_date)
+    target_start, target_end = target_dates(target_entity, start_date, end_date)
     q = db.query(DayOff).filter(
         DayOff.surgeon_id == surgeon_id,
         DayOff.start_date <= target_end,
@@ -131,7 +63,7 @@ def check_overlap_call(
     target_entity: Optional[dict] = None,
 ) -> Iterator[Conflict]:
     from ..models import CallRotation
-    target_start, target_end = _target_dates(target_entity, start_date, end_date)
+    target_start, target_end = target_dates(target_entity, start_date, end_date)
     for r in db.query(CallRotation).filter(
         CallRotation.surgeon_id == surgeon_id,
         CallRotation.date >= target_start,
@@ -160,7 +92,7 @@ def check_overlap_unavailable(
     target_entity: Optional[dict] = None,
 ) -> Iterator[Conflict]:
     from ..models import Availability
-    target_start, target_end = _target_dates(target_entity, start_date, end_date)
+    target_start, target_end = target_dates(target_entity, start_date, end_date)
     for av in db.query(Availability).filter(
         Availability.surgeon_id == surgeon_id,
         Availability.date >= target_start,
@@ -187,10 +119,10 @@ def check_overlap_clinic(
     target_entity: Optional[dict] = None,
 ) -> Iterator[Conflict]:
     from ..models import ClinicSchedule
-    target_type = _target_type(target_entity)
-    target_start, target_end = _target_dates(target_entity, start_date, end_date)
+    target_type = target_type(target_entity)
+    target_start, target_end = target_dates(target_entity, start_date, end_date)
     target_day = target_entity.get("date") if target_entity else None
-    target_range = _target_range_on_day(target_entity, target_day) if target_day else None
+    target_range = target_range_on_day(target_entity, target_day) if target_day else None
     for cs in db.query(ClinicSchedule).filter(
         ClinicSchedule.surgeon_id == surgeon_id,
         ClinicSchedule.date >= target_start,
@@ -201,8 +133,8 @@ def check_overlap_clinic(
         if target_type in {"clinic_schedule", "surgical_case", "meeting"}:
             if not target_day or cs.date != target_day or not target_range:
                 continue
-            clinic_start, clinic_end = _session_range(cs.date, cs.session)
-            if not _ranges_overlap(clinic_start, clinic_end, target_range[0], target_range[1]):
+            clinic_start, clinic_end = session_range(cs.date, cs.session)
+            if not ranges_overlap(clinic_start, clinic_end, target_range[0], target_range[1]):
                 continue
         loc_name = cs.location.name if cs.location else "Clinic"
         yield Conflict(
@@ -225,10 +157,10 @@ def check_overlap_surgery(
     target_entity: Optional[dict] = None,
 ) -> Iterator[Conflict]:
     from ..models import SurgicalCase
-    target_type = _target_type(target_entity)
-    target_start, target_end = _target_dates(target_entity, start_date, end_date)
+    target_type = target_type(target_entity)
+    target_start, target_end = target_dates(target_entity, start_date, end_date)
     target_day = target_entity.get("date") if target_entity else None
-    target_range = _target_range_on_day(target_entity, target_day) if target_day else None
+    target_range = target_range_on_day(target_entity, target_day) if target_day else None
     q = db.query(SurgicalCase).filter(
         SurgicalCase.surgeon_id == surgeon_id,
         SurgicalCase.date >= target_start,
@@ -241,8 +173,8 @@ def check_overlap_surgery(
         if target_type in {"surgical_case", "clinic_schedule", "meeting"}:
             if not target_day or sc.date != target_day or not target_range:
                 continue
-            case_start, case_end = _case_range(sc)
-            if not _ranges_overlap(case_start, case_end, target_range[0], target_range[1]):
+            case_start, case_end = case_range(sc)
+            if not ranges_overlap(case_start, case_end, target_range[0], target_range[1]):
                 continue
         yield Conflict(
             rule_id="OVERLAP_SURGERY",
@@ -264,10 +196,10 @@ def check_overlap_meeting(
     target_entity: Optional[dict] = None,
 ) -> Iterator[Conflict]:
     from ..models import Meeting, MeetingAttendee
-    target_type = _target_type(target_entity)
-    target_start, target_end = _target_dates(target_entity, start_date, end_date)
+    target_type = target_type(target_entity)
+    target_start, target_end = target_dates(target_entity, start_date, end_date)
     target_day = target_entity.get("date") if target_entity else None
-    target_range = _target_range_on_day(target_entity, target_day) if target_day else None
+    target_range = target_range_on_day(target_entity, target_day) if target_day else None
     meetings = (
         db.query(Meeting)
         .outerjoin(MeetingAttendee)
@@ -288,8 +220,8 @@ def check_overlap_meeting(
         if target_type in {"meeting", "clinic_schedule", "surgical_case"}:
             if not target_day or m.date != target_day or not target_range:
                 continue
-            meeting_start, meeting_end = _meeting_range(m)
-            if not _ranges_overlap(meeting_start, meeting_end, target_range[0], target_range[1]):
+            meeting_start, meeting_end = meeting_range(m)
+            if not ranges_overlap(meeting_start, meeting_end, target_range[0], target_range[1]):
                 continue
         time_str = m.start_time.strftime("%-I:%M %p") if m.start_time else "TBD"
         yield Conflict(
@@ -320,7 +252,7 @@ def check_buffer_clinic_to_surgery(
     target_entity: Optional[dict] = None,
 ) -> Iterator[Conflict]:
     from ..models import ClinicSchedule, SurgicalCase
-    if _target_type(target_entity) not in {"clinic_schedule", "surgical_case"}:
+    if target_type(target_entity) not in {"clinic_schedule", "surgical_case"}:
         return
     minutes = config.get("minutes", 30)
     delta = timedelta(minutes=minutes)
@@ -367,7 +299,7 @@ def check_buffer_surgery_to_clinic(
     target_entity: Optional[dict] = None,
 ) -> Iterator[Conflict]:
     from ..models import ClinicSchedule, SurgicalCase
-    if _target_type(target_entity) not in {"clinic_schedule", "surgical_case"}:
+    if target_type(target_entity) not in {"clinic_schedule", "surgical_case"}:
         return
     minutes = config.get("minutes", 30)
     delta = timedelta(minutes=minutes)
@@ -413,7 +345,7 @@ def check_buffer_between_cases(
     target_entity: Optional[dict] = None,
 ) -> Iterator[Conflict]:
     from ..models import SurgicalCase
-    if _target_type(target_entity) != "surgical_case":
+    if target_type(target_entity) != "surgical_case":
         return
     minutes = config.get("minutes", 15)
     delta = timedelta(minutes=minutes)
@@ -454,7 +386,7 @@ def check_buffer_same_site_am_pm(
     target_entity: Optional[dict] = None,
 ) -> Iterator[Conflict]:
     from ..models import ClinicSchedule, SurgicalCase
-    if _target_type(target_entity) not in {"clinic_schedule", "surgical_case"}:
+    if target_type(target_entity) not in {"clinic_schedule", "surgical_case"}:
         return
     minutes = config.get("minutes", 30)
     delta = timedelta(minutes=minutes)
@@ -504,7 +436,7 @@ def check_location_drive_time(
     target_entity: Optional[dict] = None,
 ) -> Iterator[Conflict]:
     from ..models import ClinicSchedule, SurgicalCase
-    if _target_type(target_entity) not in {"clinic_schedule", "surgical_case"}:
+    if target_type(target_entity) not in {"clinic_schedule", "surgical_case"}:
         return
     minutes = config.get("minutes_between_sites", 60)
     delta = timedelta(minutes=minutes)

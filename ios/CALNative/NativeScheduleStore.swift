@@ -1,13 +1,19 @@
 import SwiftUI
 
+enum NativeLoadState: Equatable {
+  case idle
+  case loading
+  case loaded
+  case warning(String)
+}
+
 @MainActor
 final class NativeScheduleStore: ObservableObject {
   @Published private(set) var days: [ScheduleDay] = []
   @Published private(set) var timeOffRequests: [TimeOffRequest] = []
   @Published private(set) var currentSurgeon: NativeSurgeon?
   @Published private(set) var surgeons: [NativeSurgeon] = []
-  @Published private(set) var isLoading = false
-  @Published private(set) var statusMessage: String?
+  @Published private(set) var loadState: NativeLoadState = .idle
   @Published private(set) var sessionToken: String?
   @Published private(set) var hasBootstrapped = false
   @Published private(set) var authBusy = false
@@ -18,6 +24,17 @@ final class NativeScheduleStore: ObservableObject {
   private let session = NativeSessionService()
   private var projection: NativeScheduleProjection {
     NativeScheduleProjection(days: days)
+  }
+
+  var isLoading: Bool {
+    loadState == .loading
+  }
+
+  var warningMessage: String? {
+    if case let .warning(message) = loadState {
+      return message
+    }
+    return nil
   }
 
   func bootstrap(containing date: Date, scope: ScheduleScope) async {
@@ -51,23 +68,21 @@ final class NativeScheduleStore: ObservableObject {
   private func loadRange(start: Date, end: Date, fallbackDate: Date) async {
     guard let token = sessionToken, !token.isEmpty else {
       days = ScheduleFixtures.week(containing: fallbackDate)
-      statusMessage = nil
+      loadState = .idle
       return
     }
 
-    isLoading = true
-    statusMessage = "Syncing schedule..."
-    defer { isLoading = false }
+    loadState = .loading
 
     do {
       let home = try await client.fetchHome(token: token, start: start, end: end)
       apply(home)
-      statusMessage = "Synced \(Date().formatted(.dateTime.hour().minute().second()))"
+      loadState = .loaded
     } catch {
       if days.isEmpty {
         days = ScheduleFixtures.week(containing: fallbackDate)
       }
-      statusMessage = "Live sync failed. Showing preview data. \(error.localizedDescription)"
+      loadState = .warning("Live sync failed. Showing preview data. \(error.localizedDescription)")
     }
   }
 
@@ -122,7 +137,7 @@ final class NativeScheduleStore: ObservableObject {
     timeOffRequests = []
     currentSurgeon = nil
     surgeons = []
-    statusMessage = nil
+    loadState = .idle
     authMessage = nil
     hasBootstrapped = true
   }
@@ -156,8 +171,8 @@ final class NativeScheduleStore: ObservableObject {
     await load(containing: selectedDate, scope: scope)
   }
 
-  func setStatusMessage(_ message: String) {
-    statusMessage = message
+  func setWarningMessage(_ message: String) {
+    loadState = .warning(message)
   }
 
   private func restoreStoredTokenIfNeeded() {

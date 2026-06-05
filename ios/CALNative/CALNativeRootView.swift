@@ -61,7 +61,7 @@ struct ScheduleHomeView: View {
             DayScheduleDashboard(
               day: selectedDay,
               days: store.days,
-              statusMessage: nonSyncedStatusMessage,
+              statusMessage: store.warningMessage,
               previousAction: { shiftSelection(by: -1) },
               nextAction: { shiftSelection(by: 1) },
               coverAction: { assignment in
@@ -72,7 +72,7 @@ struct ScheduleHomeView: View {
           } else {
             ScrollView {
               VStack(alignment: .leading, spacing: 8) {
-                if let statusMessage = nonSyncedStatusMessage {
+                if let statusMessage = store.warningMessage {
                   Label(statusMessage, systemImage: store.sessionToken == nil ? "lock" : "exclamationmark.triangle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -199,7 +199,7 @@ struct ScheduleHomeView: View {
                 )
                 coveringAssignment = nil
               } catch {
-                store.setStatusMessage(error.localizedDescription)
+                store.setWarningMessage(error.localizedDescription)
               }
             }
           },
@@ -246,10 +246,4 @@ struct ScheduleHomeView: View {
     }
   }
 
-  private var nonSyncedStatusMessage: String? {
-    guard let statusMessage = store.statusMessage, !statusMessage.hasPrefix("Synced") else {
-      return nil
-    }
-    return statusMessage
-  }
 }

@@ -6,8 +6,6 @@ final class NativeScheduleStore: ObservableObject {
   @Published private(set) var timeOffRequests: [TimeOffRequest] = []
   @Published private(set) var currentSurgeon: NativeSurgeon?
   @Published private(set) var surgeons: [NativeSurgeon] = []
-  @Published private(set) var patientToday: PatientSummary?
-  @Published private(set) var patientUpcoming: [PatientSummary] = []
   @Published private(set) var isLoading = false
   @Published private(set) var statusMessage: String?
   @Published private(set) var sessionToken: String?
@@ -78,8 +76,6 @@ final class NativeScheduleStore: ObservableObject {
     surgeons = home.surgeons ?? []
     days = home.days.map { $0.scheduleDay }
     timeOffRequests = home.requests.map(\.timeOffRequest)
-    patientToday = home.patients?.today.patientSummary
-    patientUpcoming = home.patients?.upcoming.map(\.patientSummary) ?? []
   }
 
   func requestOtp(email: String) async -> Bool {
@@ -126,8 +122,6 @@ final class NativeScheduleStore: ObservableObject {
     timeOffRequests = []
     currentSurgeon = nil
     surgeons = []
-    patientToday = nil
-    patientUpcoming = []
     statusMessage = nil
     authMessage = nil
     hasBootstrapped = true

@@ -104,27 +104,6 @@ struct TimeOffRequest: Identifiable {
   }
 }
 
-struct PatientSummary: Identifiable {
-  let id: String
-  let date: String
-  let count: Int
-  let notes: String
-  let location: String
-
-  var subtitle: String {
-    [formatShortDate(date), location, notes]
-      .filter { !$0.isEmpty }
-      .joined(separator: " · ")
-  }
-
-  private func formatShortDate(_ iso: String) -> String {
-    guard let date = NativeDayResponse.dateFormatter.date(from: iso) else {
-      return iso
-    }
-    return date.formatted(.dateTime.month(.twoDigits).day(.twoDigits))
-  }
-}
-
 struct RequestSegment: Identifiable {
   let date: Date
   let isFullDay: Bool

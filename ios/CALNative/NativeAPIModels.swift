@@ -148,16 +148,6 @@ struct NativePatientSummaryResponse: Decodable {
   let count: Int
   let notes: String
   let location: String
-
-  var patientSummary: PatientSummary {
-    PatientSummary(
-      id: date,
-      date: date,
-      count: count,
-      notes: notes,
-      location: location
-    )
-  }
 }
 
 struct NativeScheduleItemResponse: Decodable {

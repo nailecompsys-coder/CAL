@@ -4,7 +4,6 @@ struct NativeHomeResponse: Decodable {
   let surgeon: NativeSurgeon?
   let days: [NativeDayResponse]
   let requests: [NativeDayOffRequestResponse]
-  let patients: NativePatientsResponse?
   let surgeons: [NativeSurgeon]?
 }
 
@@ -138,18 +137,6 @@ struct NativeDayOffRequestResponse: Decodable {
   }
 }
 
-struct NativePatientsResponse: Decodable {
-  let today: NativePatientSummaryResponse
-  let upcoming: [NativePatientSummaryResponse]
-}
-
-struct NativePatientSummaryResponse: Decodable {
-  let date: String
-  let count: Int
-  let notes: String
-  let location: String
-}
-
 struct NativeScheduleItemResponse: Decodable {
   let id: String?
   let rawId: Int?
@@ -164,7 +151,7 @@ struct NativeScheduleItemResponse: Decodable {
   let notes: String?
 
   func doctorScheduleItem(dateKey: String) -> DoctorScheduleItem? {
-    guard !["personal", "meeting", "oncall", "dayoff"].contains(type), allDay != true else {
+    guard !["personal", "meeting", "oncall", "dayoff", "patients"].contains(type), allDay != true else {
       return nil
     }
 
@@ -206,8 +193,6 @@ struct NativeScheduleItemResponse: Decodable {
       return title.isEmpty ? "Clinic" : title
     case "surgery":
       return title.isEmpty ? "Hospital" : title
-    case "patients":
-      return title.isEmpty ? "Patients" : title
     default:
       return title
     }

@@ -11,8 +11,14 @@ struct DayScheduleSections: View {
     .listRowBackground(Color.clear)
 
     Section("My Schedule") {
-      ForEach(day.mySchedule) { item in
-        MyScheduleRow(item: item)
+      if day.mySchedule.isEmpty {
+        Label("No clinic or hospital schedule", systemImage: "checkmark.circle")
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+      } else {
+        ForEach(day.mySchedule) { item in
+          MyScheduleRow(item: item)
+        }
       }
     }
     .listRowBackground(Color.white.opacity(0.68))
@@ -127,6 +133,8 @@ struct ScheduleDailyGlanceCard: View {
             GlanceOnCallLine(assignment: assignment, coverAction: coverAction)
           }
         }
+      } else {
+        EmptyDashboardRow(title: "No on-call coverage scheduled")
       }
     }
     .padding(14)

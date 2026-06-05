@@ -75,8 +75,12 @@ struct DayScheduleDashboard: View {
         }
 
         DashboardSection(title: "My Schedule", tint: ClinicalPalette.cardStrong) {
-          ForEach(day.mySchedule) { item in
-            MyScheduleRow(item: item)
+          if day.mySchedule.isEmpty {
+            EmptyDashboardRow(title: "No clinic or hospital schedule")
+          } else {
+            ForEach(day.mySchedule) { item in
+              MyScheduleRow(item: item)
+            }
           }
         }
 

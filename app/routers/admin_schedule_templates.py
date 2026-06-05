@@ -1,5 +1,5 @@
 """Admin schedule template and call rotation builder routes."""
-from datetime import date, timedelta
+from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, Request
@@ -7,11 +7,11 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from ..auth import get_current_admin
+from ..admin_schedule_template_service import apply_clinic_schedule_templates, auto_fill_call_rotation
 from ..database import get_db
 from ..jinja_env import templates
 from ..models import (
-    CallGroup, CallRotation, CallRotationTemplate, ClinicSchedule, DayOff, Location,
-    Surgeon, SurgeonLocationSchedule,
+    CallGroup, CallRotationTemplate, Location, Surgeon, SurgeonLocationSchedule,
 )
 from .admin import _base, _sort_surgeons_physicians_first
 
@@ -131,83 +131,16 @@ async def apply_schedule_templates(
     if d_to < d_from or (d_to - d_from).days > 366:
         return RedirectResponse("/admin/schedule-templates?msg=bad_range", status_code=303)
 
-    if surgeon_ids == "all":
-        target_ids = [s.id for s in db.query(Surgeon.id).filter(Surgeon.is_active == True).all()]
-    else:
-        target_ids = [int(x) for x in surgeon_ids.split(",") if x.strip().isdigit()]
-
-    templates_all = db.query(SurgeonLocationSchedule).filter(
-        SurgeonLocationSchedule.surgeon_id.in_(target_ids),
-        SurgeonLocationSchedule.assignment_type != "off",
-    ).all()
-
-    tpl_by_surgeon = {}
-    for t in templates_all:
-        tpl_by_surgeon.setdefault(t.surgeon_id, {}).setdefault(t.day_of_week, {})[t.session] = t
-
-    days_off_records = db.query(DayOff).filter(
-        DayOff.surgeon_id.in_(target_ids),
-        DayOff.start_date <= d_to,
-        DayOff.end_date >= d_from,
-        DayOff.status == "approved",
-    ).all()
-    off_dates = set()
-    for doff in days_off_records:
-        cur = doff.start_date
-        while cur <= doff.end_date:
-            off_dates.add((doff.surgeon_id, cur))
-            cur += timedelta(days=1)
-
-    created = 0
-    skipped_existing = 0
-    skipped_off = 0
-    skipped_float = 0
-
-    cur_date = d_from
-    while cur_date <= d_to:
-        dow = cur_date.weekday()
-        if dow > 4:
-            cur_date += timedelta(days=1)
-            continue
-
-        for sid in target_ids:
-            if (sid, cur_date) in off_dates and not overwrite_daysoff:
-                skipped_off += 1
-                continue
-
-            day_tpls = tpl_by_surgeon.get(sid, {}).get(dow, {})
-            for sess, tpl in day_tpls.items():
-                if tpl.assignment_type == "float":
-                    skipped_float += 1
-                    continue
-                if tpl.assignment_type == "assigned" and tpl.location_id is None:
-                    continue
-
-                if skip_existing:
-                    exists = db.query(ClinicSchedule).filter(
-                        ClinicSchedule.surgeon_id == sid,
-                        ClinicSchedule.date == cur_date,
-                        ClinicSchedule.session == sess,
-                    ).first()
-                    if exists:
-                        skipped_existing += 1
-                        continue
-
-                db.add(ClinicSchedule(
-                    surgeon_id=sid,
-                    location_id=tpl.location_id if tpl.assignment_type == "assigned" else None,
-                    date=cur_date,
-                    session=sess,
-                    assignment_type=tpl.assignment_type,
-                    notes=None,
-                ))
-                created += 1
-
-        cur_date += timedelta(days=1)
-
-    db.commit()
+    result = apply_clinic_schedule_templates(
+        db,
+        d_from,
+        d_to,
+        surgeon_ids,
+        skip_existing,
+        overwrite_daysoff,
+    )
     return RedirectResponse(
-        f"/admin/schedule-templates?msg=applied&created={created}&skipped={skipped_existing}&off={skipped_off}",
+        f"/admin/schedule-templates?msg=applied&created={result['created']}&skipped={result['skipped_existing']}&off={result['skipped_off']}",
         status_code=303,
     )
 
@@ -261,79 +194,19 @@ def call_rotation_auto_fill(
     if d_to < d_from or (d_to - d_from).days > 366:
         return RedirectResponse("/admin/schedule-templates?tab=call&msg=bad_range", status_code=303)
 
-    rotation = db.query(CallRotationTemplate).filter(
-        CallRotationTemplate.call_group_id == call_group_id,
-    ).order_by(CallRotationTemplate.position).all()
-
-    if not rotation:
+    result = auto_fill_call_rotation(
+        db,
+        call_group_id,
+        d_from,
+        d_to,
+        start_position,
+        days_per_surgeon,
+        skip_existing,
+        rotation_type,
+    )
+    if result["no_rotation"]:
         return RedirectResponse("/admin/schedule-templates?tab=call&msg=no_rotation", status_code=303)
-
-    surgeon_ids = [r.surgeon_id for r in rotation]
-    days_off_records = db.query(DayOff).filter(
-        DayOff.surgeon_id.in_(surgeon_ids),
-        DayOff.start_date <= d_to,
-        DayOff.end_date >= d_from,
-        DayOff.status == "approved",
-    ).all()
-    off_dates = set()
-    for doff in days_off_records:
-        cur = doff.start_date
-        while cur <= doff.end_date:
-            off_dates.add((doff.surgeon_id, cur))
-            cur += timedelta(days=1)
-
-    n = len(rotation)
-    rot_idx = (start_position - 1) % n
-    day_count = 0
-    created = 0
-    skipped = 0
-
-    cur_date = d_from
-    while cur_date <= d_to:
-        attempts = 0
-        while attempts < n:
-            surgeon = rotation[rot_idx]
-            if (surgeon.surgeon_id, cur_date) not in off_dates:
-                break
-            rot_idx = (rot_idx + 1) % n
-            day_count = 0
-            attempts += 1
-        else:
-            cur_date += timedelta(days=1)
-            continue
-
-        if skip_existing:
-            exists = db.query(CallRotation).filter(
-                CallRotation.date == cur_date,
-                CallRotation.call_group_id == call_group_id,
-                CallRotation.rotation_type == rotation_type,
-            ).first()
-            if exists:
-                skipped += 1
-                cur_date += timedelta(days=1)
-                day_count += 1
-                if day_count >= days_per_surgeon:
-                    rot_idx = (rot_idx + 1) % n
-                    day_count = 0
-                continue
-
-        db.add(CallRotation(
-            surgeon_id=surgeon.surgeon_id,
-            date=cur_date,
-            rotation_type=rotation_type,
-            call_group_id=call_group_id,
-        ))
-        created += 1
-
-        day_count += 1
-        if day_count >= days_per_surgeon:
-            rot_idx = (rot_idx + 1) % n
-            day_count = 0
-
-        cur_date += timedelta(days=1)
-
-    db.commit()
     return RedirectResponse(
-        f"/admin/schedule-templates?tab=call&msg=call_filled&created={created}&skipped={skipped}",
+        f"/admin/schedule-templates?tab=call&msg=call_filled&created={result['created']}&skipped={result['skipped']}",
         status_code=303,
     )

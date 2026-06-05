@@ -1,24 +1,16 @@
 """Admin portal HTML routes."""
-import base64
 import calendar as _calendar
-import hashlib
-import io
 import os
-import secrets
 import urllib.parse
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, time, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from ..auth import (
-    SURGEON_ADMIN_PREVIEW_DEVICE_NAME,
-    cookie_secure,
-    create_surgeon_session_token,
-    generate_magic_link_token,
     get_current_admin,
     hash_password,
     verify_password,
@@ -29,7 +21,7 @@ from ..jinja_env import templates
 from ..models import (
     AdminUser, CallCoverage, CallGroup, CallGroupLocation, CallRotation, CallRotationTemplate,
     ClinicSchedule, DayOff, Location, Meeting, MeetingAttendee, PatientAssignment,
-    SiteSettings, Surgeon, SurgeonDevice, SurgeonLocationSchedule, SurgicalCase,
+    SiteSettings, Surgeon, SurgeonLocationSchedule, SurgicalCase,
 )
 from ..push import send_push_to_surgeon
 from .. import wasabi_backup
@@ -157,198 +149,6 @@ def calendar(request: Request, db: Session = Depends(get_db), admin=Depends(get_
     surgeons = db.query(Surgeon).filter(Surgeon.is_active == True).order_by(Surgeon.last_name).all()
     surgeons = _sort_surgeons_physicians_first(surgeons)
     return templates.TemplateResponse("admin/calendar.html", _base(request, admin, db=db, surgeons=surgeons))
-
-
-# ── Surgeons ─────────────────────────────────────────────────────────────────
-
-@router.get("/surgeons", response_class=HTMLResponse)
-def surgeons_page(request: Request, db: Session = Depends(get_db), admin=Depends(get_current_admin)):
-    surgeons = db.query(Surgeon).order_by(Surgeon.last_name).all()
-    surgeons = _sort_surgeons_physicians_first(surgeons)
-    return templates.TemplateResponse("admin/surgeons.html", _base(request, admin, db=db, surgeons=surgeons))
-
-
-@router.post("/surgeons/add")
-def add_surgeon(
-    request: Request,
-    first_name: str = Form(...),
-    last_name: str = Form(...),
-    suffix: str = Form(""),
-    staff_type: str = Form("physician"),
-    email: str = Form(""),
-    phone: str = Form(""),
-    sort_order: int = Form(0),
-    db: Session = Depends(get_db),
-    admin=Depends(get_current_admin),
-):
-    assigned_sort_order = sort_order
-    if (staff_type or "physician") == "physician" and assigned_sort_order <= 0:
-        assigned_sort_order = _next_physician_sort_order(db)
-    s = Surgeon(first_name=first_name, last_name=last_name,
-                suffix=suffix or None, staff_type=staff_type or "physician",
-                email=email or None, phone=phone, color="#ffffff",
-                sort_order=assigned_sort_order)
-    db.add(s)
-    db.commit()
-    return RedirectResponse("/admin/surgeons?msg=added", status_code=303)
-
-
-@router.post("/surgeons/{surgeon_id}/edit")
-def edit_surgeon(
-    surgeon_id: int,
-    first_name: str = Form(...),
-    last_name: str = Form(...),
-    suffix: str = Form(""),
-    staff_type: str = Form("physician"),
-    email: str = Form(""),
-    phone: str = Form(""),
-    sort_order: int = Form(0),
-    db: Session = Depends(get_db),
-    admin=Depends(get_current_admin),
-):
-    s = db.get(Surgeon, surgeon_id)
-    if s:
-        assigned_sort_order = sort_order
-        if (staff_type or "physician") == "physician" and assigned_sort_order <= 0:
-            assigned_sort_order = _next_physician_sort_order(db)
-        s.first_name = first_name
-        s.last_name = last_name
-        s.suffix = suffix or None
-        s.staff_type = staff_type or "physician"
-        s.email = email or None
-        s.phone = phone
-        s.color = "#ffffff"
-        s.sort_order = assigned_sort_order
-        db.commit()
-    return RedirectResponse("/admin/surgeons?msg=updated", status_code=303)
-
-
-@router.post("/surgeons/{surgeon_id}/delete")
-def delete_surgeon(surgeon_id: int, db: Session = Depends(get_db), admin=Depends(get_current_admin)):
-    s = db.get(Surgeon, surgeon_id)
-    if not s:
-        return RedirectResponse("/admin/surgeons?msg=not_found", status_code=303)
-    db.delete(s)
-    db.commit()
-    return RedirectResponse("/admin/surgeons?msg=deleted", status_code=303)
-
-
-@router.post("/surgeons/{surgeon_id}/toggle")
-def toggle_surgeon(surgeon_id: int, db: Session = Depends(get_db), admin=Depends(get_current_admin)):
-    s = db.get(Surgeon, surgeon_id)
-    if s:
-        s.is_active = not s.is_active
-        db.commit()
-    return RedirectResponse("/admin/surgeons", status_code=303)
-
-
-@router.post("/surgeons/{surgeon_id}/magic-link")
-def create_magic_link(
-    surgeon_id: int,
-    request: Request,
-    db: Session = Depends(get_db),
-    admin=Depends(get_current_admin),
-):
-    import qrcode
-    from concurrent.futures import ThreadPoolExecutor
-    from ..email_service import send_magic_link_email
-
-    base_url = str(request.base_url).rstrip("/")
-    link = generate_magic_link_token(surgeon_id, db, base_url)
-
-    qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=8, border=3)
-    qr.add_data(link)
-    qr.make(fit=True)
-    img = qr.make_image(fill_color="#14305A", back_color="white")
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    qr_b64 = base64.b64encode(buf.getvalue()).decode()
-
-    # Email the link + QR code if the surgeon has an email on file
-    surgeon = db.get(Surgeon, surgeon_id)
-    if surgeon and surgeon.email:
-        import os
-        _exec = ThreadPoolExecutor(max_workers=1)
-        _exec.submit(
-            send_magic_link_email,
-            to_email=surgeon.email,
-            to_name=surgeon.full_name or surgeon.email,
-            magic_url=link,
-            app_name="Mid Florida Surgical Calendar",
-            expiry_hours=int(os.environ.get("MAGIC_LINK_EXPIRE_HOURS", "168")),
-        )
-
-    surgeons = db.query(Surgeon).order_by(Surgeon.last_name).all()
-    surgeons = _sort_surgeons_physicians_first(surgeons)
-    return templates.TemplateResponse("admin/surgeons.html", _base(
-        request, admin, db=db, surgeons=surgeons, generated_link=link,
-        link_surgeon_id=surgeon_id, qr_code_b64=qr_b64,
-    ))
-
-
-@router.post("/surgeons/{surgeon_id}/devices/{device_id}/revoke")
-def revoke_device(surgeon_id: int, device_id: int, db: Session = Depends(get_db), admin=Depends(get_current_admin)):
-    device = db.get(SurgeonDevice, device_id)
-    if device and device.surgeon_id == surgeon_id:
-        device.is_active = False
-        db.commit()
-    return RedirectResponse("/admin/surgeons", status_code=303)
-
-
-@router.post("/surgeons/{surgeon_id}/preview-mobile")
-def preview_surgeon_mobile(
-    surgeon_id: int,
-    request: Request,
-    db: Session = Depends(get_db),
-    admin=Depends(get_current_admin),
-):
-    """Issue a surgeon session in this browser without consuming a magic link.
-
-    Uses cookie ``surgeon_token_preview`` so real ``surgeon_token`` (physician phone) is untouched.
-    """
-    surgeon = db.get(Surgeon, surgeon_id)
-    if not surgeon or not surgeon.is_active:
-        raise HTTPException(status_code=404, detail="Physician not found or inactive")
-
-    now = datetime.now(timezone.utc)
-    ua = request.headers.get("user-agent", "Desktop preview")
-    device = (
-        db.query(SurgeonDevice)
-        .filter(
-            SurgeonDevice.surgeon_id == surgeon_id,
-            SurgeonDevice.device_name == SURGEON_ADMIN_PREVIEW_DEVICE_NAME,
-        )
-        .first()
-    )
-    placeholder = secrets.token_urlsafe(32)
-    if not device:
-        device = SurgeonDevice(
-            surgeon_id=surgeon_id,
-            device_name=SURGEON_ADMIN_PREVIEW_DEVICE_NAME,
-            user_agent=ua,
-            token_hash=hashlib.sha256(placeholder.encode()).hexdigest(),
-            last_seen=now,
-        )
-        db.add(device)
-        db.commit()
-        db.refresh(device)
-    else:
-        device.is_active = True
-        device.last_seen = now
-        device.user_agent = ua
-        db.commit()
-
-    session_token = create_surgeon_session_token(device.id)
-    resp = RedirectResponse("/surgeon/schedule", status_code=303)
-    resp.set_cookie(
-        "surgeon_token_preview",
-        session_token,
-        httponly=True,
-        secure=cookie_secure(),
-        samesite="lax",
-        max_age=365 * 24 * 3600,
-    )
-    return resp
 
 
 # ── Call Schedule ──────────────────────────────────────────────────────────────
@@ -1208,5 +1008,4 @@ def call_rotation_auto_fill(
         f"/admin/schedule-templates?tab=call&msg=call_filled&created={created}&skipped={skipped}",
         status_code=303,
     )
-
 

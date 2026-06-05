@@ -1,5 +1,5 @@
 """Native iOS API endpoints."""
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -46,7 +46,7 @@ def native_mark_alerts_read(
         NativeScheduleAlert.surgeon_id == surgeon.id,
         NativeScheduleAlert.read_at.is_(None),
     ).all()
-    now = datetime.utcnow()
+    now = datetime.now(UTC).replace(tzinfo=None)
     for row in rows:
         row.read_at = now
     db.commit()
@@ -238,7 +238,7 @@ def native_push_token(
         row.device_id = device.id if device else None
         row.platform = body.platform or "ios"
         row.is_active = True
-        row.updated_at = datetime.utcnow()
+        row.updated_at = datetime.now(UTC).replace(tzinfo=None)
     else:
         db.add(NativePushToken(
             surgeon_id=surgeon.id,

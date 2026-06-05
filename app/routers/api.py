@@ -1,5 +1,4 @@
 """JSON API endpoints — FullCalendar event feed, push subscription, health."""
-import json
 import re
 from collections import defaultdict
 from datetime import date, datetime, timedelta
@@ -20,15 +19,18 @@ from ..push import send_native_push_to_surgeon
 from ..conflicts import check_conflicts
 from ..native_call_coverage_service import assign_native_call_coverage, cancel_native_call_coverage
 from ..native_home_service import build_native_home
+from ..native_request_off_service import (
+    NativeRequestOffInput,
+    cancel_native_request_off as cancel_native_request_off_service,
+    create_native_request_off,
+    update_native_request_off,
+)
 from ..native_support import (
     date_label as _date_label,
     fmt_time as _fmt_time,
     meetings_for_surgeon as _meetings_for_surgeon,
-    normalize_day_off_segments as _normalize_day_off_segments,
     parse_hhmm as _parse_hhmm,
     segment_for_date as _segment_for_date,
-    serialize_day_off as _serialize_day_off,
-    validate_day_off_segments as _validate_day_off_segments,
 )
 
 router = APIRouter(prefix="/api")
@@ -463,6 +465,19 @@ class NativeRequestOffBody(BaseModel):
     segments: list[dict] | None = None
 
 
+def _native_request_off_input(body: NativeRequestOffBody) -> NativeRequestOffInput:
+    return NativeRequestOffInput(
+        start_date=body.start_date,
+        end_date=body.end_date,
+        reason=body.reason,
+        notes=body.notes,
+        is_full_day=body.is_full_day,
+        start=body.start,
+        end=body.end,
+        segments=body.segments,
+    )
+
+
 @router.post("/native/request-off")
 def native_request_off(
     body: NativeRequestOffBody,
@@ -470,61 +485,7 @@ def native_request_off(
     auth=Depends(get_current_surgeon),
 ):
     surgeon, _ = auth
-    today = date.today()
-    if body.start_date < today or body.end_date < today:
-        raise HTTPException(400, "Days off can only be requested for today or later.")
-    if body.end_date < body.start_date:
-        raise HTTPException(400, "End date must be the same day or after the start date.")
-
-    segments = _normalize_day_off_segments(body.start_date, body.end_date, body.is_full_day, body.start, body.end, body.segments)
-    _validate_day_off_segments(segments)
-    first_partial = next((s for s in segments if not s.get("isFullDay")), None)
-    start_t = _parse_hhmm(first_partial.get("start")) if first_partial else None
-    end_t = _parse_hhmm(first_partial.get("end")) if first_partial else None
-
-    conflict_msgs = check_conflicts(
-        surgeon.id,
-        body.start_date,
-        body.end_date,
-        db,
-        target_entity={"type": "day_off", "start_date": body.start_date, "end_date": body.end_date},
-    )
-    overlap = db.query(DayOff).filter(
-        DayOff.surgeon_id == surgeon.id,
-        DayOff.status.in_(["pending", "approved"]),
-        DayOff.start_date <= body.end_date,
-        DayOff.end_date >= body.start_date,
-    ).first()
-    if overlap:
-        conflict_msgs.append(
-            f"You already have a request for {overlap.start_date.isoformat()} - {overlap.end_date.isoformat()}"
-        )
-    if conflict_msgs:
-        return {"ok": False, "request": None, "warnings": conflict_msgs[:5]}
-
-    row = DayOff(
-        surgeon_id=surgeon.id,
-        start_date=body.start_date,
-        end_date=body.end_date,
-        reason=body.reason.strip(),
-        notes=body.notes.strip(),
-        is_full_day=body.is_full_day,
-        start_time=start_t,
-        end_time=end_t,
-        segments=json.dumps(segments),
-        status="pending",
-    )
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    send_native_push_to_surgeon(
-        surgeon.id,
-        "Days off request pending",
-        f"{body.start_date.strftime('%b %-d')} request sent for approval",
-        db,
-        {"type": "day_off", "requestId": row.id},
-    )
-    return {"ok": True, "request": _serialize_day_off(row), "warnings": conflict_msgs[:3]}
+    return create_native_request_off(db, surgeon, _native_request_off_input(body))
 
 
 @router.put("/native/request-off/{dayoff_id}")
@@ -535,63 +496,7 @@ def native_update_request_off(
     auth=Depends(get_current_surgeon),
 ):
     surgeon, _ = auth
-    row = db.get(DayOff, dayoff_id)
-    if not row or row.surgeon_id != surgeon.id:
-        raise HTTPException(404, "Days off request not found")
-    today = date.today()
-    if body.start_date < today or body.end_date < today:
-        raise HTTPException(400, "Days off can only be changed for today or later.")
-    if body.end_date < body.start_date:
-        raise HTTPException(400, "End date must be the same day or after the start date.")
-
-    segments = _normalize_day_off_segments(body.start_date, body.end_date, body.is_full_day, body.start, body.end, body.segments)
-    _validate_day_off_segments(segments)
-    first_partial = next((s for s in segments if not s.get("isFullDay")), None)
-    start_t = _parse_hhmm(first_partial.get("start")) if first_partial else None
-    end_t = _parse_hhmm(first_partial.get("end")) if first_partial else None
-
-    conflict_msgs = check_conflicts(
-        surgeon.id,
-        body.start_date,
-        body.end_date,
-        db,
-        exclude_dayoff_id=row.id,
-        target_entity={"type": "day_off", "start_date": body.start_date, "end_date": body.end_date},
-    )
-    overlap = db.query(DayOff).filter(
-        DayOff.id != row.id,
-        DayOff.surgeon_id == surgeon.id,
-        DayOff.status.in_(["pending", "approved"]),
-        DayOff.start_date <= body.end_date,
-        DayOff.end_date >= body.start_date,
-    ).first()
-    if overlap:
-        conflict_msgs.append(
-            f"You already have a request for {overlap.start_date.isoformat()} - {overlap.end_date.isoformat()}"
-        )
-    if conflict_msgs:
-        return {"ok": False, "request": _serialize_day_off(row), "warnings": conflict_msgs[:5]}
-
-    row.start_date = body.start_date
-    row.end_date = body.end_date
-    row.reason = body.reason.strip()
-    row.notes = body.notes.strip()
-    row.is_full_day = body.is_full_day
-    row.start_time = start_t
-    row.end_time = end_t
-    row.segments = json.dumps(segments)
-    row.status = "pending"
-    row.admin_note = None
-    db.commit()
-    db.refresh(row)
-    send_native_push_to_surgeon(
-        surgeon.id,
-        "Days off request updated",
-        f"{body.start_date.strftime('%b %-d')} request updated and pending approval",
-        db,
-        {"type": "day_off", "requestId": row.id},
-    )
-    return {"ok": True, "request": _serialize_day_off(row), "warnings": []}
+    return update_native_request_off(db, surgeon, dayoff_id, _native_request_off_input(body))
 
 
 @router.delete("/native/request-off/{dayoff_id}")
@@ -601,19 +506,7 @@ def native_cancel_request_off(
     auth=Depends(get_current_surgeon),
 ):
     surgeon, _ = auth
-    row = db.get(DayOff, dayoff_id)
-    if not row or row.surgeon_id != surgeon.id:
-        raise HTTPException(404, "Days off request not found")
-    db.delete(row)
-    db.commit()
-    send_native_push_to_surgeon(
-        surgeon.id,
-        "Days off canceled",
-        "Your schedule has been restored for the canceled days.",
-        db,
-        {"type": "day_off", "requestId": dayoff_id, "status": "canceled"},
-    )
-    return {"ok": True}
+    return cancel_native_request_off_service(db, surgeon, dayoff_id)
 
 
 class NativeCallCoverageBody(BaseModel):

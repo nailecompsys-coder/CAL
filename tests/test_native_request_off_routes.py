@@ -49,7 +49,7 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
                 ],
             )
 
-            with patch("app.routers.api.check_conflicts", return_value=[]), patch("app.routers.api.send_native_push_to_surgeon"):
+            with patch("app.native_request_off_service.check_conflicts", return_value=[]), patch("app.native_request_off_service.send_native_push_to_surgeon"):
                 create_response = native_request_off(create_body, db=db, auth=(surgeon, "token"))
 
             self.assertTrue(create_response["ok"])
@@ -82,7 +82,7 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
                 segments=[{"date": updated_start.isoformat(), "isFullDay": True}],
             )
 
-            with patch("app.routers.api.check_conflicts", return_value=[]), patch("app.routers.api.send_native_push_to_surgeon"):
+            with patch("app.native_request_off_service.check_conflicts", return_value=[]), patch("app.native_request_off_service.send_native_push_to_surgeon"):
                 update_response = native_update_request_off(row.id, update_body, db=db, auth=(surgeon, "token"))
 
             self.assertTrue(update_response["ok"])
@@ -100,7 +100,7 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
             self.assertEqual(refreshed.status, "pending")
             self.assertIsNone(refreshed.admin_note)
 
-            with patch("app.routers.api.send_native_push_to_surgeon"):
+            with patch("app.native_request_off_service.send_native_push_to_surgeon"):
                 delete_response = native_cancel_request_off(row.id, db=db, auth=(surgeon, "token"))
 
             self.assertTrue(delete_response["ok"])
@@ -121,7 +121,7 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
                 is_full_day=True,
             )
 
-            with patch("app.routers.api.check_conflicts", return_value=["Clinic conflict"]), patch("app.routers.api.send_native_push_to_surgeon"):
+            with patch("app.native_request_off_service.check_conflicts", return_value=["Clinic conflict"]), patch("app.native_request_off_service.send_native_push_to_surgeon"):
                 response = native_request_off(body, db=db, auth=(surgeon, "token"))
 
             self.assertFalse(response["ok"])

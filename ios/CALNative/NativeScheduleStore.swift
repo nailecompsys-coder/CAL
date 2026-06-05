@@ -67,7 +67,7 @@ final class NativeScheduleStore: ObservableObject {
 
   private func loadRange(start: Date, end: Date, fallbackDate: Date) async {
     guard let token = sessionToken, !token.isEmpty else {
-      days = ScheduleFixtures.week(containing: fallbackDate)
+      days = []
       loadState = .idle
       return
     }
@@ -79,10 +79,7 @@ final class NativeScheduleStore: ObservableObject {
       apply(home)
       loadState = .loaded
     } catch {
-      if days.isEmpty {
-        days = ScheduleFixtures.week(containing: fallbackDate)
-      }
-      loadState = .warning("Live sync failed. Showing preview data. \(error.localizedDescription)")
+      loadState = .warning("Live sync failed. Showing last loaded schedule. \(error.localizedDescription)")
     }
   }
 

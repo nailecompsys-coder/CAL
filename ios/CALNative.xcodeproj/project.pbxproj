@@ -22,7 +22,6 @@
 			6A45D70D2D0F41B4A3C5E901 /* TimeOffRequestSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A45D70E2D0F41B4A3C5E901 /* TimeOffRequestSheet.swift */; };
 			6A45D70F2D0F41B4A3C5E901 /* TimeOffMonthViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A45D7102D0F41B4A3C5E901 /* TimeOffMonthViews.swift */; };
 			6A45D7112D0F41B4A3C5E901 /* NativeAPIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A45D7122D0F41B4A3C5E901 /* NativeAPIModels.swift */; };
-			6A45D7132D0F41B4A3C5E901 /* ScheduleFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A45D7142D0F41B4A3C5E901 /* ScheduleFixtures.swift */; };
 			6A45D7152D0F41B4A3C5E901 /* CallCoverageViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A45D7162D0F41B4A3C5E901 /* CallCoverageViews.swift */; };
 			6A45D7172D0F41B4A3C5E901 /* ScheduleDailyViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A45D7182D0F41B4A3C5E901 /* ScheduleDailyViews.swift */; };
 			6A45D6F32D0F41B4A3C5E901 /* NativeAuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A45D6F12D0F41B4A3C5E901 /* NativeAuthView.swift */; };
@@ -60,7 +59,6 @@
 			6A45D70E2D0F41B4A3C5E901 /* TimeOffRequestSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TimeOffRequestSheet.swift; path = CALNative/TimeOffRequestSheet.swift; sourceTree = "<group>"; };
 			6A45D7102D0F41B4A3C5E901 /* TimeOffMonthViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TimeOffMonthViews.swift; path = CALNative/TimeOffMonthViews.swift; sourceTree = "<group>"; };
 			6A45D7122D0F41B4A3C5E901 /* NativeAPIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeAPIModels.swift; path = CALNative/NativeAPIModels.swift; sourceTree = "<group>"; };
-			6A45D7142D0F41B4A3C5E901 /* ScheduleFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ScheduleFixtures.swift; path = CALNative/ScheduleFixtures.swift; sourceTree = "<group>"; };
 			6A45D7162D0F41B4A3C5E901 /* CallCoverageViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CallCoverageViews.swift; path = CALNative/CallCoverageViews.swift; sourceTree = "<group>"; };
 			6A45D7182D0F41B4A3C5E901 /* ScheduleDailyViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ScheduleDailyViews.swift; path = CALNative/ScheduleDailyViews.swift; sourceTree = "<group>"; };
 			6A45D6F12D0F41B4A3C5E901 /* NativeAuthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeAuthView.swift; path = CALNative/NativeAuthView.swift; sourceTree = "<group>"; };
@@ -114,7 +112,6 @@
 						6A45D71C2D0F41B4A3C5E901 /* NativeAuthAPIModels.swift */,
 						6A45D71E2D0F41B4A3C5E901 /* NativeTimeOffAPIModels.swift */,
 						6A45D7202D0F41B4A3C5E901 /* NativeCallCoverageAPIModels.swift */,
-						6A45D7142D0F41B4A3C5E901 /* ScheduleFixtures.swift */,
 						6A45D7162D0F41B4A3C5E901 /* CallCoverageViews.swift */,
 						6A45D7182D0F41B4A3C5E901 /* ScheduleDailyViews.swift */,
 					6A45D6FC2D0F41B4A3C5E901 /* NativeScheduleStore.swift */,
@@ -417,7 +414,6 @@
 					6A45D71B2D0F41B4A3C5E901 /* NativeAuthAPIModels.swift in Sources */,
 					6A45D71D2D0F41B4A3C5E901 /* NativeTimeOffAPIModels.swift in Sources */,
 					6A45D71F2D0F41B4A3C5E901 /* NativeCallCoverageAPIModels.swift in Sources */,
-					6A45D7132D0F41B4A3C5E901 /* ScheduleFixtures.swift in Sources */,
 					6A45D7152D0F41B4A3C5E901 /* CallCoverageViews.swift in Sources */,
 					6A45D7172D0F41B4A3C5E901 /* ScheduleDailyViews.swift in Sources */,
 					6A45D6FB2D0F41B4A3C5E901 /* NativeScheduleStore.swift in Sources */,

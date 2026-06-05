@@ -33,7 +33,7 @@ struct NativeDayResponse: Decodable {
       assignments: callAssignments.map { $0.scheduleAssignment(dateKey: date) },
       off: offSurgeons.map(\.initials),
       requestedOff: (requestedOffSurgeons ?? []).map(\.initials),
-      mySchedule: scheduleItems.isEmpty ? ScheduleFixtures.doctorScheduleFallback(for: parsedDate) : scheduleItems,
+      mySchedule: scheduleItems,
       meetings: meetingItems,
       personalItems: personal
     )

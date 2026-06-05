@@ -79,6 +79,19 @@ struct ScheduleDay: Identifiable {
     }
     return "\(assignments.count) on call"
   }
+
+  static func empty(for date: Date) -> ScheduleDay {
+    ScheduleDay(
+      id: dateKey(date),
+      date: date,
+      assignments: [],
+      off: [],
+      requestedOff: [],
+      mySchedule: [],
+      meetings: [],
+      personalItems: []
+    )
+  }
 }
 
 struct TimeOffRequest: Identifiable {
@@ -191,6 +204,19 @@ struct MonthCell: Identifiable {
     let hiddenCount = values.count - min(values.count, limit)
     guard hiddenCount > 0 else { return visible }
     return "\(visible)+\(hiddenCount)"
+  }
+
+  static func empty(for date: Date, isCurrentMonth: Bool, isToday: Bool) -> MonthCell {
+    MonthCell(
+      id: dateKey(date),
+      date: date,
+      isCurrentMonth: isCurrentMonth,
+      isToday: isToday,
+      assignments: [],
+      callInitials: [],
+      offInitials: [],
+      schedulePeriods: []
+    )
   }
 }
 

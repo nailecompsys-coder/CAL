@@ -29,7 +29,7 @@ struct ScheduleHomeView: View {
   @State private var coveringAssignment: ScheduleAssignment?
 
   private var selectedDay: ScheduleDay {
-    store.day(for: selectedDate) ?? ScheduleFixtures.day(for: selectedDate)
+    store.day(for: selectedDate) ?? ScheduleDay.empty(for: selectedDate)
   }
 
   private var visibleWeek: [ScheduleDay] {

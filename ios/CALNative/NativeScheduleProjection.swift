@@ -15,7 +15,7 @@ struct NativeScheduleProjection {
 
     return (0..<7).compactMap { offset in
       guard let dayDate = calendar.date(byAdding: .day, value: offset, to: start) else { return nil }
-      return day(for: dayDate) ?? ScheduleFixtures.day(for: dayDate)
+      return day(for: dayDate) ?? ScheduleDay.empty(for: dayDate)
     }
   }
 
@@ -29,12 +29,16 @@ struct NativeScheduleProjection {
 
     return (0..<42).compactMap { offset in
       guard let cellDate = calendar.date(byAdding: .day, value: offset, to: gridStart) else { return nil }
-      let day = self.day(for: cellDate) ?? ScheduleFixtures.day(for: cellDate)
+      let isCurrentMonth = calendar.isDate(cellDate, equalTo: date, toGranularity: .month)
+      let isToday = calendar.isDateInToday(cellDate)
+      guard let day = self.day(for: cellDate) else {
+        return MonthCell.empty(for: cellDate, isCurrentMonth: isCurrentMonth, isToday: isToday)
+      }
       return MonthCell(
         id: dateKey(cellDate),
         date: cellDate,
-        isCurrentMonth: calendar.isDate(cellDate, equalTo: date, toGranularity: .month),
-        isToday: calendar.isDateInToday(cellDate),
+        isCurrentMonth: isCurrentMonth,
+        isToday: isToday,
         assignments: day.assignments,
         callInitials: day.assignments.map(\.surgeon),
         offInitials: day.off,

@@ -38,7 +38,7 @@ struct NativeScheduleActions {
       throw NativeCALError.missingSession
     }
     guard let rotationId = assignment.rotationId else {
-      throw NativeCALError.requestRejected("This on-call row is preview data and cannot be updated.")
+      throw NativeCALError.requestRejected("This on-call row is not linked to the live schedule and cannot be updated.")
     }
 
     _ = try await client.submitCallCoverage(

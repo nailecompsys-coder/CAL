@@ -22,6 +22,7 @@
 			6A45D70F2D0F41B4A3C5E901 /* TimeOffMonthViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A45D7102D0F41B4A3C5E901 /* TimeOffMonthViews.swift */; };
 			6A45D7112D0F41B4A3C5E901 /* NativeAPIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A45D7122D0F41B4A3C5E901 /* NativeAPIModels.swift */; };
 			6A45D7132D0F41B4A3C5E901 /* ScheduleFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A45D7142D0F41B4A3C5E901 /* ScheduleFixtures.swift */; };
+			6A45D7152D0F41B4A3C5E901 /* CallCoverageViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A45D7162D0F41B4A3C5E901 /* CallCoverageViews.swift */; };
 			6A45D6F32D0F41B4A3C5E901 /* NativeAuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A45D6F12D0F41B4A3C5E901 /* NativeAuthView.swift */; };
 		6A45D6F42D0F41B4A3C5E901 /* CALNativeTabShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A45D6F22D0F41B4A3C5E901 /* CALNativeTabShell.swift */; };
 		6A45D6F92D0F41B4A3C5E901 /* CALNativeModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A45D6FA2D0F41B4A3C5E901 /* CALNativeModels.swift */; };
@@ -54,6 +55,7 @@
 			6A45D7102D0F41B4A3C5E901 /* TimeOffMonthViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = TimeOffMonthViews.swift; path = CALNative/TimeOffMonthViews.swift; sourceTree = "<group>"; };
 			6A45D7122D0F41B4A3C5E901 /* NativeAPIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeAPIModels.swift; path = CALNative/NativeAPIModels.swift; sourceTree = "<group>"; };
 			6A45D7142D0F41B4A3C5E901 /* ScheduleFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ScheduleFixtures.swift; path = CALNative/ScheduleFixtures.swift; sourceTree = "<group>"; };
+			6A45D7162D0F41B4A3C5E901 /* CallCoverageViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CallCoverageViews.swift; path = CALNative/CallCoverageViews.swift; sourceTree = "<group>"; };
 			6A45D6F12D0F41B4A3C5E901 /* NativeAuthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeAuthView.swift; path = CALNative/NativeAuthView.swift; sourceTree = "<group>"; };
 		6A45D6F22D0F41B4A3C5E901 /* CALNativeTabShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CALNativeTabShell.swift; path = CALNative/CALNativeTabShell.swift; sourceTree = "<group>"; };
 		6A45D6FA2D0F41B4A3C5E901 /* CALNativeModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CALNativeModels.swift; path = CALNative/CALNativeModels.swift; sourceTree = "<group>"; };
@@ -99,6 +101,7 @@
 						6A45D6FA2D0F41B4A3C5E901 /* CALNativeModels.swift */,
 						6A45D7122D0F41B4A3C5E901 /* NativeAPIModels.swift */,
 						6A45D7142D0F41B4A3C5E901 /* ScheduleFixtures.swift */,
+						6A45D7162D0F41B4A3C5E901 /* CallCoverageViews.swift */,
 					6A45D6FC2D0F41B4A3C5E901 /* NativeScheduleStore.swift */,
 					6A45D7082D0F41B4A3C5E901 /* NativeScheduleActions.swift */,
 					6A45D70A2D0F41B4A3C5E901 /* NativeScheduleProjection.swift */,
@@ -396,6 +399,7 @@
 					6A45D6F92D0F41B4A3C5E901 /* CALNativeModels.swift in Sources */,
 					6A45D7112D0F41B4A3C5E901 /* NativeAPIModels.swift in Sources */,
 					6A45D7132D0F41B4A3C5E901 /* ScheduleFixtures.swift in Sources */,
+					6A45D7152D0F41B4A3C5E901 /* CallCoverageViews.swift in Sources */,
 					6A45D6FB2D0F41B4A3C5E901 /* NativeScheduleStore.swift in Sources */,
 					6A45D7072D0F41B4A3C5E901 /* NativeScheduleActions.swift in Sources */,
 					6A45D7092D0F41B4A3C5E901 /* NativeScheduleProjection.swift in Sources */,

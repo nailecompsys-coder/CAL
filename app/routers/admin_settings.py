@@ -9,7 +9,15 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from .. import wasabi_backup
-from ..auth import get_current_admin, hash_password, verify_password
+from ..admin_settings_service import (
+    add_admin_user as add_admin_user_service,
+    delete_admin_user as delete_admin_user_service,
+    edit_admin_user as edit_admin_user_service,
+    save_rule_config,
+    set_admin_password as set_admin_password_service,
+    toggle_admin_user as toggle_admin_user_service,
+)
+from ..auth import get_current_admin, verify_password
 from ..database import get_db
 from ..jinja_env import templates
 from ..models import AdminUser, Surgeon, SurgeonDevice
@@ -100,35 +108,8 @@ async def save_rules(
     current_admin=Depends(get_current_admin),
 ):
     """Save scheduling rule config (enabled + config params) from form."""
-    import json
-    from ..models import SchedulingRuleConfig
-    from ..rules_engine.registry import ALL_RULES
-
     form = await request.form()
-    for rule in ALL_RULES:
-        row = db.query(SchedulingRuleConfig).filter(SchedulingRuleConfig.rule_id == rule.rule_id).first()
-        if not row:
-            row = SchedulingRuleConfig(rule_id=rule.rule_id, enabled=True, config="{}")
-            db.add(row)
-        enabled_key = f"rule_{rule.rule_id}_enabled"
-        row.enabled = form.get(enabled_key) == "1"
-        config = dict(rule.default_config) if rule.default_config else {}
-        for schema_item in rule.config_schema:
-            key = schema_item.get("key")
-            if not key:
-                continue
-            form_key = f"rule_{rule.rule_id}_{key}"
-            val = form.get(form_key, "").strip()
-            if schema_item.get("type") == "number":
-                if val != "":
-                    try:
-                        config[key] = int(val)
-                    except ValueError:
-                        config[key] = config.get(key, 0)
-            elif val:
-                config[key] = val
-        row.config = json.dumps(config)
-    db.commit()
+    save_rule_config(db, form)
     return RedirectResponse("/admin/settings?msg=rules_saved", status_code=303)
 
 
@@ -156,27 +137,8 @@ def add_admin_user(
     db: Session = Depends(get_db),
     current_admin=Depends(get_current_admin),
 ):
-    username = username.strip().lower()
-    email = email.strip().lower()
-    if not username or not email:
-        return RedirectResponse("/admin/settings?msg=user_invalid", status_code=303)
-    if len(password) < 8:
-        return RedirectResponse("/admin/settings?msg=password_short", status_code=303)
-    if db.query(AdminUser).filter(AdminUser.username == username).first():
-        return RedirectResponse("/admin/settings?msg=username_taken", status_code=303)
-    if db.query(AdminUser).filter(AdminUser.email == email).first():
-        return RedirectResponse("/admin/settings?msg=email_taken", status_code=303)
-    db.add(
-        AdminUser(
-            username=username,
-            email=email,
-            password_hash=hash_password(password),
-            role="admin",
-            is_active=True,
-        )
-    )
-    db.commit()
-    return RedirectResponse("/admin/settings?msg=user_added", status_code=303)
+    msg = add_admin_user_service(db, username, email, password)
+    return RedirectResponse(f"/admin/settings?msg={msg}", status_code=303)
 
 
 @router.post("/settings/users/{user_id}/set-password")
@@ -186,14 +148,8 @@ def set_admin_password(
     db: Session = Depends(get_db),
     current_admin=Depends(get_current_admin),
 ):
-    user = db.get(AdminUser, user_id)
-    if not user:
-        return RedirectResponse("/admin/settings?msg=user_not_found", status_code=303)
-    if len(new_password) < 8:
-        return RedirectResponse("/admin/settings?msg=password_short", status_code=303)
-    user.password_hash = hash_password(new_password)
-    db.commit()
-    return RedirectResponse("/admin/settings?msg=password_updated", status_code=303)
+    msg = set_admin_password_service(db, user_id, new_password)
+    return RedirectResponse(f"/admin/settings?msg={msg}", status_code=303)
 
 
 @router.post("/settings/users/{user_id}/toggle")
@@ -202,15 +158,8 @@ def toggle_admin_user(
     db: Session = Depends(get_db),
     current_admin=Depends(get_current_admin),
 ):
-    user = db.get(AdminUser, user_id)
-    if not user:
-        return RedirectResponse("/admin/settings?msg=user_not_found", status_code=303)
-    active_count = db.query(AdminUser).filter(AdminUser.is_active == True).count()
-    if user.is_active and active_count <= 1:
-        return RedirectResponse("/admin/settings?msg=last_admin", status_code=303)
-    user.is_active = not user.is_active
-    db.commit()
-    return RedirectResponse("/admin/settings?msg=user_updated", status_code=303)
+    msg = toggle_admin_user_service(db, user_id)
+    return RedirectResponse(f"/admin/settings?msg={msg}", status_code=303)
 
 
 @router.post("/settings/users/{user_id}/edit")
@@ -222,25 +171,8 @@ def edit_admin_user(
     db: Session = Depends(get_db),
     current_admin=Depends(get_current_admin),
 ):
-    user = db.get(AdminUser, user_id)
-    if not user:
-        return RedirectResponse("/admin/settings?msg=user_not_found", status_code=303)
-    username = username.strip().lower()
-    email = email.strip().lower()
-    if not username or not email:
-        return RedirectResponse("/admin/settings?msg=user_invalid", status_code=303)
-    other_username = db.query(AdminUser).filter(AdminUser.username == username, AdminUser.id != user_id).first()
-    if other_username:
-        return RedirectResponse("/admin/settings?msg=username_taken", status_code=303)
-    other_email = db.query(AdminUser).filter(AdminUser.email == email, AdminUser.id != user_id).first()
-    if other_email:
-        return RedirectResponse("/admin/settings?msg=email_taken", status_code=303)
-    user.username = username
-    user.email = email
-    if new_password and len(new_password.strip()) >= 8:
-        user.password_hash = hash_password(new_password.strip())
-    db.commit()
-    return RedirectResponse("/admin/settings?msg=user_edited", status_code=303)
+    msg = edit_admin_user_service(db, user_id, username, email, new_password)
+    return RedirectResponse(f"/admin/settings?msg={msg}", status_code=303)
 
 
 @router.post("/settings/users/{user_id}/delete")
@@ -249,15 +181,8 @@ def delete_admin_user(
     db: Session = Depends(get_db),
     current_admin=Depends(get_current_admin),
 ):
-    user = db.get(AdminUser, user_id)
-    if not user:
-        return RedirectResponse("/admin/settings?msg=user_not_found", status_code=303)
-    active_count = db.query(AdminUser).filter(AdminUser.is_active == True).count()
-    if user.is_active and active_count <= 1:
-        return RedirectResponse("/admin/settings?msg=last_admin", status_code=303)
-    db.delete(user)
-    db.commit()
-    return RedirectResponse("/admin/settings?msg=user_deleted", status_code=303)
+    msg = delete_admin_user_service(db, user_id)
+    return RedirectResponse(f"/admin/settings?msg={msg}", status_code=303)
 
 
 @router.post("/settings/backup/run")

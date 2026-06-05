@@ -15,7 +15,6 @@ from app.models import (
     DayOff,
     Location,
     Meeting,
-    PatientAssignment,
     Surgeon,
     SurgeonDayItem,
 )
@@ -99,13 +98,6 @@ class NativeHomeContractTest(unittest.TestCase):
                     title="Dentist",
                     sort_order=1,
                 ),
-                PatientAssignment(
-                    surgeon_id=surgeon.id,
-                    location_id=location.id,
-                    date=date.today(),
-                    patient_count=3,
-                    notes="Rounds",
-                ),
             ])
             db.commit()
 
@@ -123,7 +115,6 @@ class NativeHomeContractTest(unittest.TestCase):
                     "surgeons",
                     "callSchedule",
                     "alerts",
-                    "patients",
                 },
                 set(payload.keys()),
             )
@@ -145,7 +136,7 @@ class NativeHomeContractTest(unittest.TestCase):
             self.assertTrue(any(item["type"] == "dayoff" for item in june_5["items"]))
             self.assertTrue(any(request["status"] == "pending" for request in payload["requests"]))
             self.assertEqual(payload["callGroups"], [{"id": group.id, "name": group.name}])
-            self.assertEqual(payload["patients"]["today"]["count"], 3)
+            self.assertFalse(any(item["type"] == "patients" for day in payload["days"] for item in day["items"]))
             self.assertIn("unreadCount", payload["alerts"])
         finally:
             db.close()

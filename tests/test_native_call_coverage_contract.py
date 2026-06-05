@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.models import Base, CallCoverage, CallGroup, CallRotation, Surgeon
 from app.native_support import serialize_call_assignment
-from app.routers.api import NativeCallCoverageBody, native_call_coverage, native_cancel_call_coverage
+from app.routers.native_api import NativeCallCoverageBody, native_call_coverage, native_cancel_call_coverage
 
 
 class NativeCallCoverageContractTest(unittest.TestCase):

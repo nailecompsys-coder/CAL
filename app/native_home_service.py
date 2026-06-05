@@ -12,7 +12,6 @@ from .models import (
     ClinicSchedule,
     DayOff,
     NativeScheduleAlert,
-    PatientAssignment,
     Surgeon,
     SurgeonDayItem,
     SurgicalCase,
@@ -48,7 +47,6 @@ class NativeHomeService:
         self._append_my_call_items()
         self._append_my_day_off_items()
         self._append_meetings()
-        self._append_patient_items()
         self._append_clinic_items()
         self._append_surgical_items()
         self._append_personal_items()
@@ -58,7 +56,6 @@ class NativeHomeService:
         requests = self._requests()
         call_groups = self._call_groups()
         call_schedule = self._call_schedule()
-        patient_summary = self._patient_summary()
         alerts = self._alerts()
 
         return {
@@ -72,7 +69,6 @@ class NativeHomeService:
             "surgeons": self._surgeons(),
             "callSchedule": call_schedule,
             "alerts": alerts,
-            "patients": patient_summary,
         }
 
     def _empty_days(self) -> list[dict]:
@@ -164,22 +160,6 @@ class NativeHomeService:
                 "end": fmt_time(meeting.end_time),
                 "notes": meeting.notes or "",
             })
-
-    def _append_patient_items(self) -> None:
-        for row in self.db.query(PatientAssignment).options(joinedload(PatientAssignment.location)).filter(
-            PatientAssignment.surgeon_id == self.surgeon.id,
-            PatientAssignment.date >= self.start_date,
-            PatientAssignment.date <= self.end_date,
-        ).order_by(PatientAssignment.date).all():
-            if row.patient_count > 0:
-                self.by_date[row.date.isoformat()]["items"].append({
-                    "id": f"pt-{row.id}",
-                    "type": "patients",
-                    "title": f"{row.patient_count} patients",
-                    "subtitle": (row.location.name if row.location else "") or row.notes or "",
-                    "start": "09:00",
-                    "notes": row.notes or "",
-                })
 
     def _append_clinic_items(self) -> None:
         for row in self.db.query(ClinicSchedule).options(joinedload(ClinicSchedule.location)).filter(
@@ -342,34 +322,6 @@ class NativeHomeService:
                 key=native_surgeon_rank_key,
             )
         ]
-
-    def _patient_summary(self) -> dict:
-        today_assignment = self.db.query(PatientAssignment).options(joinedload(PatientAssignment.location)).filter(
-            PatientAssignment.surgeon_id == self.surgeon.id,
-            PatientAssignment.date == self.today,
-        ).first()
-        upcoming_patients = self.db.query(PatientAssignment).options(joinedload(PatientAssignment.location)).filter(
-            PatientAssignment.surgeon_id == self.surgeon.id,
-            PatientAssignment.date > self.today,
-            PatientAssignment.date <= self.today + timedelta(days=7),
-        ).order_by(PatientAssignment.date).all()
-        return {
-            "today": {
-                "date": self.today.isoformat(),
-                "count": today_assignment.patient_count if today_assignment else 0,
-                "notes": today_assignment.notes if today_assignment else "",
-                "location": today_assignment.location.name if today_assignment and today_assignment.location else "",
-            },
-            "upcoming": [
-                {
-                    "date": row.date.isoformat(),
-                    "count": row.patient_count,
-                    "notes": row.notes or "",
-                    "location": row.location.name if row.location else "",
-                }
-                for row in upcoming_patients
-            ],
-        }
 
     def _alerts(self) -> dict:
         unread_alert_count = self.db.query(NativeScheduleAlert).filter(

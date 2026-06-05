@@ -11,7 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models import Base, DayOff, Surgeon
-from app.routers.api import (
+from app.routers.native_api import (
     NativeRequestOffBody,
     native_cancel_request_off,
     native_request_off,

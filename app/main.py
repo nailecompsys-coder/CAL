@@ -11,7 +11,7 @@ from .location_palette import ensure_location_palette_seeded
 from . import migrate_surgeon_sort_order
 from . import migrate_clinic_schedule_off
 from . import migrate_native_parity
-from .routers import admin, admin_call_groups, admin_daysoff, admin_locations, admin_meetings, admin_patients, admin_settings, admin_surgical_schedule, api, auth, surgeon
+from .routers import admin, admin_call_groups, admin_daysoff, admin_locations, admin_meetings, admin_patients, admin_settings, admin_surgical_schedule, api, auth, native_api, surgeon
 from .routers.surgeon import otp_router
 from . import migrate_call_groups
 
@@ -80,6 +80,7 @@ app.include_router(admin_surgical_schedule.router)
 app.include_router(surgeon.router)
 app.include_router(otp_router, prefix="/api/surgeon")
 app.include_router(api.router)
+app.include_router(native_api.router)
 
 @app.get("/", response_class=HTMLResponse)
 def root(request: Request):

@@ -21,6 +21,7 @@ final class NativeScheduleStore: ObservableObject {
 
   private let client = NativeCALClient()
   private let actions = NativeScheduleActions()
+  private let loader = NativeScheduleLoader()
   private let session = NativeSessionService()
   private var projection: NativeScheduleProjection {
     NativeScheduleProjection(days: days)
@@ -54,40 +55,42 @@ final class NativeScheduleStore: ObservableObject {
   }
 
   func load(containing date: Date, scope: ScheduleScope) async {
-    let range = DateRange(containing: date, scope: scope)
-    await loadRange(start: range.start, end: range.end, fallbackDate: date)
+    guard let token = activeToken else {
+      clearScheduleForMissingSession()
+      return
+    }
+    await loadSnapshot {
+      try await loader.load(token: token, containing: date, scope: scope)
+    }
   }
 
   func loadLookahead(containing date: Date, daysAhead: Int = 30) async {
-    let calendar = Calendar.current
-    let start = calendar.startOfDay(for: date)
-    let end = calendar.date(byAdding: .day, value: daysAhead, to: start) ?? start
-    await loadRange(start: start, end: end, fallbackDate: date)
-  }
-
-  private func loadRange(start: Date, end: Date, fallbackDate: Date) async {
-    guard let token = sessionToken, !token.isEmpty else {
-      days = []
-      loadState = .idle
+    guard let token = activeToken else {
+      clearScheduleForMissingSession()
       return
     }
+    await loadSnapshot {
+      try await loader.loadLookahead(token: token, containing: date, daysAhead: daysAhead)
+    }
+  }
 
+  private func loadSnapshot(_ operation: () async throws -> NativeScheduleSnapshot) async {
     loadState = .loading
 
     do {
-      let home = try await client.fetchHome(token: token, start: start, end: end)
-      apply(home)
+      let snapshot = try await operation()
+      apply(snapshot)
       loadState = .loaded
     } catch {
       loadState = .warning("Live sync failed. Showing last loaded schedule. \(error.localizedDescription)")
     }
   }
 
-  private func apply(_ home: NativeHomeResponse) {
-    currentSurgeon = home.surgeon
-    surgeons = home.surgeons ?? []
-    days = home.days.map { $0.scheduleDay }
-    timeOffRequests = home.requests.map(\.timeOffRequest)
+  private func apply(_ snapshot: NativeScheduleSnapshot) {
+    currentSurgeon = snapshot.currentSurgeon
+    surgeons = snapshot.surgeons
+    days = snapshot.days
+    timeOffRequests = snapshot.timeOffRequests
   }
 
   func requestOtp(email: String) async -> Bool {
@@ -176,6 +179,16 @@ final class NativeScheduleStore: ObservableObject {
     if sessionToken == nil {
       sessionToken = session.storedToken()
     }
+  }
+
+  private var activeToken: String? {
+    guard let sessionToken, !sessionToken.isEmpty else { return nil }
+    return sessionToken
+  }
+
+  private func clearScheduleForMissingSession() {
+    days = []
+    loadState = .idle
   }
 
   func eligibleCoveringSurgeons(for assignment: ScheduleAssignment) -> [NativeSurgeon] {

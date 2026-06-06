@@ -9,12 +9,10 @@ from .checker_helpers import (
     case_range,
     exclude_entity as _exclude_entity,
     meeting_range,
-    ranges_overlap,
     session_range,
     target_dates,
-    target_range_on_day,
-    target_type,
 )
+from .overlap_helpers import overlap_target, should_skip_time_overlap
 from .registry import Conflict
 
 
@@ -117,23 +115,16 @@ def check_overlap_clinic(
     target_entity: Optional[dict] = None,
 ) -> Iterator[Conflict]:
     from ..models import ClinicSchedule
-    target_kind = target_type(target_entity)
-    target_start, target_end = target_dates(target_entity, start_date, end_date)
-    target_day = target_entity.get("date") if target_entity else None
-    target_range = target_range_on_day(target_entity, target_day) if target_day else None
+    target = overlap_target(target_entity, start_date, end_date)
     for cs in db.query(ClinicSchedule).filter(
         ClinicSchedule.surgeon_id == surgeon_id,
-        ClinicSchedule.date >= target_start,
-        ClinicSchedule.date <= target_end,
+        ClinicSchedule.date >= target.start,
+        ClinicSchedule.date <= target.end,
     ).all():
         if _exclude_entity(exclude_entity, "clinic_schedule", cs.id):
             continue
-        if target_kind in {"clinic_schedule", "surgical_case", "meeting"}:
-            if not target_day or cs.date != target_day or not target_range:
-                continue
-            clinic_start, clinic_end = session_range(cs.date, cs.session)
-            if not ranges_overlap(clinic_start, clinic_end, target_range[0], target_range[1]):
-                continue
+        if should_skip_time_overlap(target, cs.date, session_range(cs.date, cs.session), {"clinic_schedule", "surgical_case", "meeting"}):
+            continue
         loc_name = cs.location.name if cs.location else "Clinic"
         yield Conflict(
             rule_id="OVERLAP_CLINIC",
@@ -155,25 +146,18 @@ def check_overlap_surgery(
     target_entity: Optional[dict] = None,
 ) -> Iterator[Conflict]:
     from ..models import SurgicalCase
-    target_kind = target_type(target_entity)
-    target_start, target_end = target_dates(target_entity, start_date, end_date)
-    target_day = target_entity.get("date") if target_entity else None
-    target_range = target_range_on_day(target_entity, target_day) if target_day else None
+    target = overlap_target(target_entity, start_date, end_date)
     q = db.query(SurgicalCase).filter(
         SurgicalCase.surgeon_id == surgeon_id,
-        SurgicalCase.date >= target_start,
-        SurgicalCase.date <= target_end,
+        SurgicalCase.date >= target.start,
+        SurgicalCase.date <= target.end,
         SurgicalCase.status != "cancelled",
     )
     if exclude_entity and exclude_entity[0] == "surgical_case":
         q = q.filter(SurgicalCase.id != exclude_entity[1])
     for sc in q.all():
-        if target_kind in {"surgical_case", "clinic_schedule", "meeting"}:
-            if not target_day or sc.date != target_day or not target_range:
-                continue
-            case_start, case_end = case_range(sc)
-            if not ranges_overlap(case_start, case_end, target_range[0], target_range[1]):
-                continue
+        if should_skip_time_overlap(target, sc.date, case_range(sc), {"surgical_case", "clinic_schedule", "meeting"}):
+            continue
         yield Conflict(
             rule_id="OVERLAP_SURGERY",
             surgeon_id=surgeon_id,
@@ -194,16 +178,13 @@ def check_overlap_meeting(
     target_entity: Optional[dict] = None,
 ) -> Iterator[Conflict]:
     from ..models import Meeting, MeetingAttendee
-    target_kind = target_type(target_entity)
-    target_start, target_end = target_dates(target_entity, start_date, end_date)
-    target_day = target_entity.get("date") if target_entity else None
-    target_range = target_range_on_day(target_entity, target_day) if target_day else None
+    target = overlap_target(target_entity, start_date, end_date)
     meetings = (
         db.query(Meeting)
         .outerjoin(MeetingAttendee)
         .filter(
-            Meeting.date >= target_start,
-            Meeting.date <= target_end,
+            Meeting.date >= target.start,
+            Meeting.date <= target.end,
             or_(
                 MeetingAttendee.surgeon_id == surgeon_id,
                 ~Meeting.attendees.any(),
@@ -215,12 +196,8 @@ def check_overlap_meeting(
     for m in meetings:
         if _exclude_entity(exclude_entity, "meeting", m.id):
             continue
-        if target_kind in {"meeting", "clinic_schedule", "surgical_case"}:
-            if not target_day or m.date != target_day or not target_range:
-                continue
-            meeting_start, meeting_end = meeting_range(m)
-            if not ranges_overlap(meeting_start, meeting_end, target_range[0], target_range[1]):
-                continue
+        if should_skip_time_overlap(target, m.date, meeting_range(m), {"meeting", "clinic_schedule", "surgical_case"}):
+            continue
         time_str = m.start_time.strftime("%-I:%M %p") if m.start_time else "TBD"
         yield Conflict(
             rule_id="OVERLAP_MEETING",

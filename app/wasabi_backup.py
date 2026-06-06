@@ -3,68 +3,40 @@ Wasabi S3 backup/restore for Cal — surgical_cal DB.
 Uses same env pattern as SSS: WASABI_BUCKET, WASABI_KEY_ID, WASABI_SECRET, WASABI_ENDPOINT.
 Prefix: cal-backups/ (so same bucket as SSS can be used).
 """
-import gzip
 import os
 import subprocess
 import tempfile
 from datetime import datetime
-from urllib.parse import urlparse
 
-import boto3
-from botocore.config import Config
 from botocore.exceptions import ClientError
 
-# Wasabi (S3-compatible) config — same env vars as SSS
-WASABI_BUCKET = os.environ.get("WASABI_BUCKET", "mfsa-cal").strip()
-WASABI_KEY_ID = os.environ.get("WASABI_KEY_ID", "").strip()
-WASABI_SECRET = os.environ.get("WASABI_SECRET", "").strip()
-WASABI_ENDPOINT_RAW = os.environ.get("WASABI_ENDPOINT", "").strip()
-WASABI_REGION = os.environ.get("WASABI_REGION", "us-east-1").strip()
+from .wasabi_config import WASABI_CONFIG, parse_database_url, s3_client
+from .wasabi_postgres import dump_database_to_gzip, restore_database_from_gzip
+
+WASABI_BUCKET = WASABI_CONFIG.bucket
+WASABI_KEY_ID = WASABI_CONFIG.key_id
+WASABI_SECRET = WASABI_CONFIG.secret
+WASABI_ENDPOINT_RAW = WASABI_CONFIG.endpoint_raw
+WASABI_REGION = WASABI_CONFIG.region
 
 BACKUP_PREFIX = "cal-backups/"
 
 
 def _wasabi_endpoint() -> str:
     """Return a valid Wasabi endpoint URL. Regional format preferred (s3.REGION.wasabisys.com)."""
-    if WASABI_ENDPOINT_RAW:
-        url = WASABI_ENDPOINT_RAW
-        if not url.startswith("http://") and not url.startswith("https://"):
-            url = "https://" + url
-        return url.rstrip("/")
-    # Default: regional endpoint per Wasabi docs (avoids "Invalid endpoint" with generic s3.wasabisys.com)
-    return f"https://s3.{WASABI_REGION}.wasabisys.com"
+    return WASABI_CONFIG.endpoint
 
 
 def _s3_client():
-    return boto3.client(
-        "s3",
-        endpoint_url=_wasabi_endpoint(),
-        region_name=WASABI_REGION,
-        aws_access_key_id=WASABI_KEY_ID,
-        aws_secret_access_key=WASABI_SECRET,
-        config=Config(signature_version="s3v4"),
-    )
+    return s3_client(WASABI_CONFIG)
 
 
 def is_configured() -> bool:
-    return bool(WASABI_KEY_ID and WASABI_SECRET and WASABI_BUCKET)
+    return WASABI_CONFIG.is_configured
 
 
 def _parse_database_url():
-    url = os.environ.get("DATABASE_URL", "")
-    if not url:
-        return None
-    # postgresql://user:pass@host:port/dbname
-    if url.startswith("postgres://"):
-        url = "postgresql://" + url[11:]
-    r = urlparse(url)
-    return {
-        "host": r.hostname or "localhost",
-        "port": r.port or 5432,
-        "user": r.username,
-        "password": r.password or "",
-        "dbname": (r.path or "").lstrip("/").split("?")[0] or "surgical_cal",
-    }
+    return parse_database_url()
 
 
 def list_backups() -> list[dict]:
@@ -116,31 +88,9 @@ def run_backup() -> dict:
     tmpdir = tempfile.mkdtemp(prefix="cal_backup_")
     dbfile = os.path.join(tmpdir, "db.sql.gz")
     try:
-        env = os.environ.copy()
-        env["PGPASSWORD"] = db["password"] or ""
-        cmd = [
-            "pg_dump",
-            "-h", db["host"],
-            "-p", str(db["port"]),
-            "-U", db["user"],
-            "--no-owner",
-            "--clean",
-            "--if-exists",
-            db["dbname"],
-        ]
-        proc = subprocess.Popen(
-            cmd,
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        gz = gzip.open(dbfile, "wb", compresslevel=6)
-        gz.writelines(proc.stdout)
-        gz.close()
-        stderr = proc.stderr.read().decode("utf-8", errors="replace")
-        proc.wait(timeout=300)
-        if proc.returncode != 0:
-            return {"success": False, "error": f"pg_dump failed: {stderr[:500]}"}
+        error = dump_database_to_gzip(db, dbfile)
+        if error:
+            return {"success": False, "error": f"pg_dump failed: {error}"}
         size = os.path.getsize(dbfile)
         client = _s3_client()
         client.upload_file(
@@ -196,27 +146,9 @@ def restore_backup(wasabi_key: str, admin_password: str, confirm: str) -> dict:
     try:
         client = _s3_client()
         client.download_file(WASABI_BUCKET, wasabi_key, local_gz)
-        env = os.environ.copy()
-        env["PGPASSWORD"] = db["password"] or ""
-        # gunzip -c file | psql ...
-        with gzip.open(local_gz, "rb") as f:
-            proc = subprocess.Popen(
-                [
-                    "psql",
-                    "-h", db["host"],
-                    "-p", str(db["port"]),
-                    "-U", db["user"],
-                    "-d", db["dbname"],
-                    "--no-password",
-                ],
-                stdin=subprocess.PIPE,
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            stdout, stderr = proc.communicate(input=f.read(), timeout=300)
-        if proc.returncode != 0:
-            return {"success": False, "error": (stderr or stdout).decode("utf-8", errors="replace")[:500]}
+        error = restore_database_from_gzip(db, local_gz)
+        if error:
+            return {"success": False, "error": error}
         return {"success": True, "restored_from": wasabi_key}
     except subprocess.TimeoutExpired:
         return {"success": False, "error": "Restore timed out"}

@@ -15,9 +15,19 @@ from .models import (
     SurgeonDayItem,
     SurgicalCase,
 )
+from .native_home_serializers import (
+    availability_payload,
+    call_item_payload,
+    clinic_item_payload,
+    day_off_item_payload,
+    empty_day_payload,
+    meeting_item_payload,
+    personal_item_payload,
+    surgeon_payload,
+    surgical_item_payload,
+)
 from .native_support import (
     active_coverage_for_rotation,
-    date_label,
     fmt_time,
     meetings_for_surgeon,
     native_surgeon_rank_key,
@@ -32,13 +42,7 @@ def empty_days(start_date: date, end_date: date) -> list[dict]:
     days = []
     current = start_date
     while current <= end_date:
-        days.append({
-            **date_label(current),
-            "items": [],
-            "offSurgeons": [],
-            "requestedOffSurgeons": [],
-            "callAssignments": [],
-        })
+        days.append(empty_day_payload(current))
         current += timedelta(days=1)
     return days
 
@@ -82,14 +86,7 @@ def append_my_call_items(db: Session, surgeon: Surgeon, start_date: date, end_da
     ).all():
         coverage = active_coverage_for_rotation(rotation)
         if rotation.surgeon_id == surgeon.id or (coverage and coverage.covering_surgeon_id == surgeon.id):
-            by_date[rotation.date.isoformat()]["items"].append({
-                "id": f"rot-{rotation.id}",
-                "rawId": rotation.id,
-                "type": "oncall",
-                "title": "On-Call Coverage" if coverage and coverage.covering_surgeon_id == surgeon.id else "On-Call",
-                "subtitle": rotation.call_group.name if rotation.call_group else "",
-                "allDay": True,
-            })
+            by_date[rotation.date.isoformat()]["items"].append(call_item_payload(rotation, coverage, surgeon.id))
 
 
 def append_my_day_off_items(day_off_rows: list[DayOff], start_date: date, end_date: date, by_date: dict) -> None:
@@ -99,29 +96,13 @@ def append_my_day_off_items(day_off_rows: list[DayOff], start_date: date, end_da
         while span <= span_end:
             segment = segment_for_date(row, span) or {}
             is_full = segment.get("isFullDay", row.is_full_day if row.is_full_day is not None else True)
-            by_date[span.isoformat()]["items"].append({
-                "id": f"off-{row.id}-{span.isoformat()}",
-                "type": "dayoff",
-                "title": "Day Off",
-                "subtitle": f"{row.reason or ''}{' · pending' if row.status == 'pending' else ''}".strip(" ·"),
-                "start": None if is_full else segment.get("start") or fmt_time(row.start_time),
-                "end": None if is_full else segment.get("end") or fmt_time(row.end_time),
-                "allDay": is_full,
-            })
+            by_date[span.isoformat()]["items"].append(day_off_item_payload(row, span, segment, is_full))
             span += timedelta(days=1)
 
 
 def append_meetings(db: Session, surgeon: Surgeon, start_date: date, end_date: date, by_date: dict) -> None:
     for meeting in meetings_for_surgeon(db, surgeon.id, start_date, end_date):
-        by_date[meeting.date.isoformat()]["items"].append({
-            "id": f"mtg-{meeting.id}",
-            "type": "meeting",
-            "title": meeting.title,
-            "subtitle": meeting.location_text or "",
-            "start": fmt_time(meeting.start_time),
-            "end": fmt_time(meeting.end_time),
-            "notes": meeting.notes or "",
-        })
+        by_date[meeting.date.isoformat()]["items"].append(meeting_item_payload(meeting))
 
 
 def append_clinic_items(db: Session, surgeon: Surgeon, start_date: date, end_date: date, by_date: dict, day_off_rows: list[DayOff]) -> None:
@@ -133,17 +114,7 @@ def append_clinic_items(db: Session, surgeon: Surgeon, start_date: date, end_dat
         start_t, end_t = session_times(row.session)
         if blocked_by_day_off(day_off_rows, row.date, start_t, end_t):
             continue
-        title = "OFF" if (row.assignment_type or "assigned") == "off" else (row.location.name if row.location else "Clinic")
-        by_date[row.date.isoformat()]["items"].append({
-            "id": f"clinic-{row.id}",
-            "type": "clinic",
-            "title": title,
-            "subtitle": (row.session or "full").upper(),
-            "start": start_t,
-            "end": end_t,
-            "color": "#cbd5e1" if title == "OFF" else ((row.location.color if row.location else None) or "#0ea5e9"),
-            "notes": row.notes or "",
-        })
+        by_date[row.date.isoformat()]["items"].append(clinic_item_payload(row, start_t, end_t))
 
 
 def append_surgical_items(db: Session, surgeon: Surgeon, start_date: date, end_date: date, by_date: dict, day_off_rows: list[DayOff]) -> None:
@@ -155,21 +126,7 @@ def append_surgical_items(db: Session, surgeon: Surgeon, start_date: date, end_d
     ).order_by(SurgicalCase.date, SurgicalCase.start_time, SurgicalCase.id).all():
         if blocked_by_day_off(day_off_rows, row.date, fmt_time(row.start_time), fmt_time(row.end_time)):
             continue
-        by_date[row.date.isoformat()]["items"].append({
-            "id": f"surg-{row.id}",
-            "rawId": row.id,
-            "type": "surgery",
-            "title": row.patient_name or "Surgery",
-            "subtitle": row.procedure or "",
-            "start": fmt_time(row.start_time) or "08:00",
-            "end": fmt_time(row.end_time),
-            "location": (row.location.name if row.location else "") or row.room_text or "",
-            "room": row.room_text or "",
-            "status": row.status or "scheduled",
-            "notes": row.notes or "",
-            "surgeonNotes": row.surgeon_notes or "",
-            "color": (row.location.color if row.location else None) or "#e0f2fe",
-        })
+        by_date[row.date.isoformat()]["items"].append(surgical_item_payload(row))
 
 
 def append_personal_items(db: Session, surgeon: Surgeon, start_date: date, end_date: date, by_date: dict) -> None:
@@ -178,16 +135,7 @@ def append_personal_items(db: Session, surgeon: Surgeon, start_date: date, end_d
         SurgeonDayItem.date >= start_date,
         SurgeonDayItem.date <= end_date,
     ).order_by(SurgeonDayItem.date, SurgeonDayItem.sort_order, SurgeonDayItem.id).all():
-        by_date[row.date.isoformat()]["items"].append({
-            "id": f"personal-{row.id}",
-            "rawId": row.id,
-            "type": "personal",
-            "title": row.title,
-            "subtitle": row.notes or "",
-            "start": fmt_time(row.start_time),
-            "end": fmt_time(row.end_time),
-            "notes": row.notes or "",
-        })
+        by_date[row.date.isoformat()]["items"].append(personal_item_payload(row))
 
 
 def sort_day_items(days: list[dict]) -> None:
@@ -206,12 +154,7 @@ def availability(db: Session, surgeon: Surgeon, today: date) -> list[dict]:
     for i in range(28):
         day = today + timedelta(days=i)
         rec = avail_map.get(day)
-        rows.append({
-            **date_label(day),
-            "isAvailable": rec.is_available if rec else True,
-            "start": fmt_time(rec.start_time) if rec else None,
-            "end": fmt_time(rec.end_time) if rec else None,
-        })
+        rows.append(availability_payload(day, rec))
     return rows
 
 
@@ -231,7 +174,7 @@ def call_groups(db: Session) -> list[CallGroup]:
 
 def surgeons(db: Session) -> list[dict]:
     return [
-        {"id": row.id, "name": row.full_name, "initials": row.initials, "staffType": row.staff_type, "sortOrder": row.sort_order or 0}
+        surgeon_payload(row)
         for row in sorted(
             db.query(Surgeon).filter(Surgeon.is_active == True).all(),  # noqa: E712
             key=native_surgeon_rank_key,

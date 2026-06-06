@@ -4,6 +4,7 @@ from typing import Iterator, Optional
 
 from sqlalchemy.orm import Session
 
+from .buffer_helpers import case_end_datetime, clinic_and_surgery_rows
 from .checker_helpers import target_type
 from .registry import CLINIC_AM_END, Conflict, _session_end_time, _session_start_time
 
@@ -17,25 +18,11 @@ def check_buffer_clinic_to_surgery(
     exclude_entity: Optional[tuple[str, int]] = None,
     target_entity: Optional[dict] = None,
 ) -> Iterator[Conflict]:
-    from ..models import ClinicSchedule, SurgicalCase
     if target_type(target_entity) not in {"clinic_schedule", "surgical_case"}:
         return
     minutes = config.get("minutes", 30)
     delta = timedelta(minutes=minutes)
-    clinics = db.query(ClinicSchedule).filter(
-        ClinicSchedule.surgeon_id == surgeon_id,
-        ClinicSchedule.date >= start_date,
-        ClinicSchedule.date <= end_date,
-    ).all()
-    surgeries = db.query(SurgicalCase).filter(
-        SurgicalCase.surgeon_id == surgeon_id,
-        SurgicalCase.date >= start_date,
-        SurgicalCase.date <= end_date,
-        SurgicalCase.status != "cancelled",
-    )
-    if exclude_entity and exclude_entity[0] == "surgical_case":
-        surgeries = surgeries.filter(SurgicalCase.id != exclude_entity[1])
-    surgeries = surgeries.all()
+    clinics, surgeries = clinic_and_surgery_rows(db, surgeon_id, start_date, end_date, exclude_entity)
     for sc in surgeries:
         case_start = datetime.combine(sc.date, sc.start_time)
         for cs in clinics:
@@ -64,31 +51,17 @@ def check_buffer_surgery_to_clinic(
     exclude_entity: Optional[tuple[str, int]] = None,
     target_entity: Optional[dict] = None,
 ) -> Iterator[Conflict]:
-    from ..models import ClinicSchedule, SurgicalCase
     if target_type(target_entity) not in {"clinic_schedule", "surgical_case"}:
         return
     minutes = config.get("minutes", 30)
     delta = timedelta(minutes=minutes)
-    clinics = db.query(ClinicSchedule).filter(
-        ClinicSchedule.surgeon_id == surgeon_id,
-        ClinicSchedule.date >= start_date,
-        ClinicSchedule.date <= end_date,
-    ).all()
-    surgeries = db.query(SurgicalCase).filter(
-        SurgicalCase.surgeon_id == surgeon_id,
-        SurgicalCase.date >= start_date,
-        SurgicalCase.date <= end_date,
-        SurgicalCase.status != "cancelled",
-    )
-    if exclude_entity and exclude_entity[0] == "surgical_case":
-        surgeries = surgeries.filter(SurgicalCase.id != exclude_entity[1])
-    surgeries = surgeries.all()
+    clinics, surgeries = clinic_and_surgery_rows(db, surgeon_id, start_date, end_date, exclude_entity)
     for cs in clinics:
         clinic_start = datetime.combine(cs.date, _session_start_time(cs.session or "full"))
         for sc in surgeries:
             if sc.date != cs.date:
                 continue
-            case_end = datetime.combine(sc.date, sc.end_time) if sc.end_time else datetime.combine(sc.date, sc.start_time) + timedelta(hours=1)
+            case_end = case_end_datetime(sc)
             if case_end <= clinic_start and (clinic_start - case_end) < delta:
                 yield Conflict(
                     rule_id="BUFFER_SURGERY_TO_CLINIC",
@@ -128,7 +101,7 @@ def check_buffer_between_cases(
         a, b = cases[i], cases[i + 1]
         if a.date != b.date:
             continue
-        end_a = datetime.combine(a.date, a.end_time) if a.end_time else datetime.combine(a.date, a.start_time) + timedelta(hours=1)
+        end_a = case_end_datetime(a)
         start_b = datetime.combine(b.date, b.start_time)
         if end_a <= start_b and (start_b - end_a) < delta:
             yield Conflict(
@@ -151,25 +124,11 @@ def check_buffer_same_site_am_pm(
     exclude_entity: Optional[tuple[str, int]] = None,
     target_entity: Optional[dict] = None,
 ) -> Iterator[Conflict]:
-    from ..models import ClinicSchedule, SurgicalCase
     if target_type(target_entity) not in {"clinic_schedule", "surgical_case"}:
         return
     minutes = config.get("minutes", 30)
     delta = timedelta(minutes=minutes)
-    clinics = db.query(ClinicSchedule).filter(
-        ClinicSchedule.surgeon_id == surgeon_id,
-        ClinicSchedule.date >= start_date,
-        ClinicSchedule.date <= end_date,
-    ).all()
-    surgeries = db.query(SurgicalCase).filter(
-        SurgicalCase.surgeon_id == surgeon_id,
-        SurgicalCase.date >= start_date,
-        SurgicalCase.date <= end_date,
-        SurgicalCase.status != "cancelled",
-    )
-    if exclude_entity and exclude_entity[0] == "surgical_case":
-        surgeries = surgeries.filter(SurgicalCase.id != exclude_entity[1])
-    surgeries = surgeries.all()
+    clinics, surgeries = clinic_and_surgery_rows(db, surgeon_id, start_date, end_date, exclude_entity)
     for cs in clinics:
         if (cs.session or "").lower() != "am":
             continue
@@ -201,25 +160,11 @@ def check_location_drive_time(
     exclude_entity: Optional[tuple[str, int]] = None,
     target_entity: Optional[dict] = None,
 ) -> Iterator[Conflict]:
-    from ..models import ClinicSchedule, SurgicalCase
     if target_type(target_entity) not in {"clinic_schedule", "surgical_case"}:
         return
     minutes = config.get("minutes_between_sites", 60)
     delta = timedelta(minutes=minutes)
-    clinics = db.query(ClinicSchedule).filter(
-        ClinicSchedule.surgeon_id == surgeon_id,
-        ClinicSchedule.date >= start_date,
-        ClinicSchedule.date <= end_date,
-    ).all()
-    surgeries = db.query(SurgicalCase).filter(
-        SurgicalCase.surgeon_id == surgeon_id,
-        SurgicalCase.date >= start_date,
-        SurgicalCase.date <= end_date,
-        SurgicalCase.status != "cancelled",
-    )
-    if exclude_entity and exclude_entity[0] == "surgical_case":
-        surgeries = surgeries.filter(SurgicalCase.id != exclude_entity[1])
-    surgeries = surgeries.all()
+    clinics, surgeries = clinic_and_surgery_rows(db, surgeon_id, start_date, end_date, exclude_entity)
     for cs in clinics:
         for sc in surgeries:
             if sc.date != cs.date or not sc.location_id or not cs.location_id:

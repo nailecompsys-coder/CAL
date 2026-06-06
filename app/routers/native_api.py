@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from ..auth import get_current_surgeon
 from ..conflicts import check_conflicts
 from ..database import get_db
-from ..models import Availability, SurgicalCase
+from ..native_availability_service import save_native_availability as save_native_availability_service
 from ..native_call_coverage_service import assign_native_call_coverage, cancel_native_call_coverage
 from ..native_home_service import build_native_home
 from ..native_misc_service import mark_alerts_read, save_push_token
@@ -18,7 +18,7 @@ from ..native_request_off_service import (
     create_native_request_off,
     update_native_request_off,
 )
-from ..native_support import parse_hhmm
+from ..native_surgery_notes_service import save_native_surgery_notes as save_native_surgery_notes_service
 from ..push import send_native_push_to_surgeon
 from .api_common import parse_iso_date_range
 
@@ -153,34 +153,7 @@ def native_save_availability(
     auth=Depends(get_current_surgeon),
 ):
     surgeon, _ = auth
-    warnings = []
-    for row in body.days:
-        existing = db.query(Availability).filter(
-            Availability.surgeon_id == surgeon.id,
-            Availability.date == row.date,
-        ).first()
-        if not row.isAvailable:
-            warnings.extend(check_conflicts(
-                surgeon.id,
-                row.date,
-                row.date,
-                db,
-                target_entity={"type": "availability", "date": row.date},
-            ))
-        if existing:
-            existing.is_available = row.isAvailable
-            existing.start_time = parse_hhmm(row.start)
-            existing.end_time = parse_hhmm(row.end)
-        else:
-            db.add(Availability(
-                surgeon_id=surgeon.id,
-                date=row.date,
-                is_available=row.isAvailable,
-                start_time=parse_hhmm(row.start),
-                end_time=parse_hhmm(row.end),
-            ))
-    db.commit()
-    return {"ok": True, "warnings": warnings[:5]}
+    return save_native_availability_service(db, surgeon, body.days, check_conflicts)
 
 
 class NativeSurgeryNotesBody(BaseModel):
@@ -195,19 +168,7 @@ def native_save_surgery_notes(
     auth=Depends(get_current_surgeon),
 ):
     surgeon, _ = auth
-    row = db.get(SurgicalCase, case_id)
-    if not row or row.surgeon_id != surgeon.id:
-        raise HTTPException(404, "Case not found")
-    row.surgeon_notes = body.notes.strip() or None
-    db.commit()
-    send_native_push_to_surgeon(
-        surgeon.id,
-        "Surgical case notes updated",
-        f"{row.date.strftime('%b %-d')} case notes saved",
-        db,
-        {"type": "surgical_case", "caseId": row.id},
-    )
-    return {"ok": True}
+    return save_native_surgery_notes_service(db, surgeon, case_id, body.notes, send_native_push_to_surgeon)
 
 
 class NativePushTokenBody(BaseModel):

@@ -1,10 +1,10 @@
 """Services for admin schedule templates and call rotation generation."""
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 from sqlalchemy.orm import Session
 
-from .models import CallRotation, CallRotationTemplate, ClinicSchedule, DayOff, Surgeon, SurgeonLocationSchedule
+from .models import CallGroup, CallRotation, CallRotationTemplate, ClinicSchedule, DayOff, Location, Surgeon, SurgeonLocationSchedule
 
 
 def active_surgeon_ids(db: Session) -> list[int]:
@@ -42,6 +42,113 @@ def template_cells_by_surgeon(db: Session, surgeon_ids: list[int]) -> dict:
     for template in templates_all:
         tpl_by_surgeon.setdefault(template.surgeon_id, {}).setdefault(template.day_of_week, {})[template.session] = template
     return tpl_by_surgeon
+
+
+def template_grid_context(db: Session, sort_surgeons) -> dict:
+    surgeons = db.query(Surgeon).filter(Surgeon.is_active == True).all()
+    templates_raw = db.query(SurgeonLocationSchedule).all()
+    tpl_map = {}
+    for template in templates_raw:
+        tpl_map.setdefault(template.surgeon_id, {}).setdefault(template.day_of_week, {})[template.session] = template
+
+    rotation_templates = db.query(CallRotationTemplate).order_by(
+        CallRotationTemplate.call_group_id, CallRotationTemplate.position
+    ).all()
+    rotation_by_group = {}
+    for rotation_template in rotation_templates:
+        rotation_by_group.setdefault(rotation_template.call_group_id, []).append(rotation_template)
+
+    return {
+        "surgeons": sort_surgeons(surgeons),
+        "all_locations": db.query(Location)
+        .filter(Location.is_active == True)
+        .order_by(Location.location_type.desc(), Location.name)
+        .all(),
+        "tpl_map": tpl_map,
+        "call_groups": db.query(CallGroup).order_by(CallGroup.sort_order).all(),
+        "rotation_by_group": rotation_by_group,
+        "days": ["Mon", "Tue", "Wed", "Thu", "Fri"],
+    }
+
+
+def save_template_cell_value(
+    db: Session,
+    surgeon_id: int,
+    day_of_week: int,
+    session: str,
+    location_id: int | None,
+    assignment_type: str,
+) -> dict:
+    existing = db.query(SurgeonLocationSchedule).filter(
+        SurgeonLocationSchedule.surgeon_id == surgeon_id,
+        SurgeonLocationSchedule.day_of_week == day_of_week,
+        SurgeonLocationSchedule.session == session,
+    ).first()
+
+    if assignment_type == "off" and location_id is None and existing is None:
+        return {"ok": True, "action": "noop"}
+
+    if existing:
+        existing.location_id = location_id if assignment_type == "assigned" else None
+        existing.assignment_type = assignment_type
+    else:
+        db.add(SurgeonLocationSchedule(
+            surgeon_id=surgeon_id,
+            day_of_week=day_of_week,
+            session=session,
+            location_id=location_id if assignment_type == "assigned" else None,
+            assignment_type=assignment_type,
+        ))
+    db.commit()
+    return {"ok": True, "action": "updated" if existing else "created"}
+
+
+def parse_date_range(date_from: str, date_to: str):
+    try:
+        d_from = date.fromisoformat(date_from)
+        d_to = date.fromisoformat(date_to)
+    except ValueError:
+        return None, None, "bad_date"
+    if d_to < d_from or (d_to - d_from).days > 366:
+        return None, None, "bad_range"
+    return d_from, d_to, None
+
+
+def clinic_apply_result_url(result: dict) -> str:
+    return (
+        "/admin/schedule-templates?msg=applied"
+        f"&created={result['created']}"
+        f"&skipped={result['skipped_existing']}"
+        f"&off={result['skipped_off']}"
+    )
+
+
+def save_call_rotation_order(db: Session, call_group_id: int, surgeon_ids: list[str]) -> str:
+    if not surgeon_ids:
+        return "no_surgeons"
+
+    db.query(CallRotationTemplate).filter(
+        CallRotationTemplate.call_group_id == call_group_id
+    ).delete()
+
+    for pos, sid in enumerate(surgeon_ids, start=1):
+        db.add(CallRotationTemplate(
+            call_group_id=call_group_id,
+            surgeon_id=int(sid),
+            position=pos,
+        ))
+    db.commit()
+    return "rotation_saved"
+
+
+def call_rotation_result_url(result: dict) -> str:
+    if result["no_rotation"]:
+        return "/admin/schedule-templates?tab=call&msg=no_rotation"
+    return (
+        "/admin/schedule-templates?tab=call&msg=call_filled"
+        f"&created={result['created']}"
+        f"&skipped={result['skipped']}"
+    )
 
 
 def apply_clinic_schedule_templates(

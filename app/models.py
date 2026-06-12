@@ -114,6 +114,24 @@ class MagicLink(Base):
     surgeon = relationship("Surgeon", back_populates="magic_links")
 
 
+class SurgeonOtpAuditLog(Base):
+    __tablename__ = "surgeon_otp_audit_logs"
+    id = Column(Integer, primary_key=True)
+    action = Column(String(16), nullable=False)  # request | verify
+    submitted_email = Column(String(255), nullable=False)
+    surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=True)
+    matched = Column(Boolean, default=False, nullable=False)
+    delivery_channel = Column(String(16))  # sms | email | none
+    delivery_success = Column(Boolean)
+    result = Column(String(32), nullable=False)  # requested | verified | invalid_email | invalid_code | delivery_failed
+    failure_reason = Column(Text)
+    client_ip = Column(String(64))
+    user_agent = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+
+    surgeon = relationship("Surgeon")
+
+
 class SurgeonDevice(Base):
     __tablename__ = "surgeon_devices"
     id = Column(Integer, primary_key=True)

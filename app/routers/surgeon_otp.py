@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from ..auth import create_surgeon_session_token
 from ..database import get_db
 from ..email_service import send_email
-from ..models import MagicLink, Surgeon, SurgeonDevice
+from ..models import MagicLink, Surgeon, SurgeonDevice, SurgeonOtpAuditLog
 from ..sms_service import send_sms
 
 router = APIRouter()
@@ -61,11 +61,59 @@ def _create_native_session_device(surgeon_id: int, user_agent: str, now: datetim
     )
 
 
+def _client_ip(request: Request) -> str | None:
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    if forwarded_for:
+        return forwarded_for.split(",", 1)[0].strip()
+    if request.client:
+        return request.client.host
+    return None
+
+
+def _audit_otp(
+    db: Session,
+    *,
+    request: Request,
+    action: str,
+    submitted_email: str,
+    surgeon: Surgeon | None,
+    delivery_channel: str | None,
+    delivery_success: bool | None,
+    result: str,
+    failure_reason: str | None = None,
+) -> None:
+    db.add(SurgeonOtpAuditLog(
+        action=action,
+        submitted_email=submitted_email.strip().lower(),
+        surgeon_id=surgeon.id if surgeon else None,
+        matched=surgeon is not None,
+        delivery_channel=delivery_channel,
+        delivery_success=delivery_success,
+        result=result,
+        failure_reason=failure_reason,
+        client_ip=_client_ip(request),
+        user_agent=request.headers.get("User-Agent", "CAL Native App"),
+    ))
+
+
 @router.post("/otp/request")
-def otp_request(body: OtpRequestBody, db: Session = Depends(get_db)):
-    surgeon = _find_active_surgeon_by_email(db, body.email)
+def otp_request(body: OtpRequestBody, request: Request, db: Session = Depends(get_db)):
+    submitted_email = body.email.strip().lower()
+    surgeon = _find_active_surgeon_by_email(db, submitted_email)
     if not surgeon:
         # Don't reveal whether email exists
+        _audit_otp(
+            db,
+            request=request,
+            action="request",
+            submitted_email=submitted_email,
+            surgeon=None,
+            delivery_channel="none",
+            delivery_success=False,
+            result="invalid_email",
+            failure_reason="No active surgeon matched submitted email.",
+        )
+        db.commit()
         return {"ok": True, "message": "If that email is registered, a code was sent."}
 
     code = _generate_otp()
@@ -78,35 +126,72 @@ def otp_request(body: OtpRequestBody, db: Session = Depends(get_db)):
     ))
     db.commit()
 
+    delivery_channel = "sms" if surgeon.phone else "email"
+    delivery_success = True
+    failure_reason = None
     if surgeon.phone:
-        send_sms(
+        delivery_success = send_sms(
             phone=surgeon.phone,
             message=f"CAL access code: {code}\nExpires in {OTP_EXPIRE_MINUTES} min. Do not share.",
         )
+        if not delivery_success:
+            failure_reason = "SMS provider failed to send code."
     else:
-        send_email(
-            to_email=surgeon.email,
-            subject="Your CAL access code",
-            html_body=f"""
-            <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px">
-              <h2 style="color:#2A3F54;margin-bottom:8px">CAL Access Code</h2>
-              <p style="color:#6B7C93;margin-bottom:24px">Mid Florida Surgical Associates</p>
-              <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:16px;padding:32px;text-align:center">
-                <p style="font-size:48px;font-weight:700;letter-spacing:12px;color:#2A3F54;margin:0">{code}</p>
-              </div>
-              <p style="color:#6B7C93;font-size:13px;margin-top:20px">
-                This code expires in {OTP_EXPIRE_MINUTES} minutes. Do not share it with anyone.
-              </p>
-            </div>
-            """,
-        )
+        try:
+            delivery_success = send_email(
+                to_email=surgeon.email,
+                subject="Your CAL access code",
+                html_body=f"""
+                <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px">
+                  <h2 style="color:#2A3F54;margin-bottom:8px">CAL Access Code</h2>
+                  <p style="color:#6B7C93;margin-bottom:24px">Mid Florida Surgical Associates</p>
+                  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:16px;padding:32px;text-align:center">
+                    <p style="font-size:48px;font-weight:700;letter-spacing:12px;color:#2A3F54;margin:0">{code}</p>
+                  </div>
+                  <p style="color:#6B7C93;font-size:13px;margin-top:20px">
+                    This code expires in {OTP_EXPIRE_MINUTES} minutes. Do not share it with anyone.
+                  </p>
+                </div>
+                """,
+            )
+            if not delivery_success:
+                failure_reason = "Email service is not configured or failed to send code."
+        except Exception as exc:
+            delivery_success = False
+            failure_reason = f"Email send failed: {exc.__class__.__name__}"
+
+    _audit_otp(
+        db,
+        request=request,
+        action="request",
+        submitted_email=submitted_email,
+        surgeon=surgeon,
+        delivery_channel=delivery_channel,
+        delivery_success=delivery_success,
+        result="requested" if delivery_success else "delivery_failed",
+        failure_reason=failure_reason,
+    )
+    db.commit()
     return {"ok": True, "message": "If that email is registered, a code was sent."}
 
 
 @router.post("/otp/verify")
 def otp_verify(body: OtpVerifyBody, request: Request, db: Session = Depends(get_db)):
-    surgeon = _find_active_surgeon_by_email(db, body.email)
+    submitted_email = body.email.strip().lower()
+    surgeon = _find_active_surgeon_by_email(db, submitted_email)
     if not surgeon:
+        _audit_otp(
+            db,
+            request=request,
+            action="verify",
+            submitted_email=submitted_email,
+            surgeon=None,
+            delivery_channel="none",
+            delivery_success=False,
+            result="invalid_email",
+            failure_reason="No active surgeon matched submitted email.",
+        )
+        db.commit()
         raise HTTPException(status_code=401, detail="Invalid code")
 
     code = body.code.strip()
@@ -121,6 +206,18 @@ def otp_verify(body: OtpVerifyBody, request: Request, db: Session = Depends(get_
     ).first()
 
     if not link:
+        _audit_otp(
+            db,
+            request=request,
+            action="verify",
+            submitted_email=submitted_email,
+            surgeon=surgeon,
+            delivery_channel="none",
+            delivery_success=False,
+            result="invalid_code",
+            failure_reason="No unused, unexpired OTP matched submitted code.",
+        )
+        db.commit()
         raise HTTPException(status_code=401, detail="Invalid or expired code")
 
     link.used_at = now
@@ -130,6 +227,16 @@ def otp_verify(body: OtpVerifyBody, request: Request, db: Session = Depends(get_
     db.flush()
 
     jwt_token = create_surgeon_session_token(device.id)
+    _audit_otp(
+        db,
+        request=request,
+        action="verify",
+        submitted_email=submitted_email,
+        surgeon=surgeon,
+        delivery_channel="none",
+        delivery_success=True,
+        result="verified",
+    )
     db.commit()
 
     return {"token": jwt_token}

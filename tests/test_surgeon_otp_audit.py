@@ -1,0 +1,114 @@
+import os
+import unittest
+from unittest.mock import patch
+
+os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
+os.environ.setdefault("SECRET_KEY", "test-secret")
+
+from fastapi import HTTPException
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from starlette.requests import Request
+
+from app.models import Base, MagicLink, Surgeon, SurgeonDevice, SurgeonOtpAuditLog
+from app.routers.surgeon_otp import OtpRequestBody, OtpVerifyBody, otp_request, otp_verify
+
+
+def test_request() -> Request:
+    return Request({
+        "type": "http",
+        "method": "POST",
+        "path": "/api/surgeon/otp/request",
+        "headers": [
+            (b"user-agent", b"CALNative/10 Test"),
+            (b"x-forwarded-for", b"203.0.113.10"),
+        ],
+        "client": ("127.0.0.1", 12345),
+    })
+
+
+class SurgeonOtpAuditTest(unittest.TestCase):
+    def setUp(self):
+        self.engine = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(bind=self.engine)
+        self.Session = sessionmaker(bind=self.engine)
+
+    def tearDown(self):
+        Base.metadata.drop_all(bind=self.engine)
+        self.engine.dispose()
+
+    def test_unknown_email_is_audited_without_creating_otp(self):
+        db = self.Session()
+        try:
+            response = otp_request(OtpRequestBody(email=" wrong@example.com "), request=test_request(), db=db)
+
+            self.assertTrue(response["ok"])
+            self.assertEqual(db.query(MagicLink).count(), 0)
+            row = db.query(SurgeonOtpAuditLog).one()
+            self.assertEqual(row.action, "request")
+            self.assertEqual(row.submitted_email, "wrong@example.com")
+            self.assertFalse(row.matched)
+            self.assertEqual(row.result, "invalid_email")
+            self.assertEqual(row.client_ip, "203.0.113.10")
+        finally:
+            db.close()
+
+    def test_matching_sms_request_is_audited(self):
+        db = self.Session()
+        try:
+            surgeon = Surgeon(first_name="Jorge", last_name="Florin", email="jorge@example.com", phone="4079484000", is_active=True)
+            db.add(surgeon)
+            db.commit()
+
+            with patch("app.routers.surgeon_otp.send_sms", return_value=True):
+                response = otp_request(OtpRequestBody(email=" JORGE@example.com "), request=test_request(), db=db)
+
+            self.assertTrue(response["ok"])
+            self.assertEqual(db.query(MagicLink).count(), 1)
+            row = db.query(SurgeonOtpAuditLog).one()
+            self.assertEqual(row.surgeon_id, surgeon.id)
+            self.assertTrue(row.matched)
+            self.assertEqual(row.delivery_channel, "sms")
+            self.assertTrue(row.delivery_success)
+            self.assertEqual(row.result, "requested")
+        finally:
+            db.close()
+
+    def test_invalid_verify_is_audited(self):
+        db = self.Session()
+        try:
+            surgeon = Surgeon(first_name="Jorge", last_name="Florin", email="jorge@example.com", phone="4079484000", is_active=True)
+            db.add(surgeon)
+            db.commit()
+
+            with self.assertRaises(HTTPException):
+                otp_verify(OtpVerifyBody(email="jorge@example.com", code="123456"), request=test_request(), db=db)
+
+            row = db.query(SurgeonOtpAuditLog).one()
+            self.assertEqual(row.action, "verify")
+            self.assertEqual(row.surgeon_id, surgeon.id)
+            self.assertEqual(row.result, "invalid_code")
+        finally:
+            db.close()
+
+    def test_successful_verify_creates_device_and_audit(self):
+        db = self.Session()
+        try:
+            surgeon = Surgeon(first_name="Jorge", last_name="Florin", email="jorge@example.com", phone="4079484000", is_active=True)
+            db.add(surgeon)
+            db.commit()
+
+            with patch("app.routers.surgeon_otp.send_sms", return_value=True), patch("app.routers.surgeon_otp.random.randint", return_value=123456):
+                otp_request(OtpRequestBody(email="jorge@example.com"), request=test_request(), db=db)
+            response = otp_verify(OtpVerifyBody(email="jorge@example.com", code="123456"), request=test_request(), db=db)
+
+            self.assertIn("token", response)
+            self.assertEqual(db.query(SurgeonDevice).count(), 1)
+            rows = db.query(SurgeonOtpAuditLog).order_by(SurgeonOtpAuditLog.id).all()
+            self.assertEqual([row.result for row in rows], ["requested", "verified"])
+        finally:
+            db.close()
+
+
+if __name__ == "__main__":
+    unittest.main()

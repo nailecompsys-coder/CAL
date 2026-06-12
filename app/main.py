@@ -12,6 +12,7 @@ from . import migrate_surgeon_sort_order
 from . import migrate_clinic_schedule_off
 from . import migrate_native_parity
 from .routers import (
+    admin_otp_audit,
     admin, admin_call_groups, admin_call_schedule, admin_clinic_schedule, admin_daysoff,
     admin_locations, admin_meetings, admin_settings, admin_surgeons,
     admin_schedule_templates, admin_surgical_schedule, api, api_calendar, api_push, auth,
@@ -75,6 +76,7 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 # Routers
 app.include_router(auth.router)
 app.include_router(admin.router)
+app.include_router(admin_otp_audit.router)
 app.include_router(admin_surgeons.router)
 app.include_router(admin_call_schedule.router)
 app.include_router(admin_clinic_schedule.router)

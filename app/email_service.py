@@ -27,7 +27,6 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from .email_config import SMTP_CONFIG
-from .email_qr import make_qr_png, qr_data_uri
 from .email_templates import MAGIC_LINK_HTML, MAGIC_LINK_TEXT
 
 log = logging.getLogger(__name__)
@@ -41,20 +40,24 @@ SMTP_ENABLED = SMTP_CONFIG.enabled
 
 
 def _make_qr_png(url: str) -> bytes:
+    from .email_qr import make_qr_png
+
     return make_qr_png(url)
 
 
 def _qr_data_uri(url: str) -> str:
+    from .email_qr import qr_data_uri
+
     return qr_data_uri(url)
 
 
-def _send(msg: MIMEMultipart) -> None:
+def _send(msg: MIMEMultipart) -> bool:
     if not SMTP_ENABLED:
         log.info("[email_service] SMTP_ENABLED=false — would send to %s", msg["To"])
-        return
+        return True
     if not SMTP_USER or not SMTP_PASS:
         log.error("[email_service] SMTP_USER/SMTP_PASS not set — cannot send email")
-        return
+        return False
     with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as s:
         s.ehlo()
         s.starttls()
@@ -62,20 +65,21 @@ def _send(msg: MIMEMultipart) -> None:
         s.login(SMTP_USER, SMTP_PASS)
         s.send_message(msg)
     log.info("[email_service] sent → %s subject=%r", msg["To"], msg["Subject"])
+    return True
 
 
 _MAGIC_HTML = MAGIC_LINK_HTML
 _MAGIC_TEXT = MAGIC_LINK_TEXT
 
 
-def send_email(*, to_email: str, subject: str, html_body: str) -> None:
+def send_email(*, to_email: str, subject: str, html_body: str) -> bool:
     """Generic transactional email — plain HTML body, no attachments."""
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = f"{SMTP_FROM_NAME} <{SMTP_USER}>"
     msg["To"] = to_email
     msg.attach(MIMEText(html_body, "html"))
-    _send(msg)
+    return _send(msg)
 
 
 def send_magic_link_email(

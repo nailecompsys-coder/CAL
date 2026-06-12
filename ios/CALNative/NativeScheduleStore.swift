@@ -81,6 +81,8 @@ final class NativeScheduleStore: ObservableObject {
       let snapshot = try await operation()
       apply(snapshot)
       loadState = .loaded
+    } catch let error as NativeCALError where error.isAuthenticationFailure {
+      expireSession()
     } catch {
       loadState = .warning("Live sync failed. Showing last loaded schedule. \(error.localizedDescription)")
     }
@@ -139,6 +141,18 @@ final class NativeScheduleStore: ObservableObject {
     surgeons = []
     loadState = .idle
     authMessage = nil
+    hasBootstrapped = true
+  }
+
+  private func expireSession() {
+    session.clearToken()
+    sessionToken = nil
+    days = []
+    timeOffRequests = []
+    currentSurgeon = nil
+    surgeons = []
+    loadState = .idle
+    authMessage = "Session expired. Please sign in again."
     hasBootstrapped = true
   }
 

@@ -148,4 +148,11 @@ enum NativeCALError: LocalizedError {
       return message.isEmpty ? "Request was not submitted." : message
     }
   }
+
+  var isAuthenticationFailure: Bool {
+    if case .http(let status, _) = self {
+      return status == 401
+    }
+    return false
+  }
 }

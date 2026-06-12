@@ -14,7 +14,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.midfloridasurgical.calnative",
-      "buildNumber": "9",
+      "buildNumber": "10",
       "displayName": "MFSA CAL",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false

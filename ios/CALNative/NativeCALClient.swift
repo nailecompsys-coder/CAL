@@ -139,7 +139,10 @@ enum NativeCALError: LocalizedError {
     case .invalidResponse:
       return "Invalid CAL API response."
     case .http(let status, let body):
-      return "HTTP \(status): \(body)"
+      if status == 401 {
+        return body.contains("Invalid code") ? "Invalid code. Please try again." : "For security, please sign in again."
+      }
+      return NativeCALError.readableMessage(from: body) ?? "CAL request failed. Please try again."
     case .keychain(let status):
       return "Could not save sign-in token. Keychain status \(status)."
     case .missingSession:
@@ -149,10 +152,23 @@ enum NativeCALError: LocalizedError {
     }
   }
 
+  private static func readableMessage(from body: String) -> String? {
+    guard let data = body.data(using: .utf8),
+          let payload = try? JSONDecoder().decode(APIErrorPayload.self, from: data) else {
+      return body.isEmpty ? nil : body
+    }
+    return payload.detail ?? payload.message
+  }
+
   var isAuthenticationFailure: Bool {
     if case .http(let status, _) = self {
       return status == 401
     }
     return false
   }
+}
+
+private struct APIErrorPayload: Decodable {
+  let detail: String?
+  let message: String?
 }

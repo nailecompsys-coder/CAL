@@ -2,7 +2,7 @@
 
 from .admin_settings_backup_service import backup_result_url, restore_result_url
 from .admin_settings_branding_service import remove_practice_logo, save_practice_settings
-from .admin_settings_page_service import registered_surgeon_devices, rules_engine_settings, settings_backups
+from .admin_settings_page_service import recent_otp_audit_logs, registered_surgeon_devices, rules_engine_settings, settings_backups
 from .admin_settings_user_service import (
     add_admin_user,
     delete_admin_user,
@@ -18,6 +18,7 @@ __all__ = [
     "delete_admin_user",
     "edit_admin_user",
     "registered_surgeon_devices",
+    "recent_otp_audit_logs",
     "remove_practice_logo",
     "restore_result_url",
     "rules_engine_settings",

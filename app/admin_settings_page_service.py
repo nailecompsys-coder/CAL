@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from . import wasabi_backup
-from .models import Surgeon, SurgeonDevice
+from .models import Surgeon, SurgeonDevice, SurgeonOtpAuditLog
 
 
 def settings_backups(request) -> list[dict]:
@@ -23,6 +23,16 @@ def registered_surgeon_devices(db: Session) -> list[SurgeonDevice]:
         db.query(SurgeonDevice)
         .join(Surgeon)
         .order_by(Surgeon.last_name, Surgeon.first_name, SurgeonDevice.registered_at.desc())
+        .all()
+    )
+
+
+def recent_otp_audit_logs(db: Session, limit: int = 50) -> list[SurgeonOtpAuditLog]:
+    return (
+        db.query(SurgeonOtpAuditLog)
+        .outerjoin(Surgeon, Surgeon.id == SurgeonOtpAuditLog.surgeon_id)
+        .order_by(SurgeonOtpAuditLog.created_at.desc(), SurgeonOtpAuditLog.id.desc())
+        .limit(limit)
         .all()
     )
 

@@ -12,6 +12,7 @@ from ..admin_settings_service import (
     backup_result_url,
     delete_admin_user as delete_admin_user_service,
     edit_admin_user as edit_admin_user_service,
+    recent_otp_audit_logs,
     registered_surgeon_devices,
     remove_practice_logo,
     restore_result_url,
@@ -42,6 +43,7 @@ def settings_page(
     admin_users = db.query(AdminUser).order_by(AdminUser.username).all()
     backups = settings_backups(request)
     registered_devices = registered_surgeon_devices(db)
+    otp_audit_logs = recent_otp_audit_logs(db)
     rule_config = {}
     all_rules = []
     try:
@@ -59,6 +61,7 @@ def settings_page(
             backups=backups,
             wasabi_configured=wasabi_backup.is_configured(),
             registered_devices=registered_devices,
+            otp_audit_logs=otp_audit_logs,
             rule_config=rule_config,
             all_rules=all_rules,
         ),

@@ -104,8 +104,8 @@ final class NativeScheduleStore: ObservableObject {
     defer { authBusy = false }
 
     do {
-      let message = try await session.requestOtp(email: normalizedEmail)
-      authMessage = message.isEmpty ? "Code sent." : message
+      _ = try await session.requestOtp(email: normalizedEmail)
+      authMessage = "Check your email for the CAL access code."
       return true
     } catch {
       authMessage = error.localizedDescription
@@ -152,7 +152,7 @@ final class NativeScheduleStore: ObservableObject {
     currentSurgeon = nil
     surgeons = []
     loadState = .idle
-    authMessage = "Session expired. Please sign in again."
+    authMessage = "For security, please sign in again."
     hasBootstrapped = true
   }
 

@@ -81,15 +81,15 @@ def otp_request(body: OtpRequestBody, db: Session = Depends(get_db)):
     if surgeon.phone:
         send_sms(
             phone=surgeon.phone,
-            message=f"RVU Insight code: {code}\nExpires in {OTP_EXPIRE_MINUTES} min. Do not share.",
+            message=f"CAL access code: {code}\nExpires in {OTP_EXPIRE_MINUTES} min. Do not share.",
         )
     else:
         send_email(
             to_email=surgeon.email,
-            subject="Your RVU Insight login code",
+            subject="Your CAL access code",
             html_body=f"""
             <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px">
-              <h2 style="color:#2A3F54;margin-bottom:8px">RVU Insight Login Code</h2>
+              <h2 style="color:#2A3F54;margin-bottom:8px">CAL Access Code</h2>
               <p style="color:#6B7C93;margin-bottom:24px">Mid Florida Surgical Associates</p>
               <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:16px;padding:32px;text-align:center">
                 <p style="font-size:48px;font-weight:700;letter-spacing:12px;color:#2A3F54;margin:0">{code}</p>
@@ -124,7 +124,7 @@ def otp_verify(body: OtpVerifyBody, request: Request, db: Session = Depends(get_
         raise HTTPException(status_code=401, detail="Invalid or expired code")
 
     link.used_at = now
-    ua = request.headers.get("User-Agent", "RVU Native App")
+    ua = request.headers.get("User-Agent", "CAL Native App")
     device = _create_native_session_device(surgeon.id, ua, now)
     db.add(device)
     db.flush()

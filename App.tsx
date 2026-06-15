@@ -345,7 +345,7 @@ export default function App() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, isAuthed ? styles.scheduleContainer : styles.authContainer]}>
       <StatusBar style="dark" />
       {!isAuthed ? (
         <AuthScreen
@@ -390,7 +390,13 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f3f6fb',
+  },
+  authContainer: {
+    backgroundColor: '#f0faf8',
+    padding: 0,
+  },
+  scheduleContainer: {
+    backgroundColor: '#edf8f6',
     padding: 16,
     paddingTop: 52,
   },

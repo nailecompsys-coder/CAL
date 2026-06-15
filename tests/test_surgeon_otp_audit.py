@@ -60,7 +60,7 @@ class SurgeonOtpAuditTest(unittest.TestCase):
             db.add(surgeon)
             db.commit()
 
-            with patch("app.routers.surgeon_otp.send_sms", return_value=True):
+            with patch("app.routers.surgeon_otp.send_sms", return_value=True), patch("app.routers.surgeon_otp.send_email", return_value=True):
                 response = otp_request(OtpRequestBody(email=" JORGE@example.com "), request=test_request(), db=db)
 
             self.assertTrue(response["ok"])
@@ -68,9 +68,28 @@ class SurgeonOtpAuditTest(unittest.TestCase):
             row = db.query(SurgeonOtpAuditLog).one()
             self.assertEqual(row.surgeon_id, surgeon.id)
             self.assertTrue(row.matched)
-            self.assertEqual(row.delivery_channel, "sms")
+            self.assertEqual(row.delivery_channel, "sms+email")
             self.assertTrue(row.delivery_success)
             self.assertEqual(row.result, "requested")
+        finally:
+            db.close()
+
+    def test_sms_request_succeeds_when_email_is_backup_channel(self):
+        db = self.Session()
+        try:
+            surgeon = Surgeon(first_name="Lucy", last_name="Woodley", email="lucy@example.com", phone="4075554960", is_active=True)
+            db.add(surgeon)
+            db.commit()
+
+            with patch("app.routers.surgeon_otp.send_sms", return_value=False), patch("app.routers.surgeon_otp.send_email", return_value=True):
+                response = otp_request(OtpRequestBody(email="lucy@example.com"), request=test_request(), db=db)
+
+            self.assertTrue(response["ok"])
+            row = db.query(SurgeonOtpAuditLog).one()
+            self.assertEqual(row.delivery_channel, "sms+email")
+            self.assertTrue(row.delivery_success)
+            self.assertEqual(row.result, "requested")
+            self.assertIsNone(row.failure_reason)
         finally:
             db.close()
 
@@ -98,7 +117,7 @@ class SurgeonOtpAuditTest(unittest.TestCase):
             db.add(surgeon)
             db.commit()
 
-            with patch("app.routers.surgeon_otp.send_sms", return_value=True), patch("app.routers.surgeon_otp.random.randint", return_value=123456):
+            with patch("app.routers.surgeon_otp.send_sms", return_value=True), patch("app.routers.surgeon_otp.send_email", return_value=True), patch("app.routers.surgeon_otp.random.randint", return_value=123456):
                 otp_request(OtpRequestBody(email="jorge@example.com"), request=test_request(), db=db)
             response = otp_verify(OtpVerifyBody(email="jorge@example.com", code="123456"), request=test_request(), db=db)
 

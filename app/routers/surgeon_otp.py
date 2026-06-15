@@ -61,6 +61,31 @@ def _create_native_session_device(surgeon_id: int, user_agent: str, now: datetim
     )
 
 
+def _send_otp_email(surgeon: Surgeon, code: str) -> tuple[bool, str | None]:
+    try:
+        sent = send_email(
+            to_email=surgeon.email,
+            subject="Your CAL access code",
+            html_body=f"""
+            <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px">
+              <h2 style="color:#2A3F54;margin-bottom:8px">CAL Access Code</h2>
+              <p style="color:#6B7C93;margin-bottom:24px">Mid Florida Surgical Associates</p>
+              <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:16px;padding:32px;text-align:center">
+                <p style="font-size:48px;font-weight:700;letter-spacing:12px;color:#2A3F54;margin:0">{code}</p>
+              </div>
+              <p style="color:#6B7C93;font-size:13px;margin-top:20px">
+                This code expires in {OTP_EXPIRE_MINUTES} minutes. Do not share it with anyone.
+              </p>
+            </div>
+            """,
+        )
+        if sent:
+            return True, None
+        return False, "Email service is not configured or failed to send code."
+    except Exception as exc:
+        return False, f"Email send failed: {exc.__class__.__name__}"
+
+
 def _client_ip(request: Request) -> str | None:
     forwarded_for = request.headers.get("x-forwarded-for", "")
     if forwarded_for:
@@ -126,39 +151,23 @@ def otp_request(body: OtpRequestBody, request: Request, db: Session = Depends(ge
     ))
     db.commit()
 
-    delivery_channel = "sms" if surgeon.phone else "email"
-    delivery_success = True
-    failure_reason = None
+    delivery_channel = "sms+email" if surgeon.phone else "email"
+    delivery_success = False
+    failure_reasons = []
     if surgeon.phone:
-        delivery_success = send_sms(
+        sms_success = send_sms(
             phone=surgeon.phone,
             message=f"CAL access code: {code}\nExpires in {OTP_EXPIRE_MINUTES} min. Do not share.",
         )
-        if not delivery_success:
-            failure_reason = "SMS provider failed to send code."
-    else:
-        try:
-            delivery_success = send_email(
-                to_email=surgeon.email,
-                subject="Your CAL access code",
-                html_body=f"""
-                <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px">
-                  <h2 style="color:#2A3F54;margin-bottom:8px">CAL Access Code</h2>
-                  <p style="color:#6B7C93;margin-bottom:24px">Mid Florida Surgical Associates</p>
-                  <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:16px;padding:32px;text-align:center">
-                    <p style="font-size:48px;font-weight:700;letter-spacing:12px;color:#2A3F54;margin:0">{code}</p>
-                  </div>
-                  <p style="color:#6B7C93;font-size:13px;margin-top:20px">
-                    This code expires in {OTP_EXPIRE_MINUTES} minutes. Do not share it with anyone.
-                  </p>
-                </div>
-                """,
-            )
-            if not delivery_success:
-                failure_reason = "Email service is not configured or failed to send code."
-        except Exception as exc:
-            delivery_success = False
-            failure_reason = f"Email send failed: {exc.__class__.__name__}"
+        if not sms_success:
+            failure_reasons.append("SMS provider failed to send code.")
+        delivery_success = sms_success
+
+    email_success, email_failure = _send_otp_email(surgeon, code)
+    if email_failure:
+        failure_reasons.append(email_failure)
+    delivery_success = delivery_success or email_success
+    failure_reason = " ".join(failure_reasons) if failure_reasons and not delivery_success else None
 
     _audit_otp(
         db,

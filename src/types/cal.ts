@@ -190,6 +190,31 @@ export type NativeHome = {
   }[];
 };
 
+export type PatientAppointment = {
+  id: string;
+  date: string;
+  start: string;
+  end: string;
+  surgeonInitials: string;
+  surgeonName: string;
+  patientName: string;
+  mrn: string;
+  appointmentType: string;
+  status: string;
+  reason: string;
+  serviceSite: string;
+  room: string;
+};
+
+export type NativePatientScheduleResponse = {
+  range: {
+    start: string;
+    end: string;
+  };
+  appointments: PatientAppointment[];
+  warning?: string;
+};
+
 export type NativeRequestOffResponse = {
   ok: boolean;
   request: NativeDayOffRequest | null;

@@ -6,6 +6,7 @@ import type {
   NativeCallCoverageResponse,
   NativeDayOffRequest,
   NativeRequestOffResponse,
+  NativePatientScheduleResponse,
   NativeSaveResponse,
   OtpRequestResponse,
   OtpVerifyResponse,
@@ -112,6 +113,18 @@ export function fetchNativeHome(token: string, weekOffset = 0): Promise<NativeHo
   const end = sunday.toISOString().slice(0, 10);
   return apiCall<NativeHome>(
     `/api/native/home?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`,
+    { method: "GET" },
+    token
+  );
+}
+
+export function fetchPatientSchedule(
+  token: string,
+  start: string,
+  end: string
+): Promise<NativePatientScheduleResponse> {
+  return apiCall<NativePatientScheduleResponse>(
+    `/api/native/patient-schedule?start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}`,
     { method: "GET" },
     token
   );

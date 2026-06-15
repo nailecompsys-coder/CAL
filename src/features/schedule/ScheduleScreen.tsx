@@ -1,9 +1,9 @@
 import { ActivityIndicator, FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useEffect, useState } from "react";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import type { NativeDay, NativeDayOffRequest, NativeHome, NativeScheduleAlert, NativeScheduleItem } from "../../types/cal";
+import type { NativeDay, NativeDayOffRequest, NativeHome, NativeScheduleAlert, NativeScheduleItem, PatientAppointment } from "../../types/cal";
 
-type TabKey = "schedule" | "request";
+type TabKey = "schedule" | "request" | "patients";
 
 type RequestDraft = {
   startDate: string;
@@ -30,9 +30,12 @@ type ScheduleScreenProps = {
   lastSync: string;
   activeTab: TabKey;
   weekOffset: number;
+  patientAppointments: PatientAppointment[];
+  patientWarning: string;
   requestDraft: RequestDraft;
   onTabChange: (tab: TabKey) => void;
   onWeekChange: (weekOffset: number) => void;
+  onLoadPatients: () => void;
   onRequestDraftChange: (draft: RequestDraft) => void;
   onSubmitRequestOff: () => void;
   onUpdateRequestOff: (requestId: number) => void;
@@ -47,6 +50,7 @@ type ScheduleScreenProps = {
 const tabs: { key: TabKey; label: string; icon: string }[] = [
   { key: "schedule", label: "Schedule", icon: "▦" },
   { key: "request", label: "Days Off", icon: "▲" },
+  { key: "patients", label: "Patients", icon: "+" },
 ];
 
 export function ScheduleScreen(props: ScheduleScreenProps) {
@@ -57,9 +61,12 @@ export function ScheduleScreen(props: ScheduleScreenProps) {
     lastSync,
     activeTab,
     weekOffset,
+    patientAppointments,
+    patientWarning,
     requestDraft,
     onTabChange,
     onWeekChange,
+    onLoadPatients,
     onRequestDraftChange,
     onSubmitRequestOff,
     onUpdateRequestOff,
@@ -111,6 +118,15 @@ export function ScheduleScreen(props: ScheduleScreenProps) {
             onUpdate={onUpdateRequestOff}
             onCancel={onCancelRequestOff}
             busy={busy}
+          />
+        ) : null}
+        {home && activeTab === "patients" ? (
+          <PatientsTab
+            range={home.range}
+            appointments={patientAppointments}
+            warning={patientWarning}
+            busy={busy}
+            onRefresh={onLoadPatients}
           />
         ) : null}
       </ScrollView>
@@ -661,6 +677,83 @@ function PeriodRow({ label, items }: { label: string; items: NativeScheduleItem[
   );
 }
 
+function PatientsTab({
+  range,
+  appointments,
+  warning,
+  busy,
+  onRefresh,
+}: {
+  range: NativeHome["range"];
+  appointments: PatientAppointment[];
+  warning: string;
+  busy: boolean;
+  onRefresh: () => void;
+}) {
+  const byDate = groupAppointmentsByDate(appointments);
+  const dateKeys = Object.keys(byDate).sort();
+
+  return (
+    <View style={styles.patientScreen}>
+      <View style={styles.patientTopBar}>
+        <View>
+          <Text style={styles.patientTitle}>Patients</Text>
+          <Text style={styles.patientRange}>{formatDisplayDate(range.start)} - {formatDisplayDate(range.end)}</Text>
+        </View>
+        <Pressable style={[styles.patientRefreshButton, busy && styles.disabled]} onPress={onRefresh} disabled={busy}>
+          <Text style={styles.patientRefreshText}>{busy ? "Loading" : "Refresh"}</Text>
+        </Pressable>
+      </View>
+
+      {warning ? (
+        <View style={styles.patientWarning}>
+          <Text style={styles.patientWarningText}>{warning}</Text>
+        </View>
+      ) : null}
+
+      {dateKeys.length === 0 && !warning ? (
+        <View style={styles.patientEmptyCard}>
+          <Text style={styles.patientEmptyTitle}>No Aprima appointments found.</Text>
+          <Text style={styles.patientEmptyText}>The schedule is empty for this date range.</Text>
+        </View>
+      ) : null}
+
+      {dateKeys.map((date) => {
+        const surgeonGroups = groupAppointmentsBySurgeon(byDate[date]);
+        return (
+          <View key={date} style={styles.patientDayCard}>
+            <View style={styles.patientDayHeader}>
+              <Text style={styles.patientDayTitle}>{formatDisplayDate(date)}</Text>
+              <Text style={styles.patientDayCount}>{byDate[date].length} appt{byDate[date].length === 1 ? "" : "s"}</Text>
+            </View>
+            {Object.entries(surgeonGroups).map(([surgeonName, rows]) => (
+              <View key={`${date}-${surgeonName}`} style={styles.patientSurgeonSection}>
+                <View style={styles.patientSurgeonHeader}>
+                  <Text style={styles.patientSurgeonBadge}>{rows[0]?.surgeonInitials || initialsFromName(surgeonName)}</Text>
+                  <Text style={styles.patientSurgeonName}>{surgeonName}</Text>
+                </View>
+                {rows.map((appointment) => (
+                  <View key={appointment.id} style={styles.patientRow}>
+                    <View style={styles.patientTimeBlock}>
+                      <Text style={styles.patientTime}>{patientTime(appointment.start)}</Text>
+                      {appointment.end ? <Text style={styles.patientEnd}>{patientTime(appointment.end)}</Text> : null}
+                    </View>
+                    <View style={styles.patientInfo}>
+                      <Text style={styles.patientName}>{appointment.patientName || "Patient"}</Text>
+                      <Text style={styles.patientMeta}>{patientMeta(appointment)}</Text>
+                      {appointment.mrn ? <Text style={styles.patientMrn}>MRN {appointment.mrn}</Text> : null}
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ))}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
 function RequestOffTab({
   home,
   draft,
@@ -1172,6 +1265,38 @@ function timelineSub(item: NativeScheduleItem): string {
   return label ? `${label} ${time}` : time;
 }
 
+function groupAppointmentsByDate(appointments: PatientAppointment[]): Record<string, PatientAppointment[]> {
+  return appointments.reduce<Record<string, PatientAppointment[]>>((acc, appointment) => {
+    const key = appointment.date || "Unknown";
+    acc[key] = acc[key] ?? [];
+    acc[key].push(appointment);
+    return acc;
+  }, {});
+}
+
+function groupAppointmentsBySurgeon(appointments: PatientAppointment[]): Record<string, PatientAppointment[]> {
+  return appointments.reduce<Record<string, PatientAppointment[]>>((acc, appointment) => {
+    const key = appointment.surgeonName || "Unassigned";
+    acc[key] = acc[key] ?? [];
+    acc[key].push(appointment);
+    return acc;
+  }, {});
+}
+
+function patientMeta(appointment: PatientAppointment): string {
+  return [
+    appointment.appointmentType,
+    appointment.serviceSite,
+    appointment.room ? `Room ${appointment.room}` : "",
+    appointment.status,
+  ].filter(Boolean).join(" · ");
+}
+
+function patientTime(value: string): string {
+  if (!value) return "--";
+  return displayTime(value);
+}
+
 const styles = StyleSheet.create({
   shell: {
     flex: 1,
@@ -1545,6 +1670,181 @@ const styles = StyleSheet.create({
     color: "#7890ad",
     fontSize: 10,
     textAlign: "center",
+  },
+  patientScreen: {
+    gap: 12,
+  },
+  patientTopBar: {
+    backgroundColor: "#ffffffcc",
+    borderColor: "#ffffffdd",
+    borderWidth: 1,
+    borderRadius: 20,
+    padding: 12,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    shadowColor: "#8ebcea",
+    shadowOpacity: 0.13,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 7 },
+  },
+  patientTitle: {
+    color: "#18375f",
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  patientRange: {
+    color: "#6f86a4",
+    fontSize: 11,
+    marginTop: 2,
+    fontWeight: "700",
+  },
+  patientRefreshButton: {
+    backgroundColor: "#1c66d8",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  patientRefreshText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  patientWarning: {
+    backgroundColor: "#fff7ed",
+    borderColor: "#fed7aa",
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 10,
+  },
+  patientWarningText: {
+    color: "#9a3412",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  patientEmptyCard: {
+    backgroundColor: "#ffffffcc",
+    borderColor: "#ffffffdd",
+    borderWidth: 1,
+    borderRadius: 20,
+    padding: 16,
+  },
+  patientEmptyTitle: {
+    color: "#18375f",
+    fontWeight: "900",
+    fontSize: 14,
+  },
+  patientEmptyText: {
+    color: "#6f86a4",
+    fontSize: 12,
+    marginTop: 4,
+  },
+  patientDayCard: {
+    backgroundColor: "#ffffffcc",
+    borderColor: "#ffffffdd",
+    borderWidth: 1,
+    borderRadius: 20,
+    padding: 12,
+    shadowColor: "#8ebcea",
+    shadowOpacity: 0.13,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 7 },
+  },
+  patientDayHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  patientDayTitle: {
+    color: "#18375f",
+    fontWeight: "900",
+    fontSize: 14,
+  },
+  patientDayCount: {
+    color: "#54708f",
+    backgroundColor: "#e8f1fc",
+    borderRadius: 8,
+    overflow: "hidden",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    fontSize: 10,
+    fontWeight: "900",
+  },
+  patientSurgeonSection: {
+    borderTopColor: "#e4edf8",
+    borderTopWidth: 1,
+    paddingTop: 10,
+    marginTop: 8,
+  },
+  patientSurgeonHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 7,
+  },
+  patientSurgeonBadge: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    overflow: "hidden",
+    textAlign: "center",
+    lineHeight: 30,
+    backgroundColor: "#155e75",
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "900",
+  },
+  patientSurgeonName: {
+    color: "#18375f",
+    fontSize: 13,
+    fontWeight: "900",
+    flex: 1,
+  },
+  patientRow: {
+    flexDirection: "row",
+    gap: 10,
+    borderRadius: 14,
+    backgroundColor: "#f8fbff",
+    borderColor: "#e0eaf5",
+    borderWidth: 1,
+    padding: 10,
+    marginBottom: 7,
+  },
+  patientTimeBlock: {
+    width: 54,
+    alignItems: "flex-start",
+  },
+  patientTime: {
+    color: "#075985",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  patientEnd: {
+    color: "#7890ad",
+    fontSize: 10,
+    fontWeight: "800",
+    marginTop: 2,
+  },
+  patientInfo: {
+    flex: 1,
+  },
+  patientName: {
+    color: "#102a4c",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  patientMeta: {
+    color: "#4b6485",
+    fontSize: 11,
+    marginTop: 3,
+    fontWeight: "700",
+  },
+  patientMrn: {
+    color: "#7890ad",
+    fontSize: 10,
+    marginTop: 3,
+    fontWeight: "700",
   },
   sheet: {
     position: "absolute",

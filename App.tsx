@@ -13,6 +13,7 @@ import {
   createDayItem,
   deleteDayItem,
   fetchNativeHome,
+  fetchPatientSchedule,
   markNativeAlertsRead,
   registerNativePushToken,
   requestOtp,
@@ -23,9 +24,9 @@ import {
   updateRequestOff,
   verifyOtp,
 } from './src/services/calApi';
-import type { NativeDayOffRequest, NativeHome } from './src/types/cal';
+import type { NativeDayOffRequest, NativeHome, PatientAppointment } from './src/types/cal';
 
-type TabKey = 'schedule' | 'request';
+type TabKey = 'schedule' | 'request' | 'patients';
 
 export default function App() {
   const [email, setEmail] = useState('');
@@ -33,6 +34,8 @@ export default function App() {
   const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
   const [home, setHome] = useState<NativeHome | null>(null);
+  const [patientAppointments, setPatientAppointments] = useState<PatientAppointment[]>([]);
+  const [patientWarning, setPatientWarning] = useState('');
   const [activeTab, setActiveTab] = useState<TabKey>('schedule');
   const [weekOffset, setWeekOffset] = useState(0);
   const [requestDraft, setRequestDraft] = useState({
@@ -147,8 +150,38 @@ export default function App() {
       await registerForNativePush(tok);
       setLastSync(new Date().toLocaleTimeString());
       setMessage('');
+      if (activeTab === 'patients') {
+        await loadPatients(tok, data.range);
+      }
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'CAL load failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function loadPatients(
+    sessionToken: string = token,
+    range: NativeHome['range'] | null = home?.range ?? null
+  ) {
+    const tok = sessionToken.trim();
+    if (!tok) {
+      setMessage('Log in first.');
+      return;
+    }
+    const activeRange = range ?? defaultPatientRange();
+    setBusy(true);
+    setPatientWarning('');
+    try {
+      const data = await fetchPatientSchedule(tok, activeRange.start, activeRange.end);
+      setPatientAppointments(data.appointments ?? []);
+      setPatientWarning(data.warning ?? '');
+      setMessage('');
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : 'Aprima schedule failed';
+      setPatientAppointments([]);
+      setPatientWarning(detail);
+      setMessage(detail);
     } finally {
       setBusy(false);
     }
@@ -236,6 +269,13 @@ export default function App() {
   async function onWeekChange(nextWeekOffset: number) {
     setWeekOffset(nextWeekOffset);
     await loadHome(token, nextWeekOffset);
+  }
+
+  function onTabChange(tab: TabKey) {
+    setActiveTab(tab);
+    if (tab === 'patients') {
+      void loadPatients();
+    }
   }
 
   async function onSubmitCallCoverage(rotationId: number, coveringSurgeonId?: number) {
@@ -326,9 +366,12 @@ export default function App() {
           lastSync={lastSync}
           activeTab={activeTab}
           weekOffset={weekOffset}
+          patientAppointments={patientAppointments}
+          patientWarning={patientWarning}
           requestDraft={requestDraft}
-          onTabChange={setActiveTab}
+          onTabChange={onTabChange}
           onWeekChange={onWeekChange}
+          onLoadPatients={() => loadPatients()}
           onRequestDraftChange={setRequestDraft}
           onSubmitRequestOff={onSubmitRequestOff}
           onUpdateRequestOff={onUpdateRequestOff}
@@ -352,3 +395,20 @@ const styles = StyleSheet.create({
     paddingTop: 52,
   },
 });
+
+function defaultPatientRange(): NativeHome['range'] {
+  const start = new Date();
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  return {
+    start: dateToIso(start),
+    end: dateToIso(end),
+  };
+}
+
+function dateToIso(value: Date): string {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}

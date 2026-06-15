@@ -52,7 +52,7 @@ type ScheduleScreenProps = {
 
 const tabs: { key: TabKey; label: string; icon: string }[] = [
   { key: "schedule", label: "Schedule", icon: "▦" },
-  { key: "request", label: "Days Off", icon: "▲" },
+  { key: "request", label: "Time Off", icon: "▲" },
   { key: "patients", label: "Patients", icon: "+" },
 ];
 
@@ -1076,7 +1076,7 @@ function RequestOffTab({
     <View style={styles.daysOffScreen}>
       <View style={styles.daysOffTopBar}>
         <View>
-          <Text style={styles.daysOffTitle}>Days Off</Text>
+          <Text style={styles.daysOffTitle}>Time Off</Text>
         </View>
         <Pressable style={styles.requestFabInline} onPress={openNewRequest}>
           <Text style={styles.requestFabText}>+ Request</Text>
@@ -1171,17 +1171,6 @@ function RequestOffSheet({
     onDraftChange({ ...next, segments: normalizedRequestSegments(next) });
   }
 
-  function addRequestDay() {
-    const endDate = addDaysIso(draft.endDate, 1);
-    onDraftChange({ ...draft, endDate, segments: normalizedRequestSegments({ ...draft, endDate }) });
-  }
-
-  function removeLastRequestDay() {
-    if (segments.length <= 1) return;
-    const endDate = addDaysIso(draft.endDate, -1);
-    onDraftChange({ ...draft, endDate, segments: normalizedRequestSegments({ ...draft, endDate }) });
-  }
-
   function setSegment(date: string, preset: "full" | "am" | "pm") {
     const next = segments.map((segment) => {
       if (segment.date !== date) return segment;
@@ -1202,31 +1191,35 @@ function RequestOffSheet({
     <Modal animationType="slide" presentationStyle="pageSheet" visible={visible} onRequestClose={onClose}>
       <View style={styles.requestSheet}>
         <View style={styles.sheetHandle} />
-        <View style={styles.itemHeader}>
-          <Text style={styles.detailTitle}>{editingRequest ? "Edit Time Off" : "Request Time Off"}</Text>
-          <Pressable onPress={onClose}>
-            <Text style={styles.sheetCloseText}>×</Text>
+        <View style={styles.requestNavHeader}>
+          <Pressable onPress={onClose} disabled={busy}>
+            <Text style={[styles.requestNavAction, busy && styles.disabledText]}>Cancel</Text>
+          </Pressable>
+          <Text style={styles.requestNavTitle}>{editingRequest ? "Edit Time Off" : "Request Time Off"}</Text>
+          <Pressable onPress={onSubmit} disabled={busy}>
+            <Text style={[styles.requestNavAction, busy && styles.disabledText]}>{busy ? "Submitting" : editingRequest ? "Save" : "Submit"}</Text>
           </Pressable>
         </View>
 
         <ScrollView style={styles.requestSheetScroll} contentContainerStyle={styles.requestSheetContent} keyboardShouldPersistTaps="handled">
-          <Text style={styles.formLabel}>Dates</Text>
-          <View style={styles.dateButtonRow}>
-            <Pressable
-              style={[styles.dateButton, datePicker === "start" && styles.dateButtonActive]}
+          <View style={styles.requestSection}>
+            <Text style={styles.requestSectionTitle}>Range</Text>
+            <RequestDateRow
+              label="Start"
+              value={draft.startDate}
+              active={datePicker === "start"}
               onPress={() => setDatePicker(datePicker === "start" ? null : "start")}
-            >
-              <Text style={styles.dateButtonLabel}>Start Date</Text>
-              <Text style={styles.dateButtonValue}>{displayDayOffDate(draft.startDate)}</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.dateButton, datePicker === "end" && styles.dateButtonActive]}
+            />
+            <View style={styles.requestDivider} />
+            <RequestDateRow
+              label="End"
+              value={draft.endDate}
+              active={datePicker === "end"}
               onPress={() => setDatePicker(datePicker === "end" ? null : "end")}
-            >
-              <Text style={styles.dateButtonLabel}>End Date</Text>
-              <Text style={styles.dateButtonValue}>{displayDayOffDate(draft.endDate)}</Text>
-            </Pressable>
+            />
+            <Text style={styles.requestRangeSummary}>{segments.length === 1 ? "1 day selected." : `${segments.length} days selected.`}</Text>
           </View>
+
           {datePicker ? (
             <View style={styles.datePickerPanel}>
               <View style={styles.datePickerHeader}>
@@ -1248,79 +1241,91 @@ function RequestOffSheet({
               />
             </View>
           ) : null}
-          {segments.map((segment, idx) => (
-            <View key={segment.date} style={styles.segmentRow}>
-              <View style={styles.segmentHeader}>
-                <View style={styles.segmentDateActions}>
-                  <Text style={styles.segmentDate}>{displayDayOffDate(segment.date)}</Text>
-                  {idx === 0 ? (
-                    <>
-                      <Pressable style={styles.inlineDayButton} onPress={addRequestDay}>
-                        <Text style={styles.inlineDayButtonText}>+</Text>
-                      </Pressable>
-                      {segments.length > 1 ? (
-                        <Pressable style={styles.inlineDayButton} onPress={removeLastRequestDay}>
-                          <Text style={styles.inlineDayButtonText}>-</Text>
-                        </Pressable>
-                      ) : null}
-                    </>
-                  ) : null}
-                </View>
-                <Text style={styles.segmentSummary}>{segment.isFullDay ? "Full day" : `${displayTime(segment.start || "07:00")} - ${displayTime(segment.end || "11:00")}`}</Text>
-              </View>
-              <View style={styles.segmentChips}>
-                {[
-                  ["full", "Full"],
-                  ["am", "AM"],
-                  ["pm", "PM"],
-                ].map(([preset, label]) => {
-                  const active = preset === "full" ? segment.isFullDay : !segment.isFullDay && segmentPreset(segment) === preset;
-                  return (
-                    <Pressable key={preset} style={[styles.segmentChip, active && styles.segmentChipActive]} onPress={() => setSegment(segment.date, preset as "full" | "am" | "pm")}>
-                      <Text style={[styles.segmentChipText, active && styles.segmentChipTextActive]}>{label}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
-          ))}
 
-          <Text style={styles.formLabel}>Type</Text>
-          <View style={styles.requestTypeGrid}>
-            {requestTypes.map((type) => (
-              <Pressable
-                key={type}
-                style={[styles.requestTypeChip, selectedType === type && styles.requestTypeChipActive]}
-                onPress={() => onDraftChange({ ...draft, reason: type })}
-              >
-                <Text style={[styles.requestTypeText, selectedType === type && styles.requestTypeTextActive]}>{type}</Text>
-              </Pressable>
+          <View style={styles.requestSection}>
+            <Text style={styles.requestSectionTitle}>Days</Text>
+            {segments.map((segment) => (
+              <View key={segment.date} style={styles.segmentRow}>
+                <View style={styles.segmentHeader}>
+                  <Text style={styles.segmentDate}>{displayDayOffDate(segment.date)}</Text>
+                  <Text style={styles.segmentSummary}>{segment.isFullDay ? "Full day" : `${displayTime(segment.start || "07:00")} - ${displayTime(segment.end || "11:00")}`}</Text>
+                </View>
+                <View style={styles.segmentChips}>
+                  {[
+                    ["full", "Full"],
+                    ["am", "AM"],
+                    ["pm", "PM"],
+                  ].map(([preset, label]) => {
+                    const active = preset === "full" ? segment.isFullDay : !segment.isFullDay && segmentPreset(segment) === preset;
+                    return (
+                      <Pressable key={preset} style={[styles.segmentChip, active && styles.segmentChipActive]} onPress={() => setSegment(segment.date, preset as "full" | "am" | "pm")}>
+                        <Text style={[styles.segmentChipText, active && styles.segmentChipTextActive]}>{label}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
             ))}
           </View>
 
-          <Text style={styles.formLabel}>Notes</Text>
-          <TextInput
-            style={[styles.input, styles.textArea]}
-            value={draft.notes}
-            onChangeText={(notes) => onDraftChange({ ...draft, notes })}
-            placeholder="Optional note"
-            multiline
-          />
+          <View style={styles.requestSection}>
+            <Text style={styles.requestSectionTitle}>Details</Text>
+            <View style={styles.requestTypeSelect}>
+              <Text style={styles.requestTypeSelectLabel}>Type</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.requestTypeScroller}>
+                {requestTypes.map((type) => (
+                  <Pressable
+                    key={type}
+                    style={[styles.requestTypeChip, selectedType === type && styles.requestTypeChipActive]}
+                    onPress={() => onDraftChange({ ...draft, reason: type })}
+                  >
+                    <Text style={[styles.requestTypeText, selectedType === type && styles.requestTypeTextActive]}>{type}</Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </View>
 
+            <TextInput
+              style={[styles.input, styles.textArea]}
+              value={draft.notes}
+              onChangeText={(notes) => onDraftChange({ ...draft, notes })}
+              placeholder="Optional note"
+              multiline
+            />
+          </View>
         </ScrollView>
 
-        <View style={styles.requestSheetFooter}>
-          <Pressable style={[styles.primaryButton, busy && styles.disabled]} onPress={onSubmit} disabled={busy}>
-            <Text style={styles.primaryButtonText}>{editingRequest ? "Save Changes" : "Submit Request"}</Text>
-          </Pressable>
-          {editingRequest ? (
+        {editingRequest ? (
+          <View style={styles.requestSheetFooter}>
             <Pressable style={[styles.cancelDayOffButton, busy && styles.disabled]} onPress={onCancel} disabled={busy}>
               <Text style={styles.cancelDayOffText}>Cancel Days Off And Restore Schedule</Text>
             </Pressable>
-          ) : null}
-        </View>
+          </View>
+        ) : null}
       </View>
     </Modal>
+  );
+}
+
+function RequestDateRow({
+  label,
+  value,
+  active,
+  onPress,
+}: {
+  label: string;
+  value: string;
+  active: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable style={[styles.requestDateRow, active && styles.requestDateRowActive]} onPress={onPress}>
+      <Text style={styles.requestDateLabel}>{label}</Text>
+      <View style={styles.requestDateValueWrap}>
+        <Text style={styles.requestDateValue}>{formatRequestDate(value)}</Text>
+        <Text style={styles.requestDateIcon}>▦</Text>
+      </View>
+    </Pressable>
   );
 }
 
@@ -1352,6 +1357,11 @@ function formatDisplayDate(value: string): string {
   const [year, month, day] = value.slice(0, 10).split("-");
   if (!year || !month || !day) return value;
   return `${month}-${day}-${year}`;
+}
+
+function formatRequestDate(value: string): string {
+  const date = dateStringToDate(value);
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 function formatDateTime(value: string): string {
@@ -2966,6 +2976,27 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     backgroundColor: "#eef9f7",
   },
+  requestNavHeader: {
+    minHeight: 42,
+    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  requestNavTitle: {
+    color: "#123034",
+    fontSize: 16,
+    fontWeight: "900",
+  },
+  requestNavAction: {
+    color: "#0f6f62",
+    fontSize: 14,
+    fontWeight: "900",
+    minWidth: 58,
+  },
+  disabledText: {
+    opacity: 0.45,
+  },
   sheetHandle: {
     alignSelf: "center",
     width: 42,
@@ -2982,6 +3013,67 @@ const styles = StyleSheet.create({
     marginTop: 10,
     textTransform: "uppercase",
     letterSpacing: 0.8,
+  },
+  requestSection: {
+    backgroundColor: "#fffffbde",
+    borderColor: "#d0e5e3",
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+    shadowColor: "#143d3d",
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+  },
+  requestSectionTitle: {
+    color: "#60787b",
+    fontSize: 11,
+    fontWeight: "900",
+    marginBottom: 8,
+  },
+  requestDivider: {
+    height: 1,
+    backgroundColor: "#d0e5e3",
+    opacity: 0.65,
+    marginVertical: 5,
+  },
+  requestDateRow: {
+    borderRadius: 10,
+    paddingVertical: 5,
+  },
+  requestDateRowActive: {
+    backgroundColor: "#edf7f3",
+    paddingHorizontal: 8,
+    marginHorizontal: -8,
+  },
+  requestDateLabel: {
+    color: "#123034",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  requestDateValueWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 3,
+  },
+  requestDateValue: {
+    color: "#0f6f62",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  requestDateIcon: {
+    color: "#0f6f62",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  requestRangeSummary: {
+    color: "#60787b",
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 8,
   },
   dateButtonRow: {
     flexDirection: "row",
@@ -3039,21 +3131,29 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "900",
   },
-  requestTypeGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 8,
+  requestTypeSelect: {
+    marginBottom: 9,
+  },
+  requestTypeSelectLabel: {
+    color: "#123034",
+    fontSize: 13,
+    fontWeight: "900",
+    marginBottom: 7,
+  },
+  requestTypeScroller: {
+    gap: 7,
+    paddingRight: 8,
   },
   requestTypeChip: {
-    width: "31%",
-    minHeight: 44,
+    minHeight: 32,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 12,
+    borderRadius: 999,
     borderWidth: 1,
     borderColor: "#d0e5e3",
     backgroundColor: "#fffffb",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
   },
   requestTypeChipActive: {
     borderColor: "#0f6f62",
@@ -3126,22 +3226,17 @@ const styles = StyleSheet.create({
     fontWeight: "900",
   },
   segmentRow: {
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#d3dbea",
-    borderRadius: 16,
-    padding: 12,
-    marginBottom: 10,
+    paddingVertical: 5,
   },
   segmentHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 10,
+    marginBottom: 7,
   },
   segmentDate: {
-    color: "#173760",
-    fontSize: 14,
+    color: "#123034",
+    fontSize: 13,
     fontWeight: "900",
   },
   segmentDateActions: {
@@ -3165,34 +3260,38 @@ const styles = StyleSheet.create({
     fontWeight: "900",
   },
   segmentSummary: {
-    color: "#52677f",
-    fontSize: 12,
+    color: "#60787b",
+    fontSize: 11,
     fontWeight: "800",
   },
   segmentChips: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 7,
+    backgroundColor: "#dcefeb",
+    borderRadius: 10,
+    padding: 3,
+    gap: 3,
   },
   segmentChip: {
-    paddingHorizontal: 11,
-    paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "#d3dbea",
-    backgroundColor: "#f8fbff",
+    flex: 1,
+    minHeight: 29,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
   },
   segmentChipActive: {
-    backgroundColor: "#1c66d8",
-    borderColor: "#1c66d8",
+    backgroundColor: "#fffffb",
+    shadowColor: "#143d3d",
+    shadowOpacity: 0.08,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 2 },
   },
   segmentChipText: {
-    color: "#52677f",
-    fontSize: 12,
+    color: "#60787b",
+    fontSize: 11,
     fontWeight: "900",
   },
   segmentChipTextActive: {
-    color: "#fff",
+    color: "#0f6f62",
   },
   input: {
     borderWidth: 1,

@@ -5,7 +5,6 @@ from datetime import date
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from .conflicts import check_conflicts
 from .models import DayOff, Surgeon
 from .native_request_off_helpers import (
     NativeRequestOffInput,
@@ -21,13 +20,7 @@ def create_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequ
     _validate_request_dates(payload.start_date, payload.end_date, "requested")
     segments, start_t, end_t = _request_segments(payload)
 
-    conflict_msgs = check_conflicts(
-        surgeon.id,
-        payload.start_date,
-        payload.end_date,
-        db,
-        target_entity={"type": "day_off", "start_date": payload.start_date, "end_date": payload.end_date},
-    )
+    conflict_msgs = []
     overlap = _overlapping_request(db, surgeon.id, payload.start_date, payload.end_date)
     if overlap:
         conflict_msgs.append(
@@ -67,14 +60,7 @@ def update_native_request_off(db: Session, surgeon: Surgeon, dayoff_id: int, pay
     _validate_request_dates(payload.start_date, payload.end_date, "changed")
     segments, start_t, end_t = _request_segments(payload)
 
-    conflict_msgs = check_conflicts(
-        surgeon.id,
-        payload.start_date,
-        payload.end_date,
-        db,
-        exclude_dayoff_id=row.id,
-        target_entity={"type": "day_off", "start_date": payload.start_date, "end_date": payload.end_date},
-    )
+    conflict_msgs = []
     overlap = _overlapping_request(db, surgeon.id, payload.start_date, payload.end_date, exclude_id=row.id)
     if overlap:
         conflict_msgs.append(

@@ -8,7 +8,6 @@ from datetime import date, timedelta
 from sqlalchemy import func as sql_func
 from sqlalchemy.orm import Session, joinedload
 
-from .conflicts import check_conflicts
 from .models import CallGroup, CallRotation, DayOff, Surgeon
 
 
@@ -135,14 +134,7 @@ def submit_request_off(db: Session, surgeon: Surgeon, start_date: str, end_date:
     if end < start:
         return {"ok": False, "warn": "End date must be the same day or after the start date."}
 
-    conflict_msgs = check_conflicts(
-        surgeon.id,
-        start,
-        end,
-        db,
-        target_entity={"type": "day_off", "start_date": start, "end_date": end},
-    )
-
+    conflict_msgs = []
     overlap = db.query(DayOff).filter(
         DayOff.surgeon_id == surgeon.id,
         DayOff.status.in_(["pending", "approved"]),

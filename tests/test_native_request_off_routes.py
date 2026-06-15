@@ -49,7 +49,7 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
                 ],
             )
 
-            with patch("app.native_request_off_service.check_conflicts", return_value=[]), patch("app.native_request_off_service.send_native_push_to_surgeon"):
+            with patch("app.native_request_off_service.send_native_push_to_surgeon"):
                 create_response = native_request_off(create_body, db=db, auth=(surgeon, "token"))
 
             self.assertTrue(create_response["ok"])
@@ -82,7 +82,7 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
                 segments=[{"date": updated_start.isoformat(), "isFullDay": True}],
             )
 
-            with patch("app.native_request_off_service.check_conflicts", return_value=[]), patch("app.native_request_off_service.send_native_push_to_surgeon"):
+            with patch("app.native_request_off_service.send_native_push_to_surgeon"):
                 update_response = native_update_request_off(row.id, update_body, db=db, auth=(surgeon, "token"))
 
             self.assertTrue(update_response["ok"])
@@ -108,7 +108,7 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
         finally:
             db.close()
 
-    def test_create_request_saves_with_warnings_on_conflict(self):
+    def test_create_request_saves_without_schedule_conflict_warning(self):
         db = self.Session()
         try:
             surgeon = self._seed_surgeon(db)
@@ -121,12 +121,12 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
                 is_full_day=True,
             )
 
-            with patch("app.native_request_off_service.check_conflicts", return_value=["Clinic conflict"]), patch("app.native_request_off_service.send_native_push_to_surgeon"):
+            with patch("app.native_request_off_service.send_native_push_to_surgeon"):
                 response = native_request_off(body, db=db, auth=(surgeon, "token"))
 
             self.assertTrue(response["ok"])
             self.assertIsNotNone(response["request"])
-            self.assertEqual(response["warnings"], ["Clinic conflict"])
+            self.assertEqual(response["warnings"], [])
             self.assertEqual(db.query(DayOff).count(), 1)
         finally:
             db.close()

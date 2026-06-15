@@ -1,6 +1,6 @@
 import os
 import unittest
-from datetime import date
+from datetime import date, datetime
 from unittest.mock import patch
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
@@ -10,6 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models import Base, Surgeon
+from app.native_patient_schedule_service import _utc_bounds_for_eastern_dates
 from app.routers.native_api import native_patient_schedule
 
 
@@ -59,6 +60,12 @@ class NativePatientScheduleRouteTest(unittest.TestCase):
             service.assert_called_once_with(date(2026, 6, 12), date(2026, 6, 18))
         finally:
             db.close()
+
+    def test_aprima_query_bounds_use_utc_for_eastern_dates(self):
+        start, end = _utc_bounds_for_eastern_dates(date(2026, 6, 15), date(2026, 6, 21))
+
+        self.assertEqual(start, datetime(2026, 6, 15, 4, 0))
+        self.assertEqual(end, datetime(2026, 6, 22, 4, 0))
 
     def _seed_surgeon(self, db) -> Surgeon:
         surgeon = Surgeon(

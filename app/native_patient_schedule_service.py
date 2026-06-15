@@ -2,16 +2,28 @@
 from __future__ import annotations
 
 import os
-from datetime import date
+from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 
 APPOINTMENT_SQL = """
-WITH normalized AS (
+WITH filtered AS (
   SELECT
-    a.*,
+    a.AppointmentUid,
+    a.StartDateTime,
+    a.EndDateTime,
+    a.PatientUid,
+    a.ProviderUid,
+    a.AppointmentTypeUid,
+    a.AppointmentStatusUid,
+    a.ServiceSiteUid,
+    a.RoomUid,
+    a.Reason,
     CAST((a.StartDateTime AT TIME ZONE 'UTC' AT TIME ZONE 'Eastern Standard Time') AS DATETIME) AS LocalStartDateTime,
     CAST((a.EndDateTime AT TIME ZONE 'UTC' AT TIME ZONE 'Eastern Standard Time') AS DATETIME) AS LocalEndDateTime
   FROM Appointment a
+  WHERE a.StartDateTime >= %s
+    AND a.StartDateTime < %s
 )
 SELECT
   CAST(appt.AppointmentUid AS VARCHAR(36)) AS appointment_id,
@@ -27,7 +39,7 @@ SELECT
   appt.Reason AS reason,
   lss.Name AS service_site,
   lr.Name AS room
-FROM normalized appt
+FROM filtered appt
 JOIN Patient pt ON pt.PersonUid = appt.PatientUid
 JOIN Person pat ON pat.PersonUid = pt.PersonUid
 JOIN Provider prov ON prov.PersonUid = appt.ProviderUid
@@ -36,9 +48,7 @@ LEFT JOIN ListAppointmentType lat ON lat.AppointmentTypeUid = appt.AppointmentTy
 LEFT JOIN ListAppointmentStatus las ON las.AppointmentStatusUid = appt.AppointmentStatusUid
 LEFT JOIN ListServiceSite lss ON lss.ServiceSiteUid = appt.ServiceSiteUid
 LEFT JOIN ListRoom lr ON lr.RoomUid = appt.RoomUid
-WHERE appt.LocalStartDateTime >= %s
-  AND appt.LocalStartDateTime < DATEADD(day, 1, %s)
-  AND (las.IsCanceledStatus = 0 OR las.IsCanceledStatus IS NULL)
+WHERE (las.IsCanceledStatus = 0 OR las.IsCanceledStatus IS NULL)
   AND prov.Inactive = 0
   AND COALESCE(las.Name, '') <> 'Recalls'
   AND COALESCE(lat.Name, '') NOT IN ('Recall', 'DR OUT', 'FYI', 'Meeting')
@@ -60,7 +70,7 @@ def native_patient_schedule(start_date: date, end_date: date) -> dict:
     conn = _connect()
     try:
         with conn.cursor(as_dict=True) as cursor:
-            cursor.execute(APPOINTMENT_SQL, (start_date.isoformat(), end_date.isoformat()))
+            cursor.execute(APPOINTMENT_SQL, _utc_bounds_for_eastern_dates(start_date, end_date))
             rows = [_serialize_row(row) for row in cursor.fetchall()]
     finally:
         conn.close()
@@ -111,6 +121,17 @@ def _parse_connection_string(conn_string: str) -> dict[str, str]:
         key, value = part.split("=", 1)
         config[key.strip().upper()] = value.strip()
     return config
+
+
+def _utc_bounds_for_eastern_dates(start_date: date, end_date: date) -> tuple[datetime, datetime]:
+    eastern = ZoneInfo("America/New_York")
+    utc = ZoneInfo("UTC")
+    start_local = datetime.combine(start_date, time.min, tzinfo=eastern)
+    end_exclusive_local = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=eastern)
+    return (
+        start_local.astimezone(utc).replace(tzinfo=None),
+        end_exclusive_local.astimezone(utc).replace(tzinfo=None),
+    )
 
 
 def _serialize_row(row: dict) -> dict:

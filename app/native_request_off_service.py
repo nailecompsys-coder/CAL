@@ -33,8 +33,6 @@ def create_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequ
         conflict_msgs.append(
             f"You already have a request for {overlap.start_date.isoformat()} - {overlap.end_date.isoformat()}"
         )
-    if conflict_msgs:
-        return {"ok": False, "request": None, "warnings": conflict_msgs[:5]}
 
     row = DayOff(
         surgeon_id=surgeon.id,
@@ -82,8 +80,6 @@ def update_native_request_off(db: Session, surgeon: Surgeon, dayoff_id: int, pay
         conflict_msgs.append(
             f"You already have a request for {overlap.start_date.isoformat()} - {overlap.end_date.isoformat()}"
         )
-    if conflict_msgs:
-        return {"ok": False, "request": serialize_day_off(row), "warnings": conflict_msgs[:5]}
 
     row.start_date = payload.start_date
     row.end_date = payload.end_date

@@ -108,7 +108,7 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
         finally:
             db.close()
 
-    def test_create_request_returns_warnings_without_writing_on_conflict(self):
+    def test_create_request_saves_with_warnings_on_conflict(self):
         db = self.Session()
         try:
             surgeon = self._seed_surgeon(db)
@@ -124,10 +124,10 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
             with patch("app.native_request_off_service.check_conflicts", return_value=["Clinic conflict"]), patch("app.native_request_off_service.send_native_push_to_surgeon"):
                 response = native_request_off(body, db=db, auth=(surgeon, "token"))
 
-            self.assertFalse(response["ok"])
-            self.assertIsNone(response["request"])
+            self.assertTrue(response["ok"])
+            self.assertIsNotNone(response["request"])
             self.assertEqual(response["warnings"], ["Clinic conflict"])
-            self.assertEqual(db.query(DayOff).count(), 0)
+            self.assertEqual(db.query(DayOff).count(), 1)
         finally:
             db.close()
 

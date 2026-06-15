@@ -3,7 +3,7 @@ import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { useEffect, useMemo, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import { API_BASE_URL } from './src/config/env';
 import { AuthScreen } from './src/features/auth/AuthScreen';
 import { ScheduleScreen } from './src/features/schedule/ScheduleScreen';
@@ -164,7 +164,7 @@ export default function App() {
     if (finalStatus !== 'granted') return;
     const projectId = Constants.expoConfig?.extra?.eas?.projectId;
     const tokenData = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined);
-    await registerNativePushToken(sessionToken, tokenData.data);
+    await registerNativePushToken(sessionToken, tokenData.data, Platform.OS);
   }
 
   async function onSubmitRequestOff() {

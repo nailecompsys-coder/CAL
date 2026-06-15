@@ -64,6 +64,9 @@ async function apiCall<T>(
   if (!res.ok) {
     const body = await res.text();
     notifySessionInvalid(path, res.status);
+    if (res.status === 401 && !path.includes("/surgeon/otp/")) {
+      throw new Error("Session expired or device was signed out. Please log in again.");
+    }
     throw new Error(`HTTP ${res.status}: ${body || res.statusText} (url=${url})`);
   }
   return res.json() as Promise<T>;
@@ -218,12 +221,12 @@ export function saveSurgeryNotes(
   );
 }
 
-export function registerNativePushToken(token: string, pushToken: string): Promise<NativeSaveResponse> {
+export function registerNativePushToken(token: string, pushToken: string, platform = "ios"): Promise<NativeSaveResponse> {
   return apiCall<NativeSaveResponse>(
     "/api/native/push-token",
     {
       method: "POST",
-      body: JSON.stringify({ token: pushToken, platform: "ios" }),
+      body: JSON.stringify({ token: pushToken, platform }),
     },
     token
   );

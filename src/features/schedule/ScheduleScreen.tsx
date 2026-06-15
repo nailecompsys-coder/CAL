@@ -1,9 +1,12 @@
 import { ActivityIndicator, FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
+import type { StyleProp, ViewStyle } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import type { NativeDay, NativeDayOffRequest, NativeHome, NativeScheduleAlert, NativeScheduleItem, PatientAppointment } from "../../types/cal";
 
 type TabKey = "schedule" | "request" | "patients";
+type ScheduleViewMode = "day" | "week";
 
 type RequestDraft = {
   startDate: string;
@@ -244,61 +247,237 @@ function ScheduleTab({
   onCoverCall: (rotationId: number) => void;
 }) {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ScheduleViewMode>("day");
   const todayKey = new Date().toISOString().slice(0, 10);
   const today = home.days.find((day) => day.date === todayKey) ?? home.days.find((day) => day.items.length > 0) ?? home.days[0];
   const selectedDay = home.days.find((day) => day.date === selectedDate) ?? today;
-  const heroItem = today ? heroItemForDay(today) : undefined;
 
   useEffect(() => {
-    setSelectedDate(today?.date ?? home.days[0]?.date ?? null);
+    setSelectedDate((current) => {
+      if (current && home.days.some((day) => day.date === current)) return current;
+      return today?.date ?? home.days[0]?.date ?? null;
+    });
   }, [home.range.start, home.range.end, today?.date, home.days]);
+
+  function shiftDay(step: number) {
+    if (!selectedDay) return;
+    const index = home.days.findIndex((day) => day.date === selectedDay.date);
+    const next = home.days[index + step];
+    if (next) {
+      setSelectedDate(next.date);
+      return;
+    }
+    onWeekChange(weekOffset + (step > 0 ? 1 : -1));
+  }
 
   return (
     <View>
-      <View style={styles.hero}>
-        <Text style={styles.heroEyebrow}>TODAY SCHEDULED EVENTS</Text>
-        <Text style={styles.heroDate}>{today ? formatDisplayDate(today.date) : "Today"}</Text>
-        {heroItem ? (
-          <View style={styles.heroEvent}>
-            <View style={styles.heroIcon}>
-              <Text style={styles.heroIconText}>{labelForType(heroItem.type).slice(0, 1)}</Text>
-            </View>
-            <View>
-              <Text style={styles.heroTitle}>{heroItem.title}</Text>
-              <Text style={styles.heroSub}>{heroItem.subtitle || timeLabel(heroItem)}</Text>
-            </View>
-          </View>
-        ) : (
-          <Text style={styles.heroSub}>No scheduled events today.</Text>
-        )}
+      <View style={styles.scheduleModePicker}>
+        {[
+          ["day", "Day"],
+          ["week", "Week"],
+        ].map(([key, label]) => {
+          const active = viewMode === key;
+          return (
+            <Pressable
+              key={key}
+              style={[styles.scheduleModeButton, active && styles.scheduleModeButtonActive]}
+              onPress={() => setViewMode(key as ScheduleViewMode)}
+            >
+              <Text style={[styles.scheduleModeText, active && styles.scheduleModeTextActive]}>{label}</Text>
+            </Pressable>
+          );
+        })}
       </View>
 
-      <View style={styles.weekHeader}>
-        <Pressable style={styles.arrowButton} onPress={() => onWeekChange(weekOffset - 1)}>
-          <Text style={styles.arrowButtonText}>‹</Text>
-        </Pressable>
+      {viewMode === "day" && selectedDay ? (
+        <DailyScheduleView
+          day={selectedDay}
+          days={home.days}
+          onPrevious={() => shiftDay(-1)}
+          onNext={() => shiftDay(1)}
+          onCoverCall={onCoverCall}
+        />
+      ) : null}
+
+      {viewMode === "week" ? (
         <View>
-          <Text style={styles.weekTitle}>This Week</Text>
-          <Text style={styles.weekRange}>{formatDisplayDate(home.range.start)} - {formatDisplayDate(home.range.end)}</Text>
+          <View style={styles.weekHeader}>
+            <Pressable style={styles.arrowButton} onPress={() => onWeekChange(weekOffset - 1)}>
+              <Text style={styles.arrowButtonText}>‹</Text>
+            </Pressable>
+            <View>
+              <Text style={styles.weekTitle}>This Week</Text>
+              <Text style={styles.weekRange}>{formatDisplayDate(home.range.start)} - {formatDisplayDate(home.range.end)}</Text>
+            </View>
+            <Pressable style={styles.arrowButton} onPress={() => onWeekChange(weekOffset + 1)}>
+              <Text style={styles.arrowButtonText}>›</Text>
+            </Pressable>
+          </View>
+
+          {home.days.slice(0, 7).map((day) => (
+            <View key={day.date}>
+              <WeekDayCard
+                day={day}
+                selected={selectedDay?.date === day.date}
+                onCoverCall={onCoverCall}
+                onPress={() => {
+                  setSelectedDate(day.date);
+                  onOpenDay(day);
+                }}
+              />
+            </View>
+          ))}
         </View>
-        <Pressable style={styles.arrowButton} onPress={() => onWeekChange(weekOffset + 1)}>
-          <Text style={styles.arrowButtonText}>›</Text>
-        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function DailyScheduleView({
+  day,
+  days,
+  onPrevious,
+  onNext,
+  onCoverCall,
+}: {
+  day: NativeDay;
+  days: NativeDay[];
+  onPrevious: () => void;
+  onNext: () => void;
+  onCoverCall: (rotationId: number) => void;
+}) {
+  const callAssignments = day.callAssignments ?? [];
+  const offSurgeons = day.offSurgeons ?? [];
+  const mySchedule = day.items.filter((item) => item.type === "clinic" || item.type === "surgery");
+  const meetings = day.items.filter((item) => item.type === "meeting");
+  const personal = day.items.filter((item) => item.type === "personal");
+  const nextMeeting = nextAgendaItem(days, day.date, "meeting");
+  const nextPersonal = nextAgendaItem(days, day.date, "personal");
+
+  return (
+    <View style={styles.dailyScreen}>
+      <View style={styles.dailyHeader}>
+        <View>
+          <Text style={styles.dailyHeaderTitle}>{day.date === new Date().toISOString().slice(0, 10) ? "Today" : day.dayName}</Text>
+          <Text style={styles.dailyHeaderDate}>{formatDisplayDate(day.date)}</Text>
+        </View>
+        <View style={styles.dailyHeaderActions}>
+          <Pressable style={styles.arrowButton} onPress={onPrevious}>
+            <Text style={styles.arrowButtonText}>‹</Text>
+          </Pressable>
+          <Pressable style={styles.arrowButton} onPress={onNext}>
+            <Text style={styles.arrowButtonText}>›</Text>
+          </Pressable>
+        </View>
       </View>
 
-      {home.days.slice(0, 7).map((day) => (
-        <View key={day.date}>
-          <WeekDayCard
-            day={day}
-            selected={selectedDay?.date === day.date}
-            onCoverCall={onCoverCall}
-            onPress={() => {
-              setSelectedDate(day.date);
-              onOpenDay(day);
-            }}
-          />
-        </View>
-      ))}
+      <View style={[styles.dailyCard, styles.dailyOnCallCard]}>
+        <Text style={styles.dailySectionTitle}>On Call</Text>
+        {callAssignments.length === 0 ? <DailyEmptyRow text="No on-call coverage scheduled" /> : null}
+        {callAssignments.map((assignment, idx) => (
+          <Pressable
+            key={`${assignment.group}-${assignment.rotationId}-${idx}`}
+            style={styles.dailyCallRow}
+            onPress={() => onCoverCall(assignment.rotationId)}
+          >
+            <View>
+              <Text style={styles.dailyCallGroup}>{assignment.group}</Text>
+              <Text style={styles.dailyCallSite}>{shortGroup(assignment.group)}</Text>
+            </View>
+            <View style={styles.dailyCallInitialsWrap}>
+              {assignment.isCovered ? (
+                <Text style={styles.dailyCallInitials}>
+                  <Text style={styles.railStruck}>{assignment.originalInitials || "NC"}</Text>
+                  <Text> {assignment.coveringInitials || assignment.initials || initialsFromName(assignment.surgeon)}</Text>
+                </Text>
+              ) : (
+                <Text style={styles.dailyCallInitials}>{assignment.initials || initialsFromName(assignment.surgeon)}</Text>
+              )}
+              <Text style={styles.dailyChevron}>›</Text>
+            </View>
+          </Pressable>
+        ))}
+      </View>
+
+      <DailySection title="Off" tintStyle={styles.dailyOffCard}>
+        {offSurgeons.length === 0 ? <DailyEmptyRow text="No one off" /> : (
+          <View style={styles.dailyChipRow}>
+            {offSurgeons.map((surgeon, idx) => (
+              <View key={`${surgeon.initials}-${idx}`} style={styles.dailyChip}>
+                <Text style={styles.dailyChipText}>{surgeon.initials}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </DailySection>
+
+      <DailySection title="My Schedule" tintStyle={styles.dailyMyScheduleCard}>
+        {mySchedule.length === 0 ? <DailyEmptyRow text="No clinic or hospital schedule" /> : (
+          mySchedule.map((item) => <DailyScheduleRow key={item.id} item={item} />)
+        )}
+      </DailySection>
+
+      <DailySection title="Meetings" tintStyle={styles.dailyMeetingsCard}>
+        <AgendaPreviewRow
+          prefix="Today:"
+          content={meetings.length ? meetings.map(agendaSummary).join(", ") : "none"}
+          muted={!meetings.length}
+        />
+        {nextMeeting ? <AgendaPreviewRow prefix={`${displayDayOffDate(nextMeeting.date)}:`} content={agendaSummary(nextMeeting.item)} /> : null}
+      </DailySection>
+
+      <DailySection title="Personal Items" tintStyle={styles.dailyPersonalCard}>
+        <AgendaPreviewRow
+          prefix="Today:"
+          content={personal.length ? personal.map(agendaSummary).join(", ") : "none"}
+          muted={!personal.length}
+        />
+        {nextPersonal ? <AgendaPreviewRow prefix={`${displayDayOffDate(nextPersonal.date)}:`} content={agendaSummary(nextPersonal.item)} /> : null}
+      </DailySection>
+    </View>
+  );
+}
+
+function DailySection({
+  title,
+  tintStyle,
+  children,
+}: {
+  title: string;
+  tintStyle: StyleProp<ViewStyle>;
+  children: ReactNode;
+}) {
+  return (
+    <View style={[styles.dailyCard, tintStyle]}>
+      <Text style={styles.dailySectionTitle}>{title}</Text>
+      {children}
+    </View>
+  );
+}
+
+function DailyEmptyRow({ text }: { text: string }) {
+  return <Text style={styles.dailyEmpty}>✓ {text}</Text>;
+}
+
+function DailyScheduleRow({ item }: { item: NativeScheduleItem }) {
+  return (
+    <View style={styles.dailyScheduleRow}>
+      <Text style={styles.dailySchedulePeriod}>{periodForItem(item).toUpperCase()}</Text>
+      <View style={styles.dailyScheduleText}>
+        <Text style={styles.dailyScheduleTitle}>{item.title}</Text>
+        {item.subtitle || item.location ? <Text style={styles.dailyScheduleSub}>{item.subtitle || item.location}</Text> : null}
+      </View>
+      <Text style={styles.dailyScheduleTime}>{timeLabel(item)}</Text>
+    </View>
+  );
+}
+
+function AgendaPreviewRow({ prefix, content, muted = false }: { prefix: string; content: string; muted?: boolean }) {
+  return (
+    <View style={styles.agendaPreviewRow}>
+      <Text style={[styles.agendaPrefix, muted && styles.agendaMuted]}>{prefix}</Text>
+      <Text style={[styles.agendaContent, muted && styles.agendaMuted]}>{content}</Text>
     </View>
   );
 }
@@ -1265,6 +1444,30 @@ function timelineSub(item: NativeScheduleItem): string {
   return label ? `${label} ${time}` : time;
 }
 
+function agendaSummary(item: NativeScheduleItem): string {
+  return [timeLabel(item), item.title, item.subtitle || item.location || ""]
+    .filter((part) => part && part !== "No time")
+    .join(" ");
+}
+
+function nextAgendaItem(
+  days: NativeDay[],
+  currentDate: string,
+  type: "meeting" | "personal"
+): { date: string; item: NativeScheduleItem } | null {
+  const current = dateStringToDate(currentDate);
+  const end = dateStringToDate(currentDate);
+  end.setDate(end.getDate() + 30);
+
+  for (const day of [...days].sort((a, b) => a.date.localeCompare(b.date))) {
+    const candidate = dateStringToDate(day.date);
+    if (candidate <= current || candidate > end) continue;
+    const item = day.items.find((row) => row.type === type);
+    if (item) return { date: day.date, item };
+  }
+  return null;
+}
+
 function groupAppointmentsByDate(appointments: PatientAppointment[]): Record<string, PatientAppointment[]> {
   return appointments.reduce<Record<string, PatientAppointment[]>>((acc, appointment) => {
     const key = appointment.date || "Unknown";
@@ -1473,6 +1676,216 @@ const styles = StyleSheet.create({
     color: "#dff7f2",
     fontSize: 12,
     marginTop: 2,
+  },
+  scheduleModePicker: {
+    flexDirection: "row",
+    backgroundColor: "#dcefeb",
+    borderColor: "#d0e5e3",
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 3,
+    marginBottom: 12,
+  },
+  scheduleModeButton: {
+    flex: 1,
+    height: 32,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  scheduleModeButtonActive: {
+    backgroundColor: "#fffffb",
+    shadowColor: "#143d3d",
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+  },
+  scheduleModeText: {
+    color: "#60787b",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  scheduleModeTextActive: {
+    color: "#0f6f62",
+  },
+  dailyScreen: {
+    gap: 8,
+  },
+  dailyHeader: {
+    backgroundColor: "#fffffbde",
+    borderColor: "#d0e5e3",
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    shadowColor: "#143d3d",
+    shadowOpacity: 0.09,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+  },
+  dailyHeaderTitle: {
+    color: "#123034",
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  dailyHeaderDate: {
+    color: "#687f83",
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 2,
+  },
+  dailyHeaderActions: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  dailyCard: {
+    borderColor: "#d0e5e3",
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    shadowColor: "#143d3d",
+    shadowOpacity: 0.09,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+  },
+  dailyOnCallCard: {
+    backgroundColor: "#dcefeb",
+  },
+  dailyOffCard: {
+    backgroundColor: "#e5f5e8",
+  },
+  dailyMyScheduleCard: {
+    backgroundColor: "#fffffbde",
+  },
+  dailyMeetingsCard: {
+    backgroundColor: "#f0ecfb",
+  },
+  dailyPersonalCard: {
+    backgroundColor: "#e9f8e9",
+  },
+  dailySectionTitle: {
+    color: "#60787b",
+    fontSize: 11,
+    fontWeight: "900",
+    marginBottom: 7,
+  },
+  dailyCallRow: {
+    borderTopColor: "#c7dcda",
+    borderTopWidth: 1,
+    paddingTop: 8,
+    paddingBottom: 4,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 8,
+  },
+  dailyCallGroup: {
+    color: "#123034",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  dailyCallSite: {
+    color: "#60787b",
+    fontSize: 10,
+    fontWeight: "800",
+    marginTop: 2,
+  },
+  dailyCallInitialsWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  dailyCallInitials: {
+    color: "#123034",
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  dailyChevron: {
+    color: "#8aa09f",
+    fontSize: 20,
+    fontWeight: "700",
+  },
+  dailyChipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 5,
+  },
+  dailyChip: {
+    backgroundColor: "#edf7f3",
+    borderColor: "#c7dcda",
+    borderWidth: 1,
+    borderRadius: 9,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    minHeight: 26,
+    justifyContent: "center",
+  },
+  dailyChipText: {
+    color: "#173a35",
+    fontSize: 11,
+    fontWeight: "900",
+    lineHeight: 14,
+  },
+  dailyEmpty: {
+    color: "#60787b",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  dailyScheduleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 4,
+  },
+  dailySchedulePeriod: {
+    color: "#0f6f62",
+    fontSize: 10,
+    fontWeight: "900",
+    width: 28,
+  },
+  dailyScheduleText: {
+    flex: 1,
+  },
+  dailyScheduleTitle: {
+    color: "#123034",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  dailyScheduleSub: {
+    color: "#60787b",
+    fontSize: 10,
+    fontWeight: "700",
+    marginTop: 1,
+  },
+  dailyScheduleTime: {
+    color: "#60787b",
+    fontSize: 10,
+    fontWeight: "800",
+  },
+  agendaPreviewRow: {
+    flexDirection: "row",
+    gap: 5,
+    alignItems: "flex-start",
+    marginBottom: 3,
+  },
+  agendaPrefix: {
+    color: "#123034",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  agendaContent: {
+    color: "#123034",
+    fontSize: 12,
+    fontWeight: "700",
+    flex: 1,
+    lineHeight: 16,
+  },
+  agendaMuted: {
+    color: "#60787b",
   },
   weekHeader: {
     flexDirection: "row",

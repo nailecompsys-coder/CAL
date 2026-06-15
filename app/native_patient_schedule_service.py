@@ -6,34 +6,43 @@ from datetime import date
 
 
 APPOINTMENT_SQL = """
+WITH normalized AS (
+  SELECT
+    a.*,
+    CAST((a.StartDateTime AT TIME ZONE 'UTC' AT TIME ZONE 'Eastern Standard Time') AS DATETIME) AS LocalStartDateTime,
+    CAST((a.EndDateTime AT TIME ZONE 'UTC' AT TIME ZONE 'Eastern Standard Time') AS DATETIME) AS LocalEndDateTime
+  FROM Appointment a
+)
 SELECT
-  CAST(a.AppointmentUid AS VARCHAR(36)) AS appointment_id,
-  CAST(a.StartDateTime AS DATE) AS appointment_date,
-  CONVERT(VARCHAR(5), a.StartDateTime, 108) AS start_time,
-  CONVERT(VARCHAR(5), a.EndDateTime, 108) AS end_time,
+  CAST(appt.AppointmentUid AS VARCHAR(36)) AS appointment_id,
+  CAST(appt.LocalStartDateTime AS DATE) AS appointment_date,
+  CONVERT(VARCHAR(5), appt.LocalStartDateTime, 108) AS start_time,
+  CONVERT(VARCHAR(5), appt.LocalEndDateTime, 108) AS end_time,
   COALESCE(NULLIF(prov.Initials, ''), LEFT(pp.FirstName, 1) + LEFT(pp.LastName, 1)) AS surgeon_initials,
   LTRIM(RTRIM(COALESCE(pp.FirstName, '') + ' ' + COALESCE(pp.LastName, ''))) AS surgeon_name,
   LTRIM(RTRIM(COALESCE(pat.LastName, '') + ', ' + COALESCE(pat.FirstName, ''))) AS patient_name,
   pt.MedicalRecordNumber AS mrn,
   lat.Name AS appointment_type,
   las.Name AS status,
-  a.Reason AS reason,
+  appt.Reason AS reason,
   lss.Name AS service_site,
   lr.Name AS room
-FROM Appointment a
-JOIN Patient pt ON pt.PersonUid = a.PatientUid
+FROM normalized appt
+JOIN Patient pt ON pt.PersonUid = appt.PatientUid
 JOIN Person pat ON pat.PersonUid = pt.PersonUid
-LEFT JOIN Provider prov ON prov.PersonUid = a.ProviderUid
+JOIN Provider prov ON prov.PersonUid = appt.ProviderUid
 LEFT JOIN Person pp ON pp.PersonUid = prov.PersonUid
-LEFT JOIN ListAppointmentType lat ON lat.AppointmentTypeUid = a.AppointmentTypeUid
-LEFT JOIN ListAppointmentStatus las ON las.AppointmentStatusUid = a.AppointmentStatusUid
-LEFT JOIN ListServiceSite lss ON lss.ServiceSiteUid = a.ServiceSiteUid
-LEFT JOIN ListRoom lr ON lr.RoomUid = a.RoomUid
-WHERE a.StartDateTime >= %s
-  AND a.StartDateTime < DATEADD(day, 1, %s)
+LEFT JOIN ListAppointmentType lat ON lat.AppointmentTypeUid = appt.AppointmentTypeUid
+LEFT JOIN ListAppointmentStatus las ON las.AppointmentStatusUid = appt.AppointmentStatusUid
+LEFT JOIN ListServiceSite lss ON lss.ServiceSiteUid = appt.ServiceSiteUid
+LEFT JOIN ListRoom lr ON lr.RoomUid = appt.RoomUid
+WHERE appt.LocalStartDateTime >= %s
+  AND appt.LocalStartDateTime < DATEADD(day, 1, %s)
   AND (las.IsCanceledStatus = 0 OR las.IsCanceledStatus IS NULL)
-  AND (prov.Inactive = 0 OR prov.Inactive IS NULL)
-ORDER BY CAST(a.StartDateTime AS DATE), surgeon_name, a.StartDateTime, patient_name
+  AND prov.Inactive = 0
+  AND COALESCE(las.Name, '') <> 'Recalls'
+  AND COALESCE(lat.Name, '') NOT IN ('Recall', 'DR OUT', 'FYI', 'Meeting')
+ORDER BY CAST(appt.LocalStartDateTime AS DATE), surgeon_name, appt.LocalStartDateTime, patient_name
 """
 
 

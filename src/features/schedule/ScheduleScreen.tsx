@@ -6,7 +6,7 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import type { NativeDay, NativeDayOffRequest, NativeHome, NativeScheduleAlert, NativeScheduleItem, PatientAppointment } from "../../types/cal";
 
 type TabKey = "schedule" | "request" | "patients";
-type ScheduleViewMode = "day" | "week";
+type ScheduleViewMode = "day" | "week" | "month";
 
 type RequestDraft = {
   startDate: string;
@@ -276,6 +276,7 @@ function ScheduleTab({
         {[
           ["day", "Day"],
           ["week", "Week"],
+          ["month", "Month"],
         ].map(([key, label]) => {
           const active = viewMode === key;
           return (
@@ -330,7 +331,108 @@ function ScheduleTab({
           ))}
         </View>
       ) : null}
+
+      {viewMode === "month" && selectedDay ? (
+        <MonthScheduleView
+          days={home.days}
+          selectedDate={selectedDay.date}
+          onOpenDay={(date) => {
+            setSelectedDate(date);
+            setViewMode("day");
+          }}
+          onCoverCall={onCoverCall}
+        />
+      ) : null}
     </View>
+  );
+}
+
+function MonthScheduleView({
+  days,
+  selectedDate,
+  onOpenDay,
+  onCoverCall,
+}: {
+  days: NativeDay[];
+  selectedDate: string;
+  onOpenDay: (date: string) => void;
+  onCoverCall: (rotationId: number) => void;
+}) {
+  const [visibleMonth, setVisibleMonth] = useState(() => monthStart(selectedDate));
+  const cells = monthCells(days, visibleMonth);
+
+  useEffect(() => {
+    setVisibleMonth(monthStart(selectedDate));
+  }, [selectedDate]);
+
+  return (
+    <View>
+      <View style={styles.weekHeader}>
+        <Pressable style={styles.arrowButton} onPress={() => setVisibleMonth(addMonthsIso(visibleMonth, -1))}>
+          <Text style={styles.arrowButtonText}>‹</Text>
+        </Pressable>
+        <View>
+          <Text style={styles.weekTitle}>{monthTitle(visibleMonth)}</Text>
+          <Text style={styles.weekRange}>Month scan</Text>
+        </View>
+        <Pressable style={styles.arrowButton} onPress={() => setVisibleMonth(addMonthsIso(visibleMonth, 1))}>
+          <Text style={styles.arrowButtonText}>›</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.monthGridCard}>
+        <View style={styles.monthWeekdayRow}>
+          {["S", "M", "T", "W", "T", "F", "S"].map((label, idx) => (
+            <Text key={`${label}-${idx}`} style={styles.monthWeekday}>{label}</Text>
+          ))}
+        </View>
+        <View style={styles.monthGrid}>
+          {cells.map((cell) => (
+            <Pressable
+              key={cell.date}
+              style={[
+                styles.monthCell,
+                !cell.isCurrentMonth && styles.monthCellMuted,
+                cell.isToday && styles.monthCellToday,
+              ]}
+              onPress={() => onOpenDay(cell.date)}
+            >
+              <Text style={[styles.monthDayNumber, !cell.isCurrentMonth && styles.monthMutedText]}>{Number(cell.date.slice(-2))}</Text>
+              <MonthCellLabel prefix="OFF" value={cell.offSummary} />
+              <View style={styles.monthOnRow}>
+                {cell.assignments.length === 0 ? <Text style={styles.monthSpacer}> </Text> : (
+                  <>
+                    <Text style={styles.monthOnPrefix}>ON</Text>
+                    {cell.assignments.slice(0, 2).map((assignment, idx) => (
+                      <Pressable
+                        key={`${assignment.rotationId}-${idx}`}
+                        onPress={() => onCoverCall(assignment.rotationId)}
+                        disabled={!assignment.rotationId}
+                      >
+                        <Text style={styles.monthOnInitials}>
+                          {assignment.isCovered
+                            ? assignment.coveringInitials || assignment.initials || initialsFromName(assignment.surgeon)
+                            : assignment.initials || initialsFromName(assignment.surgeon)}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </>
+                )}
+              </View>
+            </Pressable>
+          ))}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function MonthCellLabel({ prefix, value }: { prefix: string; value: string }) {
+  if (!value) return <Text style={styles.monthSpacer}> </Text>;
+  return (
+    <Text style={styles.monthOffLabel} numberOfLines={1}>
+      {prefix} {value}
+    </Text>
   );
 }
 
@@ -1468,6 +1570,49 @@ function nextAgendaItem(
   return null;
 }
 
+function monthStart(value: string): string {
+  const date = dateStringToDate(value);
+  date.setDate(1);
+  return dateToString(date);
+}
+
+function addMonthsIso(value: string, months: number): string {
+  const date = dateStringToDate(value);
+  date.setMonth(date.getMonth() + months, 1);
+  return dateToString(date);
+}
+
+function monthTitle(value: string): string {
+  return dateStringToDate(value).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+
+function monthCells(days: NativeDay[], visibleMonth: string): {
+  date: string;
+  isCurrentMonth: boolean;
+  isToday: boolean;
+  offSummary: string;
+  assignments: NativeDay["callAssignments"];
+}[] {
+  const first = dateStringToDate(visibleMonth);
+  const gridStart = new Date(first);
+  gridStart.setDate(first.getDate() - first.getDay());
+  const today = dateToString(new Date());
+  const byDate = new Map(days.map((day) => [day.date, day]));
+  return Array.from({ length: 42 }, (_, offset) => {
+    const date = new Date(gridStart);
+    date.setDate(gridStart.getDate() + offset);
+    const dateKey = dateToString(date);
+    const day = byDate.get(dateKey);
+    return {
+      date: dateKey,
+      isCurrentMonth: date.getMonth() === first.getMonth(),
+      isToday: dateKey === today,
+      offSummary: (day?.offSurgeons ?? []).slice(0, 3).map((surgeon) => surgeon.initials).join(" "),
+      assignments: day?.callAssignments ?? [],
+    };
+  });
+}
+
 function groupAppointmentsByDate(appointments: PatientAppointment[]): Record<string, PatientAppointment[]> {
   return appointments.reduce<Record<string, PatientAppointment[]>>((acc, appointment) => {
     const key = appointment.date || "Unknown";
@@ -1902,6 +2047,97 @@ const styles = StyleSheet.create({
     color: "#687f83",
     fontSize: 12,
     textAlign: "center",
+  },
+  monthGridCard: {
+    backgroundColor: "#fffffbde",
+    borderColor: "#d0e5e3",
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    shadowColor: "#143d3d",
+    shadowOpacity: 0.09,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+  },
+  monthWeekdayRow: {
+    flexDirection: "row",
+    marginBottom: 6,
+  },
+  monthWeekday: {
+    flex: 1,
+    color: "#60787b",
+    fontSize: 10,
+    fontWeight: "900",
+    textAlign: "center",
+  },
+  monthGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 5,
+  },
+  monthCell: {
+    width: "13.4%",
+    minHeight: 64,
+    backgroundColor: "#f7fbf8",
+    borderColor: "#ffffff",
+    borderWidth: 1,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    paddingVertical: 5,
+  },
+  monthCellMuted: {
+    opacity: 0.45,
+    backgroundColor: "#ffffff90",
+  },
+  monthCellToday: {
+    backgroundColor: "#dcefeb",
+    borderColor: "#6bbab0",
+  },
+  monthDayNumber: {
+    color: "#123034",
+    fontSize: 10,
+    fontWeight: "900",
+    marginBottom: 3,
+  },
+  monthMutedText: {
+    color: "#60787b",
+  },
+  monthOffLabel: {
+    color: "#0f6f62",
+    backgroundColor: "#0f6f6218",
+    borderRadius: 4,
+    overflow: "hidden",
+    paddingHorizontal: 3,
+    paddingVertical: 2,
+    fontSize: 8,
+    fontWeight: "900",
+    marginBottom: 3,
+  },
+  monthOnRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    backgroundColor: "#0f6f6218",
+    borderRadius: 4,
+    minHeight: 14,
+    paddingHorizontal: 3,
+    paddingVertical: 2,
+  },
+  monthOnPrefix: {
+    color: "#0f6f62",
+    fontSize: 8,
+    fontWeight: "900",
+  },
+  monthOnInitials: {
+    color: "#123034",
+    fontSize: 8,
+    fontWeight: "900",
+  },
+  monthSpacer: {
+    color: "transparent",
+    fontSize: 8,
+    lineHeight: 12,
   },
   arrowButton: {
     backgroundColor: "#fffffb",

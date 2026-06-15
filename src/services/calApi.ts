@@ -103,12 +103,12 @@ export function fetchMyEvents(token: string): Promise<CalEvent[]> {
   );
 }
 
-export function fetchNativeHome(token: string, weekOffset = 0): Promise<NativeHome> {
+export function fetchNativeHome(token: string, weekOffset = 0, daysAhead = 365): Promise<NativeHome> {
   const today = new Date();
   const monday = new Date(today);
   monday.setDate(today.getDate() - ((today.getDay() + 6) % 7) + weekOffset * 7);
   const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
+  sunday.setDate(monday.getDate() + daysAhead);
   const start = monday.toISOString().slice(0, 10);
   const end = sunday.toISOString().slice(0, 10);
   return apiCall<NativeHome>(

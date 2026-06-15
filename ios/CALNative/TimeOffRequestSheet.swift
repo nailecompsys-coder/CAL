@@ -11,6 +11,7 @@ struct TimeOffRequestForm: View {
   @State private var notes = ""
   @State private var message: String?
   @State private var isSubmitting = false
+  @State private var editingDate: RequestDateField?
 
   private let reasons = ["Day Off", "No Call", "Vacation", "CME", "Partial Day", "Medical"]
 
@@ -22,27 +23,44 @@ struct TimeOffRequestForm: View {
         ScrollView {
           VStack(alignment: .leading, spacing: 8) {
             DashboardSection(title: "Range") {
-              CompactDatePickerRow(title: "Start", date: $startDate)
-                .onChange(of: startDate) { newValue in
-                  if endDate < newValue {
-                    endDate = newValue
-                  }
-                  normalizeSegments()
-                }
+              RequestDateButton(title: "Start", date: startDate) {
+                editingDate = .start
+              }
 
               Divider().opacity(0.45)
 
-              CompactDatePickerRow(title: "End", date: $endDate)
-                .onChange(of: endDate) { newValue in
-                  if newValue < startDate {
-                    startDate = newValue
-                  }
-                  normalizeSegments()
-                }
+              RequestDateButton(title: "End", date: endDate) {
+                editingDate = .end
+              }
+
+              if let message {
+                Text(message)
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+                  .padding(.horizontal, 10)
+                  .padding(.vertical, 8)
+                  .frame(maxWidth: .infinity, alignment: .leading)
+                  .liquidGlassCard(cornerRadius: 12, tint: ClinicalPalette.amber)
+              }
 
               Text(rangeSummary)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+            }
+            .sheet(item: $editingDate) { field in
+              RequestDatePickerSheet(title: field.title, date: dateBinding(for: field))
+            }
+            .onChange(of: startDate) { newValue in
+              if endDate < newValue {
+                endDate = newValue
+              }
+              normalizeSegments()
+            }
+            .onChange(of: endDate) { newValue in
+              if newValue < startDate {
+                startDate = newValue
+              }
+              normalizeSegments()
             }
 
             DashboardSection(title: "Days") {
@@ -76,15 +94,6 @@ struct TimeOffRequestForm: View {
                 }
             }
 
-            if let message {
-              Text(message)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.amber)
-            }
           }
           .padding(.horizontal, 16)
           .padding(.top, 8)
@@ -182,6 +191,103 @@ struct TimeOffRequestForm: View {
     }
 
     return dates
+  }
+
+  private func dateBinding(for field: RequestDateField) -> Binding<Date> {
+    Binding(
+      get: {
+        switch field {
+        case .start:
+          return startDate
+        case .end:
+          return endDate
+        }
+      },
+      set: { newValue in
+        switch field {
+        case .start:
+          startDate = Calendar.current.startOfDay(for: newValue)
+          if endDate < startDate {
+            endDate = startDate
+          }
+        case .end:
+          endDate = Calendar.current.startOfDay(for: newValue)
+          if endDate < startDate {
+            startDate = endDate
+          }
+        }
+        normalizeSegments()
+      }
+    )
+  }
+}
+
+private enum RequestDateField: String, Identifiable {
+  case start
+  case end
+
+  var id: String { rawValue }
+
+  var title: String {
+    switch self {
+    case .start:
+      return "Start Date"
+    case .end:
+      return "End Date"
+    }
+  }
+}
+
+private struct RequestDateButton: View {
+  let title: String
+  let date: Date
+  let action: () -> Void
+
+  var body: some View {
+    Button(action: action) {
+      HStack(spacing: 10) {
+        Text(title)
+          .font(.subheadline.weight(.semibold))
+          .foregroundStyle(.primary)
+
+        Spacer()
+
+        Text(date.formatted(.dateTime.month(.abbreviated).day().year()))
+          .font(.subheadline.weight(.semibold))
+          .foregroundStyle(ClinicalPalette.teal)
+
+        Image(systemName: "calendar")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(ClinicalPalette.teal)
+      }
+      .padding(.vertical, 4)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+    .accessibilityLabel("\(title), \(date.formatted(.dateTime.month(.wide).day().year()))")
+  }
+}
+
+private struct RequestDatePickerSheet: View {
+  let title: String
+  @Binding var date: Date
+  @Environment(\.dismiss) private var dismiss
+
+  var body: some View {
+    NavigationView {
+      DatePicker(title, selection: $date, displayedComponents: .date)
+        .datePickerStyle(.graphical)
+        .padding()
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+          ToolbarItem(placement: .confirmationAction) {
+            Button("Done") {
+              dismiss()
+            }
+          }
+        }
+    }
   }
 }
 

@@ -12,6 +12,7 @@ from ..native_availability_service import save_native_availability as save_nativ
 from ..native_call_coverage_service import assign_native_call_coverage, cancel_native_call_coverage
 from ..native_home_service import build_native_home
 from ..native_misc_service import mark_alerts_read, save_push_token
+from ..native_patient_schedule_service import AprimaScheduleUnavailable, native_patient_schedule as native_patient_schedule_service
 from ..native_request_off_service import (
     NativeRequestOffInput,
     cancel_native_request_off as cancel_native_request_off_service,
@@ -35,6 +36,24 @@ def native_home(
     surgeon, _ = auth
     start_date, end_date = parse_iso_date_range(start, end)
     return build_native_home(db, surgeon, start_date, end_date)
+
+
+@router.get("/patient-schedule")
+def native_patient_schedule(
+    start: str,
+    end: str,
+    auth=Depends(get_current_surgeon),
+):
+    _, _ = auth
+    start_date, end_date = parse_iso_date_range(start, end)
+    try:
+        return native_patient_schedule_service(start_date, end_date)
+    except AprimaScheduleUnavailable as exc:
+        return {
+            "range": {"start": start_date.isoformat(), "end": end_date.isoformat()},
+            "appointments": [],
+            "warning": str(exc),
+        }
 
 
 @router.post("/alerts/read")

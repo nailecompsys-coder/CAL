@@ -72,6 +72,13 @@ export type NativeDay = {
     sortOrder?: number;
     staffType?: string;
   }[];
+  requestedOffSurgeons?: {
+    initials: string;
+    displayName: string;
+    isSelf: boolean;
+    sortOrder?: number;
+    staffType?: string;
+  }[];
   callAssignments: {
     rotationId: number;
     groupId?: number | null;

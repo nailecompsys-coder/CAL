@@ -1054,11 +1054,11 @@ function RequestOffTab({
 }) {
   const [requestOpen, setRequestOpen] = useState(false);
   const [editingRequest, setEditingRequest] = useState<NativeDayOffRequest | null>(null);
-  const currentMonthIndex = Math.max(0, home.dayOffSections.findIndex((section) => section.isCurrentMonth));
-  const orderedSections = [
-    ...home.dayOffSections.slice(currentMonthIndex),
-    ...home.dayOffSections.slice(0, currentMonthIndex),
-  ];
+  const [selectedMonth, setSelectedMonth] = useState(() => monthStart(dateToString(new Date())));
+  const monthOptions = Array.from({ length: 12 }, (_, offset) => addMonthsIso(monthStart(dateToString(new Date())), offset));
+  const selectedMonthDays = home.days
+    .filter((day) => monthStart(day.date) === selectedMonth)
+    .sort((a, b) => a.date.localeCompare(b.date));
 
   function openNewRequest() {
     setEditingRequest(null);
@@ -1083,10 +1083,10 @@ function RequestOffTab({
         </Pressable>
       </View>
 
-      {orderedSections.map((section, sectionIndex) => (
-        <View key={`${section.header}-${sectionIndex}`} style={styles.daysOffSection}>
-          <Text style={styles.daysOffHeader}>{section.header}</Text>
-          {section.requests.map((request) => (
+      <View style={styles.daysOffSection}>
+        <Text style={styles.daysOffHeader}>Requests</Text>
+        {home.requests.length === 0 ? <Text style={styles.daysOffEmpty}>No requests in this range.</Text> : null}
+        {home.requests.map((request) => (
             <Pressable
               key={request.id}
               onPress={() => handleOwnedRowPress(request)}
@@ -1099,10 +1099,33 @@ function RequestOffTab({
               </Text>
               {request.surgeonId === home.surgeon.id ? <Text style={styles.youText}>You</Text> : null}
             </Pressable>
-          ))}
-          {section.requests.length === 0 ? <Text style={styles.emptySmall}>No requests</Text> : null}
-        </View>
-      ))}
+        ))}
+      </View>
+
+      <View style={styles.timeOffInfoBanner}>
+        <Text style={styles.timeOffInfoIcon}>i</Text>
+        <Text style={styles.timeOffInfoText}>Pick a month to scan requested and approved time off before choosing your dates.</Text>
+      </View>
+
+      <View style={styles.monthPillGrid}>
+        {monthOptions.map((month) => {
+          const selected = month === selectedMonth;
+          return (
+            <Pressable
+              key={month}
+              style={[styles.monthPill, selected && styles.monthPillActive]}
+              onPress={() => setSelectedMonth(month)}
+            >
+              <Text style={[styles.monthPillText, selected && styles.monthPillTextActive]}>{monthAbbrev(month)}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      <View style={styles.daysOffSection}>
+        <Text style={styles.daysOffHeader}>{monthTitle(selectedMonth)}</Text>
+        <MonthTimeOffList days={selectedMonthDays} />
+      </View>
 
       <Pressable style={styles.requestFab} onPress={openNewRequest}>
         <Text style={styles.requestFabPlus}>+</Text>
@@ -1304,6 +1327,68 @@ function RequestOffSheet({
         ) : null}
       </View>
     </Modal>
+  );
+}
+
+function MonthTimeOffList({ days }: { days: NativeDay[] }) {
+  const visibleDays = days.filter((day) => {
+    const requested = day.requestedOffSurgeons ?? [];
+    const approved = day.offSurgeons ?? [];
+    return requested.length > 0 || approved.length > 0;
+  });
+
+  if (visibleDays.length === 0) {
+    return <Text style={styles.emptySmall}>No requested or approved time off.</Text>;
+  }
+
+  return (
+    <View style={styles.monthTimeOffList}>
+      {visibleDays.map((day) => (
+        <View key={day.date} style={styles.monthTimeOffDayRow}>
+          <Text style={styles.monthTimeOffDate}>{monthDayLabel(day.date)}</Text>
+          {(day.requestedOffSurgeons ?? []).length > 0 ? (
+            <TimeOffStatusLine
+              label="Requested"
+              initials={(day.requestedOffSurgeons ?? []).map((surgeon) => surgeon.initials)}
+              variant="requested"
+            />
+          ) : null}
+          {(day.offSurgeons ?? []).length > 0 ? (
+            <TimeOffStatusLine
+              label="Approved"
+              initials={(day.offSurgeons ?? []).map((surgeon) => surgeon.initials)}
+              variant="approved"
+            />
+          ) : null}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function TimeOffStatusLine({
+  label,
+  initials,
+  variant,
+}: {
+  label: string;
+  initials: string[];
+  variant: "requested" | "approved";
+}) {
+  return (
+    <View style={styles.timeOffStatusLine}>
+      <Text style={styles.timeOffStatusLabel}>{label}</Text>
+      <View style={styles.timeOffInitialsRow}>
+        {initials.map((item, idx) => (
+          <Text
+            key={`${item}-${idx}`}
+            style={[styles.timeOffInitialsPill, variant === "requested" ? styles.timeOffRequestedPill : styles.timeOffApprovedPill]}
+          >
+            {item}
+          </Text>
+        ))}
+      </View>
+    </View>
   );
 }
 
@@ -1594,6 +1679,14 @@ function addMonthsIso(value: string, months: number): string {
 
 function monthTitle(value: string): string {
   return dateStringToDate(value).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+
+function monthAbbrev(value: string): string {
+  return dateStringToDate(value).toLocaleDateString("en-US", { month: "short" });
+}
+
+function monthDayLabel(value: string): string {
+  return dateStringToDate(value).toLocaleDateString("en-US", { weekday: "short", month: "numeric", day: "numeric" });
 }
 
 function monthCells(days: NativeDay[], visibleMonth: string): {
@@ -2936,6 +3029,65 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     fontSize: 12,
   },
+  timeOffInfoBanner: {
+    backgroundColor: "#dcefeb",
+    borderColor: "#d0e5e3",
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    marginBottom: 10,
+  },
+  timeOffInfoIcon: {
+    color: "#0f6f62",
+    fontSize: 12,
+    fontWeight: "900",
+    borderColor: "#0f6f62",
+    borderWidth: 1,
+    borderRadius: 999,
+    width: 18,
+    height: 18,
+    textAlign: "center",
+    lineHeight: 16,
+    marginTop: 1,
+  },
+  timeOffInfoText: {
+    color: "#60787b",
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 16,
+  },
+  monthPillGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 7,
+    marginBottom: 10,
+  },
+  monthPill: {
+    width: "23.3%",
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#d0e5e3",
+    backgroundColor: "#fffffbde",
+    paddingVertical: 7,
+    alignItems: "center",
+  },
+  monthPillActive: {
+    backgroundColor: "#0f6f62",
+    borderColor: "#0f6f62",
+  },
+  monthPillText: {
+    color: "#0f6f62",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  monthPillTextActive: {
+    color: "#fff",
+  },
   requestFab: {
     position: "absolute",
     right: 6,
@@ -3372,6 +3524,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginBottom: 8,
   },
+  daysOffEmpty: {
+    color: "#7890ad",
+    fontSize: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
   daysOffSection: {
     backgroundColor: "#fff",
     borderColor: "#d8e5f3",
@@ -3388,6 +3546,53 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     paddingHorizontal: 12,
     paddingVertical: 8,
+  },
+  monthTimeOffList: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 7,
+  },
+  monthTimeOffDayRow: {
+    gap: 5,
+    paddingVertical: 2,
+  },
+  monthTimeOffDate: {
+    color: "#123034",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  timeOffStatusLine: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 7,
+  },
+  timeOffStatusLabel: {
+    color: "#60787b",
+    fontSize: 11,
+    fontWeight: "800",
+    width: 62,
+  },
+  timeOffInitialsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    flex: 1,
+    gap: 5,
+  },
+  timeOffInitialsPill: {
+    borderRadius: 999,
+    overflow: "hidden",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    fontSize: 10,
+    fontWeight: "900",
+  },
+  timeOffRequestedPill: {
+    backgroundColor: "#f7d98f",
+    color: "#9a5d00",
+  },
+  timeOffApprovedPill: {
+    backgroundColor: "#dff4df",
+    color: "#1f6b45",
   },
   dayOffRow: {
     flexDirection: "row",

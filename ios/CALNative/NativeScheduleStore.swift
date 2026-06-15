@@ -11,6 +11,7 @@ enum NativeLoadState: Equatable {
 final class NativeScheduleStore: ObservableObject {
   @Published private(set) var days: [ScheduleDay] = []
   @Published private(set) var timeOffRequests: [TimeOffRequest] = []
+  @Published private(set) var patientAppointments: [PatientAppointment] = []
   @Published private(set) var currentSurgeon: NativeSurgeon?
   @Published private(set) var surgeons: [NativeSurgeon] = []
   @Published private(set) var loadState: NativeLoadState = .idle
@@ -71,6 +72,32 @@ final class NativeScheduleStore: ObservableObject {
     }
     await loadSnapshot {
       try await loader.loadLookahead(token: token, containing: date, daysAhead: daysAhead)
+    }
+  }
+
+  func loadPatientSchedule(containing date: Date, daysAhead: Int = 6) async {
+    guard let token = activeToken else {
+      clearScheduleForMissingSession()
+      return
+    }
+
+    loadState = .loading
+    let calendar = Calendar.current
+    let start = calendar.startOfDay(for: date)
+    let end = calendar.date(byAdding: .day, value: daysAhead, to: start) ?? start
+
+    do {
+      let response = try await client.fetchPatientSchedule(token: token, start: start, end: end)
+      patientAppointments = response.appointments.map(\.patientAppointment)
+      if let warning = response.warning, !warning.isEmpty {
+        loadState = .warning(warning)
+      } else {
+        loadState = .loaded
+      }
+    } catch let error as NativeCALError where error.isAuthenticationFailure {
+      expireSession()
+    } catch {
+      loadState = .warning("Aprima schedule failed. \(error.localizedDescription)")
     }
   }
 
@@ -137,6 +164,7 @@ final class NativeScheduleStore: ObservableObject {
     sessionToken = nil
     days = []
     timeOffRequests = []
+    patientAppointments = []
     currentSurgeon = nil
     surgeons = []
     loadState = .idle
@@ -149,6 +177,7 @@ final class NativeScheduleStore: ObservableObject {
     sessionToken = nil
     days = []
     timeOffRequests = []
+    patientAppointments = []
     currentSurgeon = nil
     surgeons = []
     loadState = .idle

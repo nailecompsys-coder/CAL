@@ -117,6 +117,45 @@ struct TimeOffRequest: Identifiable {
   }
 }
 
+struct PatientAppointment: Identifiable {
+  let id: String
+  let date: Date
+  let start: String
+  let end: String
+  let surgeonInitials: String
+  let surgeonName: String
+  let patientName: String
+  let mrn: String
+  let appointmentType: String
+  let status: String
+  let reason: String
+  let serviceSite: String
+  let room: String
+
+  var timeRange: String {
+    let startText = displayTime(start)
+    let endText = displayTime(end)
+    if startText.isEmpty { return "" }
+    if endText.isEmpty { return startText }
+    return "\(startText) - \(endText)"
+  }
+
+  var locationLine: String {
+    [serviceSite, room].filter { !$0.isEmpty }.joined(separator: " · ")
+  }
+
+  private func displayTime(_ value: String) -> String {
+    guard !value.isEmpty else { return "" }
+    let parts = value.split(separator: ":")
+    guard let hourText = parts.first, let hour24 = Int(hourText) else {
+      return value
+    }
+    let minute = parts.count > 1 ? String(parts[1]) : "00"
+    let hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12
+    return "\(hour12):\(minute)"
+  }
+}
+
 struct RequestSegment: Identifiable {
   let date: Date
   let isFullDay: Bool

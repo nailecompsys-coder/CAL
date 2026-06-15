@@ -7,6 +7,46 @@ struct NativeHomeResponse: Decodable {
   let surgeons: [NativeSurgeon]?
 }
 
+struct NativePatientScheduleResponse: Decodable {
+  let appointments: [NativePatientAppointmentResponse]
+  let warning: String?
+}
+
+struct NativePatientAppointmentResponse: Decodable {
+  let id: String?
+  let date: String
+  let start: String
+  let end: String
+  let surgeonInitials: String
+  let surgeonName: String
+  let patientName: String
+  let mrn: String?
+  let appointmentType: String
+  let status: String
+  let reason: String
+  let serviceSite: String
+  let room: String
+
+  var patientAppointment: PatientAppointment {
+    let parsedDate = NativeDayResponse.dateFormatter.date(from: date) ?? Date()
+    return PatientAppointment(
+      id: id ?? "\(date)-\(start)-\(patientName)",
+      date: parsedDate,
+      start: start,
+      end: end,
+      surgeonInitials: surgeonInitials,
+      surgeonName: surgeonName,
+      patientName: patientName,
+      mrn: mrn ?? "",
+      appointmentType: appointmentType,
+      status: status,
+      reason: reason,
+      serviceSite: serviceSite,
+      room: room
+    )
+  }
+}
+
 struct NativeDayResponse: Decodable {
   let date: String
   let dayName: String?

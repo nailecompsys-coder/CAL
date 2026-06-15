@@ -11,6 +11,8 @@ struct CALNativeTabShell: View {
         ScheduleHomeView(store: store, selectedSection: $selectedSection)
       case .timeOff:
         TimeOffHomeView(store: store, selectedSection: $selectedSection)
+      case .patients:
+        PatientScheduleView(store: store, selectedSection: $selectedSection)
       }
     }
     .tint(ClinicalPalette.teal)
@@ -20,6 +22,7 @@ struct CALNativeTabShell: View {
 enum CALNativeSection: String, CaseIterable, Identifiable {
   case schedule = "Schedule"
   case timeOff = "Time Off"
+  case patients = "Patients"
 
   var id: String { rawValue }
 
@@ -29,6 +32,8 @@ enum CALNativeSection: String, CaseIterable, Identifiable {
       return "calendar"
     case .timeOff:
       return "person.crop.circle.badge.minus"
+    case .patients:
+      return "person.text.rectangle"
     }
   }
 }

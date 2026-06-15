@@ -46,6 +46,27 @@ struct NativeCALClient {
     return try JSONDecoder().decode(NativeHomeResponse.self, from: data)
   }
 
+  func fetchPatientSchedule(token: String, start: Date, end: Date) async throws -> NativePatientScheduleResponse {
+    var components = URLComponents(url: baseURL.appendingPathComponent("/api/native/patient-schedule"), resolvingAgainstBaseURL: false)!
+    components.queryItems = [
+      URLQueryItem(name: "start", value: isoDate(start)),
+      URLQueryItem(name: "end", value: isoDate(end))
+    ]
+
+    guard let url = components.url else {
+      throw NativeCALError.invalidURL
+    }
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.setValue(token, forHTTPHeaderField: "X-CAL-Device-Token")
+
+    let data = try await perform(request)
+    return try JSONDecoder().decode(NativePatientScheduleResponse.self, from: data)
+  }
+
   func submitRequestOff(token: String, startDate: Date, endDate: Date, reason: String, notes: String, segments: [RequestSegment]) async throws {
     let url = baseURL.appendingPathComponent("/api/native/request-off")
     let normalizedSegments = segments.isEmpty ? [RequestSegment(date: startDate, isFullDay: true, start: "07:00", end: "17:00")] : segments

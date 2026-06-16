@@ -103,7 +103,7 @@
             <span class="text-sm text-slate-600">{{ active_devices|length }} registered</span>
             {% for d in active_devices %}
             <div class="flex items-center gap-1 mt-0.5">
-              <span class="text-xs text-slate-400">{{ d.device_name }}</span>
+              <span class="text-xs text-slate-400">{{ d.device_name|device_name(d.user_agent) }}</span>
               <form method="post" action="/admin/surgeons/{{ s.id }}/devices/{{ d.id }}/revoke" class="inline">
                 <button class="text-slate-300 hover:text-rose-500 text-xs ml-1" title="Revoke device">✕</button>
               </form>

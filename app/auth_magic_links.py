@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from .auth_tokens import MAGIC_LINK_EXPIRE_HOURS
+from .device_names import readable_device_name
 from .models import MagicLink, SurgeonDevice
 
 
@@ -53,15 +54,4 @@ def redeem_magic_link(raw_token: str, user_agent: str, db: Session) -> SurgeonDe
 
 
 def parse_device_name(ua: str) -> str:
-    ua_lower = ua.lower()
-    if "iphone" in ua_lower:
-        return "iPhone"
-    if "ipad" in ua_lower:
-        return "iPad"
-    if "android" in ua_lower:
-        return "Android"
-    if "macintosh" in ua_lower or "mac os" in ua_lower:
-        return "Mac"
-    if "windows" in ua_lower:
-        return "Windows PC"
-    return "Unknown Device"
+    return readable_device_name(None, ua)

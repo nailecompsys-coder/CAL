@@ -7,6 +7,8 @@ from zoneinfo import ZoneInfo as _ZoneInfo
 
 from fastapi.templating import Jinja2Templates
 
+from .device_names import readable_device_name
+
 
 _EASTERN = _ZoneInfo("America/New_York")
 
@@ -36,3 +38,4 @@ templates.env.filters["from_json"] = _json.loads
 templates.env.filters["urlquote"] = lambda s: _url_quote(str(s or ""), safe="")
 templates.env.filters["eastern_time"] = _eastern_time
 templates.env.filters["phone"] = _format_phone
+templates.env.filters["device_name"] = readable_device_name

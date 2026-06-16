@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import create_surgeon_session_token
 from ..database import get_db
+from ..device_names import readable_device_name
 from ..email_service import send_email
 from ..models import MagicLink, Surgeon, SurgeonDevice, SurgeonOtpAuditLog
 from ..sms_service import send_sms
@@ -88,7 +89,7 @@ def _invalidate_existing_otp_codes(db: Session, surgeon_id: int) -> None:
 def _create_native_session_device(surgeon_id: int, user_agent: str, now: datetime) -> SurgeonDevice:
     return SurgeonDevice(
         surgeon_id=surgeon_id,
-        device_name=user_agent[:128],
+        device_name=readable_device_name(None, user_agent),
         user_agent=user_agent,
         token_hash=hashlib.sha256(f"{surgeon_id}:{now.isoformat()}".encode()).hexdigest(),
         is_active=True,

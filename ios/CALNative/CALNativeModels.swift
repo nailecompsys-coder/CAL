@@ -152,7 +152,8 @@ struct PatientAppointment: Identifiable {
     }
     let minute = parts.count > 1 ? String(parts[1]) : "00"
     let hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12
-    return "\(hour12):\(minute)"
+    let meridiem = hour24 < 12 ? "AM" : "PM"
+    return "\(hour12):\(minute) \(meridiem)"
   }
 }
 

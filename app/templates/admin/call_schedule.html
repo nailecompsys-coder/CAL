@@ -2,39 +2,42 @@
 {% block title %}Call Schedule{% endblock %}
 
 {% block content %}
-<header class="bg-white border-b border-slate-200 px-6 py-4 sticky top-0 z-10 flex-shrink-0">
+<header class="portal-header px-5 py-3 sticky top-0 z-10 flex-shrink-0">
   <div class="flex items-center justify-between gap-4">
-    <h1 class="text-xl font-bold text-slate-800">Call Schedule</h1>
+    <div>
+      <h1 class="font-bold">Call Schedule</h1>
+      <p class="text-xs text-slate-500">Daily call coverage with requested and approved time off</p>
+    </div>
     <div class="flex items-center gap-2">
       <a href="/admin/call-schedule?month_offset={{ month_offset - 1 }}"
-         class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600">
+         class="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600">
         <i class="fa-solid fa-chevron-left text-xs"></i>
       </a>
-      <span class="text-base font-semibold text-slate-800 w-36 text-center">{{ month_label }}</span>
+      <span class="text-sm font-extrabold text-slate-800 w-36 text-center rounded-full px-3 py-1.5" style="background:rgba(255,255,255,.58);border:1px solid rgba(179,209,209,.68);">{{ month_label }}</span>
       <a href="/admin/call-schedule?month_offset={{ month_offset + 1 }}"
-         class="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600">
+         class="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600">
         <i class="fa-solid fa-chevron-right text-xs"></i>
       </a>
       {% if month_offset != 0 %}
-      <a href="/admin/call-schedule" class="text-xs text-blue-600 hover:underline ml-1">Today</a>
+      <a href="/admin/call-schedule" class="text-xs font-bold text-blue-600 hover:underline ml-1">Today</a>
       {% endif %}
     </div>
-    <a href="/admin/call-groups" class="text-xs text-slate-500 hover:text-blue-600">Manage groups</a>
+    <a href="/admin/call-groups" class="text-xs font-bold text-slate-500 hover:text-blue-600">Groups</a>
   </div>
 </header>
 
 {% if request.query_params.get('msg') == 'week_copied' %}
-<div class="mx-6 mt-3 bg-green-50 border border-green-200 rounded-lg px-4 py-2 text-green-700 text-sm">{{ request.query_params.get('n', '0') }} assignment(s) copied.</div>
+<div class="mx-5 mt-3 status-approved border rounded-xl px-4 py-2 text-sm font-semibold">{{ request.query_params.get('n', '0') }} assignment(s) copied.</div>
 {% endif %}
 {% if request.query_params.get('warn') %}
-<div class="mx-6 mt-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 flex items-start gap-2 text-amber-800 text-sm">
+<div class="mx-5 mt-3 status-pending border rounded-xl px-4 py-2 flex items-start gap-2 text-sm">
   <i class="fa-solid fa-triangle-exclamation text-amber-500 mt-0.5 flex-shrink-0"></i>
   <div>{{ request.query_params.get('warn') }}</div>
 </div>
 {% endif %}
 
 <div class="p-4">
-  <div class="bg-white rounded-xl border border-slate-200 p-3">
+  <div class="clinical-glass p-3">
     {# Day-of-week header: Sun – Sat #}
     <div class="grid grid-cols-7 gap-1 mb-1">
       {% for wd in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'] %}
@@ -55,26 +58,26 @@
     <div class="grid grid-cols-7 gap-1">
       {# Leading empty cells #}
       {% for _ in range(pad_start) %}
-      <div class="rounded-lg bg-slate-50/50 min-h-[4.5rem]"></div>
+      <div class="rounded-xl min-h-[4.5rem]" style="background:rgba(255,255,255,.32);border:1px dashed rgba(179,209,209,.42);"></div>
       {% endfor %}
 
       {# Day cells #}
       {% for day in schedule_days %}
       {% set off_bucket = day_off_by_date.get(day, {'pending': [], 'approved': []}) %}
-      <div class="rounded-lg border min-h-[7.5rem] {% if day == today %}border-blue-300 bg-blue-50/40{% elif day.weekday() >= 5 %}border-slate-100 bg-slate-50/60{% else %}border-slate-200 bg-white{% endif %} overflow-hidden">
+      <div class="rounded-xl border min-h-[7.5rem] {% if day == today %}border-clinical-teal bg-clinical-tealSoft/40{% elif day.weekday() >= 5 %}border-clinical-stroke bg-clinical-porcelain/60{% else %}border-clinical-stroke bg-white/70{% endif %} overflow-hidden shadow-sm">
         {# Date header #}
         <div class="px-1.5 pt-1 pb-0.5">
-          <span class="text-[11px] font-bold {% if day == today %}text-blue-600{% elif day.weekday() >= 5 %}text-slate-400{% else %}text-slate-700{% endif %}">{{ day.strftime('%-d') }}</span>
+          <span class="text-[11px] font-extrabold {% if day == today %}text-blue-600{% elif day.weekday() >= 5 %}text-slate-400{% else %}text-slate-700{% endif %}">{{ day.strftime('%-d') }}</span>
         </div>
         {# One slot per call group #}
         <div class="px-1 pb-1 space-y-0.5">
           {% for group, rot_map in group_rows %}
           {% set rot = rot_map.get(day) %}
           {% if rot %}
-          <div class="flex items-center justify-between gap-0.5 rounded px-1 py-0.5 {% if rot.surgeon %}bg-slate-100 text-slate-700{% else %}bg-slate-200 text-slate-500{% endif %}">
-            <span class="text-[9px] font-semibold text-slate-400 leading-none flex-shrink-0 mr-0.5">{{ group.name[:3].upper() }}</span>
+          <div class="flex items-center justify-between gap-0.5 rounded-lg px-1.5 py-1 {% if rot.surgeon %}bg-white/70 text-slate-700 border border-clinical-stroke/60{% else %}bg-clinical-porcelain/70 text-slate-500 border border-clinical-stroke/50{% endif %}">
+            <span class="text-[9px] font-extrabold text-slate-400 leading-none flex-shrink-0 mr-0.5">{{ group.name[:3].upper() }}</span>
             {% set cov = rot.active_coverage %}
-            <span class="text-[10px] font-semibold truncate min-w-0 leading-none">
+            <span class="text-[10px] font-bold truncate min-w-0 leading-none">
               {% if cov and cov.covering_surgeon %}
                 <span class="text-red-600 line-through">{% if rot.surgeon %}{{ rot.surgeon.initials }}{% else %}NC{% endif %}</span>
                 <span class="text-slate-800">{{ cov.covering_surgeon.initials }}</span>
@@ -93,8 +96,8 @@
           </div>
           {% else %}
           <button onclick="openAssign('{{ day.isoformat() }}', {{ group.id }}, '{{ group.name|e }}')"
-            class="w-full flex items-center gap-0.5 rounded px-1 py-0.5 border border-dashed border-slate-200 hover:border-blue-300 hover:bg-blue-50 text-slate-300 hover:text-blue-400 transition-colors">
-            <span class="text-[9px] font-semibold text-slate-400 leading-none flex-shrink-0">{{ group.name[:3].upper() }}</span>
+            class="w-full flex items-center gap-0.5 rounded-lg px-1.5 py-1 border border-dashed border-slate-200 hover:border-clinical-teal hover:bg-clinical-tealSoft/40 text-slate-300 hover:text-blue-400 transition-colors">
+            <span class="text-[9px] font-extrabold text-slate-400 leading-none flex-shrink-0">{{ group.name[:3].upper() }}</span>
             <span class="text-[9px] ml-auto leading-none"><i class="fa-solid fa-plus"></i></span>
           </button>
           {% endif %}
@@ -104,7 +107,7 @@
         <div class="mx-1 mb-1 border-t border-slate-200/80 pt-1 space-y-0.5">
           {% if off_bucket.pending %}
           <div class="flex items-start gap-1">
-            <span class="text-[8px] font-bold uppercase text-amber-700 leading-[1.15] w-6 flex-shrink-0">Req</span>
+            <span class="text-[8px] font-extrabold uppercase text-amber-700 leading-[1.15] w-6 flex-shrink-0">Req</span>
             <div class="flex flex-wrap gap-0.5 min-w-0">
               {% for s in off_bucket.pending %}
               <span title="{{ s.full_name }} requested off"
@@ -115,11 +118,11 @@
           {% endif %}
           {% if off_bucket.approved %}
           <div class="flex items-start gap-1">
-            <span class="text-[8px] font-bold uppercase text-emerald-700 leading-[1.15] w-6 flex-shrink-0">Off</span>
+            <span class="text-[8px] font-extrabold uppercase leading-[1.15] w-6 flex-shrink-0" style="color:#1a6b4c;">Off</span>
             <div class="flex flex-wrap gap-0.5 min-w-0">
               {% for s in off_bucket.approved %}
               <span title="{{ s.full_name }} approved off"
-                    class="inline-flex items-center rounded-full bg-emerald-100 border border-emerald-300 px-1 py-0.5 text-[9px] font-bold leading-none text-emerald-800">{{ s.initials }}</span>
+                    class="inline-flex items-center rounded-full status-approved border px-1 py-0.5 text-[9px] font-extrabold leading-none">{{ s.initials }}</span>
               {% endfor %}
             </div>
           </div>
@@ -131,7 +134,7 @@
 
       {# Trailing empty cells #}
       {% for _ in range(pad_end) %}
-      <div class="rounded-lg bg-slate-50/50 min-h-[4.5rem]"></div>
+      <div class="rounded-xl min-h-[4.5rem]" style="background:rgba(255,255,255,.32);border:1px dashed rgba(179,209,209,.42);"></div>
       {% endfor %}
     </div>
 

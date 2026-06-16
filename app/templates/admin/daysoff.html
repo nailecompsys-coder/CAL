@@ -2,49 +2,49 @@
 {% block title %}Days Off{% endblock %}
 
 {% block content %}
-<header class="bg-white border-b border-slate-200 px-6 py-4 sticky top-0 z-10 flex-shrink-0 flex items-center justify-between">
+<header class="portal-header px-5 py-3 sticky top-0 z-10 flex-shrink-0 flex items-center justify-between">
   <div>
-    <h1 class="text-xl font-bold text-slate-800">Days Off</h1>
-    <p class="text-sm text-slate-500">
+    <h1 class="font-bold">Days Off</h1>
+    <p class="text-xs text-slate-500">
       {{ pending|length }} pending
       {%- if selected_surgeon_id %} · filtered by {{ surgeons | selectattr('id', 'equalto', selected_surgeon_id) | map(attribute='full_name') | first }}{% endif %}
     </p>
   </div>
   <button onclick="document.getElementById('add-dayoff-modal').classList.remove('hidden')"
-    class="bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2">
+    class="bg-blue-600 text-white text-xs font-bold px-3 py-2 rounded-xl hover:bg-blue-700 flex items-center gap-2">
     <i class="fa-solid fa-plus"></i> Add Day Off
   </button>
 </header>
 
 {% if request.query_params.get('warn') %}
-<div class="mx-6 mt-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-start gap-2 text-amber-800 text-sm">
+<div class="mx-5 mt-4 status-pending border rounded-xl px-4 py-3 flex items-start gap-2 text-sm">
   <i class="fa-solid fa-triangle-exclamation text-amber-500 mt-0.5 flex-shrink-0"></i>
   <div><strong>Scheduling conflict:</strong> {{ request.query_params.get('warn') }}</div>
 </div>
 {% endif %}
 {% if request.query_params.get('msg') == 'bulk_approved' %}
-<div class="mx-6 mt-4 bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-green-700 text-sm">
+<div class="mx-5 mt-4 status-approved border rounded-xl px-4 py-3 text-sm font-semibold">
   <i class="fa-solid fa-circle-check mr-1.5"></i> {{ request.query_params.get('n', '0') }} request(s) approved.
 </div>
 {% endif %}
 
 {# ── Surgeon filter chips ──────────────────────────────────────────────── #}
-<div class="px-6 pt-4 pb-2 flex items-center gap-2 flex-wrap">
+<div class="px-5 pt-4 pb-2 flex items-center gap-2 flex-wrap">
   <a href="/admin/daysoff"
      class="text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors
-            {% if not selected_surgeon_id %}bg-slate-800 text-white border-slate-800{% else %}bg-white text-slate-500 border-slate-200 hover:border-slate-400{% endif %}">
+            {% if not selected_surgeon_id %}bg-blue-600 text-white border-transparent{% else %}bg-white text-slate-500 border-slate-200 hover:border-slate-400{% endif %}">
     All
   </a>
   {% for s in surgeons %}
   <a href="/admin/daysoff?surgeon_id={{ s.id }}"
      class="text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors
-            {% if selected_surgeon_id == s.id %}bg-slate-800 text-white border-slate-800{% else %}bg-white text-slate-500 border-slate-200 hover:border-slate-400{% endif %}">
+            {% if selected_surgeon_id == s.id %}bg-blue-600 text-white border-transparent{% else %}bg-white text-slate-500 border-slate-200 hover:border-slate-400{% endif %}">
     {{ s.initials }}
   </a>
   {% endfor %}
 </div>
 
-<div class="px-6 pb-8 space-y-6 mt-2">
+<div class="px-5 pb-8 space-y-6 mt-2">
 
   {# ── Pending section ──────────────────────────────────────────────────── #}
   {% if pending %}
@@ -54,7 +54,7 @@
   <div>
     <div class="flex items-center gap-3 mb-3 flex-wrap">
       <div class="w-2.5 h-2.5 rounded-full status-pending flex-shrink-0"></div>
-      <h2 class="font-bold text-slate-700 text-sm uppercase tracking-wide">Pending Approval</h2>
+      <h2 class="font-extrabold text-slate-700 text-xs uppercase tracking-wide">Pending Approval</h2>
       <span class="text-xs font-bold px-2 py-0.5 rounded-full status-pending">{{ pending|length }}</span>
       <div class="flex-1 h-px bg-slate-200 min-w-[40px]"></div>
       <label class="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer select-none">
@@ -65,7 +65,7 @@
       <form method="post" action="/admin/daysoff/bulk-approve" id="approve-clear-form">
         {% for cid in clear_ids %}<input type="hidden" name="ids" value="{{ cid }}" />{% endfor %}
         <button type="submit"
-          class="flex items-center gap-1.5 bg-green-600 text-white text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-green-700"
+          class="flex items-center gap-1.5 bg-blue-600 text-white text-xs font-bold px-3 py-1.5 rounded-xl hover:bg-blue-700"
           onclick="return confirm('Approve {{ clear_ids|length }} request(s) with no call conflicts?')">
           <i class="fa-solid fa-check-double"></i> Approve all clear ({{ clear_ids|length }})
         </button>
@@ -74,10 +74,10 @@
     </div>
 
     <form method="post" action="/admin/daysoff/bulk-approve" id="bulk-approve-form" class="hidden mb-3">
-      <div id="bulk-bar" class="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5">
+      <div id="bulk-bar" class="clinical-glass flex items-center gap-3 px-4 py-2.5">
         <span id="bulk-count" class="text-sm font-semibold text-blue-700">0 selected</span>
         <div class="flex-1"></div>
-        <button type="submit" class="flex items-center gap-1.5 bg-green-600 text-white text-sm font-medium px-4 py-1.5 rounded-lg hover:bg-green-700">
+        <button type="submit" class="flex items-center gap-1.5 bg-blue-600 text-white text-sm font-bold px-4 py-1.5 rounded-xl hover:bg-blue-700">
           <i class="fa-solid fa-check"></i> Approve selected
         </button>
         <button type="button" onclick="clearSelection()" class="text-xs text-blue-500 hover:text-blue-700">Cancel</button>
@@ -87,8 +87,8 @@
     <div class="space-y-2" id="pending-list">
       {% for d in pending %}
       {% set conflicts = conflict_map.get(d.id, []) %}
-      <div class="bg-white rounded-xl border-2 {% if conflicts %}border-amber-200{% else %}border-slate-200{% endif %} overflow-hidden">
-        <div class="px-4 py-3.5 flex items-center gap-3 flex-wrap">
+      <div class="clinical-glass overflow-hidden {% if conflicts %}ring-1 ring-amber-200{% endif %}">
+        <div class="px-4 py-3 flex items-center gap-3 flex-wrap">
           <input type="checkbox" name="ids" value="{{ d.id }}" form="bulk-approve-form"
             class="pending-cb rounded w-4 h-4 flex-shrink-0 cursor-pointer accent-blue-600"
             onchange="updateBulkBar()" />
@@ -116,19 +116,19 @@
           {% endif %}
           <div class="flex gap-1.5 flex-shrink-0">
             <form method="post" action="/admin/daysoff/{{ d.id }}/approve">
-              <button class="bg-green-100 text-green-700 px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-green-600 hover:text-white flex items-center gap-1"><i class="fa-solid fa-check"></i> Approve</button>
+              <button class="status-approved border px-3 py-1.5 rounded-xl text-xs font-extrabold hover:bg-blue-600 hover:text-white flex items-center gap-1"><i class="fa-solid fa-check"></i> Approve</button>
             </form>
             <button onclick="openDenyModal({{ d.id }})"
-              class="bg-rose-100 text-rose-700 px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-rose-200 flex items-center gap-1">
+              class="bg-rose-100 text-rose-700 px-3 py-1.5 rounded-xl text-xs font-extrabold hover:bg-rose-200 flex items-center gap-1">
               <i class="fa-solid fa-xmark"></i> Deny
             </button>
             <button onclick="openEditModal({{ d.id }}, '{{ d.surgeon.full_name }}', '{{ d.start_date.isoformat() }}', '{{ d.end_date.isoformat() }}', '{{ d.reason or '' }}', '{{ d.notes or '' }}')"
-              class="w-7 h-7 bg-slate-100 text-slate-500 rounded-lg hover:bg-blue-100 hover:text-blue-600 flex items-center justify-center flex-shrink-0" title="Edit">
+              class="w-7 h-7 bg-slate-100 text-slate-500 rounded-xl hover:bg-clinical-tealSoft/50 hover:text-blue-600 flex items-center justify-center flex-shrink-0" title="Edit">
               <i class="fa-solid fa-pen" style="font-size:10px;"></i>
             </button>
             <form method="post" action="/admin/daysoff/{{ d.id }}/delete"
               onsubmit="return confirm('Delete this day off request?')">
-              <button class="w-7 h-7 bg-slate-100 text-slate-400 rounded-lg hover:bg-rose-100 hover:text-rose-600 flex items-center justify-center" title="Delete">
+              <button class="w-7 h-7 bg-slate-100 text-slate-400 rounded-xl hover:bg-rose-100 hover:text-rose-600 flex items-center justify-center" title="Delete">
                 <i class="fa-solid fa-trash" style="font-size:10px;"></i>
               </button>
             </form>
@@ -153,7 +153,7 @@
       </div>
 
       {# Compact record rows #}
-      <div class="bg-white rounded-xl border border-slate-200 divide-y divide-slate-100 overflow-hidden">
+      <div class="clinical-glass divide-y divide-slate-100 overflow-hidden">
         {% for d in section.records %}
         <div class="px-4 py-2.5 flex items-center gap-3">
           {# Initials avatar #}
@@ -179,12 +179,12 @@
           {# Actions #}
           <div class="flex gap-1 flex-shrink-0">
             <button onclick="openEditModal({{ d.id }}, '{{ d.surgeon.full_name }}', '{{ d.start_date.isoformat() }}', '{{ d.end_date.isoformat() }}', '{{ d.reason or '' }}', '{{ d.notes or '' }}')"
-              class="w-7 h-7 bg-slate-100 text-slate-400 rounded-lg hover:bg-blue-100 hover:text-blue-600 flex items-center justify-center" title="Edit">
+              class="w-7 h-7 bg-slate-100 text-slate-400 rounded-xl hover:bg-clinical-tealSoft/50 hover:text-blue-600 flex items-center justify-center" title="Edit">
               <i class="fa-solid fa-pen" style="font-size:10px;"></i>
             </button>
             <form method="post" action="/admin/daysoff/{{ d.id }}/delete"
               onsubmit="return confirm('Remove this day off?')">
-              <button class="w-7 h-7 bg-slate-100 text-slate-400 rounded-lg hover:bg-rose-100 hover:text-rose-600 flex items-center justify-center" title="Delete">
+              <button class="w-7 h-7 bg-slate-100 text-slate-400 rounded-xl hover:bg-rose-100 hover:text-rose-600 flex items-center justify-center" title="Delete">
                 <i class="fa-solid fa-trash" style="font-size:10px;"></i>
               </button>
             </form>

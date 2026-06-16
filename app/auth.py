@@ -4,12 +4,10 @@ from fastapi import Cookie, Depends, Request
 from jose import JWTError
 from sqlalchemy.orm import Session
 
-from .auth_magic_links import generate_magic_link_token, parse_device_name, redeem_magic_link
 from .auth_request import raise_html_or_json_auth_error, request_wants_json
 from .auth_tokens import (
     ADMIN_TOKEN_EXPIRE_HOURS,
     ALGORITHM,
-    MAGIC_LINK_EXPIRE_HOURS,
     SECRET_KEY,
     SURGEON_TOKEN_EXPIRE_DAYS,
     cookie_secure,
@@ -37,10 +35,6 @@ def _request_wants_json(request: Request) -> bool:
 
 def _raise_html_or_json_auth_error(request: Request, login_path: str) -> None:
     raise_html_or_json_auth_error(request, login_path)
-
-
-def _parse_device_name(ua: str) -> str:
-    return parse_device_name(ua)
 
 
 def get_current_admin(
@@ -102,18 +96,15 @@ def get_current_surgeon(
 __all__ = [
     "ADMIN_TOKEN_EXPIRE_HOURS",
     "ALGORITHM",
-    "MAGIC_LINK_EXPIRE_HOURS",
     "SECRET_KEY",
     "SURGEON_ADMIN_PREVIEW_DEVICE_NAME",
     "SURGEON_TOKEN_EXPIRE_DAYS",
     "cookie_secure",
     "create_admin_token",
     "create_surgeon_session_token",
-    "generate_magic_link_token",
     "get_current_admin",
     "get_current_surgeon",
     "hash_password",
     "pwd_context",
-    "redeem_magic_link",
     "verify_password",
 ]

@@ -1,4 +1,4 @@
-"""Surgeon registration routes."""
+"""Surgeon signed-out routes."""
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
@@ -9,8 +9,8 @@ router = APIRouter(prefix="/surgeon")
 
 
 @router.get("/register", response_class=HTMLResponse)
-def register_page(request: Request, token: str = ""):
+def register_page(request: Request):
     return templates.TemplateResponse(
         "surgeon/register.html",
-        {"request": request, "token": token, "app_version": app_version},
+        {"request": request, "app_version": app_version},
     )

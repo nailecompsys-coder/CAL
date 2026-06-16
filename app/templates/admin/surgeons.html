@@ -21,48 +21,6 @@
 <div class="mx-5 mt-4 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3 text-rose-700 text-sm"><i class="fa-solid fa-trash mr-2"></i>Physician removed.</div>
 {% endif %}
 
-{% if generated_link %}
-<div class="mx-5 mt-4 clinical-panel p-5">
-  <div class="flex items-start gap-5 flex-wrap">
-    <!-- QR Code -->
-    {% if qr_code_b64 %}
-    <div class="flex-shrink-0 text-center">
-      <img src="data:image/png;base64,{{ qr_code_b64 }}"
-           alt="Registration QR Code"
-           class="w-40 h-40 rounded-xl border border-blue-200 shadow-sm"
-           id="qr-img" />
-      <button onclick="printQR()" class="mt-2 text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 mx-auto">
-        <i class="fa-solid fa-print"></i> Print
-      </button>
-    </div>
-    {% endif %}
-    <!-- Link details -->
-    {% set link_surgeon = surgeons | selectattr('id', 'equalto', link_surgeon_id) | first %}
-    <div class="flex-1 min-w-0">
-      <p class="text-sm font-semibold text-blue-800 mb-0.5">
-        <i class="fa-solid fa-link mr-2"></i>Registration Link — {{ link_surgeon.full_name }}
-      </p>
-      <p class="text-xs text-blue-600 mb-3">
-        <strong>In person:</strong> have them scan the QR code with their phone camera. &nbsp;·&nbsp;
-        <strong>Remote:</strong> tap the button below to email the link directly to their phone.
-        Single-use, expires in 7 days.
-      </p>
-      <div class="flex gap-2 mb-3">
-        <input id="magic-link-input" type="text" value="{{ generated_link }}" readonly
-          class="flex-1 bg-white border border-blue-300 rounded-lg px-3 py-2 text-xs font-mono text-blue-900 focus:outline-none min-w-0" />
-        <button onclick="copyLink(this)" class="bg-blue-600 text-white px-3 py-2 rounded-lg text-xs hover:bg-blue-700 whitespace-nowrap flex items-center gap-1">
-          <i class="fa-solid fa-copy"></i> Copy
-        </button>
-      </div>
-      <button onclick="emailLink('{{ link_surgeon.email }}', '{{ link_surgeon.full_name }}', document.getElementById('magic-link-input').value)"
-        class="w-full bg-white border border-blue-300 text-blue-700 text-sm font-medium px-4 py-2.5 rounded-xl hover:bg-blue-50 flex items-center justify-center gap-2">
-        <i class="fa-solid fa-envelope"></i> Email registration link to {{ link_surgeon.full_name }}
-      </button>
-    </div>
-  </div>
-</div>
-{% endif %}
-
 <div class="p-5">
   <div class="clinical-panel clinical-table overflow-hidden">
     <table class="w-full">
@@ -132,11 +90,6 @@
                 </button>
               </form>
               {% endif %}
-              <form method="post" action="/admin/surgeons/{{ s.id }}/magic-link">
-                <button title="Generate registration link" class="icon-action text-blue-600">
-                  <i class="fa-solid fa-link text-xs"></i>
-                </button>
-              </form>
               <form method="post" action="/admin/surgeons/{{ s.id }}/toggle">
                 <button title="{% if s.is_active %}Deactivate{% else %}Activate{% endif %}"
                   class="icon-action {% if not s.is_active %}text-green-600{% endif %}">
@@ -288,43 +241,6 @@ function openEditModal(id, first, last, suffix, email, phone, staffType, sortOrd
   document.getElementById('edit-staff-type').value = staffType || 'physician';
   document.getElementById('edit-sort-order').value = sortOrder || 0;
   document.getElementById('edit-modal').classList.remove('hidden');
-}
-
-function emailLink(email, name, link) {
-  const subject = encodeURIComponent('Your Mid Florida Surgical schedule access link');
-  const body = encodeURIComponent(
-    'Hi ' + name + ',\n\n' +
-    'Here is your personalized link to access your call schedule at Mid Florida Surgical. ' +
-    'Tap the link below to register your device:\n\n' +
-    link + '\n\n' +
-    'This link is single-use and expires in 7 days.\n\n' +
-    '— Mid Florida Surgical Admin'
-  );
-  window.location.href = 'mailto:' + email + '?subject=' + subject + '&body=' + body;
-}
-
-function copyLink(button) {
-  const input = document.getElementById('magic-link-input');
-  input.select();
-  navigator.clipboard.writeText(input.value).then(() => {
-    button.innerHTML = '<i class="fa-solid fa-check"></i> Copied!';
-    setTimeout(() => button.innerHTML = '<i class="fa-solid fa-copy"></i> Copy', 2000);
-  });
-}
-
-function printQR() {
-  const img = document.getElementById('qr-img');
-  const link = document.getElementById('magic-link-input').value;
-  const w = window.open('', '_blank');
-  w.document.write(`<!DOCTYPE html><html><head><title>Surgeon Registration QR</title>
-    <style>body{font-family:sans-serif;text-align:center;padding:40px}img{width:280px;height:280px}p{color:#333;font-size:14px;margin-top:16px}</style>
-    </head><body>
-    <h2 style="color:#14305A">Scan to Register Your Phone</h2>
-    <img src="${img.src}" /><br>
-    <p style="word-break:break-all;font-size:11px;color:#666">${link}</p>
-    <script>window.onload=()=>window.print()<\/script>
-    </body></html>`);
-  w.document.close();
 }
 
 ['add-modal','edit-modal'].forEach(id => {

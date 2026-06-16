@@ -1,15 +1,10 @@
-from datetime import datetime, timezone
-
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from ..auth import (
     cookie_secure,
     create_admin_token,
-    create_surgeon_session_token,
-    get_current_admin,
-    redeem_magic_link,
     verify_password,
 )
 from ..database import get_db
@@ -60,43 +55,6 @@ def admin_login(
 def admin_logout():
     resp = RedirectResponse("/admin/login", status_code=303)
     resp.delete_cookie("admin_token")
-    return resp
-
-
-@router.get("/register", response_class=HTMLResponse)
-def register_device_page(request: Request, token: str = ""):
-    return templates.TemplateResponse("surgeon/register.html", {"request": request, "token": token})
-
-
-@router.post("/register")
-def register_device(
-    request: Request,
-    token: str = Form(...),
-    db: Session = Depends(get_db),
-):
-    ua = request.headers.get("user-agent", "Unknown")
-    try:
-        device = redeem_magic_link(token, ua, db)
-    except HTTPException:
-        return templates.TemplateResponse(
-            "surgeon/register.html",
-            {
-                "request": request,
-                "token": token,
-                "error": "This registration link has expired or already been used. Ask the office to send a new one.",
-            },
-            status_code=400,
-        )
-
-    # Create a long-lived session JWT keyed to the device
-    session_token = create_surgeon_session_token(device.id)
-
-    resp = RedirectResponse("/surgeon/schedule", status_code=303)
-    resp.set_cookie(
-        "surgeon_token", session_token,
-        httponly=True, secure=cookie_secure(), samesite="lax",
-        max_age=365 * 24 * 3600,
-    )
     return resp
 
 

@@ -10,7 +10,6 @@ SECRET_KEY = os.environ["SECRET_KEY"]
 ALGORITHM = "HS256"
 ADMIN_TOKEN_EXPIRE_HOURS = 12
 SURGEON_TOKEN_EXPIRE_DAYS = 365
-MAGIC_LINK_EXPIRE_HOURS = int(os.environ.get("MAGIC_LINK_EXPIRE_HOURS", "168"))
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 

@@ -7,8 +7,6 @@ from sqlalchemy.orm import Session
 from ..admin_surgeon_service import (
     add_surgeon as add_surgeon_service,
     delete_surgeon as delete_surgeon_service,
-    email_magic_link_if_possible,
-    generate_magic_link_qr,
     preview_session_token,
     revoke_device as revoke_device_service,
     surgeon_fields,
@@ -101,30 +99,6 @@ def toggle_surgeon(surgeon_id: int, db: Session = Depends(get_db), admin=Depends
     return RedirectResponse("/admin/surgeons", status_code=303)
 
 
-@router.post("/surgeons/{surgeon_id}/magic-link")
-def create_magic_link(
-    surgeon_id: int,
-    request: Request,
-    db: Session = Depends(get_db),
-    admin=Depends(get_current_admin),
-):
-    base_url = str(request.base_url).rstrip("/")
-    payload = generate_magic_link_qr(db, surgeon_id, base_url)
-    email_magic_link_if_possible(db, surgeon_id, payload["link"])
-
-    surgeons = db.query(Surgeon).order_by(Surgeon.last_name).all()
-    surgeons = _sort_surgeons_physicians_first(surgeons)
-    return templates.TemplateResponse("admin/surgeons.html", _base(
-        request,
-        admin,
-        db=db,
-        surgeons=surgeons,
-        generated_link=payload["link"],
-        link_surgeon_id=surgeon_id,
-        qr_code_b64=payload["qr_code_b64"],
-    ))
-
-
 @router.post("/surgeons/{surgeon_id}/devices/{device_id}/revoke")
 def revoke_device(surgeon_id: int, device_id: int, db: Session = Depends(get_db), admin=Depends(get_current_admin)):
     revoke_device_service(db, surgeon_id, device_id)
@@ -138,7 +112,7 @@ def preview_surgeon_mobile(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    """Issue a surgeon session in this browser without consuming a magic link."""
+    """Issue a surgeon session in this browser for admin troubleshooting."""
     ua = request.headers.get("user-agent", "Desktop preview")
     session_token = preview_session_token(db, surgeon_id, ua)
     if not session_token:

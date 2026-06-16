@@ -1,12 +1,8 @@
 """Services for admin surgeon management."""
 
-import base64
 import hashlib
-import io
-import os
 import re
 import secrets
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
@@ -14,9 +10,7 @@ from sqlalchemy.orm import Session
 from .auth import (
     SURGEON_ADMIN_PREVIEW_DEVICE_NAME,
     create_surgeon_session_token,
-    generate_magic_link_token,
 )
-from .email_service import send_magic_link_email
 from .models import Surgeon, SurgeonDevice
 
 
@@ -82,34 +76,6 @@ def toggle_surgeon(db: Session, surgeon_id: int) -> None:
     if surgeon:
         surgeon.is_active = not surgeon.is_active
         db.commit()
-
-
-def generate_magic_link_qr(db: Session, surgeon_id: int, base_url: str) -> dict:
-    import qrcode
-
-    link = generate_magic_link_token(surgeon_id, db, base_url)
-    qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=8, border=3)
-    qr.add_data(link)
-    qr.make(fit=True)
-    img = qr.make_image(fill_color="#14305A", back_color="white")
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    qr_b64 = base64.b64encode(buf.getvalue()).decode()
-    return {"link": link, "qr_code_b64": qr_b64}
-
-
-def email_magic_link_if_possible(db: Session, surgeon_id: int, link: str) -> None:
-    surgeon = db.get(Surgeon, surgeon_id)
-    if surgeon and surgeon.email:
-        executor = ThreadPoolExecutor(max_workers=1)
-        executor.submit(
-            send_magic_link_email,
-            to_email=surgeon.email,
-            to_name=surgeon.full_name or surgeon.email,
-            magic_url=link,
-            app_name="Mid Florida Surgical Calendar",
-            expiry_hours=int(os.environ.get("MAGIC_LINK_EXPIRE_HOURS", "168")),
-        )
 
 
 def revoke_device(db: Session, surgeon_id: int, device_id: int) -> None:

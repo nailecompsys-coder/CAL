@@ -35,79 +35,87 @@
     .color-picker-row input[type="text"].color-hex { width: 6rem; font-family: ui-monospace, monospace; font-size: 0.8rem; }
   </style>
 </head>
-<body class="bg-slate-100 font-sans">
+<body class="admin-shell bg-clinical-mist font-sans">
 <div class="flex h-screen overflow-hidden">
 
   <!-- Sidebar overlay (mobile tap-to-close) -->
   <div id="sidebar-overlay" class="fixed inset-0 bg-black/50 z-20 hidden lg:hidden" onclick="closeSidebar()"></div>
 
   <!-- Sidebar -->
-  <aside id="sidebar" class="fixed lg:static inset-y-0 left-0 w-64 bg-slate-800 flex flex-col flex-shrink-0 z-30 transform -translate-x-full lg:translate-x-0 transition-transform duration-200">
-    <div class="px-6 py-5 border-b border-slate-700">
+  <aside id="sidebar" class="admin-sidebar fixed lg:static inset-y-0 left-0 w-64 flex flex-col flex-shrink-0 z-30 transform -translate-x-full lg:translate-x-0 transition-transform duration-200">
+    <div class="admin-sidebar-brand px-5 py-4 border-b">
       <div class="flex items-center gap-2">
         {% if settings and settings.logo_filename %}
         <img src="/static/uploads/{{ settings.logo_filename }}" alt="Logo" class="h-8 object-contain flex-shrink-0" />
         {% else %}
-        <div class="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center flex-shrink-0">
+        <div class="w-8 h-8 bg-blue-500 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm">
           <i class="fa-solid fa-scalpel text-white text-sm"></i>
         </div>
         {% endif %}
         <div class="min-w-0">
-          <p class="text-white font-bold text-sm leading-tight truncate">{% if settings %}{{ settings.practice_name }}{% else %}Mid Florida Surgical{% endif %}</p>
-          <p class="text-slate-400 text-xs">Admin Portal</p>
+          <p class="text-clinical-ink font-extrabold text-sm leading-tight truncate">{% if settings %}{{ settings.practice_name }}{% else %}Mid Florida Surgical{% endif %}</p>
+          <p class="text-clinical-muted text-xs font-semibold">Command Center</p>
         </div>
-        <button onclick="closeSidebar()" class="ml-auto text-slate-400 hover:text-white lg:hidden flex-shrink-0">
+        <button onclick="closeSidebar()" class="ml-auto text-clinical-muted hover:text-clinical-ink lg:hidden flex-shrink-0">
           <i class="fa-solid fa-xmark text-lg"></i>
         </button>
       </div>
     </div>
 
-    <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+    <nav class="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
+      <div class="nav-section-label">Overview</div>
       <a href="/admin/dashboard" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/dashboard' %}active{% endif %}">
         <i class="fa-solid fa-gauge-high" style="width:1rem;text-align:center"></i> Dashboard
       </a>
       <a href="/admin/calendar" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/calendar' %}active{% endif %}">
         <i class="fa-solid fa-calendar-days" style="width:1rem;text-align:center"></i> Calendar
       </a>
+
+      <div class="nav-section-label">People</div>
       <a href="/admin/surgeons" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/surgeons' %}active{% endif %}">
         <i class="fa-solid fa-user-doctor" style="width:1rem;text-align:center"></i> Physicians
-      </a>
-      <a href="/admin/clinic-schedule" onclick="closeSidebar()" class="sidebar-link {% if '/clinic-schedule' in request.url.path %}active{% endif %}">
-        <i class="fa-solid fa-calendar-check" style="width:1rem;text-align:center"></i> Schedule
-      </a>
-      <a href="/admin/call-schedule" onclick="closeSidebar()" class="sidebar-link {% if '/call-schedule' in request.url.path %}active{% endif %}">
-        <i class="fa-solid fa-bell" style="width:1rem;text-align:center"></i> Call Schedule
-      </a>
-      <a href="/admin/schedule-templates" onclick="closeSidebar()" class="sidebar-link {% if '/schedule-templates' in request.url.path %}active{% endif %}">
-        <i class="fa-solid fa-table-cells" style="width:1rem;text-align:center"></i> Templates
-      </a>
-      <a href="/admin/meetings" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/meetings' %}active{% endif %}">
-        <i class="fa-solid fa-users-rectangle" style="width:1rem;text-align:center"></i> Meetings
-      </a>
-      <a href="/admin/daysoff" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/daysoff' %}active{% endif %}">
-        <i class="fa-solid fa-umbrella-beach" style="width:1rem;text-align:center"></i> Days Off
-        {% if pending_count and pending_count > 0 %}<span class="badge">{{ pending_count }}</span>{% endif %}
       </a>
       <a href="/admin/locations" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/locations' %}active{% endif %}">
         <i class="fa-solid fa-location-dot" style="width:1rem;text-align:center"></i> Locations
       </a>
-      <div class="border-t border-slate-700 my-2"></div>
+
+      <div class="nav-section-label">Scheduling</div>
+      <a href="/admin/clinic-schedule" onclick="closeSidebar()" class="sidebar-link {% if '/clinic-schedule' in request.url.path %}active{% endif %}">
+        <i class="fa-solid fa-calendar-check" style="width:1rem;text-align:center"></i> Clinics / OR
+      </a>
+      <a href="/admin/call-schedule" onclick="closeSidebar()" class="sidebar-link {% if '/call-schedule' in request.url.path %}active{% endif %}">
+        <i class="fa-solid fa-bell" style="width:1rem;text-align:center"></i> Call
+      </a>
+      <a href="/admin/daysoff" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/daysoff' %}active{% endif %}">
+        <i class="fa-solid fa-umbrella-beach" style="width:1rem;text-align:center"></i> Time Off
+        {% if pending_count and pending_count > 0 %}<span class="badge">{{ pending_count }}</span>{% endif %}
+      </a>
+
+      <div class="nav-section-label">Operations</div>
+      <a href="/admin/meetings" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/meetings' %}active{% endif %}">
+        <i class="fa-solid fa-users-rectangle" style="width:1rem;text-align:center"></i> Meetings
+      </a>
+      <a href="/admin/schedule-templates" onclick="closeSidebar()" class="sidebar-link {% if '/schedule-templates' in request.url.path %}active{% endif %}">
+        <i class="fa-solid fa-table-cells" style="width:1rem;text-align:center"></i> Templates
+      </a>
+
+      <div class="nav-section-label">System</div>
       <a href="/admin/settings" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/settings' %}active{% endif %}">
         <i class="fa-solid fa-gear" style="width:1rem;text-align:center"></i> Settings
       </a>
     </nav>
 
-    <div class="px-4 py-3 border-t border-slate-700 space-y-2">
+    <div class="admin-sidebar-footer px-4 py-3 border-t space-y-2">
       <div class="flex items-center justify-between gap-2 flex-wrap">
         <span class="inline-flex items-center gap-1 flex-wrap">
-          <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-700 text-slate-300" title="Build {{ app_version|default('?') }}">v{{ app_version|release_label }}</span>
+          <span class="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-bold bg-white/70 text-clinical-muted border border-clinical-stroke" title="Build {{ app_version|default('?') }}">v{{ app_version|release_label }}</span>
           {% set channel = app_version|release_channel %}
           {% if channel %}
-          <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-amber-500/25 text-amber-200 border border-amber-400/40">{{ channel }}</span>
+          <span class="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wide bg-clinical-amber text-amber-900 border border-amber-200">{{ channel }}</span>
           {% endif %}
         </span>
         {% if wasabi_configured %}
-        <span class="text-xs flex items-center gap-1 text-emerald-400" title="Wasabi backup configured">
+        <span class="text-xs flex items-center gap-1 text-clinical-teal font-bold" title="Wasabi backup configured">
           <i class="fa-solid fa-cloud-arrow-up"></i> Backup
         </span>
         {% else %}
@@ -119,10 +127,10 @@
           {{ admin.username[:2].upper() }}
         </div>
         <div class="flex-1 min-w-0">
-          <p class="text-white text-sm font-medium truncate">{{ admin.username }}</p>
-          <p class="text-slate-400 text-xs">{{ admin.role }}</p>
+          <p class="text-clinical-ink text-sm font-bold truncate">{{ admin.username }}</p>
+          <p class="text-clinical-muted text-xs font-semibold">{{ admin.role }}</p>
         </div>
-        <a href="/admin/logout" class="text-slate-400 hover:text-white" title="Logout">
+        <a href="/admin/logout" class="text-clinical-muted hover:text-clinical-ink" title="Logout">
           <i class="fa-solid fa-right-from-bracket text-sm"></i>
         </a>
       </div>
@@ -132,11 +140,11 @@
   <!-- Main content -->
   <main class="flex-1 overflow-y-auto flex flex-col min-w-0">
     <!-- Mobile top bar -->
-    <div class="lg:hidden bg-slate-800 px-4 py-3 flex items-center gap-3 flex-shrink-0">
-      <button onclick="openSidebar()" class="text-white w-8 h-8 flex items-center justify-center">
+    <div class="lg:hidden bg-white/75 backdrop-blur-xl border-b border-clinical-stroke px-4 py-3 flex items-center gap-3 flex-shrink-0">
+      <button onclick="openSidebar()" class="text-clinical-teal w-8 h-8 flex items-center justify-center">
         <i class="fa-solid fa-bars text-lg"></i>
       </button>
-      <span class="text-white font-semibold text-sm flex-1">Mid Florida Surgical</span>
+      <span class="text-clinical-ink font-bold text-sm flex-1">Mid Florida Surgical</span>
       {% if pending_count and pending_count > 0 %}
       <a href="/admin/daysoff" class="bg-amber-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{{ pending_count }} pending</a>
       {% endif %}

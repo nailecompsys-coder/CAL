@@ -1,3 +1,217 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  --cal-ink: #102b31;
+  --cal-muted: #62777d;
+  --cal-mist: #f3faf7;
+  --cal-page-top: #effafa;
+  --cal-page-mid: #fcfffb;
+  --cal-page-bottom: #edf9f0;
+  --cal-card: rgba(252, 255, 253, 0.76);
+  --cal-card-strong: rgba(255, 255, 247, 0.84);
+  --cal-teal: #087967;
+  --cal-teal-2: #179eaa;
+  --cal-teal-soft: #c2ede6;
+  --cal-scrub: #d1f0d6;
+  --cal-amber: #ffeaba;
+  --cal-lavender: #f0e8ff;
+  --cal-stroke: rgba(179, 209, 209, 0.72);
+  --cal-shadow: rgba(20, 61, 61, 0.12);
+}
+
+html {
+  background: var(--cal-mist);
+}
+
+body.admin-shell {
+  color: var(--cal-ink);
+  background:
+    linear-gradient(135deg, var(--cal-page-top) 0%, var(--cal-page-mid) 46%, var(--cal-page-bottom) 100%);
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+.admin-shell main {
+  background:
+    radial-gradient(circle at 12% 0%, rgba(194, 237, 230, 0.42), transparent 28rem),
+    radial-gradient(circle at 98% 12%, rgba(240, 232, 255, 0.40), transparent 24rem),
+    linear-gradient(135deg, var(--cal-page-top), var(--cal-page-mid) 46%, var(--cal-page-bottom));
+}
+
+.admin-shell .admin-sidebar {
+  background: rgba(248, 253, 250, 0.78);
+  border-right: 1px solid rgba(179, 209, 209, 0.62);
+  box-shadow: 16px 0 40px rgba(10, 50, 50, 0.08);
+  backdrop-filter: blur(22px) saturate(1.35);
+  -webkit-backdrop-filter: blur(22px) saturate(1.35);
+}
+
+.admin-shell .admin-sidebar-brand,
+.admin-shell .admin-sidebar-footer {
+  border-color: rgba(179, 209, 209, 0.58);
+}
+
+.admin-shell .sidebar-link {
+  min-height: 2.25rem;
+  border-radius: 0.85rem;
+  color: var(--cal-muted);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  padding: 0.45rem 0.65rem;
+}
+
+.admin-shell .sidebar-link:hover {
+  background: rgba(194, 237, 230, 0.38);
+  color: var(--cal-ink);
+}
+
+.admin-shell .sidebar-link.active {
+  background: linear-gradient(145deg, rgba(8, 121, 103, 0.96), rgba(23, 158, 170, 0.90));
+  color: white;
+  box-shadow: 0 8px 18px rgba(8, 121, 103, 0.18);
+}
+
+.admin-shell .sidebar-link .badge {
+  background: #d94235;
+  color: white;
+}
+
+.admin-shell .nav-section-label {
+  color: rgba(98, 119, 125, 0.76);
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.7rem 0.65rem 0.25rem;
+}
+
+.admin-shell header.bg-white,
+.admin-shell .portal-header {
+  background: rgba(252, 255, 253, 0.74) !important;
+  border-color: rgba(179, 209, 209, 0.58) !important;
+  backdrop-filter: blur(18px) saturate(1.35);
+  -webkit-backdrop-filter: blur(18px) saturate(1.35);
+}
+
+.admin-shell h1,
+.admin-shell h2,
+.admin-shell h3 {
+  color: var(--cal-ink) !important;
+  letter-spacing: 0;
+}
+
+.admin-shell h1 {
+  font-size: 1.08rem !important;
+  line-height: 1.25;
+}
+
+.admin-shell h2 {
+  font-size: 0.98rem !important;
+}
+
+.admin-shell .text-slate-500,
+.admin-shell .text-slate-600,
+.admin-shell .text-slate-400 {
+  color: var(--cal-muted) !important;
+}
+
+.admin-shell .bg-white,
+.admin-shell .bg-slate-50,
+.admin-shell .bg-slate-100,
+.admin-shell details.settings-card {
+  background-color: var(--cal-card) !important;
+}
+
+.admin-shell .border-slate-100,
+.admin-shell .border-slate-200,
+.admin-shell .border-slate-300,
+.admin-shell details.settings-card {
+  border-color: var(--cal-stroke) !important;
+}
+
+.admin-shell .rounded-xl,
+.admin-shell .rounded-2xl,
+.admin-shell .rounded-\[1\.25rem\],
+.admin-shell details.settings-card {
+  border-radius: 1rem !important;
+}
+
+.admin-shell .shadow-xl,
+.admin-shell .shadow-lg,
+.admin-shell .shadow-sm,
+.admin-shell .shadow-\[0_2px_12px_rgba\(0\,0\,0\,0\.04\)\] {
+  box-shadow: 0 10px 30px var(--cal-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.78) !important;
+}
+
+.admin-shell .bg-blue-600,
+.admin-shell .bg-blue-500 {
+  background: linear-gradient(145deg, var(--cal-teal), var(--cal-teal-2)) !important;
+}
+
+.admin-shell .text-blue-600,
+.admin-shell .text-blue-700,
+.admin-shell .hover\:text-blue-800:hover {
+  color: var(--cal-teal) !important;
+}
+
+.admin-shell .focus\:ring-blue-500:focus,
+.admin-shell .focus\:ring-blue-400:focus {
+  --tw-ring-color: rgba(8, 121, 103, 0.34) !important;
+}
+
+.admin-shell input,
+.admin-shell select,
+.admin-shell textarea {
+  border-color: rgba(179, 209, 209, 0.76) !important;
+  background-color: rgba(255, 255, 255, 0.72) !important;
+  color: var(--cal-ink) !important;
+  border-radius: 0.85rem !important;
+}
+
+.admin-shell table {
+  font-size: 0.8125rem;
+}
+
+.admin-shell th {
+  color: rgba(98, 119, 125, 0.86) !important;
+  font-size: 0.68rem !important;
+  letter-spacing: 0.06em !important;
+}
+
+.admin-shell td,
+.admin-shell th {
+  padding-top: 0.55rem !important;
+  padding-bottom: 0.55rem !important;
+}
+
+.admin-shell .staff-avatar {
+  background: rgba(247, 250, 242, 0.94) !important;
+  color: var(--cal-teal) !important;
+  border-color: rgba(179, 209, 209, 0.82) !important;
+}
+
+.admin-shell .status-approved {
+  background: linear-gradient(145deg, #dff4df, #effaee) !important;
+  color: #1a6b4c !important;
+}
+
+.admin-shell .status-pending {
+  background: linear-gradient(145deg, #ffe7a8, #fff6d9) !important;
+  color: #77520b !important;
+}
+
+.admin-shell .status-denied {
+  background: linear-gradient(145deg, #ffd8d1, #fff0ed) !important;
+  color: #9f241a !important;
+}
+
+.admin-shell .clinical-glass {
+  background: var(--cal-card);
+  border: 1px solid var(--cal-stroke);
+  border-radius: 1rem;
+  box-shadow: 0 10px 30px var(--cal-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(18px) saturate(1.32);
+  -webkit-backdrop-filter: blur(18px) saturate(1.32);
+}

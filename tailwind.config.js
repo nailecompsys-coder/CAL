@@ -4,6 +4,22 @@ module.exports = {
   theme: {
     extend: {
       colors: {
+        clinical: {
+          ink: '#102B31',
+          muted: '#62777D',
+          mist: '#F3FAF7',
+          card: '#FCFFFD',
+          strong: '#FFFFF7',
+          teal: '#087967',
+          tealSoft: '#C2EDE6',
+          scrub: '#D1F0D6',
+          scrubInk: '#1A6B4C',
+          porcelain: '#F7FAF2',
+          mint: '#E1F7E1',
+          amber: '#FFEABA',
+          lavender: '#F0E8FF',
+          stroke: '#B3D1D1',
+        },
         slate: {
           50:  '#EAF0F8',
           100: '#F4F6F9',

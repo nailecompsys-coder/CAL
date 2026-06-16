@@ -10,7 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models import Base, Surgeon
-from app.native_patient_schedule_service import _utc_bounds_for_eastern_dates
+from app.native_patient_schedule_service import APPOINTMENT_SQL, _local_bounds_for_dates
 from app.routers.native_api import native_patient_schedule
 
 
@@ -61,11 +61,19 @@ class NativePatientScheduleRouteTest(unittest.TestCase):
         finally:
             db.close()
 
-    def test_aprima_query_bounds_use_utc_for_eastern_dates(self):
-        start, end = _utc_bounds_for_eastern_dates(date(2026, 6, 15), date(2026, 6, 21))
+    def test_aprima_query_bounds_use_aprima_local_datetimes(self):
+        start, end = _local_bounds_for_dates(date(2026, 6, 15), date(2026, 6, 21))
 
-        self.assertEqual(start, datetime(2026, 6, 15, 4, 0))
-        self.assertEqual(end, datetime(2026, 6, 22, 4, 0))
+        self.assertEqual(start, datetime(2026, 6, 15, 0, 0))
+        self.assertEqual(end, datetime(2026, 6, 22, 0, 0))
+
+    def test_aprima_query_only_reads_visible_scheduled_patient_appointments(self):
+        self.assertNotIn("AT TIME ZONE", APPOINTMENT_SQL)
+        self.assertIn("las.ShowOnSchedule = 1", APPOINTMENT_SQL)
+        self.assertIn("a.PatientUid IS NOT NULL", APPOINTMENT_SQL)
+        self.assertIn("pt.Inactive = 0", APPOINTMENT_SQL)
+        self.assertIn("NOT LIKE '%RECALL%'", APPOINTMENT_SQL)
+        self.assertIn("NOT LIKE '%POSSIBLE%'", APPOINTMENT_SQL)
 
     def _seed_surgeon(self, db) -> Surgeon:
         surgeon = Surgeon(

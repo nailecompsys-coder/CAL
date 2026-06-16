@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 from datetime import date, datetime, time, timedelta
-from zoneinfo import ZoneInfo
 
 
 APPOINTMENT_SQL = """
@@ -19,11 +18,16 @@ WITH filtered AS (
     a.ServiceSiteUid,
     a.RoomUid,
     a.Reason,
-    CAST((a.StartDateTime AT TIME ZONE 'UTC' AT TIME ZONE 'Eastern Standard Time') AS DATETIME) AS LocalStartDateTime,
-    CAST((a.EndDateTime AT TIME ZONE 'UTC' AT TIME ZONE 'Eastern Standard Time') AS DATETIME) AS LocalEndDateTime
+    a.StartDateTime AS LocalStartDateTime,
+    a.EndDateTime AS LocalEndDateTime
   FROM Appointment a
   WHERE a.StartDateTime >= %s
     AND a.StartDateTime < %s
+    AND a.StartDateTime IS NOT NULL
+    AND a.EndDateTime IS NOT NULL
+    AND a.EndDateTime > a.StartDateTime
+    AND a.PatientUid IS NOT NULL
+    AND a.ProviderUid IS NOT NULL
 )
 SELECT
   CAST(appt.AppointmentUid AS VARCHAR(36)) AS appointment_id,
@@ -49,9 +53,18 @@ LEFT JOIN ListAppointmentStatus las ON las.AppointmentStatusUid = appt.Appointme
 LEFT JOIN ListServiceSite lss ON lss.ServiceSiteUid = appt.ServiceSiteUid
 LEFT JOIN ListRoom lr ON lr.RoomUid = appt.RoomUid
 WHERE (las.IsCanceledStatus = 0 OR las.IsCanceledStatus IS NULL)
+  AND las.ShowOnSchedule = 1
+  AND (las.Inactive = 0 OR las.Inactive IS NULL)
   AND prov.Inactive = 0
-  AND COALESCE(las.Name, '') <> 'Recalls'
-  AND COALESCE(lat.Name, '') NOT IN ('Recall', 'DR OUT', 'FYI', 'Meeting')
+  AND pt.Inactive = 0
+  AND (lat.Inactive = 0 OR lat.Inactive IS NULL)
+  AND UPPER(COALESCE(las.Name, '')) NOT LIKE '%RECALL%'
+  AND UPPER(COALESCE(lat.Name, '')) NOT LIKE '%RECALL%'
+  AND UPPER(COALESCE(appt.Reason, '')) NOT LIKE '%RECALL%'
+  AND UPPER(COALESCE(lat.Name, '')) NOT IN ('DR OUT', 'FYI', 'MEETING')
+  AND UPPER(COALESCE(appt.Reason, '')) NOT LIKE '%POSSIBLE%'
+  AND UPPER(COALESCE(appt.Reason, '')) NOT LIKE '%WAITLIST%'
+  AND UPPER(COALESCE(appt.Reason, '')) NOT LIKE '%WAIT LIST%'
 ORDER BY CAST(appt.LocalStartDateTime AS DATE), surgeon_name, appt.LocalStartDateTime, patient_name
 """
 
@@ -70,7 +83,7 @@ def native_patient_schedule(start_date: date, end_date: date) -> dict:
     conn = _connect()
     try:
         with conn.cursor(as_dict=True) as cursor:
-            cursor.execute(APPOINTMENT_SQL, _utc_bounds_for_eastern_dates(start_date, end_date))
+            cursor.execute(APPOINTMENT_SQL, _local_bounds_for_dates(start_date, end_date))
             rows = [_serialize_row(row) for row in cursor.fetchall()]
     finally:
         conn.close()
@@ -123,14 +136,10 @@ def _parse_connection_string(conn_string: str) -> dict[str, str]:
     return config
 
 
-def _utc_bounds_for_eastern_dates(start_date: date, end_date: date) -> tuple[datetime, datetime]:
-    eastern = ZoneInfo("America/New_York")
-    utc = ZoneInfo("UTC")
-    start_local = datetime.combine(start_date, time.min, tzinfo=eastern)
-    end_exclusive_local = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=eastern)
+def _local_bounds_for_dates(start_date: date, end_date: date) -> tuple[datetime, datetime]:
     return (
-        start_local.astimezone(utc).replace(tzinfo=None),
-        end_exclusive_local.astimezone(utc).replace(tzinfo=None),
+        datetime.combine(start_date, time.min),
+        datetime.combine(end_date + timedelta(days=1), time.min),
     )
 
 

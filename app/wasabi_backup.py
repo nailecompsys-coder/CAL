@@ -3,10 +3,12 @@ Wasabi S3 backup/restore for Cal — surgical_cal DB.
 Uses same env pattern as SSS: WASABI_BUCKET, WASABI_KEY_ID, WASABI_SECRET, WASABI_ENDPOINT.
 Prefix: cal-backups/ (so same bucket as SSS can be used).
 """
+import json
 import os
 import subprocess
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
+from pathlib import Path
 
 from botocore.exceptions import ClientError
 
@@ -37,6 +39,90 @@ def is_configured() -> bool:
 
 def _parse_database_url():
     return parse_database_url()
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def _git_value(args: list[str]) -> str | None:
+    try:
+        return subprocess.check_output(
+            ["git", "-C", str(_repo_root()), *args],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip() or None
+    except Exception:
+        return None
+
+
+def _version() -> str | None:
+    version_file = _repo_root() / "VERSION"
+    try:
+        return version_file.read_text().strip() or None
+    except Exception:
+        return None
+
+
+def _redacted_env_manifest() -> dict:
+    safe_keys = {
+        "BASE_URL",
+        "CAL_BIND_HOST",
+        "CAL_DB_NAME",
+        "CAL_DB_USER",
+        "WASABI_BUCKET",
+        "WASABI_REGION",
+        "WASABI_ENDPOINT",
+    }
+    required_secret_keys = {
+        "APRIMA_CONNECTION_STRING",
+        "CAL_DB_PASSWORD",
+        "DATABASE_URL",
+        "SECRET_KEY",
+        "VAPID_PRIVATE_KEY",
+        "VAPID_PUBLIC_KEY",
+        "VAPID_EMAIL",
+        "WASABI_KEY_ID",
+        "WASABI_SECRET",
+    }
+    safe = {key: os.environ.get(key) for key in sorted(safe_keys) if os.environ.get(key)}
+    present_secrets = sorted(key for key in required_secret_keys if os.environ.get(key))
+    missing_secrets = sorted(key for key in required_secret_keys if not os.environ.get(key))
+    return {
+        "safe_values": safe,
+        "present_secret_keys": present_secrets,
+        "missing_secret_keys": missing_secrets,
+        "note": "Secrets are not stored in this backup. Restore requires a valid production .env.",
+    }
+
+
+def _dr_manifest(timestamp: str, db_size_bytes: int, wasabi_key: str) -> dict:
+    remote = _git_value(["remote", "get-url", "origin"])
+    return {
+        "app": "CAL",
+        "backup_type": "database-plus-manifest",
+        "created_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "timestamp": timestamp,
+        "app_version": _version(),
+        "git": {
+            "remote": remote,
+            "commit": _git_value(["rev-parse", "HEAD"]),
+            "branch": _git_value(["rev-parse", "--abbrev-ref", "HEAD"]),
+            "dirty": bool(_git_value(["status", "--porcelain"])),
+        },
+        "database": {
+            "engine": "postgresql",
+            "dump_key": wasabi_key,
+            "dump_file": "db.sql.gz",
+            "dump_size_bytes": db_size_bytes,
+        },
+        "restore": {
+            "code_source": "git",
+            "minimum_files_required": ["db.sql.gz", "manifest.json", ".env"],
+            "script": "scripts/dr-restore-from-wasabi.sh",
+        },
+        "env": _redacted_env_manifest(),
+    }
 
 
 def list_backups() -> list[dict]:
@@ -78,13 +164,16 @@ def run_backup() -> dict:
         return {"success": False, "error": "Wasabi credentials not configured"}
     ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
     wasabi_key = f"{BACKUP_PREFIX}{ts}/db.sql.gz"
+    manifest_key = f"{BACKUP_PREFIX}{ts}/manifest.json"
     tmpdir = tempfile.mkdtemp(prefix="cal_backup_")
     dbfile = os.path.join(tmpdir, "db.sql.gz")
+    manifest_file = os.path.join(tmpdir, "manifest.json")
     try:
         error = dump_database_to_gzip(db, dbfile)
         if error:
             return {"success": False, "error": f"pg_dump failed: {error}"}
         size = os.path.getsize(dbfile)
+        Path(manifest_file).write_text(json.dumps(_dr_manifest(ts, size, wasabi_key), indent=2) + "\n")
         client = _s3_client()
         client.upload_file(
             dbfile,
@@ -92,10 +181,17 @@ def run_backup() -> dict:
             wasabi_key,
             ExtraArgs={"ContentType": "application/gzip"},
         )
+        client.upload_file(
+            manifest_file,
+            WASABI_BUCKET,
+            manifest_key,
+            ExtraArgs={"ContentType": "application/json"},
+        )
         return {
             "success": True,
             "timestamp": ts,
             "wasabi_key": wasabi_key,
+            "manifest_key": manifest_key,
             "db_size_bytes": size,
             "wasabi_ok": True,
         }
@@ -115,6 +211,8 @@ def run_backup() -> dict:
         try:
             if os.path.exists(dbfile):
                 os.remove(dbfile)
+            if os.path.exists(manifest_file):
+                os.remove(manifest_file)
             os.rmdir(tmpdir)
         except Exception:
             pass

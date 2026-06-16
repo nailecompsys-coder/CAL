@@ -54,6 +54,38 @@ class WasabiBackupTest(unittest.TestCase):
             "cal-backups/20260616-194617/db.sql.gz",
         )
 
+    def test_dr_manifest_uses_git_for_code_and_redacts_secrets(self):
+        with patch("app.wasabi_backup._version", return_value="1.35"):
+            with patch("app.wasabi_backup._git_value") as git_value:
+                git_value.side_effect = [
+                    "git@github.com:nailecompsys-coder/CAL.git",
+                    "abc123",
+                    "main",
+                    "",
+                ]
+                with patch.dict(
+                    "os.environ",
+                    {
+                        "DATABASE_URL": "postgresql://cal_app:secret@cal_postgres:5432/cal_prod",
+                        "WASABI_BUCKET": "mfsa-cal",
+                        "WASABI_KEY_ID": "key",
+                        "WASABI_SECRET": "secret",
+                        "CAL_DB_USER": "cal_app",
+                    },
+                    clear=True,
+                ):
+                    manifest = wasabi_backup._dr_manifest(
+                        "20260616-194617",
+                        123,
+                        "cal-backups/20260616-194617/db.sql.gz",
+                    )
+
+        self.assertEqual(manifest["restore"]["code_source"], "git")
+        self.assertEqual(manifest["database"]["dump_size_bytes"], 123)
+        self.assertEqual(manifest["env"]["safe_values"]["WASABI_BUCKET"], "mfsa-cal")
+        self.assertIn("DATABASE_URL", manifest["env"]["present_secret_keys"])
+        self.assertNotIn("postgresql://cal_app:secret", str(manifest["env"]))
+
 
 if __name__ == "__main__":
     unittest.main()

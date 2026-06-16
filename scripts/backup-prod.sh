@@ -72,6 +72,83 @@ database_host=${DB_HOST}
 database_port=${DB_PORT}
 EOF
 
+python3 - "${BACKUP_DIR}/manifest.json" "${TIMESTAMP}" <<'PY'
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+manifest_path = Path(sys.argv[1])
+timestamp = sys.argv[2]
+repo = Path.cwd()
+
+def git_value(args):
+    try:
+        return subprocess.check_output(["git", "-C", str(repo), *args], text=True, stderr=subprocess.DEVNULL).strip() or None
+    except Exception:
+        return None
+
+def version():
+    try:
+        return (repo / "VERSION").read_text().strip() or None
+    except Exception:
+        return None
+
+safe_keys = [
+    "BASE_URL",
+    "CAL_BIND_HOST",
+    "CAL_DB_NAME",
+    "CAL_DB_USER",
+    "WASABI_BUCKET",
+    "WASABI_REGION",
+    "WASABI_ENDPOINT",
+]
+secret_keys = [
+    "APRIMA_CONNECTION_STRING",
+    "CAL_DB_PASSWORD",
+    "DATABASE_URL",
+    "SECRET_KEY",
+    "VAPID_PRIVATE_KEY",
+    "VAPID_PUBLIC_KEY",
+    "VAPID_EMAIL",
+    "WASABI_KEY_ID",
+    "WASABI_SECRET",
+]
+
+manifest = {
+    "app": "CAL",
+    "backup_type": "database-plus-manifest",
+    "created_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    "timestamp": timestamp,
+    "app_version": version(),
+    "git": {
+        "remote": git_value(["remote", "get-url", "origin"]),
+        "commit": git_value(["rev-parse", "HEAD"]),
+        "branch": git_value(["rev-parse", "--abbrev-ref", "HEAD"]),
+        "dirty": bool(git_value(["status", "--porcelain"])),
+    },
+    "database": {
+        "engine": "postgresql",
+        "dump_key": f"cal-backups/{timestamp}/db.sql.gz",
+        "dump_file": "db.sql.gz",
+    },
+    "restore": {
+        "code_source": "git",
+        "minimum_files_required": ["db.sql.gz", "manifest.json", ".env"],
+        "script": "scripts/dr-restore-from-wasabi.sh",
+    },
+    "env": {
+        "safe_values": {key: os.environ[key] for key in safe_keys if os.environ.get(key)},
+        "present_secret_keys": sorted(key for key in secret_keys if os.environ.get(key)),
+        "missing_secret_keys": sorted(key for key in secret_keys if not os.environ.get(key)),
+        "note": "Secrets are not stored in this backup. Restore requires a valid production .env.",
+    },
+}
+manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+PY
+
 echo "Creating CAL database dump ..."
 if docker ps -a --format '{{.Names}}' | grep -q '^cal_postgres$'; then
   docker exec -e PGPASSWORD="${DB_PASSWORD}" cal_postgres \

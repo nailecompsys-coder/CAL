@@ -67,8 +67,7 @@
       {% for s in physicians %}
       <div class="flex items-center gap-2.5 px-2 py-1.5 rounded-xl cursor-pointer surgeon-toggle mb-0.5" data-id="{{ s.id }}"
            onclick="togglePhysician({{ s.id }}, this)">
-        <div class="w-7 h-7 rounded-xl flex items-center justify-center flex-shrink-0 text-white text-[10px] font-bold shadow-sm"
-             style="background: {{ s.color or '#0ea5e9' }};">{{ s.initials }}</div>
+        <div class="w-7 h-7 rounded-xl flex items-center justify-center flex-shrink-0 text-[10px] font-bold staff-avatar">{{ s.initials }}</div>
         <span class="text-xs text-slate-600 truncate font-medium">{{ s.last_name }}</span>
       </div>
       {% endfor %}
@@ -93,8 +92,7 @@
       {% for s in surgeons %}
       <div class="flex items-center gap-2.5 px-2 py-1.5 rounded-xl cursor-pointer surgeon-toggle mb-0.5" data-id="{{ s.id }}"
            onclick="togglePhysician({{ s.id }}, this)">
-        <div class="w-7 h-7 rounded-xl flex items-center justify-center flex-shrink-0 text-white text-[10px] font-bold shadow-sm"
-             style="background: {{ s.color or '#0ea5e9' }};">{{ s.initials }}</div>
+        <div class="w-7 h-7 rounded-xl flex items-center justify-center flex-shrink-0 text-[10px] font-bold staff-avatar">{{ s.initials }}</div>
         <span class="text-xs text-slate-600 truncate font-medium">{{ s.last_name }}</span>
       </div>
       {% endfor %}

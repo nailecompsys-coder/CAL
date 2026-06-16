@@ -19,6 +19,9 @@ class DeviceNamesTest(unittest.TestCase):
             "iPhone browser",
         )
 
+    def test_admin_preview_is_readable(self):
+        self.assertEqual(readable_device_name("Admin desktop preview"), "Admin preview")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -25,6 +25,9 @@ services:
       dockerfile: Dockerfile
       args:
         APP_VERSION: ${CAL_APP_VERSION:-mac-dev}
+        GIT_COMMIT: ${CAL_GIT_COMMIT:-unknown}
+        GIT_BRANCH: ${CAL_GIT_BRANCH:-unknown}
+        GIT_REMOTE: ${CAL_GIT_REMOTE:-unknown}
     image: cal_api:local
     container_name: cal_api
     restart: unless-stopped

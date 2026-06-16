@@ -1,9 +1,18 @@
 FROM python:3.11-slim
 
 ARG APP_VERSION=unknown
+ARG GIT_COMMIT=unknown
+ARG GIT_BRANCH=unknown
+ARG GIT_REMOTE=unknown
 # IMAGE_VERSION is set at build time from ./scripts/rebuild-cal-api.sh (reads VERSION after bump).
 LABEL org.opencontainers.image.title="cal_api" \
-      org.opencontainers.image.version="${APP_VERSION}"
+      org.opencontainers.image.version="${APP_VERSION}" \
+      org.opencontainers.image.revision="${GIT_COMMIT}" \
+      org.opencontainers.image.source="${GIT_REMOTE}"
+
+ENV CAL_GIT_COMMIT="${GIT_COMMIT}" \
+    CAL_GIT_BRANCH="${GIT_BRANCH}" \
+    CAL_GIT_REMOTE="${GIT_REMOTE}"
 
 WORKDIR /app
 

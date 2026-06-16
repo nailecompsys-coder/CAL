@@ -15,6 +15,9 @@ else
 fi
 
 export CAL_APP_VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
+export CAL_GIT_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+export CAL_GIT_BRANCH="$(git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+export CAL_GIT_REMOTE="$(git -C "$ROOT" remote get-url origin 2>/dev/null || echo unknown)"
 EXPECTED="$CAL_APP_VERSION"
 
 echo "==> Repo VERSION: $EXPECTED"

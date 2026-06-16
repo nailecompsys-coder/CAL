@@ -71,6 +71,9 @@ class WasabiBackupTest(unittest.TestCase):
                         "WASABI_KEY_ID": "key",
                         "WASABI_SECRET": "secret",
                         "CAL_DB_USER": "cal_app",
+                        "CAL_GIT_REMOTE": "git@github.com:nailecompsys-coder/CAL.git",
+                        "CAL_GIT_COMMIT": "abc123",
+                        "CAL_GIT_BRANCH": "main",
                     },
                     clear=True,
                 ):

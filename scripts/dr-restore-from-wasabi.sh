@@ -139,8 +139,12 @@ gunzip -c "${TMP_DIR}/db.sql.gz" | "${DOCKER[@]}" exec -i \
   cal_postgres psql -U "$CAL_DB_USER" -d "$CAL_DB_NAME" --no-password
 
 echo "==> Building and starting CAL API"
-CAL_APP_VERSION="$(tr -d '[:space:]' < VERSION)" "${COMPOSE[@]}" build cal_api
-CAL_APP_VERSION="$(tr -d '[:space:]' < VERSION)" "${COMPOSE[@]}" up -d --no-build cal_api
+export CAL_APP_VERSION="$(tr -d '[:space:]' < VERSION)"
+export CAL_GIT_COMMIT="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+export CAL_GIT_BRANCH="$(git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+export CAL_GIT_REMOTE="$(git -C "$ROOT" remote get-url origin 2>/dev/null || echo unknown)"
+"${COMPOSE[@]}" build cal_api
+"${COMPOSE[@]}" up -d --no-build cal_api
 
 echo "==> Waiting for health"
 for _ in {1..30}; do

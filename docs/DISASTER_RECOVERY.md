@@ -16,6 +16,8 @@ cal-backups/YYYYMMDD-HHMMSS/
 
 `manifest.json` records the app version, Git remote, Git commit, branch, database dump key, dump size, and which secret keys were present at backup time. Secret values are not stored in Wasabi or Git.
 
+The Git metadata is stamped into the Docker image during build so portal-created backups can still record the exact commit even though the running container does not contain the `.git` directory.
+
 ## What Is Not Backed Up
 
 The backup does not contain plaintext secrets, nginx config, DNS records, SSL certificates, operating-system packages, or the VM itself.

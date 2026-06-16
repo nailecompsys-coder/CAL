@@ -124,10 +124,10 @@ manifest = {
     "timestamp": timestamp,
     "app_version": version(),
     "git": {
-        "remote": git_value(["remote", "get-url", "origin"]),
-        "commit": git_value(["rev-parse", "HEAD"]),
-        "branch": git_value(["rev-parse", "--abbrev-ref", "HEAD"]),
-        "dirty": bool(git_value(["status", "--porcelain"])),
+        "remote": os.environ.get("CAL_GIT_REMOTE") or git_value(["remote", "get-url", "origin"]),
+        "commit": os.environ.get("CAL_GIT_COMMIT") or git_value(["rev-parse", "HEAD"]),
+        "branch": os.environ.get("CAL_GIT_BRANCH") or git_value(["rev-parse", "--abbrev-ref", "HEAD"]),
+        "dirty": False if os.environ.get("CAL_GIT_COMMIT") else bool(git_value(["status", "--porcelain"])),
     },
     "database": {
         "engine": "postgresql",

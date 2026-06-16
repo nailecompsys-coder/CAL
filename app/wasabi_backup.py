@@ -97,7 +97,10 @@ def _redacted_env_manifest() -> dict:
 
 
 def _dr_manifest(timestamp: str, db_size_bytes: int, wasabi_key: str) -> dict:
-    remote = _git_value(["remote", "get-url", "origin"])
+    remote = os.environ.get("CAL_GIT_REMOTE") or _git_value(["remote", "get-url", "origin"])
+    commit = os.environ.get("CAL_GIT_COMMIT") or _git_value(["rev-parse", "HEAD"])
+    branch = os.environ.get("CAL_GIT_BRANCH") or _git_value(["rev-parse", "--abbrev-ref", "HEAD"])
+    dirty = bool(_git_value(["status", "--porcelain"])) if not os.environ.get("CAL_GIT_COMMIT") else False
     return {
         "app": "CAL",
         "backup_type": "database-plus-manifest",
@@ -106,9 +109,9 @@ def _dr_manifest(timestamp: str, db_size_bytes: int, wasabi_key: str) -> dict:
         "app_version": _version(),
         "git": {
             "remote": remote,
-            "commit": _git_value(["rev-parse", "HEAD"]),
-            "branch": _git_value(["rev-parse", "--abbrev-ref", "HEAD"]),
-            "dirty": bool(_git_value(["status", "--porcelain"])),
+            "commit": commit,
+            "branch": branch,
+            "dirty": dirty,
         },
         "database": {
             "engine": "postgresql",

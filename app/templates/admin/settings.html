@@ -39,6 +39,10 @@
   <div class="bg-rose-50 border border-rose-200 rounded-xl px-4 py-3 text-rose-700 text-sm"><i class="fa-solid fa-triangle-exclamation mr-2"></i>That email is already in use.</div>
   {% elif request.query_params.get('msg') == 'last_admin' %}
   <div class="bg-rose-50 border border-rose-200 rounded-xl px-4 py-3 text-rose-700 text-sm"><i class="fa-solid fa-triangle-exclamation mr-2"></i>Cannot deactivate the last active admin.</div>
+  {% elif request.query_params.get('msg') == 'backup_started' %}
+  <div class="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-blue-700 text-sm"><i class="fa-solid fa-spinner mr-2"></i>Backup started. You can leave this page and refresh Settings to see the result.</div>
+  {% elif request.query_params.get('msg') == 'backup_running' %}
+  <div class="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-amber-800 text-sm"><i class="fa-solid fa-clock mr-2"></i>A backup is already running.</div>
   {% elif request.query_params.get('msg') == 'backup_ok' %}
   <div class="bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-green-700 text-sm"><i class="fa-solid fa-circle-check mr-2"></i>Backup {% if request.query_params.get('ts') %}{{ request.query_params.get('ts') }}{% endif %} completed and uploaded to Wasabi. It appears in the list below; if not, refresh the page.</div>
   {% elif request.query_params.get('msg') == 'backup_upload_failed' %}
@@ -64,7 +68,7 @@
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
     <div class="lg:col-span-2 space-y-6">
   <!-- Scheduling rules (card) — FIRST so it's always visible -->
-  <details class="settings-card" open id="scheduling-rules">
+  <details class="settings-card" id="scheduling-rules">
     <summary class="text-base">Scheduling rules <span class="text-xs font-normal text-slate-500">— Conflict checks &amp; buffers</span></summary>
     <form method="post" action="/admin/settings/rules" class="p-5 space-y-4">
       <p class="text-sm text-slate-600">Enable or disable each rule and set buffer minutes. Used when adding or editing days off, clinic, surgery, meetings, and call.</p>
@@ -110,7 +114,7 @@
   </details>
 
   <!-- Branding (card) -->
-  <details class="settings-card" open>
+  <details class="settings-card">
     <summary>Branding <span class="text-xs font-normal text-slate-500">— Login screen and sidebar</span></summary>
     <form method="post" action="/admin/settings" enctype="multipart/form-data" class="p-5 space-y-5">
 
@@ -162,7 +166,7 @@
   </details>
 
   <!-- Admin users (login control) (card) -->
-  <details class="settings-card" open>
+  <details class="settings-card">
     <summary>Login &amp; users <span class="text-xs font-normal text-slate-500">— Portal (desktop) access</span></summary>
     <div class="p-5 space-y-4">
       <p class="text-sm text-slate-600">These users can sign in to the <strong>admin portal</strong> (username + password) to manage the calendar, physicians, and settings. To give <strong>physicians/staff mobile access</strong>, go to <a href="/admin/surgeons" class="text-blue-600 hover:text-blue-800 font-medium">Physicians</a> and click the <i class="fa-solid fa-link text-blue-600"></i> link icon next to a person to generate a registration link or QR code to email or show them.</p>
@@ -275,7 +279,7 @@
   </details>
 
   <!-- Native OTP audit log (card) -->
-  <details class="settings-card" open id="otp-audit">
+  <details class="settings-card" id="otp-audit">
     <summary>OTP sign-in audit <span class="text-xs font-normal text-slate-500">— Native app code requests</span></summary>
     <div class="p-5">
       <div class="flex items-start justify-between gap-4 mb-4">
@@ -382,11 +386,33 @@
         Wasabi not configured. Add <code class="bg-amber-100 px-1 rounded">WASABI_BUCKET</code>, <code class="bg-amber-100 px-1 rounded">WASABI_KEY_ID</code>, <code class="bg-amber-100 px-1 rounded">WASABI_SECRET</code> to <code class="bg-amber-100 px-1 rounded">.env</code> and restart.
       </div>
       {% else %}
+      {% set backup_state = backup_job.get('state', 'idle') if backup_job else 'idle' %}
+      {% if backup_state != 'idle' %}
+      <div class="{% if backup_state == 'succeeded' %}bg-emerald-50 border-emerald-200 text-emerald-800{% elif backup_state == 'running' %}bg-blue-50 border-blue-200 text-blue-800{% else %}bg-rose-50 border-rose-200 text-rose-800{% endif %} border rounded-xl px-4 py-3 text-sm">
+        <div class="font-semibold">
+          {% if backup_state == 'running' %}
+          Backup running
+          {% elif backup_state == 'succeeded' %}
+          Last backup succeeded
+          {% elif backup_state == 'upload_failed' %}
+          Last backup upload failed
+          {% else %}
+          Last backup failed
+          {% endif %}
+        </div>
+        <div class="text-xs mt-1 opacity-80">
+          {{ backup_job.get('message', '') }}
+          {% if backup_job.get('timestamp') %} · {{ backup_job.get('timestamp') }}{% endif %}
+          {% if backup_job.get('db_size_bytes') %} · {{ (backup_job.get('db_size_bytes') / 1024)|round(1) }} KB{% endif %}
+          {% if backup_job.get('error') %} · {{ backup_job.get('error') }}{% endif %}
+        </div>
+      </div>
+      {% endif %}
       <form method="post" action="/admin/settings/backup/run" class="flex items-center gap-3">
-        <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700">
-          <i class="fa-solid fa-cloud-arrow-up mr-2"></i>Run backup now
+        <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-60" {% if backup_state == 'running' %}disabled{% endif %}>
+          <i class="fa-solid fa-cloud-arrow-up mr-2"></i>{% if backup_state == 'running' %}Backup running{% else %}Run backup now{% endif %}
         </button>
-        <span class="text-xs text-slate-500">Dumps <code>surgical_cal</code>, compresses, uploads to Wasabi.</span>
+        <span class="text-xs text-slate-500">Starts a background dump of <code>surgical_cal</code>, compresses it, then uploads it to Wasabi.</span>
       </form>
       <div>
         <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Wasabi backups</p>

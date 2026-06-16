@@ -100,9 +100,10 @@
     <div class="px-4 py-3 border-t border-slate-700 space-y-2">
       <div class="flex items-center justify-between gap-2 flex-wrap">
         <span class="inline-flex items-center gap-1 flex-wrap">
-          <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-700 text-slate-300" title="App version">v{{ app_version|default('?') }}</span>
-          {% if app_version and 'beta' in app_version|lower %}
-          <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-amber-500/25 text-amber-200 border border-amber-400/40">Beta</span>
+          <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-700 text-slate-300" title="Build {{ app_version|default('?') }}">v{{ app_version|release_label }}</span>
+          {% set channel = app_version|release_channel %}
+          {% if channel %}
+          <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-amber-500/25 text-amber-200 border border-amber-400/40">{{ channel }}</span>
           {% endif %}
         </span>
         {% if wasabi_configured %}

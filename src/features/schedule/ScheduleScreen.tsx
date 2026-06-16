@@ -1455,7 +1455,7 @@ function formatDateTime(value: string): string {
   const mm = String(date.getMonth() + 1).padStart(2, "0");
   const dd = String(date.getDate()).padStart(2, "0");
   const yyyy = date.getFullYear();
-  return `${mm}-${dd}-${yyyy} ${date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+  return `${mm}-${dd}-${yyyy} ${timeToString(date)}`;
 }
 
 function greetingForNow(): string {
@@ -1608,7 +1608,9 @@ function displayDayOffDate(value: string): string {
 }
 
 function displayTime(value: string): string {
-  return timeToDate(value).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  const [hour, minute] = value.split(":").map((part) => Number(part));
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return value;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
 function parseMinutes(value?: string | null): number {
@@ -1630,9 +1632,7 @@ function timelineHeight(item: NativeScheduleItem): number {
 }
 
 function formatHour(hour: number): string {
-  if (hour === 12) return "12 PM";
-  if (hour > 12) return `${hour - 12} PM`;
-  return `${hour} AM`;
+  return `${String(hour).padStart(2, "0")}:00`;
 }
 
 function timelineSub(item: NativeScheduleItem): string {

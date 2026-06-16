@@ -190,8 +190,7 @@ struct NativeScheduleItemResponse: Decodable {
       return value
     }
     let minute = parts.count > 1 ? String(parts[1]) : "00"
-    let hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12
-    return "\(hour12):\(minute)"
+    return "\(String(format: "%02d", hour24)):\(minute)"
   }
 }
 
@@ -225,7 +224,7 @@ struct NativeCallAssignmentResponse: Decodable {
       coveringInitials: coveringInitials,
       coveringSurgeonId: coveringSurgeonId,
       isCovered: isCovered == true,
-      time: "7:00 AM - 5:00 PM",
+      time: "07:00 - 17:00",
       systemImage: "building.2"
     )
   }

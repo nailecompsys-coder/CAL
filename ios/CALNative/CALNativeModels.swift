@@ -151,9 +151,7 @@ struct PatientAppointment: Identifiable {
       return value
     }
     let minute = parts.count > 1 ? String(parts[1]) : "00"
-    let hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12
-    let meridiem = hour24 < 12 ? "AM" : "PM"
-    return "\(hour12):\(minute) \(meridiem)"
+    return "\(String(format: "%02d", hour24)):\(minute)"
   }
 }
 
@@ -187,11 +185,11 @@ struct RequestSegment: Identifiable {
   private func displayTime(_ value: String) -> String {
     switch value {
     case "07:00":
-      return "7:00 AM"
+      return "07:00"
     case "12:00":
-      return "12:00 PM"
+      return "12:00"
     case "17:00":
-      return "5:00 PM"
+      return "17:00"
     default:
       return value
     }

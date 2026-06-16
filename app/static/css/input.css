@@ -215,3 +215,60 @@ body.admin-shell {
   backdrop-filter: blur(18px) saturate(1.32);
   -webkit-backdrop-filter: blur(18px) saturate(1.32);
 }
+
+.admin-shell .clinical-panel {
+  background: rgba(252, 255, 253, 0.70);
+  border: 1px solid rgba(179, 209, 209, 0.68);
+  border-radius: 1rem;
+  box-shadow: 0 8px 24px rgba(20, 61, 61, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(16px) saturate(1.22);
+  -webkit-backdrop-filter: blur(16px) saturate(1.22);
+}
+
+.admin-shell .clinical-stat {
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.72), rgba(247, 250, 242, 0.62));
+  border: 1px solid rgba(179, 209, 209, 0.68);
+  border-radius: 1rem;
+  box-shadow: 0 8px 22px rgba(20, 61, 61, 0.09), inset 0 1px 0 rgba(255, 255, 255, 0.78);
+}
+
+.admin-shell .clinical-stat--primary {
+  background: linear-gradient(145deg, rgba(8, 121, 103, 0.95), rgba(23, 158, 170, 0.88));
+  color: white;
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+.admin-shell .clinical-table {
+  overflow: hidden;
+}
+
+.admin-shell .clinical-table tbody tr {
+  transition: background 0.12s ease;
+}
+
+.admin-shell .clinical-table tbody tr:hover {
+  background: rgba(194, 237, 230, 0.22) !important;
+}
+
+.admin-shell .icon-action {
+  width: 1.85rem;
+  height: 1.85rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.85rem;
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid rgba(179, 209, 209, 0.64);
+  color: var(--cal-muted);
+  transition: background 0.12s ease, color 0.12s ease, transform 0.12s ease;
+}
+
+.admin-shell .icon-action:hover {
+  background: rgba(194, 237, 230, 0.48);
+  color: var(--cal-teal);
+}
+
+.admin-shell .icon-action:active {
+  transform: scale(0.96);
+}

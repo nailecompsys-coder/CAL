@@ -2,34 +2,34 @@
 {% block title %}Physicians{% endblock %}
 
 {% block content %}
-<header class="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 flex-shrink-0">
+<header class="portal-header px-5 py-3 flex items-center justify-between sticky top-0 z-10 flex-shrink-0">
   <div>
-    <h1 class="text-xl font-bold text-slate-800">Physicians</h1>
-    <p class="text-sm text-slate-500">{{ surgeons|length }} total</p>
+    <h1 class="font-bold">Physicians</h1>
+    <p class="text-xs text-slate-500">{{ surgeons|length }} total · mobile access and contact records</p>
   </div>
   <button onclick="openAddModal()"
-    class="bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2">
+    class="bg-blue-600 text-white text-xs font-bold px-3 py-2 rounded-xl hover:bg-blue-700 flex items-center gap-2">
     <i class="fa-solid fa-plus"></i> Add Physician
   </button>
 </header>
 
 {% if request.query_params.get('msg') == 'added' %}
-<div class="mx-6 mt-4 bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-green-700 text-sm"><i class="fa-solid fa-circle-check mr-2"></i>Physician added successfully.</div>
+<div class="mx-5 mt-4 status-approved border rounded-xl px-4 py-3 text-sm font-semibold"><i class="fa-solid fa-circle-check mr-2"></i>Physician added successfully.</div>
 {% elif request.query_params.get('msg') == 'updated' %}
-<div class="mx-6 mt-4 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-blue-700 text-sm"><i class="fa-solid fa-circle-check mr-2"></i>Physician updated.</div>
+<div class="mx-5 mt-4 status-approved border rounded-xl px-4 py-3 text-sm font-semibold"><i class="fa-solid fa-circle-check mr-2"></i>Physician updated.</div>
 {% elif request.query_params.get('msg') == 'deleted' %}
-<div class="mx-6 mt-4 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3 text-rose-700 text-sm"><i class="fa-solid fa-trash mr-2"></i>Physician removed.</div>
+<div class="mx-5 mt-4 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3 text-rose-700 text-sm"><i class="fa-solid fa-trash mr-2"></i>Physician removed.</div>
 {% endif %}
 
 {% if generated_link %}
-<div class="mx-6 mt-4 bg-blue-50 border border-blue-200 rounded-2xl p-5">
+<div class="mx-5 mt-4 clinical-panel p-5">
   <div class="flex items-start gap-5 flex-wrap">
     <!-- QR Code -->
     {% if qr_code_b64 %}
     <div class="flex-shrink-0 text-center">
       <img src="data:image/png;base64,{{ qr_code_b64 }}"
            alt="Registration QR Code"
-           class="w-44 h-44 rounded-xl border border-blue-200 shadow-sm"
+           class="w-40 h-40 rounded-xl border border-blue-200 shadow-sm"
            id="qr-img" />
       <button onclick="printQR()" class="mt-2 text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 mx-auto">
         <i class="fa-solid fa-print"></i> Print
@@ -63,8 +63,8 @@
 </div>
 {% endif %}
 
-<div class="p-6">
-  <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+<div class="p-5">
+  <div class="clinical-panel clinical-table overflow-hidden">
     <table class="w-full">
       <thead>
         <tr class="border-b border-slate-100 bg-slate-50">
@@ -78,7 +78,7 @@
       </thead>
       <tbody class="divide-y divide-slate-100">
         {% for s in surgeons %}
-        <tr class="hover:bg-slate-50 {% if not s.is_active %}opacity-50{% endif %}">
+        <tr class="{% if not s.is_active %}opacity-50{% endif %}">
           <td class="px-5 py-3 text-sm text-slate-600">
             {% if (s.staff_type or 'physician') == 'physician' %}
             <span class="font-medium text-slate-800">{{ s.sort_order or '—' }}</span>
@@ -95,15 +95,15 @@
             </div>
           </td>
           <td class="px-5 py-3">
-            <p class="text-sm text-slate-600">{{ s.email or '—' }}</p>
+            <p class="text-sm font-medium text-slate-700">{{ s.email or '—' }}</p>
             <p class="text-xs text-slate-400">{{ s.phone|phone }}</p>
           </td>
           <td class="px-5 py-3">
             {% set active_devices = s.devices | selectattr('is_active') | list %}
-            <span class="text-sm text-slate-600">{{ active_devices|length }} registered</span>
+            <span class="text-sm font-semibold text-slate-700">{{ active_devices|length }} registered</span>
             {% for d in active_devices %}
-            <div class="flex items-center gap-1 mt-0.5">
-              <span class="text-xs text-slate-400">{{ d.device_name|device_name(d.user_agent) }}</span>
+            <div class="flex items-center gap-1 mt-1 max-w-[220px]">
+              <span class="text-xs text-slate-500 truncate" title="{{ d.user_agent or d.device_name or '' }}">{{ d.device_name|device_name(d.user_agent) }}</span>
               <form method="post" action="/admin/surgeons/{{ s.id }}/devices/{{ d.id }}/revoke" class="inline">
                 <button class="text-slate-300 hover:text-rose-500 text-xs ml-1" title="Revoke device">✕</button>
               </form>
@@ -122,31 +122,31 @@
               <button
                 onclick="openEditModal({{ s.id }}, '{{ s.first_name|replace("'","\\'")|safe }}', '{{ s.last_name|replace("'","\\'")|safe }}', '{{ s.suffix or '' }}', '{{ s.email or '' }}', '{{ s.phone or '' }}', '{{ s.staff_type or "physician" }}', '{{ s.sort_order or 0 }}')"
                 title="Edit surgeon"
-                class="w-7 h-7 bg-slate-100 text-slate-600 rounded-lg hover:bg-blue-100 hover:text-blue-600 flex items-center justify-center">
+                class="icon-action">
                 <i class="fa-solid fa-pen text-xs"></i>
               </button>
               {% if s.is_active %}
               <form method="post" action="/admin/surgeons/{{ s.id }}/preview-mobile" target="_blank" title="Opens surgeon app in a new tab for troubleshooting">
-                <button type="submit" class="w-7 h-7 bg-slate-100 text-slate-700 rounded-lg hover:bg-violet-100 hover:text-violet-700 flex items-center justify-center">
+                <button type="submit" class="icon-action">
                   <i class="fa-solid fa-mobile-screen-button text-xs"></i>
                 </button>
               </form>
               {% endif %}
               <form method="post" action="/admin/surgeons/{{ s.id }}/magic-link">
-                <button title="Generate registration link" class="w-7 h-7 bg-blue-100 text-blue-600 rounded-lg hover:bg-blue-200 flex items-center justify-center">
+                <button title="Generate registration link" class="icon-action text-blue-600">
                   <i class="fa-solid fa-link text-xs"></i>
                 </button>
               </form>
               <form method="post" action="/admin/surgeons/{{ s.id }}/toggle">
                 <button title="{% if s.is_active %}Deactivate{% else %}Activate{% endif %}"
-                  class="w-7 h-7 {% if s.is_active %}bg-slate-100 text-slate-500 hover:bg-amber-100 hover:text-amber-600{% else %}bg-green-100 text-green-600 hover:bg-green-200{% endif %} rounded-lg flex items-center justify-center">
+                  class="icon-action {% if not s.is_active %}text-green-600{% endif %}">
                   <i class="fa-solid fa-power-off text-xs"></i>
                 </button>
               </form>
               <form method="post" action="/admin/surgeons/{{ s.id }}/delete"
                 onsubmit="return confirm('Permanently delete {{ s.full_name }}? This cannot be undone and will remove all their schedule data.')">
                 <button title="Delete surgeon"
-                  class="w-7 h-7 bg-slate-100 text-slate-400 rounded-lg hover:bg-rose-100 hover:text-rose-600 flex items-center justify-center">
+                  class="icon-action hover:text-rose-600">
                   <i class="fa-solid fa-trash text-xs"></i>
                 </button>
               </form>

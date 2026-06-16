@@ -2,17 +2,17 @@
 {% block title %}Settings{% endblock %}
 
 {% block content %}
-<header class="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 flex-shrink-0">
+<header class="portal-header px-5 py-3 flex items-center justify-between sticky top-0 z-10 flex-shrink-0">
   <div>
-    <h1 class="text-xl font-bold text-slate-800">Settings</h1>
-    <p class="text-sm text-slate-500">Branding, users, backup &amp; portal configuration</p>
+    <h1 class="font-bold">Settings</h1>
+    <p class="text-xs text-slate-500">Branding, users, backup and portal configuration</p>
   </div>
 </header>
 
-<div class="p-6 max-w-5xl">
+<div class="p-5 max-w-5xl">
 
   {% if request.query_params.get('msg') == 'saved' %}
-  <div class="bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-green-700 text-sm"><i class="fa-solid fa-circle-check mr-2"></i>Settings saved.</div>
+  <div class="status-approved border rounded-xl px-4 py-3 text-sm font-semibold"><i class="fa-solid fa-circle-check mr-2"></i>Settings saved.</div>
   {% elif request.query_params.get('msg') == 'rules_saved' %}
   <div class="bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-green-700 text-sm"><i class="fa-solid fa-circle-check mr-2"></i>Scheduling rules saved.</div>
   {% elif request.query_params.get('msg') == 'user_added' %}
@@ -59,14 +59,15 @@
 
   <!-- Two-column card layout: collapsible sections -->
   <style>
-    details.settings-card { border-radius: 0.75rem; border: 1px solid #e2e8f0; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.05); }
-    details.settings-card summary { cursor: pointer; list-style: none; padding: 1rem 1.25rem; border-bottom: 1px solid #f1f5f9; font-weight: 600; color: #1e293b; display: flex; align-items: center; justify-content: space-between; }
+    details.settings-card { border-radius: 1rem; border: 1px solid rgba(179,209,209,.68); background: rgba(252,255,253,.70); box-shadow: 0 8px 24px rgba(20,61,61,.10), inset 0 1px 0 rgba(255,255,255,.72); backdrop-filter: blur(16px) saturate(1.22); -webkit-backdrop-filter: blur(16px) saturate(1.22); overflow:hidden; }
+    details.settings-card summary { cursor: pointer; list-style: none; padding: .85rem 1rem; border-bottom: 1px solid rgba(179,209,209,.46); font-weight: 800; color: var(--cal-ink); display: flex; align-items: center; justify-content: space-between; gap:.75rem; }
     details.settings-card summary::-webkit-details-marker { display: none; }
-    details.settings-card summary::after { content: '\f078'; font-family: 'Font Awesome 6 Free'; font-weight: 900; font-size: .75rem; color: #94a3b8; transition: transform .2s; }
+    details.settings-card summary::after { content: '\f078'; font-family: 'Font Awesome 6 Free'; font-weight: 900; font-size: .7rem; color: var(--cal-muted); transition: transform .2s; }
     details.settings-card[open] summary::after { transform: rotate(180deg); }
+    details.settings-card:not([open]) summary { border-bottom: 0; }
   </style>
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-    <div class="lg:col-span-2 space-y-6">
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+    <div class="lg:col-span-2 space-y-4">
   <!-- Scheduling rules (card) — FIRST so it's always visible -->
   <details class="settings-card" id="scheduling-rules">
     <summary class="text-base">Scheduling rules <span class="text-xs font-normal text-slate-500">— Conflict checks &amp; buffers</span></summary>
@@ -236,7 +237,7 @@
   </details>
     </div>
 
-    <div class="space-y-6">
+    <div class="space-y-4">
   <!-- Logged in as (card) -->
   <details class="settings-card">
     <summary>Session</summary>

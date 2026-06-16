@@ -96,7 +96,7 @@
           </td>
           <td class="px-5 py-3">
             <p class="text-sm text-slate-600">{{ s.email or '—' }}</p>
-            <p class="text-xs text-slate-400">{{ s.phone or '—' }}</p>
+            <p class="text-xs text-slate-400">{{ s.phone|phone }}</p>
           </td>
           <td class="px-5 py-3">
             {% set active_devices = s.devices | selectattr('is_active') | list %}

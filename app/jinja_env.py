@@ -1,5 +1,6 @@
 """One Jinja2 environment for all routers — custom filters register here only."""
 import json as _json
+import re as _re
 from datetime import timezone as _timezone
 from urllib.parse import quote as _url_quote
 from zoneinfo import ZoneInfo as _ZoneInfo
@@ -18,7 +19,20 @@ def _eastern_time(value, fmt: str = "%b %d %I:%M %p %Z") -> str:
     return value.astimezone(_EASTERN).strftime(fmt).replace(" 0", " ")
 
 
+def _format_phone(value) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return "—"
+    digits = _re.sub(r"\D+", "", raw)
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    if len(digits) == 10:
+        return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+    return raw
+
+
 templates = Jinja2Templates(directory="app/templates")
 templates.env.filters["from_json"] = _json.loads
 templates.env.filters["urlquote"] = lambda s: _url_quote(str(s or ""), safe="")
 templates.env.filters["eastern_time"] = _eastern_time
+templates.env.filters["phone"] = _format_phone

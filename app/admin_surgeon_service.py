@@ -4,6 +4,7 @@ import base64
 import hashlib
 import io
 import os
+import re
 import secrets
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -17,6 +18,16 @@ from .auth import (
 )
 from .email_service import send_magic_link_email
 from .models import Surgeon, SurgeonDevice
+
+
+def format_us_phone(phone: str | None) -> str:
+    raw = (phone or "").strip()
+    digits = re.sub(r"\D+", "", raw)
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    if len(digits) == 10:
+        return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+    return raw
 
 
 def surgeon_fields(
@@ -38,7 +49,7 @@ def surgeon_fields(
         "suffix": suffix or None,
         "staff_type": staff_type or "physician",
         "email": email or None,
-        "phone": phone,
+        "phone": format_us_phone(phone),
         "color": "#ffffff",
         "sort_order": assigned_sort_order,
     }

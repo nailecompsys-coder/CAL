@@ -244,9 +244,9 @@
 
   <!-- Mobile devices attached (card) -->
   <details class="settings-card">
-    <summary>Mobile devices attached <span class="text-xs font-normal text-slate-500">— Magic link sign-ins</span></summary>
+    <summary>Mobile devices attached <span class="text-xs font-normal text-slate-500">— Verified mobile sign-ins</span></summary>
     <div class="p-5">
-      <p class="text-sm text-slate-600 mb-4">Devices appear here after a physician or staff member registers using a link or QR code from the <a href="/admin/surgeons" class="text-blue-600 hover:text-blue-800 font-medium">Physicians</a> page (click the <i class="fa-solid fa-link text-blue-600"></i> icon next to a person to generate one).</p>
+      <p class="text-sm text-slate-600 mb-4">Devices appear here after a physician or staff member successfully signs in on a phone. Requesting a 6-digit code does not register a device; the device is created after the code is verified.</p>
       {% if registered_devices %}
       <table class="w-full text-sm border border-slate-200 rounded-lg overflow-hidden">
         <thead>
@@ -269,7 +269,7 @@
         </tbody>
       </table>
       {% else %}
-      <p class="text-sm text-slate-500">No devices registered yet. Surgeons register when they sign in via magic link from the portal.</p>
+      <p class="text-sm text-slate-500">No devices registered yet. A device appears after a physician or staff member verifies a 6-digit code or completes a registration link on that phone.</p>
       {% endif %}
     </div>
   </details>

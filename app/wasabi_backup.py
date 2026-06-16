@@ -47,27 +47,20 @@ def list_backups() -> list[dict]:
         client = _s3_client()
         paginator = client.get_paginator("list_objects_v2")
         by_ts = {}
-        for page in paginator.paginate(Bucket=WASABI_BUCKET, Prefix=BACKUP_PREFIX, Delimiter="/"):
-            for prefix in page.get("CommonPrefixes", []):
-                # e.g. cal-backups/20260316-140000/
-                p = prefix["Prefix"]
-                if p.startswith(BACKUP_PREFIX) and p != BACKUP_PREFIX:
-                    ts = p[len(BACKUP_PREFIX) :].rstrip("/")
-                    if ts and ts not in by_ts:
-                        by_ts[ts] = {"timestamp": ts, "files": [], "total_bytes": 0}
+        for page in paginator.paginate(Bucket=WASABI_BUCKET, Prefix=BACKUP_PREFIX):
             for obj in page.get("Contents", []):
                 key = obj["Key"]
                 if key == BACKUP_PREFIX or not key.startswith(BACKUP_PREFIX):
                     continue
-                parts = key[len(BACKUP_PREFIX) :].split("/")
-                if len(parts) >= 2:
-                    ts = parts[0]
-                    fname = parts[1]
-                    size = obj.get("Size", 0)
-                    if ts not in by_ts:
-                        by_ts[ts] = {"timestamp": ts, "files": [], "total_bytes": 0}
-                    by_ts[ts]["files"].append({"name": fname, "size": size, "key": key})
-                    by_ts[ts]["total_bytes"] += size
+                parts = key[len(BACKUP_PREFIX) :].split("/", 1)
+                if len(parts) != 2 or not parts[0] or not parts[1]:
+                    continue
+                ts, fname = parts
+                size = obj.get("Size", 0)
+                if ts not in by_ts:
+                    by_ts[ts] = {"timestamp": ts, "files": [], "total_bytes": 0}
+                by_ts[ts]["files"].append({"name": fname, "size": size, "key": key})
+                by_ts[ts]["total_bytes"] += size
         return sorted(by_ts.values(), key=lambda b: b["timestamp"], reverse=True)
     except Exception:
         return []

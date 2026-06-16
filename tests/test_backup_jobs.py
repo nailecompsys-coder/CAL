@@ -1,4 +1,5 @@
 import importlib
+import app
 import os
 import sys
 import tempfile
@@ -24,8 +25,16 @@ class BackupJobsTest(unittest.TestCase):
                 "wasabi_key": "cal-backups/20260616-120000/db.sql.gz",
                 "db_size_bytes": 1024,
             })
+            original_wasabi = getattr(app, "wasabi_backup", None)
             with patch.dict(sys.modules, {"app.wasabi_backup": fake_wasabi}):
-                backup_jobs.run_backup_job("admin")
+                app.wasabi_backup = fake_wasabi
+                try:
+                    backup_jobs.run_backup_job("admin")
+                finally:
+                    if original_wasabi is None:
+                        delattr(app, "wasabi_backup")
+                    else:
+                        app.wasabi_backup = original_wasabi
 
             status = backup_jobs.backup_status()
             self.assertEqual(status["state"], "succeeded")

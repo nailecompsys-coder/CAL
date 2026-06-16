@@ -34,11 +34,28 @@ def _format_phone(value) -> str:
     return raw
 
 
+def _format_bytes(value) -> str:
+    try:
+        size = float(value or 0)
+    except (TypeError, ValueError):
+        return "—"
+    units = ["B", "KB", "MB", "GB", "TB"]
+    unit = units[0]
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            break
+        size /= 1024
+    if unit == "B":
+        return f"{int(size)} {unit}"
+    return f"{size:.1f} {unit}"
+
+
 templates = Jinja2Templates(directory="app/templates")
 templates.env.filters["from_json"] = _json.loads
 templates.env.filters["urlquote"] = lambda s: _url_quote(str(s or ""), safe="")
 templates.env.filters["eastern_time"] = _eastern_time
 templates.env.filters["phone"] = _format_phone
+templates.env.filters["bytes"] = _format_bytes
 templates.env.filters["device_name"] = readable_device_name
 templates.env.filters["release_label"] = release_label
 templates.env.filters["release_channel"] = release_channel

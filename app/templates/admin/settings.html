@@ -403,7 +403,7 @@
         <div class="text-xs mt-1 opacity-80">
           {{ backup_job.get('message', '') }}
           {% if backup_job.get('timestamp') %} · {{ backup_job.get('timestamp') }}{% endif %}
-          {% if backup_job.get('db_size_bytes') %} · {{ (backup_job.get('db_size_bytes') / 1024)|round(1) }} KB{% endif %}
+          {% if backup_job.get('db_size_bytes') %} · {{ backup_job.get('db_size_bytes')|bytes }}{% endif %}
           {% if backup_job.get('error') %} · {{ backup_job.get('error') }}{% endif %}
         </div>
       </div>
@@ -431,7 +431,7 @@
             {% if db_file %}
             <tr>
               <td class="px-3 py-2 font-medium text-slate-800">{{ b.timestamp }}</td>
-              <td class="px-3 py-2 text-slate-600">{{ (b.total_bytes / 1024)|round(1) }} KB</td>
+              <td class="px-3 py-2 text-slate-600">{{ b.total_bytes|bytes }}</td>
               <td class="px-3 py-2 text-right">
                 <button type="button" onclick="openRestoreModal('{{ db_file.key|e }}', '{{ b.timestamp|e }}')"
                   class="text-rose-600 hover:text-rose-800 text-xs font-medium">Restore</button>

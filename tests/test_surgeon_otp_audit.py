@@ -74,6 +74,28 @@ class SurgeonOtpAuditTest(unittest.TestCase):
         finally:
             db.close()
 
+    def test_matching_phone_request_is_audited(self):
+        db = self.Session()
+        try:
+            surgeon = Surgeon(first_name="Cindy", last_name="Nguyen", email="cindy@example.com", phone="9102627271", is_active=True)
+            db.add(surgeon)
+            db.commit()
+
+            with patch("app.routers.surgeon_otp.send_sms", return_value=True), patch("app.routers.surgeon_otp.send_email", return_value=True):
+                response = otp_request(OtpRequestBody(email=" (910) 262-7271 "), request=test_request(), db=db)
+
+            self.assertTrue(response["ok"])
+            self.assertEqual(db.query(MagicLink).count(), 1)
+            row = db.query(SurgeonOtpAuditLog).one()
+            self.assertEqual(row.surgeon_id, surgeon.id)
+            self.assertEqual(row.submitted_email, "(910) 262-7271")
+            self.assertTrue(row.matched)
+            self.assertEqual(row.delivery_channel, "sms+email")
+            self.assertTrue(row.delivery_success)
+            self.assertEqual(row.result, "requested")
+        finally:
+            db.close()
+
     def test_sms_request_succeeds_when_email_is_backup_channel(self):
         db = self.Session()
         try:
@@ -120,6 +142,24 @@ class SurgeonOtpAuditTest(unittest.TestCase):
             with patch("app.routers.surgeon_otp.send_sms", return_value=True), patch("app.routers.surgeon_otp.send_email", return_value=True), patch("app.routers.surgeon_otp.random.randint", return_value=123456):
                 otp_request(OtpRequestBody(email="jorge@example.com"), request=test_request(), db=db)
             response = otp_verify(OtpVerifyBody(email="jorge@example.com", code="123456"), request=test_request(), db=db)
+
+            self.assertIn("token", response)
+            self.assertEqual(db.query(SurgeonDevice).count(), 1)
+            rows = db.query(SurgeonOtpAuditLog).order_by(SurgeonOtpAuditLog.id).all()
+            self.assertEqual([row.result for row in rows], ["requested", "verified"])
+        finally:
+            db.close()
+
+    def test_successful_verify_accepts_phone_identifier(self):
+        db = self.Session()
+        try:
+            surgeon = Surgeon(first_name="Lucy", last_name="Woodley", email="lucy@example.com", phone="4075554960", is_active=True)
+            db.add(surgeon)
+            db.commit()
+
+            with patch("app.routers.surgeon_otp.send_sms", return_value=True), patch("app.routers.surgeon_otp.send_email", return_value=True), patch("app.routers.surgeon_otp.random.randint", return_value=123456):
+                otp_request(OtpRequestBody(email="407-555-4960"), request=test_request(), db=db)
+            response = otp_verify(OtpVerifyBody(email="(407) 555-4960", code="123456"), request=test_request(), db=db)
 
             self.assertIn("token", response)
             self.assertEqual(db.query(SurgeonDevice).count(), 1)

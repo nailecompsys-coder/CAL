@@ -30,6 +30,7 @@ def otp_audit(
                 "id": row.id,
                 "createdAt": row.created_at.isoformat() if row.created_at else None,
                 "action": row.action,
+                "submittedIdentifier": row.submitted_email,
                 "submittedEmail": row.submitted_email,
                 "matched": row.matched,
                 "surgeonId": row.surgeon_id,

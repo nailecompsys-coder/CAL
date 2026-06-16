@@ -1,6 +1,7 @@
 """Native surgeon OTP login routes."""
 import hashlib
 import random
+import re
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -36,11 +37,44 @@ class OtpVerifyBody(BaseModel):
     code: str
 
 
+def _digits_only(value: str | None) -> str:
+    return re.sub(r"\D+", "", value or "")
+
+
+def _canonical_phone_digits(value: str | None) -> str:
+    digits = _digits_only(value)
+    if len(digits) == 11 and digits.startswith("1"):
+        return digits[1:]
+    return digits
+
+
 def _find_active_surgeon_by_email(db: Session, email: str) -> Surgeon | None:
     return db.query(Surgeon).filter(
         sql_func.lower(Surgeon.email) == email.strip().lower(),
         Surgeon.is_active == True,  # noqa: E712
     ).first()
+
+
+def _find_active_surgeon_by_phone(db: Session, phone: str) -> Surgeon | None:
+    target = _canonical_phone_digits(phone)
+    if len(target) != 10:
+        return None
+
+    candidates = db.query(Surgeon).filter(
+        Surgeon.is_active == True,  # noqa: E712
+        Surgeon.phone.isnot(None),
+    ).all()
+    matches = [surgeon for surgeon in candidates if _canonical_phone_digits(surgeon.phone) == target]
+    if len(matches) != 1:
+        return None
+    return matches[0]
+
+
+def _find_active_surgeon_by_identifier(db: Session, identifier: str) -> Surgeon | None:
+    submitted = identifier.strip()
+    if "@" in submitted:
+        return _find_active_surgeon_by_email(db, submitted)
+    return _find_active_surgeon_by_phone(db, submitted)
 
 
 def _invalidate_existing_otp_codes(db: Session, surgeon_id: int) -> None:
@@ -123,23 +157,23 @@ def _audit_otp(
 
 @router.post("/otp/request")
 def otp_request(body: OtpRequestBody, request: Request, db: Session = Depends(get_db)):
-    submitted_email = body.email.strip().lower()
-    surgeon = _find_active_surgeon_by_email(db, submitted_email)
+    submitted_identifier = body.email.strip().lower()
+    surgeon = _find_active_surgeon_by_identifier(db, submitted_identifier)
     if not surgeon:
         # Don't reveal whether email exists
         _audit_otp(
             db,
             request=request,
             action="request",
-            submitted_email=submitted_email,
+            submitted_email=submitted_identifier,
             surgeon=None,
             delivery_channel="none",
             delivery_success=False,
             result="invalid_email",
-            failure_reason="No active surgeon matched submitted email.",
+            failure_reason="No active surgeon matched submitted email or phone.",
         )
         db.commit()
-        return {"ok": True, "message": "If that email is registered, a code was sent."}
+        return {"ok": True, "message": "If that email or phone is registered, a code was sent."}
 
     code = _generate_otp()
     _invalidate_existing_otp_codes(db, surgeon.id)
@@ -173,7 +207,7 @@ def otp_request(body: OtpRequestBody, request: Request, db: Session = Depends(ge
         db,
         request=request,
         action="request",
-        submitted_email=submitted_email,
+        submitted_email=submitted_identifier,
         surgeon=surgeon,
         delivery_channel=delivery_channel,
         delivery_success=delivery_success,
@@ -181,24 +215,24 @@ def otp_request(body: OtpRequestBody, request: Request, db: Session = Depends(ge
         failure_reason=failure_reason,
     )
     db.commit()
-    return {"ok": True, "message": "If that email is registered, a code was sent."}
+    return {"ok": True, "message": "If that email or phone is registered, a code was sent."}
 
 
 @router.post("/otp/verify")
 def otp_verify(body: OtpVerifyBody, request: Request, db: Session = Depends(get_db)):
-    submitted_email = body.email.strip().lower()
-    surgeon = _find_active_surgeon_by_email(db, submitted_email)
+    submitted_identifier = body.email.strip().lower()
+    surgeon = _find_active_surgeon_by_identifier(db, submitted_identifier)
     if not surgeon:
         _audit_otp(
             db,
             request=request,
             action="verify",
-            submitted_email=submitted_email,
+            submitted_email=submitted_identifier,
             surgeon=None,
             delivery_channel="none",
             delivery_success=False,
             result="invalid_email",
-            failure_reason="No active surgeon matched submitted email.",
+            failure_reason="No active surgeon matched submitted email or phone.",
         )
         db.commit()
         raise HTTPException(status_code=401, detail="Invalid code")
@@ -219,7 +253,7 @@ def otp_verify(body: OtpVerifyBody, request: Request, db: Session = Depends(get_
             db,
             request=request,
             action="verify",
-            submitted_email=submitted_email,
+            submitted_email=submitted_identifier,
             surgeon=surgeon,
             delivery_channel="none",
             delivery_success=False,
@@ -240,7 +274,7 @@ def otp_verify(body: OtpVerifyBody, request: Request, db: Session = Depends(get_
         db,
         request=request,
         action="verify",
-        submitted_email=submitted_email,
+        submitted_email=submitted_identifier,
         surgeon=surgeon,
         delivery_channel="none",
         delivery_success=True,

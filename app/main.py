@@ -14,7 +14,7 @@ from . import migrate_native_parity
 from .routers import (
     admin_otp_audit,
     admin, admin_call_groups, admin_call_schedule, admin_clinic_schedule, admin_daysoff,
-    admin_locations, admin_meetings, admin_settings, admin_surgeons,
+    admin_locations, admin_meetings, admin_metrics, admin_settings, admin_surgeons,
     admin_schedule_templates, admin_surgical_schedule, api, api_calendar, api_push, auth,
     native_api, surgeon, surgeon_availability, surgeon_call_schedule, surgeon_day_items, surgeon_otp,
     surgeon_request_off, surgeon_schedule, surgeon_surgical_cases,
@@ -85,6 +85,7 @@ app.include_router(admin_call_groups.router)
 app.include_router(admin_daysoff.router)
 app.include_router(admin_locations.router)
 app.include_router(admin_meetings.router)
+app.include_router(admin_metrics.router)
 app.include_router(admin_settings.router)
 app.include_router(admin_surgical_schedule.router)
 app.include_router(surgeon.router)

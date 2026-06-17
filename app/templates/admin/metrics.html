@@ -1,0 +1,159 @@
+{% extends "base_admin.html" %}
+{% block title %}Metrics{% endblock %}
+
+{% block content %}
+<header class="portal-header px-5 py-3 sticky top-0 z-10 flex-shrink-0 flex items-center justify-between">
+  <div>
+    <h1 class="font-bold">Operations Metrics</h1>
+    <p class="text-xs text-slate-500">{{ metrics.staff_label }} · {{ metrics.start_date.strftime('%b %-d, %Y') }} to {{ metrics.end_date.strftime('%b %-d, %Y') }}</p>
+  </div>
+</header>
+
+<div class="p-5 space-y-5">
+  <form method="get" action="/admin/metrics" class="clinical-glass px-4 py-3 flex items-end gap-3 flex-wrap">
+    <div class="inline-flex rounded-xl bg-white/70 border border-clinical-stroke p-1">
+      <a href="/admin/metrics?staff_type=physician&start={{ metrics.start_date.isoformat() }}&end={{ metrics.end_date.isoformat() }}"
+         class="px-3 py-1.5 rounded-lg text-xs font-extrabold {% if selected_staff_type == 'physician' %}bg-clinical-teal text-white shadow-sm{% else %}text-clinical-muted hover:text-clinical-ink{% endif %}">
+        Surgeons
+      </a>
+      <a href="/admin/metrics?staff_type=staff&start={{ metrics.start_date.isoformat() }}&end={{ metrics.end_date.isoformat() }}"
+         class="px-3 py-1.5 rounded-lg text-xs font-extrabold {% if selected_staff_type != 'physician' %}bg-clinical-teal text-white shadow-sm{% else %}text-clinical-muted hover:text-clinical-ink{% endif %}">
+        PAs / Staff
+      </a>
+    </div>
+    <input type="hidden" name="staff_type" value="{{ selected_staff_type }}" />
+    <div>
+      <label class="block text-[10px] font-extrabold uppercase tracking-widest text-slate-400 mb-1">Start</label>
+      <input type="date" name="start" value="{{ metrics.start_date.isoformat() }}"
+        class="px-3 py-2 rounded-xl border border-clinical-stroke bg-white/75 text-sm font-semibold text-clinical-ink focus:outline-none focus:ring-2 focus:ring-clinical-teal/30" />
+    </div>
+    <div>
+      <label class="block text-[10px] font-extrabold uppercase tracking-widest text-slate-400 mb-1">End</label>
+      <input type="date" name="end" value="{{ metrics.end_date.isoformat() }}"
+        class="px-3 py-2 rounded-xl border border-clinical-stroke bg-white/75 text-sm font-semibold text-clinical-ink focus:outline-none focus:ring-2 focus:ring-clinical-teal/30" />
+    </div>
+    <button class="bg-clinical-teal text-white text-xs font-extrabold px-4 py-2 rounded-xl hover:opacity-90">
+      <i class="fa-solid fa-filter mr-1.5"></i> Apply
+    </button>
+    <a href="/admin/metrics?staff_type={{ selected_staff_type }}" class="text-xs font-bold text-clinical-muted hover:text-clinical-ink px-2 py-2">Reset</a>
+  </form>
+
+  <div class="grid grid-cols-2 xl:grid-cols-5 gap-3">
+    <div class="clinical-glass px-4 py-3">
+      <p class="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Requested Off</p>
+      <p class="text-2xl font-extrabold text-clinical-ink mt-1">{{ '%.1f'|format(metrics.totals.requested_days) }}</p>
+    </div>
+    <div class="clinical-glass px-4 py-3">
+      <p class="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Approved Off</p>
+      <p class="text-2xl font-extrabold text-clinical-ink mt-1">{{ '%.1f'|format(metrics.totals.approved_days) }}</p>
+    </div>
+    <div class="clinical-glass px-4 py-3">
+      <p class="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Call Scheduled</p>
+      <p class="text-2xl font-extrabold text-clinical-ink mt-1">{{ metrics.totals.scheduled_call_days }}</p>
+    </div>
+    <div class="clinical-glass px-4 py-3">
+      <p class="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Call Taken</p>
+      <p class="text-2xl font-extrabold text-clinical-ink mt-1">{{ metrics.totals.taken_call_days }}</p>
+    </div>
+    <div class="clinical-glass px-4 py-3">
+      <p class="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Taken - Scheduled</p>
+      <p class="text-2xl font-extrabold mt-1 {% if metrics.totals.call_delta > 0 %}text-emerald-700{% elif metrics.totals.call_delta < 0 %}text-rose-700{% else %}text-clinical-ink{% endif %}">
+        {{ '%+d'|format(metrics.totals.call_delta) }}
+      </p>
+    </div>
+  </div>
+
+  <section class="clinical-glass overflow-hidden">
+    <div class="px-4 py-3 border-b border-clinical-stroke flex items-center justify-between gap-3">
+      <div>
+        <h2 class="font-extrabold text-clinical-ink text-sm">Person Summary</h2>
+        <p class="text-xs text-slate-500">Scheduled is the original assignment. Taken is the effective coverage after swaps.</p>
+      </div>
+      <span class="text-xs font-bold text-clinical-muted">{{ metrics.rows|length }} people</span>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-left border-b border-clinical-stroke bg-white/35">
+            <th class="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Person</th>
+            <th class="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 text-right">Requested Off</th>
+            <th class="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 text-right">Approved Off</th>
+            <th class="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 text-right">Call Scheduled</th>
+            <th class="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 text-right">Call Taken</th>
+            <th class="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 text-right">Delta</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-clinical-stroke/60">
+          {% for item in metrics.rows %}
+          <tr class="hover:bg-white/35">
+            <td class="px-4 py-2.5">
+              <div class="flex items-center gap-2 min-w-44">
+                <span class="w-8 h-8 rounded-full staff-avatar flex items-center justify-center text-xs font-extrabold flex-shrink-0">{{ item.surgeon.initials }}</span>
+                <div class="min-w-0">
+                  <p class="font-bold text-clinical-ink truncate">{{ item.surgeon.full_name }}</p>
+                  <p class="text-[11px] text-slate-400">{{ item.surgeon.suffix or metrics.staff_label }}</p>
+                </div>
+              </div>
+            </td>
+            <td class="px-4 py-2.5 text-right font-semibold text-clinical-ink">{{ '%.1f'|format(item.requested_days) }}</td>
+            <td class="px-4 py-2.5 text-right font-semibold text-clinical-ink">{{ '%.1f'|format(item.approved_days) }}</td>
+            <td class="px-4 py-2.5 text-right font-semibold text-clinical-ink">{{ item.scheduled_call_days }}</td>
+            <td class="px-4 py-2.5 text-right font-semibold text-clinical-ink">{{ item.taken_call_days }}</td>
+            <td class="px-4 py-2.5 text-right font-extrabold {% if item.call_delta > 0 %}text-emerald-700{% elif item.call_delta < 0 %}text-rose-700{% else %}text-slate-400{% endif %}">
+              {{ '%+d'|format(item.call_delta) }}
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="6" class="px-4 py-8 text-center text-sm text-slate-400">No active people found for this cohort.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+    {% for group in metrics.groups %}
+    <div class="clinical-glass overflow-hidden">
+      <div class="px-4 py-3 border-b border-clinical-stroke flex items-center justify-between gap-3">
+        <div>
+          <h2 class="font-extrabold text-clinical-ink text-sm">{{ group.name }}</h2>
+          <p class="text-xs text-slate-500">{{ group.scheduled_total }} scheduled · {{ group.taken_total }} taken</p>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left bg-white/35 border-b border-clinical-stroke">
+              <th class="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Person</th>
+              <th class="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 text-right">Sched</th>
+              <th class="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 text-right">Sched %</th>
+              <th class="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 text-right">Taken</th>
+              <th class="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 text-right">Taken %</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-clinical-stroke/60">
+            {% for row in group.people %}
+            <tr>
+              <td class="px-4 py-2.5 font-bold text-clinical-ink whitespace-nowrap">{{ row.surgeon.initials }} <span class="font-semibold text-slate-500">{{ row.surgeon.last_name }}</span></td>
+              <td class="px-4 py-2.5 text-right font-semibold">{{ row.scheduled }}</td>
+              <td class="px-4 py-2.5 text-right font-semibold">{{ '%.1f'|format(row.scheduled_percent) }}%</td>
+              <td class="px-4 py-2.5 text-right font-semibold">{{ row.taken }}</td>
+              <td class="px-4 py-2.5 text-right font-semibold">{{ '%.1f'|format(row.taken_percent) }}%</td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="5" class="px-4 py-6 text-center text-sm text-slate-400">No call assignments in this date range.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% else %}
+    <div class="clinical-glass px-4 py-8 text-center text-sm text-slate-400 xl:col-span-2">No call groups found.</div>
+    {% endfor %}
+  </section>
+</div>
+{% endblock %}

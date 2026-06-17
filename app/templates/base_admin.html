@@ -95,6 +95,9 @@
       <a href="/admin/meetings" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/meetings' %}active{% endif %}">
         <i class="fa-solid fa-users-rectangle" style="width:1rem;text-align:center"></i> Meetings
       </a>
+      <a href="/admin/metrics" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/metrics' %}active{% endif %}">
+        <i class="fa-solid fa-chart-line" style="width:1rem;text-align:center"></i> Metrics
+      </a>
       <a href="/admin/schedule-templates" onclick="closeSidebar()" class="sidebar-link {% if '/schedule-templates' in request.url.path %}active{% endif %}">
         <i class="fa-solid fa-table-cells" style="width:1rem;text-align:center"></i> Templates
       </a>

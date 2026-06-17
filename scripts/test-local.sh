@@ -26,13 +26,6 @@ fi
 "$PYTHON_BIN" -m venv .venv-test
 source .venv-test/bin/activate
 
-python -m pip install -q \
-  "sqlalchemy==2.0.36" \
-  "fastapi==0.115.5" \
-  "pydantic==2.10.3" \
-  "python-jose[cryptography]==3.3.0" \
-  "passlib[bcrypt]==1.7.4" \
-  "requests==2.32.3" \
-  "pywebpush==2.0.1"
+python -m pip install -q -r requirements.txt
 
 PYTHON=.venv-test/bin/python make compile test

@@ -21,7 +21,7 @@
         Surgeons
       </a>
       <a href="/admin/metrics?staff_type=staff&start={{ metrics.start_date.isoformat() }}&end={{ metrics.end_date.isoformat() }}"
-         class="px-3 py-1.5 rounded-lg text-xs font-extrabold {% if selected_staff_type != 'physician' %}bg-clinical-teal text-white shadow-sm{% else %}text-clinical-muted hover:text-clinical-ink{% endif %}">
+         class="px-3 py-1.5 rounded-lg text-xs font-extrabold {% if selected_staff_type == 'staff' %}bg-clinical-teal text-white shadow-sm{% else %}text-clinical-muted hover:text-clinical-ink{% endif %}">
         PAs / Staff
       </a>
     </div>
@@ -55,32 +55,37 @@
         <thead>
           <tr class="text-left border-b border-clinical-stroke bg-white/35">
             <th class="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Person</th>
+            <th class="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 text-right">Total Call Scheduled</th>
             <th class="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 text-right">Call Taken</th>
-            <th class="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 text-right">Call Scheduled</th>
-            <th class="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 text-right">Days Off Taken</th>
+            <th class="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 text-right">Total Call %</th>
             <th class="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 text-right">Approved Off</th>
+            <th class="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 text-right">Days Off Taken</th>
+            <th class="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 text-right">Days Off %</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-clinical-stroke/60">
           {% for item in metrics.rows %}
           <tr class="hover:bg-white/35">
             <td class="px-4 py-2.5">
-              <div class="flex items-center gap-2 min-w-44">
+              <a href="/admin/metrics/person/{{ item.surgeon.id }}?staff_type={{ selected_staff_type }}&start={{ metrics.start_date.isoformat() }}&end={{ metrics.end_date.isoformat() }}" class="flex items-center gap-2 min-w-44 group">
                 <span class="w-8 h-8 rounded-full staff-avatar flex items-center justify-center text-xs font-extrabold flex-shrink-0">{{ item.surgeon.initials }}</span>
                 <div class="min-w-0">
-                  <p class="font-bold text-clinical-ink truncate">{{ item.surgeon.full_name }}</p>
+                  <p class="font-bold text-clinical-ink truncate group-hover:text-clinical-teal">{{ item.surgeon.full_name }}</p>
                   <p class="text-[11px] text-slate-400">{{ item.role_label }}{% if item.surgeon.suffix %} · {{ item.surgeon.suffix }}{% endif %}</p>
                 </div>
-              </div>
+                <i class="fa-solid fa-chevron-right text-[10px] text-slate-300 group-hover:text-clinical-teal"></i>
+              </a>
             </td>
+            <td class="px-4 py-2.5 text-right font-semibold text-clinical-ink">{{ item.total_call_scheduled }}</td>
             <td class="px-4 py-2.5 text-right font-semibold text-clinical-ink">{{ item.call_taken }}</td>
-            <td class="px-4 py-2.5 text-right font-semibold text-clinical-ink">{{ item.call_scheduled_upcoming }}</td>
+            <td class="px-4 py-2.5 text-right font-semibold text-clinical-ink">{{ '%.1f'|format(item.total_call_percent) }}%</td>
+            <td class="px-4 py-2.5 text-right font-semibold text-clinical-ink">{{ '%.1f'|format(item.days_off_approved) }}</td>
             <td class="px-4 py-2.5 text-right font-semibold text-clinical-ink">{{ '%.1f'|format(item.day_off_taken) }}</td>
-            <td class="px-4 py-2.5 text-right font-semibold text-clinical-ink">{{ '%.1f'|format(item.day_off_approved_upcoming) }}</td>
+            <td class="px-4 py-2.5 text-right font-semibold text-clinical-ink">{{ '%.1f'|format(item.days_off_percent) }}%</td>
           </tr>
           {% else %}
           <tr>
-            <td colspan="5" class="px-4 py-8 text-center text-sm text-slate-400">No active people found.</td>
+            <td colspan="7" class="px-4 py-8 text-center text-sm text-slate-400">No active people found.</td>
           </tr>
           {% endfor %}
         </tbody>

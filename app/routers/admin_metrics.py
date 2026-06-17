@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
-from ..admin_metrics_service import build_admin_metrics, default_metrics_range
+from ..admin_metrics_service import approved_day_off_detail, build_admin_metrics, default_metrics_range
 from ..auth import get_current_admin
 from ..database import get_db
 from ..jinja_env import templates
@@ -37,6 +37,43 @@ def metrics_page(
         db=db,
         metrics=metrics,
         selected_staff_type=metrics["staff_type"],
+    ))
+
+
+@router.get("/metrics/person/{surgeon_id}", response_class=HTMLResponse)
+def metrics_person_page(
+    surgeon_id: int,
+    request: Request,
+    start: str | None = None,
+    end: str | None = None,
+    staff_type: str = "all",
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    default_start, default_end = default_metrics_range(date.today())
+    start_date = _parse_date(start, default_start)
+    end_date = _parse_date(end, default_end)
+    if end_date < start_date:
+        start_date, end_date = end_date, start_date
+
+    detail = approved_day_off_detail(db, surgeon_id, start_date, end_date)
+    if not detail:
+        detail = {
+            "surgeon": None,
+            "role_label": "",
+            "start_date": start_date,
+            "end_date": end_date,
+            "as_of": date.today(),
+            "segments": [],
+            "taken_total": 0,
+            "approved_upcoming_total": 0,
+        }
+    return templates.TemplateResponse("admin/metrics_person.html", _base(
+        request,
+        admin,
+        db=db,
+        detail=detail,
+        selected_staff_type=staff_type if staff_type in {"all", "physician", "staff"} else "all",
     ))
 
 

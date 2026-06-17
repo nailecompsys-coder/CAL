@@ -1,0 +1,85 @@
+{% extends "base_admin.html" %}
+{% block title %}Metrics Detail{% endblock %}
+
+{% block content %}
+<header class="portal-header px-5 py-3 sticky top-0 z-10 flex-shrink-0 flex items-center justify-between">
+  <div>
+    <a href="/admin/metrics?staff_type={{ selected_staff_type }}&start={{ detail.start_date.isoformat() }}&end={{ detail.end_date.isoformat() }}" class="text-xs font-bold text-clinical-teal hover:opacity-80">
+      <i class="fa-solid fa-arrow-left mr-1"></i> Metrics
+    </a>
+    {% if detail.surgeon %}
+    <h1 class="font-bold mt-1">{{ detail.surgeon.full_name }}</h1>
+    <p class="text-xs text-slate-500">{{ detail.role_label }} · approved days off · {{ detail.start_date.strftime('%b %-d, %Y') }} to {{ detail.end_date.strftime('%b %-d, %Y') }}</p>
+    {% else %}
+    <h1 class="font-bold mt-1">Person Not Found</h1>
+    <p class="text-xs text-slate-500">No matching surgeon or PA record.</p>
+    {% endif %}
+  </div>
+</header>
+
+<div class="p-5 space-y-5">
+  {% if detail.surgeon %}
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+    <div class="clinical-glass px-4 py-3">
+      <p class="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Approved Off</p>
+      <p class="text-2xl font-extrabold text-clinical-ink mt-1">{{ '%.1f'|format(detail.taken_total + detail.approved_upcoming_total) }}</p>
+    </div>
+    <div class="clinical-glass px-4 py-3">
+      <p class="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Taken</p>
+      <p class="text-2xl font-extrabold text-clinical-ink mt-1">{{ '%.1f'|format(detail.taken_total) }}</p>
+    </div>
+    <div class="clinical-glass px-4 py-3">
+      <p class="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Still Approved</p>
+      <p class="text-2xl font-extrabold text-clinical-ink mt-1">{{ '%.1f'|format(detail.approved_upcoming_total) }}</p>
+    </div>
+    <div class="clinical-glass px-4 py-3">
+      <p class="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Entries</p>
+      <p class="text-2xl font-extrabold text-clinical-ink mt-1">{{ detail.segments|length }}</p>
+    </div>
+  </div>
+
+  <section class="clinical-glass overflow-hidden">
+    <div class="px-4 py-3 border-b border-clinical-stroke">
+      <h2 class="font-extrabold text-clinical-ink text-sm">Approved Days Off</h2>
+      <p class="text-xs text-slate-500">Taken is today and earlier. Approved is still coming.</p>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-left border-b border-clinical-stroke bg-white/35">
+            <th class="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Date</th>
+            <th class="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Day</th>
+            <th class="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Type</th>
+            <th class="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400 text-right">Days</th>
+            <th class="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Status</th>
+            <th class="px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Reason / Notes</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-clinical-stroke/60">
+          {% for row in detail.segments %}
+          <tr class="hover:bg-white/35">
+            <td class="px-4 py-2.5 font-semibold text-clinical-ink whitespace-nowrap">{{ row.date.strftime('%b %-d, %Y') }}</td>
+            <td class="px-4 py-2.5 text-slate-500 whitespace-nowrap">{{ row.date.strftime('%a') }}</td>
+            <td class="px-4 py-2.5 text-slate-600">{{ row.label }}</td>
+            <td class="px-4 py-2.5 text-right font-semibold text-clinical-ink">{{ '%.1f'|format(row.weight) }}</td>
+            <td class="px-4 py-2.5">
+              {% if row.status == 'Taken' %}
+              <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">Taken</span>
+              {% else %}
+              <span class="text-[10px] font-extrabold px-2 py-0.5 rounded-full status-approved">Approved</span>
+              {% endif %}
+            </td>
+            <td class="px-4 py-2.5 text-slate-600">{{ row.reason }}{% if row.notes %} · {{ row.notes }}{% endif %}</td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="6" class="px-4 py-8 text-center text-sm text-slate-400">No approved days off in this date range.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

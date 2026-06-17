@@ -8,7 +8,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.admin_metrics_service import build_admin_metrics, default_metrics_range
+from app.admin_metrics_service import approved_day_off_detail, build_admin_metrics, default_metrics_range
 from app.models import Base, CallCoverage, CallGroup, CallRotation, DayOff, Surgeon
 
 
@@ -82,10 +82,23 @@ class AdminMetricsServiceTest(unittest.TestCase):
             by_initials = {row.surgeon.initials: row for row in metrics["rows"]}
             self.assertEqual(by_initials["CJ"].day_off_taken, 3.5)
             self.assertEqual(by_initials["CJ"].day_off_approved_upcoming, 0.0)
+            self.assertEqual(by_initials["CJ"].days_off_approved, 3.5)
+            self.assertEqual(by_initials["CJ"].days_off_percent, 77.8)
             self.assertEqual(by_initials["AS"].day_off_taken, 0.0)
             self.assertEqual(by_initials["AS"].day_off_approved_upcoming, 1.0)
+            self.assertEqual(by_initials["AS"].days_off_approved, 1.0)
+            self.assertEqual(by_initials["AS"].days_off_percent, 22.2)
             self.assertEqual(by_initials["PS"].day_off_taken, 1.0)
             self.assertEqual(by_initials["PS"].day_off_approved_upcoming, 0.0)
+            self.assertEqual(by_initials["PS"].days_off_approved, 1.0)
+            self.assertEqual(by_initials["PS"].days_off_percent, 100.0)
+
+            detail = approved_day_off_detail(db, chris.id, date(2026, 1, 1), date(2026, 12, 31), today=date(2026, 6, 17))
+            self.assertEqual(detail["surgeon"].initials, "CJ")
+            self.assertEqual(detail["taken_total"], 3.5)
+            self.assertEqual(detail["approved_upcoming_total"], 0.0)
+            self.assertEqual(len(detail["segments"]), 4)
+            self.assertEqual(detail["segments"][0]["label"], "13:00-17:00")
         finally:
             db.close()
 
@@ -131,12 +144,20 @@ class AdminMetricsServiceTest(unittest.TestCase):
             by_initials = {row.surgeon.initials: row for row in metrics["rows"]}
             self.assertEqual(by_initials["CJ"].call_taken, 0)
             self.assertEqual(by_initials["CJ"].call_scheduled_upcoming, 0)
+            self.assertEqual(by_initials["CJ"].total_call_scheduled, 0)
+            self.assertEqual(by_initials["CJ"].total_call_percent, 0.0)
             self.assertEqual(by_initials["LW"].call_taken, 1)
             self.assertEqual(by_initials["LW"].call_scheduled_upcoming, 1)
+            self.assertEqual(by_initials["LW"].total_call_scheduled, 2)
+            self.assertEqual(by_initials["LW"].total_call_percent, 50.0)
             self.assertEqual(by_initials["AS"].call_taken, 1)
             self.assertEqual(by_initials["AS"].call_scheduled_upcoming, 1)
+            self.assertEqual(by_initials["AS"].total_call_scheduled, 2)
+            self.assertEqual(by_initials["AS"].total_call_percent, 50.0)
             self.assertEqual(by_initials["PS"].call_taken, 0)
             self.assertEqual(by_initials["PS"].call_scheduled_upcoming, 1)
+            self.assertEqual(by_initials["PS"].total_call_scheduled, 1)
+            self.assertEqual(by_initials["PS"].total_call_percent, 100.0)
 
             winter = next(group for group in metrics["groups"] if group["name"] == "Winter Garden")
             self.assertEqual(winter["scheduled_total"], 2)

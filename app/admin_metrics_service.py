@@ -20,6 +20,10 @@ class PersonMetrics:
     day_off_approved_upcoming: float = 0.0
     call_taken: int = 0
     call_scheduled_upcoming: int = 0
+    total_call_scheduled: int = 0
+    total_call_percent: float = 0.0
+    days_off_approved: float = 0.0
+    days_off_percent: float = 0.0
     call_taken_by_group: dict[int, int] = field(default_factory=lambda: defaultdict(int))
     call_scheduled_by_group: dict[int, int] = field(default_factory=lambda: defaultdict(int))
 
@@ -48,11 +52,14 @@ def build_admin_metrics(db: Session, start_date: date, end_date: date, staff_typ
     _apply_call_metrics(db, metrics_by_id, group_meta, start_date, end_date, cohort, as_of)
 
     rows = sorted(metrics_by_id.values(), key=lambda item: _surgeon_sort_key(item.surgeon))
+    _apply_person_percentages(rows)
     totals = {
         "day_off_taken": sum(item.day_off_taken for item in rows),
         "day_off_approved_upcoming": sum(item.day_off_approved_upcoming for item in rows),
         "call_taken": sum(item.call_taken for item in rows),
         "call_scheduled_upcoming": sum(item.call_scheduled_upcoming for item in rows),
+        "total_call_scheduled": sum(item.total_call_scheduled for item in rows),
+        "days_off_approved": sum(item.days_off_approved for item in rows),
     }
 
     group_rows = []
@@ -97,10 +104,74 @@ def default_metrics_range(today: date) -> tuple[date, date]:
     return date(today.year, 1, 1), date(today.year, 12, 31)
 
 
+def approved_day_off_detail(db: Session, surgeon_id: int, start_date: date, end_date: date, today: date | None = None) -> dict | None:
+    as_of = today or date.today()
+    surgeon = db.get(Surgeon, surgeon_id)
+    if not surgeon:
+        return None
+    rows = (
+        db.query(DayOff)
+        .filter(
+            DayOff.surgeon_id == surgeon_id,
+            DayOff.status == "approved",
+            DayOff.start_date <= end_date,
+            DayOff.end_date >= start_date,
+        )
+        .order_by(DayOff.start_date, DayOff.id)
+        .all()
+    )
+    segments = []
+    for row in rows:
+        for segment in day_off_segments(row):
+            segment_date_raw = segment.get("date")
+            if not segment_date_raw:
+                continue
+            try:
+                segment_date = date.fromisoformat(str(segment_date_raw))
+            except ValueError:
+                continue
+            if not start_date <= segment_date <= end_date:
+                continue
+            segments.append({
+                "id": row.id,
+                "date": segment_date,
+                "weight": day_off_weight(segment),
+                "status": "Taken" if segment_date <= as_of else "Approved",
+                "reason": row.reason or "Day Off",
+                "notes": row.notes or "",
+                "label": _day_off_segment_label(segment),
+            })
+    return {
+        "surgeon": surgeon,
+        "role_label": "Surgeon" if _cohort_for_surgeon(surgeon) == "physician" else "PA / Staff",
+        "start_date": start_date,
+        "end_date": end_date,
+        "as_of": as_of,
+        "segments": segments,
+        "taken_total": sum(item["weight"] for item in segments if item["status"] == "Taken"),
+        "approved_upcoming_total": sum(item["weight"] for item in segments if item["status"] == "Approved"),
+    }
+
+
 def day_off_weight(segment: dict) -> float:
     if segment.get("isFullDay", True):
         return 1.0
     return 0.5
+
+
+def _apply_person_percentages(rows: list[PersonMetrics]) -> None:
+    call_totals_by_cohort: dict[str, int] = defaultdict(int)
+    off_totals_by_cohort: dict[str, float] = defaultdict(float)
+    for item in rows:
+        cohort = _cohort_for_surgeon(item.surgeon)
+        item.total_call_scheduled = item.call_taken + item.call_scheduled_upcoming
+        item.days_off_approved = item.day_off_taken + item.day_off_approved_upcoming
+        call_totals_by_cohort[cohort] += item.total_call_scheduled
+        off_totals_by_cohort[cohort] += item.days_off_approved
+    for item in rows:
+        cohort = _cohort_for_surgeon(item.surgeon)
+        item.total_call_percent = _percent(item.total_call_scheduled, call_totals_by_cohort[cohort])
+        item.days_off_percent = _percent_float(item.days_off_approved, off_totals_by_cohort[cohort])
 
 
 def _active_people_for_cohort(db: Session, staff_type: str) -> list[Surgeon]:
@@ -172,9 +243,8 @@ def _apply_call_metrics(
             group_meta[group_id] = {
                 "id": group_id,
                 "name": rotation.call_group.name if rotation.call_group else "Call",
-                "scheduled_total": 0,
-                "taken_total": 0,
-                "rows": [],
+                "scheduled_total_by_cohort": defaultdict(int),
+                "taken_total_by_cohort": defaultdict(int),
             }
 
         original = rotation.surgeon
@@ -242,6 +312,16 @@ def _staff_label(staff_type: str) -> str:
     return "Surgeons and PAs / Staff"
 
 
+def _day_off_segment_label(segment: dict) -> str:
+    if segment.get("isFullDay", True):
+        return "Full day"
+    start = segment.get("start") or ""
+    end = segment.get("end") or ""
+    if start and end:
+        return f"{start}-{end}"
+    return "Half day"
+
+
 def _surgeon_sort_key(surgeon: Surgeon) -> tuple:
     rank = surgeon.sort_order or 0
     return (
@@ -253,6 +333,12 @@ def _surgeon_sort_key(surgeon: Surgeon) -> tuple:
 
 
 def _percent(value: int, total: int) -> float:
+    if not total:
+        return 0.0
+    return round((value / total) * 100, 1)
+
+
+def _percent_float(value: float, total: float) -> float:
     if not total:
         return 0.0
     return round((value / total) * 100, 1)

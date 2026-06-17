@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 from .models import CallCoverage, CallRotation, Surgeon
 from .native_support import serialize_call_assignment
 from .push import send_native_push_to_surgeon
+from .surgeon_visibility import surgeon_is_visible
 
 
 def assign_native_call_coverage(
@@ -22,7 +23,7 @@ def assign_native_call_coverage(
 
     covering_id = covering_surgeon_id or requesting_surgeon.id
     covering = db.get(Surgeon, covering_id)
-    if not covering or not covering.is_active:
+    if not surgeon_is_visible(covering):
         raise HTTPException(400, "Covering surgeon is not active")
 
     original_staff_type = rotation.surgeon.staff_type if rotation.surgeon else requesting_surgeon.staff_type

@@ -9,6 +9,7 @@ from sqlalchemy import func as sql_func
 from sqlalchemy.orm import Session, joinedload
 
 from .models import CallGroup, CallRotation, DayOff, Surgeon
+from .surgeon_visibility import surgeon_is_visible
 
 
 def call_group_short(name: str) -> str:
@@ -74,6 +75,7 @@ def request_off_page_data(db: Session, surgeon: Surgeon) -> dict:
         .options(joinedload(DayOff.surgeon))
         .all()
     )
+    all_requests = [request for request in all_requests if surgeon_is_visible(request.surgeon)]
 
     months = year_months(all_requests)
     first_year, first_month = months[0]
@@ -94,7 +96,7 @@ def request_off_page_data(db: Session, surgeon: Surgeon) -> dict:
 
 def physician_sections(db: Session, months: list[tuple[int, int]], all_requests: list[DayOff]) -> list[dict]:
     call_groups = db.query(CallGroup).order_by(CallGroup.sort_order, CallGroup.name).all()
-    physician_requests = [request for request in all_requests if request.surgeon.staff_type == "physician"]
+    physician_requests = [request for request in all_requests if surgeon_is_visible(request.surgeon) and request.surgeon.staff_type == "physician"]
     by_section: dict = defaultdict(list)
     for request in physician_requests:
         cg_id = dominant_call_group_id(db, request.surgeon_id, request.start_date, request.end_date)
@@ -111,7 +113,7 @@ def physician_sections(db: Session, months: list[tuple[int, int]], all_requests:
 
 
 def staff_sections(months: list[tuple[int, int]], all_requests: list[DayOff]) -> list[dict]:
-    staff_requests = [request for request in all_requests if request.surgeon.staff_type != "physician"]
+    staff_requests = [request for request in all_requests if surgeon_is_visible(request.surgeon) and request.surgeon.staff_type != "physician"]
     by_month: dict = defaultdict(list)
     for request in staff_requests:
         by_month[(request.start_date.year, request.start_date.month)].append(request)

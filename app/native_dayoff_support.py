@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 from .models import DayOff, Surgeon
 from .native_surgeon_support import native_surgeon_rank_key, native_viewer_sees_physicians
 from .native_time_utils import fmt_time, parse_hhmm
+from .surgeon_visibility import surgeon_is_visible
 
 
 def day_off_segments(row: DayOff) -> list[dict]:
@@ -126,6 +127,7 @@ def native_day_off_sections(db: Session, viewer: Surgeon) -> list[dict]:
         .options(joinedload(DayOff.surgeon))
         .all()
     )
+    rows = [row for row in rows if surgeon_is_visible(row.surgeon)]
     months = []
     cursor = date(window_start.year, window_start.month, 1)
     for _ in range(16):
@@ -143,8 +145,6 @@ def native_day_off_sections(db: Session, viewer: Surgeon) -> list[dict]:
     header_suffix = "SURGEONS" if target_staff_type == "physician" else "PAS"
     by_month: dict[tuple[int, int], list[DayOff]] = defaultdict(list)
     for req in rows:
-        if not req.surgeon:
-            continue
         if target_staff_type == "physician" and req.surgeon.staff_type != "physician":
             continue
         if target_staff_type != "physician" and req.surgeon.staff_type == "physician":

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from .models import CallCoverage, CallRotation, DayOff, NativeScheduleAlert, Surgeon
 from .native_support import date_label, serialize_call_assignment, serialize_native_alert
+from .surgeon_visibility import surgeon_is_visible
 
 
 def build_native_call_schedule(
@@ -26,6 +27,8 @@ def build_native_call_schedule(
 
     call_by_date: dict[str, list[dict]] = defaultdict(list)
     for rotation in rotations:
+        if rotation.surgeon and not surgeon_is_visible(rotation.surgeon):
+            continue
         assignment = serialize_call_assignment(rotation, viewer.id)
         key = rotation.date.isoformat()
         call_by_date[key].append(assignment)
@@ -52,7 +55,7 @@ def append_native_off_surgeons(
         DayOff.end_date >= start_date,
     ).all()
     for off in off_rows:
-        if not off.surgeon or not off.surgeon.is_active:
+        if not surgeon_is_visible(off.surgeon):
             continue
         span = max(off.start_date, start_date)
         span_end = min(off.end_date, end_date)

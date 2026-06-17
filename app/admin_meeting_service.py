@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from .conflicts import check_conflicts
 from .models import Meeting, MeetingAttendee, Surgeon
 from .push import send_push_to_surgeon
+from .surgeon_visibility import surgeon_is_visible
 
 
 def parse_meeting_fields(
@@ -56,10 +57,11 @@ def target_surgeon_ids(db: Session, attendee_ids: list[int]) -> list[int]:
         return list(dict.fromkeys(attendee_ids))
     return [
         row.id
-        for row in db.query(Surgeon.id)
+        for row in db.query(Surgeon)
         .filter(Surgeon.is_active == True)  # noqa: E712
         .order_by(Surgeon.last_name, Surgeon.first_name, Surgeon.id)
         .all()
+        if surgeon_is_visible(row)
     ]
 
 

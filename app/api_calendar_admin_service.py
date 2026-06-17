@@ -14,6 +14,7 @@ from .api_calendar_admin_event_serializers import (
     unavailable_event,
 )
 from .models import Availability, CallRotation, ClinicSchedule, DayOff, Meeting, SurgicalCase
+from .surgeon_visibility import surgeon_is_visible
 
 
 def add_day_off_events(events: list[dict], db: Session, start_date, end_date) -> None:
@@ -25,6 +26,8 @@ def add_day_off_events(events: list[dict], db: Session, start_date, end_date) ->
     by_date = defaultdict(list)
     for day_off in daysoff:
         surgeon = day_off.surgeon
+        if not surgeon_is_visible(surgeon):
+            continue
         day = max(day_off.start_date, start_date)
         last = min(day_off.end_date, end_date)
         while day <= last:
@@ -40,6 +43,8 @@ def add_call_rotation_events(events: list[dict], db: Session, start_date, end_da
         CallRotation.date <= end_date,
     ).all()
     for rotation in rotations:
+        if rotation.surgeon and not surgeon_is_visible(rotation.surgeon):
+            continue
         events.append(call_rotation_event(rotation))
 
 
@@ -58,6 +63,8 @@ def add_clinic_schedule_events(events: list[dict], db: Session, start_date, end_
         ClinicSchedule.date <= end_date,
     ).all()
     for clinic_schedule in clinic_schedules:
+        if not surgeon_is_visible(clinic_schedule.surgeon):
+            continue
         events.append(clinic_schedule_event(clinic_schedule))
 
 
@@ -70,6 +77,8 @@ def add_surgery_events(events: list[dict], db: Session, start_date, end_date) ->
         SurgicalCase.status != "cancelled",
     ).all()
     for case in surgeries:
+        if not surgeon_is_visible(case.surgeon):
+            continue
         events.append(surgery_event(case))
 
 
@@ -80,6 +89,8 @@ def add_unavailable_events(events: list[dict], db: Session, start_date, end_date
         Availability.is_available == False,
     ).all()
     for availability in unavails:
+        if not surgeon_is_visible(availability.surgeon):
+            continue
         events.append(unavailable_event(availability))
 
 

@@ -15,6 +15,7 @@ from .models import (
     SurgeonDayItem,
     SurgicalCase,
 )
+from .surgeon_visibility import surgeon_is_visible
 
 
 def bucket_rows_by_day(rows, day_attr: str = "date") -> dict:
@@ -33,7 +34,7 @@ def call_groups(db: Session) -> list[CallGroup]:
 
 
 def practice_rotations_by_range(db: Session, start_day: date, end_day: date) -> list[CallRotation]:
-    return (
+    rows = (
         db.query(CallRotation)
         .options(
             joinedload(CallRotation.surgeon),
@@ -45,6 +46,7 @@ def practice_rotations_by_range(db: Session, start_day: date, end_day: date) -> 
         )
         .all()
     )
+    return [row for row in rows if row.surgeon is None or surgeon_is_visible(row.surgeon)]
 
 
 def surgeon_rotations_by_day(db: Session, surgeon_id: int, start_day: date, end_day: date) -> dict:
@@ -147,7 +149,7 @@ def off_surgeons_by_day(db: Session, week_start: date, week_end: date) -> dict:
     by_day: dict = {}
     for off in rows:
         surgeon = off.surgeon
-        if not surgeon or not surgeon.is_active:
+        if not surgeon_is_visible(surgeon):
             continue
         span_start = max(off.start_date, week_start)
         span_end = min(off.end_date, week_end)

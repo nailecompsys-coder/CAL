@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from .admin_schedule_template_common import approved_off_dates, parse_target_surgeon_ids
 from .models import CallGroup, CallRotationTemplate, ClinicSchedule, Location, Surgeon, SurgeonLocationSchedule
+from .surgeon_visibility import surgeon_is_visible
 
 
 def template_cells_by_surgeon(db: Session, surgeon_ids: list[int]) -> dict:
@@ -20,7 +21,7 @@ def template_cells_by_surgeon(db: Session, surgeon_ids: list[int]) -> dict:
 
 
 def template_grid_context(db: Session, sort_surgeons) -> dict:
-    surgeons = db.query(Surgeon).filter(Surgeon.is_active == True).all()
+    surgeons = [row for row in db.query(Surgeon).filter(Surgeon.is_active == True).all() if surgeon_is_visible(row)]
     templates_raw = db.query(SurgeonLocationSchedule).all()
     tpl_map = {}
     for template in templates_raw:

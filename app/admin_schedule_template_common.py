@@ -5,10 +5,11 @@ from datetime import date, timedelta
 from sqlalchemy.orm import Session
 
 from .models import DayOff, Surgeon
+from .surgeon_visibility import surgeon_is_visible
 
 
 def active_surgeon_ids(db: Session) -> list[int]:
-    return [s.id for s in db.query(Surgeon.id).filter(Surgeon.is_active == True).all()]
+    return [s.id for s in db.query(Surgeon).filter(Surgeon.is_active == True).all() if surgeon_is_visible(s)]
 
 
 def parse_target_surgeon_ids(db: Session, surgeon_ids: str) -> list[int]:

@@ -12,6 +12,7 @@ from .auth import (
     create_surgeon_session_token,
 )
 from .models import Surgeon, SurgeonDevice
+from .surgeon_visibility import surgeon_is_visible
 
 
 def format_us_phone(phone: str | None) -> str:
@@ -87,7 +88,7 @@ def revoke_device(db: Session, surgeon_id: int, device_id: int) -> None:
 
 def preview_session_token(db: Session, surgeon_id: int, user_agent: str) -> str | None:
     surgeon = db.get(Surgeon, surgeon_id)
-    if not surgeon or not surgeon.is_active:
+    if not surgeon_is_visible(surgeon):
         return None
 
     now = datetime.now(timezone.utc)

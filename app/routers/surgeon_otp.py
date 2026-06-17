@@ -15,6 +15,7 @@ from ..device_names import readable_device_name
 from ..email_service import send_email
 from ..models import MagicLink, Surgeon, SurgeonDevice, SurgeonOtpAuditLog
 from ..sms_service import send_sms
+from ..surgeon_visibility import surgeon_is_visible
 
 router = APIRouter()
 
@@ -50,10 +51,11 @@ def _canonical_phone_digits(value: str | None) -> str:
 
 
 def _find_active_surgeon_by_email(db: Session, email: str) -> Surgeon | None:
-    return db.query(Surgeon).filter(
+    surgeon = db.query(Surgeon).filter(
         sql_func.lower(Surgeon.email) == email.strip().lower(),
         Surgeon.is_active == True,  # noqa: E712
     ).first()
+    return surgeon if surgeon_is_visible(surgeon) else None
 
 
 def _find_active_surgeon_by_phone(db: Session, phone: str) -> Surgeon | None:
@@ -65,7 +67,7 @@ def _find_active_surgeon_by_phone(db: Session, phone: str) -> Surgeon | None:
         Surgeon.is_active == True,  # noqa: E712
         Surgeon.phone.isnot(None),
     ).all()
-    matches = [surgeon for surgeon in candidates if _canonical_phone_digits(surgeon.phone) == target]
+    matches = [surgeon for surgeon in candidates if surgeon_is_visible(surgeon) and _canonical_phone_digits(surgeon.phone) == target]
     if len(matches) != 1:
         return None
     return matches[0]

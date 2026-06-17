@@ -16,6 +16,7 @@ from ..auth import get_current_admin
 from ..database import get_db
 from ..jinja_env import templates
 from ..models import Meeting, Surgeon
+from ..surgeon_visibility import surgeon_is_visible
 from .admin import _base, _sort_surgeons_physicians_first, _warn_redirect
 
 router = APIRouter(prefix="/admin")
@@ -25,7 +26,10 @@ router = APIRouter(prefix="/admin")
 def meetings_page(request: Request, db: Session = Depends(get_db), admin=Depends(get_current_admin)):
     today = date.today()
     meetings = db.query(Meeting).filter(Meeting.date >= today).order_by(Meeting.date, Meeting.start_time).all()
-    surgeons = db.query(Surgeon).filter(Surgeon.is_active == True).order_by(Surgeon.last_name).all()
+    surgeons = [
+        row for row in db.query(Surgeon).filter(Surgeon.is_active == True).order_by(Surgeon.last_name).all()
+        if surgeon_is_visible(row)
+    ]
     surgeons = _sort_surgeons_physicians_first(surgeons)
     return templates.TemplateResponse("admin/meetings.html", _base(
         request, admin, db=db, meetings=meetings, surgeons=surgeons

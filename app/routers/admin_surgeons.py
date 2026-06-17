@@ -20,6 +20,7 @@ from ..auth import (
 from ..database import get_db
 from ..jinja_env import templates
 from ..models import Surgeon
+from ..surgeon_visibility import visible_surgeons
 from .admin import _base, _next_physician_sort_order, _sort_surgeons_physicians_first
 
 router = APIRouter(prefix="/admin")
@@ -28,6 +29,7 @@ router = APIRouter(prefix="/admin")
 @router.get("/surgeons", response_class=HTMLResponse)
 def surgeons_page(request: Request, db: Session = Depends(get_db), admin=Depends(get_current_admin)):
     surgeons = db.query(Surgeon).order_by(Surgeon.last_name).all()
+    surgeons = visible_surgeons(surgeons)
     surgeons = _sort_surgeons_physicians_first(surgeons)
     return templates.TemplateResponse("admin/surgeons.html", _base(request, admin, db=db, surgeons=surgeons))
 

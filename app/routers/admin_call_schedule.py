@@ -16,6 +16,7 @@ from ..auth import get_current_admin
 from ..database import get_db
 from ..jinja_env import templates
 from ..models import Surgeon
+from ..surgeon_visibility import surgeon_is_visible
 from .admin import _base, _call_schedule_qs, _sort_surgeons_physicians_first, _surgeon_sort_key, _warn_redirect
 
 router = APIRouter(prefix="/admin")
@@ -34,7 +35,10 @@ def call_schedule_page(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    surgeons = db.query(Surgeon).filter(Surgeon.is_active == True).order_by(Surgeon.last_name).all()  # noqa: E712
+    surgeons = [
+        row for row in db.query(Surgeon).filter(Surgeon.is_active == True).order_by(Surgeon.last_name).all()  # noqa: E712
+        if surgeon_is_visible(row)
+    ]
     surgeons = _sort_surgeons_physicians_first(surgeons)
     data = page_data(db, month_offset, _surgeon_sort_key)
 
@@ -51,6 +55,7 @@ def call_schedule_page(
         day_off_by_date=data["day_off_by_date"],
         call_groups=data["call_groups"],
         locations=data["locations"],
+        surgeon_is_visible=data["surgeon_is_visible"],
         today=data["today"],
     ))
 

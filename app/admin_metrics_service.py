@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, joinedload
 from .models import CallCoverage, CallGroup, CallRotation, DayOff, Surgeon
 from .native_call_support import active_coverage_for_rotation
 from .native_dayoff_support import day_off_segments
+from .surgeon_visibility import surgeon_is_hidden, surgeon_is_visible
 
 
 @dataclass
@@ -107,7 +108,7 @@ def default_metrics_range(today: date) -> tuple[date, date]:
 def approved_day_off_detail(db: Session, surgeon_id: int, start_date: date, end_date: date, today: date | None = None) -> dict | None:
     as_of = today or date.today()
     surgeon = db.get(Surgeon, surgeon_id)
-    if not surgeon:
+    if not surgeon_is_visible(surgeon):
         return None
     rows = (
         db.query(DayOff)
@@ -181,6 +182,7 @@ def _active_people_for_cohort(db: Session, staff_type: str) -> list[Surgeon]:
         .order_by(Surgeon.sort_order, Surgeon.last_name, Surgeon.first_name)
         .all()
     )
+    rows = [surgeon for surgeon in rows if not surgeon_is_hidden(surgeon)]
     if staff_type == "all":
         return rows
     return [surgeon for surgeon in rows if _cohort_for_surgeon(surgeon) == staff_type]
@@ -250,7 +252,7 @@ def _apply_call_metrics(
         original = rotation.surgeon
         coverage = active_coverage_for_rotation(rotation)
         effective = coverage.covering_surgeon if coverage and coverage.covering_surgeon else original
-        if not effective:
+        if not surgeon_is_visible(effective):
             continue
         effective_cohort = _cohort_for_surgeon(effective)
         if staff_type != "all" and effective_cohort != staff_type:

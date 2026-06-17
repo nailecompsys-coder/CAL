@@ -21,6 +21,7 @@ from ..auth import get_current_admin
 from ..database import get_db
 from ..jinja_env import templates
 from ..models import DayOff, Surgeon
+from ..surgeon_visibility import surgeon_is_visible
 from .admin import _base, _sort_surgeons_physicians_first, _warn_redirect
 
 router = APIRouter(prefix="/admin")
@@ -28,15 +29,18 @@ router = APIRouter(prefix="/admin")
 
 @router.get("/daysoff", response_class=HTMLResponse)
 def daysoff_page(request: Request, surgeon_id: Optional[int] = None, db: Session = Depends(get_db), admin=Depends(get_current_admin)):
-    surgeons = db.query(Surgeon).filter(Surgeon.is_active == True).order_by(Surgeon.last_name).all()
+    surgeons = [
+        row for row in db.query(Surgeon).filter(Surgeon.is_active == True).order_by(Surgeon.last_name).all()
+        if surgeon_is_visible(row)
+    ]
     surgeons = _sort_surgeons_physicians_first(surgeons)
 
     q = db.query(DayOff)
     if surgeon_id:
         q = q.filter(DayOff.surgeon_id == surgeon_id)
 
-    pending = q.filter(DayOff.status == "pending").order_by(DayOff.start_date).all()
-    resolved = q.filter(DayOff.status != "pending").order_by(DayOff.start_date).all()
+    pending = [row for row in q.filter(DayOff.status == "pending").order_by(DayOff.start_date).all() if surgeon_is_visible(row.surgeon)]
+    resolved = [row for row in q.filter(DayOff.status != "pending").order_by(DayOff.start_date).all() if surgeon_is_visible(row.surgeon)]
 
     months = resolved_months(resolved)
     conflict_map = pending_conflict_map(db, pending)

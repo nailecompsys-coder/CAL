@@ -36,6 +36,7 @@ from .native_support import (
     serialize_day_off,
     session_times,
 )
+from .surgeon_visibility import surgeon_is_visible
 
 
 def empty_days(start_date: date, end_date: date) -> list[dict]:
@@ -176,7 +177,7 @@ def surgeons(db: Session) -> list[dict]:
     return [
         surgeon_payload(row)
         for row in sorted(
-            db.query(Surgeon).filter(Surgeon.is_active == True).all(),  # noqa: E712
+            [row for row in db.query(Surgeon).filter(Surgeon.is_active == True).all() if surgeon_is_visible(row)],  # noqa: E712
             key=native_surgeon_rank_key,
         )
     ]

@@ -16,6 +16,7 @@ from ..jinja_env import templates
 from ..models import (
     AdminUser, CallRotation, DayOff, Meeting, SiteSettings, Surgeon,
 )
+from ..surgeon_visibility import surgeon_is_visible
 from .. import wasabi_backup
 from .. import __version__ as app_version
 
@@ -99,17 +100,20 @@ def dashboard(request: Request, db: Session = Depends(get_db), admin=Depends(get
 
     on_call_today = [
         r for r in db.query(CallRotation).filter(CallRotation.date == today).all()
-        if r.surgeon_id  # only show assigned (exclude NO call)
+        if r.surgeon_id and surgeon_is_visible(r.surgeon)  # only show assigned (exclude NO call)
     ]
 
-    pending_daysoff = db.query(DayOff).filter(DayOff.status == "pending").all()
+    pending_daysoff = [
+        row for row in db.query(DayOff).filter(DayOff.status == "pending").all()
+        if surgeon_is_visible(row.surgeon)
+    ]
 
     upcoming_meetings = db.query(Meeting).filter(
         Meeting.date >= today,
         Meeting.date <= week_end,
     ).order_by(Meeting.date, Meeting.start_time).limit(5).all()
 
-    surgeons = db.query(Surgeon).filter(Surgeon.is_active == True).all()
+    surgeons = [row for row in db.query(Surgeon).filter(Surgeon.is_active == True).all() if surgeon_is_visible(row)]
     surgeons = _sort_surgeons_physicians_first(surgeons)
     active_count = len(surgeons)
 
@@ -119,7 +123,7 @@ def dashboard(request: Request, db: Session = Depends(get_db), admin=Depends(get
         DayOff.end_date >= today,
         DayOff.status == "approved",
     ).all()
-    off_ids = {d.surgeon_id for d in off_today}
+    off_ids = {d.surgeon_id for d in off_today if surgeon_is_visible(d.surgeon)}
     available_count = active_count - len(off_ids)
 
     return templates.TemplateResponse("admin/dashboard.html", _base(
@@ -138,7 +142,10 @@ def dashboard(request: Request, db: Session = Depends(get_db), admin=Depends(get
 
 @router.get("/calendar", response_class=HTMLResponse)
 def calendar(request: Request, db: Session = Depends(get_db), admin=Depends(get_current_admin)):
-    surgeons = db.query(Surgeon).filter(Surgeon.is_active == True).order_by(Surgeon.last_name).all()
+    surgeons = [
+        row for row in db.query(Surgeon).filter(Surgeon.is_active == True).order_by(Surgeon.last_name).all()
+        if surgeon_is_visible(row)
+    ]
     surgeons = _sort_surgeons_physicians_first(surgeons)
     return templates.TemplateResponse("admin/calendar.html", _base(request, admin, db=db, surgeons=surgeons))
 

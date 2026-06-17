@@ -185,6 +185,43 @@ class AdminMetricsServiceTest(unittest.TestCase):
         self.assertEqual(start, date(2026, 1, 1))
         self.assertEqual(end, date(2026, 12, 31))
 
+    def test_metrics_excludes_developer_admin_from_rows_totals_and_detail(self):
+        db = self.Session()
+        try:
+            chris = self._surgeon("Chris", "Johnson", "physician", 1)
+            hidden = self._surgeon("Developer", "Admin", "physician", 999)
+            hidden.email = "don@clermontitstore.com"
+            group = CallGroup(name="Winter Garden", sort_order=1)
+            db.add_all([chris, hidden, group])
+            db.flush()
+
+            db.add(DayOff(
+                surgeon_id=hidden.id,
+                start_date=date(2026, 6, 10),
+                end_date=date(2026, 6, 10),
+                status="approved",
+                is_full_day=True,
+            ))
+            db.add(CallRotation(
+                call_group_id=group.id,
+                surgeon_id=hidden.id,
+                date=date(2026, 6, 10),
+            ))
+            db.add(CallRotation(
+                call_group_id=group.id,
+                surgeon_id=chris.id,
+                date=date(2026, 6, 11),
+            ))
+            db.commit()
+
+            metrics = build_admin_metrics(db, date(2026, 1, 1), date(2026, 12, 31), "all", today=date(2026, 6, 17))
+            self.assertEqual([row.surgeon.initials for row in metrics["rows"]], ["CJ"])
+            self.assertEqual(metrics["totals"]["day_off_taken"], 0.0)
+            self.assertEqual(metrics["totals"]["call_taken"], 1)
+            self.assertIsNone(approved_day_off_detail(db, hidden.id, date(2026, 1, 1), date(2026, 12, 31), today=date(2026, 6, 17)))
+        finally:
+            db.close()
+
     def _surgeon(self, first_name, last_name, staff_type, sort_order):
         return Surgeon(
             first_name=first_name,

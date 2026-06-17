@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from sqlalchemy.orm import Session, joinedload
 
 from .models import CallCoverage, CallGroup, CallRotation, DayOff, Location, Surgeon
+from .surgeon_visibility import surgeon_is_visible
 
 
 def parse_call_group_id(raw: str | int | None) -> int | None:
@@ -51,7 +52,7 @@ def day_off_by_date(db: Session, schedule_days: list[date], surgeon_sort_key) ->
         day: {"pending": set(), "approved": set()} for day in schedule_days
     }
     for row in day_off_rows:
-        if not row.surgeon or not row.surgeon.is_active:
+        if not surgeon_is_visible(row.surgeon):
             continue
         status = "approved" if row.status == "approved" else "pending"
         current = max(row.start_date, schedule_days[0])
@@ -86,6 +87,8 @@ def call_group_rows(db: Session, call_groups: list[CallGroup], schedule_days: li
     for rotation in rotations:
         if rotation.call_group_id is None:
             continue
+        if rotation.surgeon and not surgeon_is_visible(rotation.surgeon):
+            continue
         by_date = rotation_by_group_date.setdefault(rotation.call_group_id, {})
         if rotation.date not in by_date:
             by_date[rotation.date] = rotation
@@ -116,4 +119,5 @@ def page_data(db: Session, month_offset: int, surgeon_sort_key) -> dict:
         "day_off_by_date": day_off_by_date(db, schedule_days, surgeon_sort_key),
         "call_groups": call_groups,
         "locations": db.query(Location).filter(Location.is_active == True).order_by(Location.name).all(),  # noqa: E712
+        "surgeon_is_visible": surgeon_is_visible,
     }

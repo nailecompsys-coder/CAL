@@ -78,7 +78,7 @@
             <span class="text-[9px] font-extrabold text-slate-400 leading-none flex-shrink-0 mr-0.5">{{ group.name[:3].upper() }}</span>
             {% set cov = rot.active_coverage %}
             <span class="text-[10px] font-bold truncate min-w-0 leading-none">
-              {% if cov and cov.covering_surgeon %}
+              {% if cov and cov.covering_surgeon and surgeon_is_visible(cov.covering_surgeon) %}
                 <span class="text-red-600 line-through">{% if rot.surgeon %}{{ rot.surgeon.initials }}{% else %}NC{% endif %}</span>
                 <span class="text-slate-800">{{ cov.covering_surgeon.initials }}</span>
               {% elif rot.surgeon %}

@@ -22,7 +22,7 @@ class AdminMetricsServiceTest(unittest.TestCase):
         Base.metadata.drop_all(bind=self.engine)
         self.engine.dispose()
 
-    def test_day_off_totals_count_pending_approved_half_days_and_exclude_denied(self):
+    def test_day_off_metrics_split_approved_taken_and_upcoming_for_all_roles(self):
         db = self.Session()
         try:
             chris = self._surgeon("Chris", "Johnson", "physician", 1)
@@ -35,7 +35,7 @@ class AdminMetricsServiceTest(unittest.TestCase):
                 surgeon_id=chris.id,
                 start_date=date(2026, 6, 10),
                 end_date=date(2026, 6, 13),
-                status="pending",
+                status="approved",
                 is_full_day=False,
                 segments=json.dumps([
                     {"date": "2026-06-10", "isFullDay": False, "start": "13:00", "end": "17:00"},
@@ -46,15 +46,22 @@ class AdminMetricsServiceTest(unittest.TestCase):
             ))
             db.add(DayOff(
                 surgeon_id=alex.id,
-                start_date=date(2026, 6, 15),
-                end_date=date(2026, 6, 15),
+                start_date=date(2026, 6, 18),
+                end_date=date(2026, 6, 18),
                 status="approved",
                 is_full_day=True,
             ))
             db.add(DayOff(
                 surgeon_id=alex.id,
-                start_date=date(2026, 6, 16),
-                end_date=date(2026, 6, 16),
+                start_date=date(2026, 6, 19),
+                end_date=date(2026, 6, 19),
+                status="pending",
+                is_full_day=True,
+            ))
+            db.add(DayOff(
+                surgeon_id=alex.id,
+                start_date=date(2026, 6, 20),
+                end_date=date(2026, 6, 20),
                 status="denied",
                 is_full_day=True,
             ))
@@ -67,25 +74,22 @@ class AdminMetricsServiceTest(unittest.TestCase):
             ))
             db.commit()
 
-            metrics = build_admin_metrics(db, date(2026, 1, 1), date(2026, 12, 31), "physician")
-            self.assertEqual(metrics["staff_label"], "Surgeons")
-            self.assertEqual(metrics["totals"]["requested_days"], 4.5)
-            self.assertEqual(metrics["totals"]["approved_days"], 1.0)
+            metrics = build_admin_metrics(db, date(2026, 1, 1), date(2026, 12, 31), "all", today=date(2026, 6, 17))
+            self.assertEqual(metrics["staff_label"], "Surgeons and PAs / Staff")
+            self.assertEqual(metrics["totals"]["day_off_taken"], 4.5)
+            self.assertEqual(metrics["totals"]["day_off_approved_upcoming"], 1.0)
 
             by_initials = {row.surgeon.initials: row for row in metrics["rows"]}
-            self.assertEqual(by_initials["CJ"].requested_days, 3.5)
-            self.assertEqual(by_initials["CJ"].approved_days, 0.0)
-            self.assertEqual(by_initials["AS"].requested_days, 1.0)
-            self.assertEqual(by_initials["AS"].approved_days, 1.0)
-
-            staff_metrics = build_admin_metrics(db, date(2026, 1, 1), date(2026, 12, 31), "staff")
-            self.assertEqual(staff_metrics["staff_label"], "PAs / Staff")
-            self.assertEqual(staff_metrics["totals"]["requested_days"], 1.0)
-            self.assertEqual(staff_metrics["totals"]["approved_days"], 1.0)
+            self.assertEqual(by_initials["CJ"].day_off_taken, 3.5)
+            self.assertEqual(by_initials["CJ"].day_off_approved_upcoming, 0.0)
+            self.assertEqual(by_initials["AS"].day_off_taken, 0.0)
+            self.assertEqual(by_initials["AS"].day_off_approved_upcoming, 1.0)
+            self.assertEqual(by_initials["PS"].day_off_taken, 1.0)
+            self.assertEqual(by_initials["PS"].day_off_approved_upcoming, 0.0)
         finally:
             db.close()
 
-    def test_call_metrics_separate_scheduled_from_taken_and_group_percentages(self):
+    def test_call_metrics_split_taken_and_upcoming_with_role_specific_percentages(self):
         db = self.Session()
         try:
             chris = self._surgeon("Chris", "Johnson", "physician", 1)
@@ -98,11 +102,12 @@ class AdminMetricsServiceTest(unittest.TestCase):
             db.flush()
 
             covered = CallRotation(call_group_id=winter_garden.id, surgeon_id=chris.id, date=date(2026, 6, 10))
-            normal = CallRotation(call_group_id=winter_garden.id, surgeon_id=alex.id, date=date(2026, 6, 11))
-            canceled = CallRotation(call_group_id=altamonte.id, surgeon_id=alex.id, date=date(2026, 6, 12))
-            staff_call = CallRotation(call_group_id=winter_garden.id, surgeon_id=staff.id, date=date(2026, 6, 13))
+            past_normal = CallRotation(call_group_id=winter_garden.id, surgeon_id=alex.id, date=date(2026, 6, 11))
+            future_normal = CallRotation(call_group_id=winter_garden.id, surgeon_id=alex.id, date=date(2026, 6, 18))
+            future_covered = CallRotation(call_group_id=altamonte.id, surgeon_id=alex.id, date=date(2026, 6, 19))
+            staff_call = CallRotation(call_group_id=winter_garden.id, surgeon_id=staff.id, date=date(2026, 6, 18))
             no_call = CallRotation(call_group_id=winter_garden.id, surgeon_id=None, date=date(2026, 6, 14))
-            db.add_all([covered, normal, canceled, staff_call, no_call])
+            db.add_all([covered, past_normal, future_normal, future_covered, staff_call, no_call])
             db.flush()
 
             db.add(CallCoverage(
@@ -112,44 +117,45 @@ class AdminMetricsServiceTest(unittest.TestCase):
                 status="active",
             ))
             db.add(CallCoverage(
-                call_rotation_id=canceled.id,
+                call_rotation_id=future_covered.id,
                 original_surgeon_id=alex.id,
                 covering_surgeon_id=lucy.id,
-                status="canceled",
+                status="active",
             ))
             db.commit()
 
-            metrics = build_admin_metrics(db, date(2026, 1, 1), date(2026, 12, 31), "physician")
-            self.assertEqual(metrics["totals"]["scheduled_call_days"], 3)
-            self.assertEqual(metrics["totals"]["taken_call_days"], 3)
+            metrics = build_admin_metrics(db, date(2026, 1, 1), date(2026, 12, 31), "all", today=date(2026, 6, 17))
+            self.assertEqual(metrics["totals"]["call_taken"], 2)
+            self.assertEqual(metrics["totals"]["call_scheduled_upcoming"], 3)
 
             by_initials = {row.surgeon.initials: row for row in metrics["rows"]}
-            self.assertEqual(by_initials["CJ"].scheduled_call_days, 1)
-            self.assertEqual(by_initials["CJ"].taken_call_days, 0)
-            self.assertEqual(by_initials["LW"].scheduled_call_days, 0)
-            self.assertEqual(by_initials["LW"].taken_call_days, 1)
-            self.assertEqual(by_initials["AS"].scheduled_call_days, 2)
-            self.assertEqual(by_initials["AS"].taken_call_days, 2)
+            self.assertEqual(by_initials["CJ"].call_taken, 0)
+            self.assertEqual(by_initials["CJ"].call_scheduled_upcoming, 0)
+            self.assertEqual(by_initials["LW"].call_taken, 1)
+            self.assertEqual(by_initials["LW"].call_scheduled_upcoming, 1)
+            self.assertEqual(by_initials["AS"].call_taken, 1)
+            self.assertEqual(by_initials["AS"].call_scheduled_upcoming, 1)
+            self.assertEqual(by_initials["PS"].call_taken, 0)
+            self.assertEqual(by_initials["PS"].call_scheduled_upcoming, 1)
 
             winter = next(group for group in metrics["groups"] if group["name"] == "Winter Garden")
             self.assertEqual(winter["scheduled_total"], 2)
             self.assertEqual(winter["taken_total"], 2)
             winter_people = {row["surgeon"].initials: row for row in winter["people"]}
-            self.assertEqual(winter_people["CJ"]["scheduled_percent"], 50.0)
+            self.assertEqual(winter_people["CJ"]["scheduled_percent"], 0.0)
             self.assertEqual(winter_people["CJ"]["taken_percent"], 0.0)
-            self.assertEqual(winter_people["AS"]["scheduled_percent"], 50.0)
+            self.assertEqual(winter_people["AS"]["scheduled_percent"], 100.0)
             self.assertEqual(winter_people["AS"]["taken_percent"], 50.0)
             self.assertEqual(winter_people["LW"]["scheduled_percent"], 0.0)
             self.assertEqual(winter_people["LW"]["taken_percent"], 50.0)
+            self.assertEqual(winter_people["PS"]["scheduled_percent"], 100.0)
 
             altamonte = next(group for group in metrics["groups"] if group["name"] == "Altamonte")
             altamonte_people = {row["surgeon"].initials: row for row in altamonte["people"]}
             self.assertEqual(altamonte_people["CJ"]["scheduled"], 0)
             self.assertEqual(altamonte_people["CJ"]["taken_percent"], 0.0)
-
-            staff_metrics = build_admin_metrics(db, date(2026, 1, 1), date(2026, 12, 31), "staff")
-            self.assertEqual(staff_metrics["totals"]["scheduled_call_days"], 1)
-            self.assertEqual(staff_metrics["totals"]["taken_call_days"], 1)
+            self.assertEqual(altamonte_people["LW"]["scheduled"], 1)
+            self.assertEqual(altamonte_people["LW"]["scheduled_percent"], 100.0)
         finally:
             db.close()
 

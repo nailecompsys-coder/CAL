@@ -20,7 +20,7 @@ def metrics_page(
     request: Request,
     start: str | None = None,
     end: str | None = None,
-    staff_type: str = "physician",
+    staff_type: str = "all",
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):

@@ -69,10 +69,10 @@
   </style>
 </head>
 <body>
-{% if desktop_preview %}
+{% if desktop_preview or desktop_browser %}
 <div class="px-3 py-2 text-center text-xs font-semibold text-amber-900 bg-amber-100 border-b border-amber-200">
-  <i class="fa-solid fa-display mr-1"></i>Desktop preview — logged in as {{ surgeon.full_name }}.
-  <a href="/surgeon/logout?next=/admin/surgeons" class="underline text-amber-950 hover:text-amber-700 ml-1">Exit preview</a>
+  <i class="fa-solid fa-display mr-1"></i>{% if desktop_preview %}Desktop preview — logged in as {{ surgeon.full_name }}.{% else %}Clinician session — logged in as {{ surgeon.full_name }}.{% endif %}
+  <a href="/surgeon/logout?next=/admin/login" class="underline text-amber-950 hover:text-amber-700 ml-1">Go to admin portal</a>
 </div>
 {% endif %}
 {% block content %}{% endblock %}

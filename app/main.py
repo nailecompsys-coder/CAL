@@ -106,8 +106,19 @@ def root(request: Request):
     # Admin first so staff with a desktop preview cookie still land in the portal.
     if request.cookies.get("admin_token"):
         return RedirectResponse("/admin/dashboard")
+    user_agent = request.headers.get("user-agent", "")
+    is_desktop_browser = any(marker in user_agent for marker in ("Macintosh", "Windows", "Linux x86_64"))
+    if is_desktop_browser:
+        return RedirectResponse("/admin/login")
     if request.cookies.get("surgeon_token") or request.cookies.get("surgeon_token_preview"):
         return RedirectResponse("/surgeon/schedule")
+    return RedirectResponse("/admin/login")
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_root(request: Request):
+    if request.cookies.get("admin_token"):
+        return RedirectResponse("/admin/dashboard")
     return RedirectResponse("/admin/login")
 
 

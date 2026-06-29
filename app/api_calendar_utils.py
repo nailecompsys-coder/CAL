@@ -27,9 +27,12 @@ def call_group_abbrev(name):
 
 
 def location_abbrev(loc, location_type=None):
-    """AH for hospital, CL for clinic; + short site name (e.g. AH-Cler, CL-Apk)."""
+    """Admin-defined location abbreviation, with generated fallback for legacy rows."""
     if not loc or not getattr(loc, "name", None):
         return "AH" if location_type == "hospital" else "CL"
+    custom = (getattr(loc, "abbreviation", None) or "").strip()
+    if custom:
+        return custom.upper()[:12]
     name = (loc.name or "").strip()
     t = (location_type or getattr(loc, "location_type", None) or "clinic").lower()
     prefix = "AH" if t == "hospital" else "CL"

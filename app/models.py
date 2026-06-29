@@ -40,6 +40,7 @@ class Location(Base):
     __tablename__ = "locations"
     id = Column(Integer, primary_key=True)
     name = Column(String(128), nullable=False)
+    abbreviation = Column(String(12), nullable=False, default="LOC", server_default="LOC")
     address = Column(String(255))
     city = Column(String(64))
     phone = Column(String(32))

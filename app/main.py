@@ -10,6 +10,7 @@ from .database import Base, SessionLocal, engine
 from .location_palette import ensure_location_palette_seeded
 from . import migrate_surgeon_sort_order
 from . import migrate_clinic_schedule_off
+from . import migrate_location_admin_fields
 from . import migrate_native_parity
 from .routers import (
     admin_otp_audit,
@@ -33,6 +34,7 @@ async def lifespan(app: FastAPI):
     migrate_clinic_schedule_off.run_migration()
     migrate_surgeon_sort_order.run_migration()
     migrate_call_groups.run_migration()
+    migrate_location_admin_fields.run_migration()
     migrate_native_parity.run_migration()
     db = SessionLocal()
     try:

@@ -123,7 +123,7 @@
                 {% if entry.session == 'am' %}<i class="fa-solid fa-sun text-[8px] opacity-80"></i>
                 {% elif entry.session == 'pm' %}<i class="fa-solid fa-moon text-[8px] opacity-80"></i>
                 {% endif %}
-                <span class="truncate">{% if entry.assignment_type == 'off' %}OFF{% else %}{{ entry.location.name }}{% endif %}</span>
+                <span class="truncate">{% if entry.assignment_type == 'off' %}OFF{% else %}{{ entry.location.abbreviation or entry.location.name }}{% endif %}</span>
               </span>
               <form method="post" action="/admin/clinic-schedule/clear" class="js-preserve-scroll" onclick="event.stopPropagation()">
                 <input type="hidden" name="schedule_id" value="{{ entry.id }}" />

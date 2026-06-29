@@ -61,13 +61,5 @@ def resolve_palette_color(name: str, location_type: str) -> Optional[str]:
 
 
 def ensure_location_palette_seeded(db: Session) -> int:
-    updated = 0
-    locations = db.query(Location).all()
-    for loc in locations:
-        palette_color = resolve_palette_color(loc.name, loc.location_type)
-        if palette_color and loc.color != palette_color:
-            loc.color = palette_color
-            updated += 1
-    if updated:
-        db.commit()
-    return updated
+    """Legacy no-op: location colors are now admin-managed."""
+    return 0

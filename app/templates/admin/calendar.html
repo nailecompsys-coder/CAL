@@ -23,6 +23,21 @@
   .fc-event-pill--dayoff { font-size:0.7rem; }
   .fc-event-pill--oncall, .fc-event-pill--clinic { font-size:0.68rem; }
   .fc-event-pill--meeting, .fc-event-pill--surgery { font-size:0.65rem; }
+  .fc-dayGridMonth-view .fc-daygrid-event-harness { display:none!important; }
+  .master-day-stack { clear:both; padding:0 1px 2px; display:flex; flex-direction:column; gap:2px; min-height:72px; font-size:.58rem; line-height:1.15; }
+  .master-row { min-height:15px; border-radius:5px; padding:2px 4px; border:1px solid rgba(20,48,90,.08); background:rgba(255,255,255,.66); color:var(--cal-ink); overflow:hidden; }
+  .master-row strong { font-weight:900; letter-spacing:.01em; }
+  .master-row--off { background:rgba(187,247,208,.42); border-color:rgba(34,197,94,.16); color:#166534; }
+  .master-row--call { background:rgba(219,234,254,.58); border-color:rgba(59,130,246,.16); color:#1e3a8a; }
+  .master-row--clinic { background:rgba(255,255,255,.72); border-color:rgba(148,163,184,.18); }
+  .master-row--meeting { background:rgba(252,231,243,.5); border-color:rgba(219,39,119,.12); color:#831843; }
+  .master-split { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:4px; align-items:center; }
+  .master-left, .master-right { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .master-right { text-align:right; }
+  .master-empty { color:rgba(74,96,128,.48); }
+  .master-click { cursor:pointer; }
+  .master-click:hover { filter:brightness(.97); box-shadow:inset 0 0 0 1px rgba(8,121,103,.18); }
+  .fc-daygrid-day-frame { min-height:116px; }
 </style>
 {% endblock %}
 
@@ -151,6 +166,8 @@
 </style>
 <script>
 let calendar, activeFilter = 'all', activeSurgeonId = null;
+let visibleCalendarEvents = [];
+const dayCellFrames = new Map();
 
 document.addEventListener('DOMContentLoaded', function() {
   const calEl = document.getElementById('calendar');
@@ -174,8 +191,22 @@ document.addEventListener('DOMContentLoaded', function() {
               return p.surgeon_id === activeSurgeonId;
             });
           }
+          visibleCalendarEvents = events;
+          setTimeout(renderMasterMonthCells, 0);
           success(events);
         }).catch(fail);
+    },
+    datesSet: function() {
+      dayCellFrames.clear();
+      setTimeout(renderMasterMonthCells, 0);
+    },
+    dayCellDidMount: function(arg) {
+      if (arg.view.type !== 'dayGridMonth') return;
+      const frame = arg.el.querySelector('.fc-daygrid-day-frame');
+      if (!frame) return;
+      dayCellFrames.set(dateKey(arg.date), frame);
+      ensureMasterStack(frame);
+      renderMasterMonthCells();
     },
     eventOrder: function(a, b) {
       const ka = (a.extendedProps && a.extendedProps.sort_key) != null ? a.extendedProps.sort_key : 99;
@@ -205,11 +236,18 @@ document.addEventListener('DOMContentLoaded', function() {
       }
     },
     height: '100%',
-    dayMaxEvents: 8,
+    dayMaxEvents: false,
     moreLinkClick: 'popover',
     nowIndicator: true,
   });
   calendar.render();
+
+  calEl.addEventListener('click', function(e) {
+    const target = e.target.closest('[data-master-event-id]');
+    if (!target) return;
+    const ev = visibleCalendarEvents.find(item => item.id === target.dataset.masterEventId);
+    if (ev) showModal(ev);
+  });
 });
 
 function togglePhysician(id, el) {
@@ -238,6 +276,140 @@ function setFilter(f) {
   calendar.refetchEvents();
 }
 
+function dateKey(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function eventDateKey(ev) {
+  return String(ev.start || ev.startStr || '').slice(0, 10);
+}
+
+function ensureMasterStack(frame) {
+  let stack = frame.querySelector('.master-day-stack');
+  if (!stack) {
+    stack = document.createElement('div');
+    stack.className = 'master-day-stack';
+    frame.appendChild(stack);
+  }
+  return stack;
+}
+
+function escapeHtml(value) {
+  return String(value || '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[ch]));
+}
+
+function shortName(value) {
+  return String(value || '').replace(/\s*(advent\s*health|hospital|clinic)\s*/ig, ' ').trim().split(/\s+/).map(w => w[0] || '').join('').slice(0, 6).toUpperCase();
+}
+
+function groupAbbrev(value) {
+  const words = String(value || '').replace(/\s*(\/|-)\s*/g, ' ').trim().split(/\s+/)
+    .filter(w => w.length >= 2 && !['HOSPITAL', 'AND', 'THE'].includes(w.toUpperCase()));
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words.map(w => w[0]).join('') || '?').slice(0, 4).toUpperCase();
+}
+
+function surgeonInitialsFromEvent(ev) {
+  const titleFirst = String(ev.title || '').trim().split(/\s+/)[0];
+  if (titleFirst && titleFirst.length <= 4 && /^[A-Z?]+$/.test(titleFirst)) return titleFirst;
+  const name = ev.extendedProps?.surgeon || '';
+  const parts = name.trim().split(/\s+/);
+  return parts.length >= 2 ? `${parts[0][0] || ''}${parts[parts.length - 1][0] || ''}`.toUpperCase() : (parts[0] || '?').slice(0, 2).toUpperCase();
+}
+
+function eventLabel(ev) {
+  const p = ev.extendedProps || {};
+  if (p.type === 'clinic') return ev.title || `${surgeonInitialsFromEvent(ev)} ${p.location || ''}`.trim();
+  if (p.type === 'surgery') return `${surgeonInitialsFromEvent(ev)} ${shortName(p.location) || 'OR'}`;
+  if (p.type === 'meeting') return (p.meeting_title || ev.title || 'Meeting').replace(/^MTG\s*/i, '');
+  if (p.type === 'oncall') {
+    const group = (ev.title || '').split(':')[0].trim() || groupAbbrev(p.call_group);
+    const initials = p.role === 'nc' ? '' : surgeonInitialsFromEvent(ev);
+    return `${group}: ${initials}`.trim();
+  }
+  return ev.title || '';
+}
+
+function splitSession(ev) {
+  const p = ev.extendedProps || {};
+  if (p.type === 'clinic') {
+    if (p.session === 'pm') return 'pm';
+    if (p.session === 'am') return 'am';
+    return 'full';
+  }
+  const time = String(ev.start || ev.startStr || '').slice(11, 16);
+  if (!time) return 'full';
+  return Number(time.slice(0, 2)) >= 12 ? 'pm' : 'am';
+}
+
+function renderMasterMonthCells() {
+  if (!calendar || calendar.view.type !== 'dayGridMonth') return;
+  for (const [key, frame] of dayCellFrames.entries()) {
+    const stack = ensureMasterStack(frame);
+    const events = visibleCalendarEvents.filter(ev => eventDateKey(ev) === key);
+    stack.innerHTML = buildMasterCellHtml(events);
+  }
+}
+
+function buildMasterCellHtml(events) {
+  const byType = type => events.filter(ev => ev.extendedProps?.type === type);
+  const off = byType('dayoff');
+  const offInitials = off.map(ev => String(ev.title || '').replace(/\s*OFF\s*$/i, '').trim()).filter(Boolean).join(' ');
+  const offId = off[0]?.id || '';
+  let html = `<div class="master-row master-row--off ${offId ? 'master-click' : ''}" ${offId ? `data-master-event-id="${escapeHtml(offId)}"` : ''}><strong>OFF:</strong>${offInitials ? ` ${escapeHtml(offInitials)}` : ''}</div>`;
+
+  const callPriority = label => {
+    const group = String(label || '').split(':')[0].trim().toUpperCase();
+    if (group === 'WG') return 0;
+    if (group === 'AL') return 1;
+    return 10 + group.charCodeAt(0);
+  };
+  const calls = byType('oncall').sort((a, b) => callPriority(eventLabel(a)) - callPriority(eventLabel(b)));
+  if (calls.length) {
+    for (let i = 0; i < calls.length; i += 2) {
+      const left = calls[i];
+      const right = calls[i + 1];
+      html += `<div class="master-row master-row--call master-split">`
+        + `<span class="master-left master-click" data-master-event-id="${escapeHtml(left.id)}">${escapeHtml(eventLabel(left))}</span>`
+        + `<span class="master-right ${right ? 'master-click' : 'master-empty'}" ${right ? `data-master-event-id="${escapeHtml(right.id)}"` : ''}>${right ? escapeHtml(eventLabel(right)) : ''}</span>`
+        + `</div>`;
+    }
+  } else {
+    html += `<div class="master-row master-row--call master-split"><span class="master-left master-empty">WG:</span><span class="master-right master-empty">AL:</span></div>`;
+  }
+
+  const scheduleRows = new Map();
+  for (const ev of events.filter(item => ['clinic', 'surgery'].includes(item.extendedProps?.type))) {
+    const key = ev.extendedProps?.surgeon_id || surgeonInitialsFromEvent(ev);
+    if (!scheduleRows.has(key)) scheduleRows.set(key, { am: [], pm: [], full: [] });
+    scheduleRows.get(key)[splitSession(ev)].push(ev);
+  }
+  for (const row of scheduleRows.values()) {
+    const leftEvents = row.am.length ? row.am : row.full;
+    const rightEvents = row.pm;
+    const left = leftEvents[0];
+    const right = rightEvents[0];
+    html += `<div class="master-row master-row--clinic master-split">`
+      + `<span class="master-left ${left ? 'master-click' : 'master-empty'}" ${left ? `data-master-event-id="${escapeHtml(left.id)}"` : ''}>${left ? escapeHtml(eventLabel(left)) : ''}</span>`
+      + `<span class="master-right ${right ? 'master-click' : 'master-empty'}" ${right ? `data-master-event-id="${escapeHtml(right.id)}"` : ''}>${right ? escapeHtml(eventLabel(right)) : ''}</span>`
+      + `</div>`;
+  }
+
+  for (const meeting of byType('meeting')) {
+    html += `<div class="master-row master-row--meeting master-click" data-master-event-id="${escapeHtml(meeting.id)}"><strong>MTG:</strong> ${escapeHtml(eventLabel(meeting))}</div>`;
+  }
+  return html;
+}
+
 function showModal(event) {
   const p = event.extendedProps || {};
   const typeLabels = { oncall: 'Call (hospital group)', dayoff: 'Days off', meeting: 'Meeting', clinic: 'Clinic', surgery: 'Surgery', unavailable: 'Unavailable' };
@@ -247,7 +419,8 @@ function showModal(event) {
   else if (p.type === 'meeting') title = p.meeting_title || title.replace(/^MTG\s*/, '') || 'Meeting';
   document.getElementById('modal-title').textContent = title;
   document.getElementById('modal-sub').textContent = typeLabels[p.type] || '';
-  let body = `<p><i class="fa-solid fa-calendar mr-2 text-slate-400"></i>${event.startStr?.slice(0,10)}</p>`;
+  const startStr = event.startStr || event.start || '';
+  let body = `<p><i class="fa-solid fa-calendar mr-2 text-slate-400"></i>${String(startStr).slice(0,10)}</p>`;
   if (p.surgeon) body += `<p><i class="fa-solid fa-user-doctor mr-2 text-slate-400"></i>${p.surgeon}</p>`;
   if (p.call_group) body += `<p><i class="fa-solid fa-shield mr-2 text-slate-400"></i>${p.call_group}</p>`;
   if (p.role && p.role !== 'nc') body += `<p><i class="fa-solid fa-phone mr-2 text-slate-400"></i>${p.role}</p>`;

@@ -23,6 +23,8 @@ def call_group_abbrev(name):
     words = [w for w in s.split() if len(w) >= 2 and w.lower() not in ("hospital", "and", "the")]
     if not words:
         return (s[:3] or "?").upper()
+    if len(words) == 1:
+        return words[0][:2].upper()
     return "".join(w[0] for w in words[:3]).upper()
 
 

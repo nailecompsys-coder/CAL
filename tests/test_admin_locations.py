@@ -7,7 +7,7 @@ os.environ.setdefault("SECRET_KEY", "test-secret")
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.api_calendar_utils import location_abbrev
+from app.api_calendar_utils import call_group_abbrev, location_abbrev
 from app.models import Base, Location
 from app.routers.admin_locations import add_location, edit_location
 
@@ -21,6 +21,10 @@ class AdminLocationsTest(unittest.TestCase):
     def tearDown(self):
         Base.metadata.drop_all(bind=self.engine)
         self.engine.dispose()
+
+    def test_call_group_abbrev_uses_two_letters_for_single_word_groups(self):
+        self.assertEqual(call_group_abbrev("Winter Garden"), "WG")
+        self.assertEqual(call_group_abbrev("Altamonte"), "AL")
 
     def test_add_location_accepts_admin_color_and_abbreviation(self):
         db = self.Session()

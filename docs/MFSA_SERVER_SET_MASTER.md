@@ -13,7 +13,7 @@ This server set is split by role:
 |---|---:|---|---|
 | Edge | `192.168.5.75` | `edge-5.75` | Public nginx/TLS edge for `.5.x` app VMs |
 | SSS | `192.168.5.60` | `sss-5.60` | Snap Send Seen production stack |
-| RVU | `192.168.5.61` | `rvu-5.61` | RVU production API/app and CAL OTP endpoints |
+| RVU | `192.168.5.61` | `rvu-5.61` | RVU production API/app |
 | CAL | `192.168.5.62` | `cal-5.62` | CAL production API/app and local CAL Postgres |
 | Legacy/Atlas | `192.168.20.10` | `old-rvu-prod` | Atlas/AEX and older shared services; legacy CAL is retired/stopped |
 
@@ -36,8 +36,8 @@ Important enabled sites:
 | Public host | Upstream |
 |---|---|
 | `cal.midfloridasurgical.com` | CAL app: `http://192.168.5.62:3005/` |
-| `cal.midfloridasurgical.com/api/surgeon/otp/request` | RVU auth: `http://192.168.5.61:3010/api/v1/auth/otp/request` |
-| `cal.midfloridasurgical.com/api/surgeon/otp/verify` | RVU auth: `http://192.168.5.61:3010/api/v1/auth/otp/verify` |
+| `cal.midfloridasurgical.com/api/surgeon/otp/request` | CAL app: `http://192.168.5.62:3005/api/surgeon/otp/request` |
+| `cal.midfloridasurgical.com/api/surgeon/otp/verify` | CAL app: `http://192.168.5.62:3005/api/surgeon/otp/verify` |
 | `rvu.midfloridasurgical.com` | RVU app: `http://192.168.5.61:3010/` |
 | `rvu.midfloridasurgical.com/assets/` | RVU assets: `http://192.168.5.61:3010/assets/` |
 | `snapsendseen.com`, `www.snapsendseen.com` | SSS API/public site: `http://192.168.5.60:3002` |
@@ -144,16 +144,16 @@ curl -sf http://127.0.0.1:3010/api/health
 
 Observed: `{"status":"ok","service":"rvu"}`.
 
-### CAL Dependency
+### CAL/RVU Auth Boundary
 
-CAL’s public OTP endpoints are routed by edge `.75` to RVU:
+CAL’s public OTP endpoints are routed by edge `.75` to CAL `.62`, not RVU. The old RVU bridge was removed on 2026-06-29 because it caused CAL login texts to say `RVU Insight code` and prevented CAL OTP verification from using CAL’s `magic_links` table.
 
 ```text
-cal.midfloridasurgical.com/api/surgeon/otp/request -> 192.168.5.61:3010/api/v1/auth/otp/request
-cal.midfloridasurgical.com/api/surgeon/otp/verify  -> 192.168.5.61:3010/api/v1/auth/otp/verify
+cal.midfloridasurgical.com/api/surgeon/otp/request -> 192.168.5.62:3005/api/surgeon/otp/request
+cal.midfloridasurgical.com/api/surgeon/otp/verify  -> 192.168.5.62:3005/api/surgeon/otp/verify
 ```
 
-Do not modify RVU auth, `SECRET_KEY`, CAL URL settings, or OTP routes without checking CAL native/web login.
+Do not re-add a CAL-to-RVU OTP bridge. RVU auth changes must stay on `rvu.midfloridasurgical.com` or RVU-specific API paths.
 
 ### Notes
 

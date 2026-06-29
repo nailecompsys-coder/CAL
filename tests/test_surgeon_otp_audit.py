@@ -159,15 +159,18 @@ class SurgeonOtpAuditTest(unittest.TestCase):
             db.add_all([preview, hidden_admin_surgeon, admin])
             db.commit()
 
-            with patch("app.routers.surgeon_otp.generate_sms_otp", return_value=(True, "123456", None)), patch("app.routers.surgeon_otp.send_email", return_value=True):
+            with patch("app.routers.surgeon_otp.generate_sms_otp") as sms, patch("app.routers.surgeon_otp.send_email", return_value=True) as email:
                 response = otp_request(OtpRequestBody(email="don@clermontitstore.com"), request=test_request(), db=db)
 
             self.assertTrue(response["ok"])
+            sms.assert_not_called()
+            self.assertEqual(email.call_args.kwargs["to_email"], "don@clermontitstore.com")
             link = db.query(MagicLink).one()
             self.assertEqual(link.surgeon_id, preview.id)
             row = db.query(SurgeonOtpAuditLog).one()
             self.assertEqual(row.submitted_email, "don@clermontitstore.com")
             self.assertEqual(row.surgeon_id, preview.id)
+            self.assertEqual(row.delivery_channel, "email")
             self.assertEqual(row.result, "requested")
         finally:
             db.close()
@@ -180,8 +183,9 @@ class SurgeonOtpAuditTest(unittest.TestCase):
             db.add_all([preview, admin])
             db.commit()
 
-            with patch("app.routers.surgeon_otp.generate_sms_otp", return_value=(True, "123456", None)), patch("app.routers.surgeon_otp.send_email", return_value=True):
+            with patch("app.routers.surgeon_otp.random.randint", return_value=123456), patch("app.routers.surgeon_otp.generate_sms_otp") as sms, patch("app.routers.surgeon_otp.send_email", return_value=True):
                 otp_request(OtpRequestBody(email="don@clermontitstore.com"), request=test_request(), db=db)
+            sms.assert_not_called()
             response = otp_verify(OtpVerifyBody(email="don@clermontitstore.com", code="123456"), request=test_request(), db=db)
 
             self.assertIn("token", response)

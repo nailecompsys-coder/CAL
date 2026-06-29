@@ -80,7 +80,7 @@ def _find_active_surgeon_by_identifier(db: Session, identifier: str) -> Surgeon 
     return _find_active_surgeon_by_phone(db, submitted)
 
 
-def _find_admin_preview_surgeon_by_identifier(db: Session, identifier: str) -> Surgeon | None:
+def _find_active_admin_email_by_identifier(db: Session, identifier: str) -> str | None:
     submitted = identifier.strip()
     if "@" not in submitted:
         return None
@@ -91,7 +91,10 @@ def _find_admin_preview_surgeon_by_identifier(db: Session, identifier: str) -> S
     ).first()
     if not admin:
         return None
+    return admin.email
 
+
+def _find_admin_preview_surgeon(db: Session) -> Surgeon | None:
     candidates = (
         db.query(Surgeon)
         .filter(
@@ -104,8 +107,15 @@ def _find_admin_preview_surgeon_by_identifier(db: Session, identifier: str) -> S
     return next((surgeon for surgeon in candidates if surgeon_is_visible(surgeon)), None)
 
 
-def _find_native_login_surgeon_by_identifier(db: Session, identifier: str) -> Surgeon | None:
-    return _find_active_surgeon_by_identifier(db, identifier) or _find_admin_preview_surgeon_by_identifier(db, identifier)
+def _resolve_native_login_identity(db: Session, identifier: str) -> tuple[Surgeon | None, str | None]:
+    surgeon = _find_active_surgeon_by_identifier(db, identifier)
+    if surgeon:
+        return surgeon, None
+
+    admin_email = _find_active_admin_email_by_identifier(db, identifier)
+    if not admin_email:
+        return None, None
+    return _find_admin_preview_surgeon(db), admin_email
 
 
 def _invalidate_existing_otp_codes(db: Session, surgeon_id: int) -> None:
@@ -126,10 +136,11 @@ def _create_native_session_device(surgeon_id: int, user_agent: str, now: datetim
     )
 
 
-def _send_otp_email(surgeon: Surgeon, code: str) -> tuple[bool, str | None]:
+def _send_otp_email(surgeon: Surgeon, code: str, to_email: str | None = None) -> tuple[bool, str | None]:
+    recipient = to_email or surgeon.email
     try:
         sent = send_email(
-            to_email=surgeon.email,
+            to_email=recipient,
             subject="Your CAL access code",
             html_body=f"""
             <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px">
@@ -197,7 +208,7 @@ def _audit_otp(
 @router.post("/otp/request")
 def otp_request(body: OtpRequestBody, request: Request, db: Session = Depends(get_db)):
     submitted_identifier = body.email.strip().lower()
-    surgeon = _find_native_login_surgeon_by_identifier(db, submitted_identifier)
+    surgeon, admin_preview_email = _resolve_native_login_identity(db, submitted_identifier)
     if not surgeon:
         # Don't reveal whether email exists
         _audit_otp(
@@ -214,12 +225,12 @@ def otp_request(body: OtpRequestBody, request: Request, db: Session = Depends(ge
         db.commit()
         return {"ok": True, "message": "If that email or phone is registered, a code was sent."}
 
-    delivery_channel = "sms+email" if surgeon.phone else "email"
+    delivery_channel = "email" if admin_preview_email else ("sms+email" if surgeon.phone else "email")
     delivery_success = False
     failure_reasons = []
     code = _generate_otp()
 
-    if surgeon.phone:
+    if surgeon.phone and not admin_preview_email:
         sms_success, sms_code, sms_failure = generate_sms_otp(
             phone=surgeon.phone,
             userid=_textbelt_otp_userid(surgeon),
@@ -243,7 +254,7 @@ def otp_request(body: OtpRequestBody, request: Request, db: Session = Depends(ge
     ))
     db.commit()
 
-    email_success, email_failure = _send_otp_email(surgeon, code)
+    email_success, email_failure = _send_otp_email(surgeon, code, to_email=admin_preview_email)
     if email_failure:
         failure_reasons.append(email_failure)
     delivery_success = delivery_success or email_success
@@ -267,7 +278,7 @@ def otp_request(body: OtpRequestBody, request: Request, db: Session = Depends(ge
 @router.post("/otp/verify")
 def otp_verify(body: OtpVerifyBody, request: Request, db: Session = Depends(get_db)):
     submitted_identifier = body.email.strip().lower()
-    surgeon = _find_native_login_surgeon_by_identifier(db, submitted_identifier)
+    surgeon, _admin_preview_email = _resolve_native_login_identity(db, submitted_identifier)
     if not surgeon:
         _audit_otp(
             db,

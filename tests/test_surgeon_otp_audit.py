@@ -11,7 +11,14 @@ from sqlalchemy.orm import sessionmaker
 from starlette.requests import Request
 
 from app.models import Base, MagicLink, Surgeon, SurgeonDevice, SurgeonOtpAuditLog
-from app.routers.surgeon_otp import OtpRequestBody, OtpVerifyBody, _otp_sms_message, otp_request, otp_verify
+from app.routers.surgeon_otp import (
+    OtpRequestBody,
+    OtpVerifyBody,
+    _otp_sms_message_template,
+    _textbelt_otp_userid,
+    otp_request,
+    otp_verify,
+)
 
 
 def test_request() -> Request:
@@ -60,11 +67,12 @@ class SurgeonOtpAuditTest(unittest.TestCase):
             db.add(surgeon)
             db.commit()
 
-            with patch("app.routers.surgeon_otp.send_sms", return_value=True), patch("app.routers.surgeon_otp.send_email", return_value=True):
+            with patch("app.routers.surgeon_otp.generate_sms_otp", return_value=(True, "654321", None)), patch("app.routers.surgeon_otp.send_email", return_value=True):
                 response = otp_request(OtpRequestBody(email=" JORGE@example.com "), request=test_request(), db=db)
 
             self.assertTrue(response["ok"])
             self.assertEqual(db.query(MagicLink).count(), 1)
+            self.assertEqual(db.query(MagicLink).one().token_hash, "481f6cc0511143ccdd7e2d1b1b94faf0a700a8b49cd13922a70b5ae28acaa8c5:otp")
             row = db.query(SurgeonOtpAuditLog).one()
             self.assertEqual(row.surgeon_id, surgeon.id)
             self.assertTrue(row.matched)
@@ -74,11 +82,15 @@ class SurgeonOtpAuditTest(unittest.TestCase):
         finally:
             db.close()
 
-    def test_sms_message_identifies_shared_rvu_cal_code(self):
+    def test_sms_message_identifies_cal_code(self):
         self.assertEqual(
-            _otp_sms_message("123456"),
-            "RVU / CAL access code: 123456\nExpires in 15 min. Do not share.",
+            _otp_sms_message_template(),
+            "CAL access code: $OTP\nExpires in 15 min. Do not share.",
         )
+
+    def test_textbelt_otp_userid_is_cal_scoped(self):
+        surgeon = Surgeon(id=42, first_name="Jorge", last_name="Florin", email="jorge@example.com", is_active=True)
+        self.assertEqual(_textbelt_otp_userid(surgeon), "cal:surgeon:42")
 
     def test_matching_phone_request_is_audited(self):
         db = self.Session()
@@ -87,7 +99,7 @@ class SurgeonOtpAuditTest(unittest.TestCase):
             db.add(surgeon)
             db.commit()
 
-            with patch("app.routers.surgeon_otp.send_sms", return_value=True), patch("app.routers.surgeon_otp.send_email", return_value=True):
+            with patch("app.routers.surgeon_otp.generate_sms_otp", return_value=(True, "654321", None)), patch("app.routers.surgeon_otp.send_email", return_value=True):
                 response = otp_request(OtpRequestBody(email=" (910) 262-7271 "), request=test_request(), db=db)
 
             self.assertTrue(response["ok"])
@@ -109,7 +121,7 @@ class SurgeonOtpAuditTest(unittest.TestCase):
             db.add(surgeon)
             db.commit()
 
-            with patch("app.routers.surgeon_otp.send_sms", return_value=False), patch("app.routers.surgeon_otp.send_email", return_value=True):
+            with patch("app.routers.surgeon_otp.generate_sms_otp", return_value=(False, None, "SMS provider failed")), patch("app.routers.surgeon_otp.send_email", return_value=True):
                 response = otp_request(OtpRequestBody(email="lucy@example.com"), request=test_request(), db=db)
 
             self.assertTrue(response["ok"])
@@ -145,7 +157,7 @@ class SurgeonOtpAuditTest(unittest.TestCase):
             db.add(surgeon)
             db.commit()
 
-            with patch("app.routers.surgeon_otp.send_sms", return_value=True), patch("app.routers.surgeon_otp.send_email", return_value=True), patch("app.routers.surgeon_otp.random.randint", return_value=123456):
+            with patch("app.routers.surgeon_otp.generate_sms_otp", return_value=(True, "123456", None)), patch("app.routers.surgeon_otp.send_email", return_value=True):
                 otp_request(OtpRequestBody(email="jorge@example.com"), request=test_request(), db=db)
             response = otp_verify(OtpVerifyBody(email="jorge@example.com", code="123456"), request=test_request(), db=db)
 
@@ -163,7 +175,7 @@ class SurgeonOtpAuditTest(unittest.TestCase):
             db.add(surgeon)
             db.commit()
 
-            with patch("app.routers.surgeon_otp.send_sms", return_value=True), patch("app.routers.surgeon_otp.send_email", return_value=True), patch("app.routers.surgeon_otp.random.randint", return_value=123456):
+            with patch("app.routers.surgeon_otp.generate_sms_otp", return_value=(True, "123456", None)), patch("app.routers.surgeon_otp.send_email", return_value=True):
                 otp_request(OtpRequestBody(email="407-555-4960"), request=test_request(), db=db)
             response = otp_verify(OtpVerifyBody(email="(407) 555-4960", code="123456"), request=test_request(), db=db)
 

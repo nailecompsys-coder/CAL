@@ -14,7 +14,7 @@ from ..database import get_db
 from ..device_names import readable_device_name
 from ..email_service import send_email
 from ..models import MagicLink, Surgeon, SurgeonDevice, SurgeonOtpAuditLog
-from ..sms_service import send_sms
+from ..sms_service import generate_sms_otp
 from ..surgeon_visibility import surgeon_is_visible
 
 router = APIRouter()
@@ -123,8 +123,12 @@ def _send_otp_email(surgeon: Surgeon, code: str) -> tuple[bool, str | None]:
         return False, f"Email send failed: {exc.__class__.__name__}"
 
 
-def _otp_sms_message(code: str) -> str:
-    return f"RVU / CAL access code: {code}\nExpires in {OTP_EXPIRE_MINUTES} min. Do not share."
+def _otp_sms_message_template() -> str:
+    return f"CAL access code: $OTP\nExpires in {OTP_EXPIRE_MINUTES} min. Do not share."
+
+
+def _textbelt_otp_userid(surgeon: Surgeon) -> str:
+    return f"cal:surgeon:{surgeon.id}"
 
 
 def _client_ip(request: Request) -> str | None:
@@ -182,27 +186,34 @@ def otp_request(body: OtpRequestBody, request: Request, db: Session = Depends(ge
         db.commit()
         return {"ok": True, "message": "If that email or phone is registered, a code was sent."}
 
+    delivery_channel = "sms+email" if surgeon.phone else "email"
+    delivery_success = False
+    failure_reasons = []
     code = _generate_otp()
-    _invalidate_existing_otp_codes(db, surgeon.id)
 
+    if surgeon.phone:
+        sms_success, sms_code, sms_failure = generate_sms_otp(
+            phone=surgeon.phone,
+            userid=_textbelt_otp_userid(surgeon),
+            message=_otp_sms_message_template(),
+            lifetime=OTP_EXPIRE_MINUTES * 60,
+            length=6,
+        )
+        if sms_success and sms_code:
+            code = sms_code
+        elif sms_failure:
+            failure_reasons.append(sms_failure)
+        else:
+            failure_reasons.append("SMS provider failed to send code.")
+        delivery_success = sms_success
+
+    _invalidate_existing_otp_codes(db, surgeon.id)
     db.add(MagicLink(
         surgeon_id=surgeon.id,
         token_hash=_hash_otp(code) + ":otp",
         expires_at=datetime.now(timezone.utc) + timedelta(minutes=OTP_EXPIRE_MINUTES),
     ))
     db.commit()
-
-    delivery_channel = "sms+email" if surgeon.phone else "email"
-    delivery_success = False
-    failure_reasons = []
-    if surgeon.phone:
-        sms_success = send_sms(
-            phone=surgeon.phone,
-            message=_otp_sms_message(code),
-        )
-        if not sms_success:
-            failure_reasons.append("SMS provider failed to send code.")
-        delivery_success = sms_success
 
     email_success, email_failure = _send_otp_email(surgeon, code)
     if email_failure:

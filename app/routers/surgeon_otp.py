@@ -13,7 +13,7 @@ from ..auth import create_surgeon_session_token
 from ..database import get_db
 from ..device_names import readable_device_name
 from ..email_service import send_email
-from ..models import MagicLink, Surgeon, SurgeonDevice, SurgeonOtpAuditLog
+from ..models import AdminUser, MagicLink, Surgeon, SurgeonDevice, SurgeonOtpAuditLog
 from ..sms_service import generate_sms_otp
 from ..surgeon_visibility import surgeon_is_visible
 
@@ -78,6 +78,34 @@ def _find_active_surgeon_by_identifier(db: Session, identifier: str) -> Surgeon 
     if "@" in submitted:
         return _find_active_surgeon_by_email(db, submitted)
     return _find_active_surgeon_by_phone(db, submitted)
+
+
+def _find_admin_preview_surgeon_by_identifier(db: Session, identifier: str) -> Surgeon | None:
+    submitted = identifier.strip()
+    if "@" not in submitted:
+        return None
+
+    admin = db.query(AdminUser).filter(
+        sql_func.lower(AdminUser.email) == submitted.lower(),
+        AdminUser.is_active == True,  # noqa: E712
+    ).first()
+    if not admin:
+        return None
+
+    candidates = (
+        db.query(Surgeon)
+        .filter(
+            Surgeon.is_active == True,  # noqa: E712
+            Surgeon.staff_type == "physician",
+        )
+        .order_by(Surgeon.sort_order, Surgeon.id)
+        .all()
+    )
+    return next((surgeon for surgeon in candidates if surgeon_is_visible(surgeon)), None)
+
+
+def _find_native_login_surgeon_by_identifier(db: Session, identifier: str) -> Surgeon | None:
+    return _find_active_surgeon_by_identifier(db, identifier) or _find_admin_preview_surgeon_by_identifier(db, identifier)
 
 
 def _invalidate_existing_otp_codes(db: Session, surgeon_id: int) -> None:
@@ -169,7 +197,7 @@ def _audit_otp(
 @router.post("/otp/request")
 def otp_request(body: OtpRequestBody, request: Request, db: Session = Depends(get_db)):
     submitted_identifier = body.email.strip().lower()
-    surgeon = _find_active_surgeon_by_identifier(db, submitted_identifier)
+    surgeon = _find_native_login_surgeon_by_identifier(db, submitted_identifier)
     if not surgeon:
         # Don't reveal whether email exists
         _audit_otp(
@@ -239,7 +267,7 @@ def otp_request(body: OtpRequestBody, request: Request, db: Session = Depends(ge
 @router.post("/otp/verify")
 def otp_verify(body: OtpVerifyBody, request: Request, db: Session = Depends(get_db)):
     submitted_identifier = body.email.strip().lower()
-    surgeon = _find_active_surgeon_by_identifier(db, submitted_identifier)
+    surgeon = _find_native_login_surgeon_by_identifier(db, submitted_identifier)
     if not surgeon:
         _audit_otp(
             db,

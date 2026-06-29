@@ -10,7 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from starlette.requests import Request
 
-from app.models import Base, MagicLink, Surgeon, SurgeonDevice, SurgeonOtpAuditLog
+from app.models import AdminUser, Base, MagicLink, Surgeon, SurgeonDevice, SurgeonOtpAuditLog
 from app.routers.surgeon_otp import (
     OtpRequestBody,
     OtpVerifyBody,
@@ -147,6 +147,48 @@ class SurgeonOtpAuditTest(unittest.TestCase):
             self.assertEqual(row.action, "verify")
             self.assertEqual(row.surgeon_id, surgeon.id)
             self.assertEqual(row.result, "invalid_code")
+        finally:
+            db.close()
+
+    def test_active_admin_email_requests_preview_surgeon_otp(self):
+        db = self.Session()
+        try:
+            preview = Surgeon(first_name="Chris", last_name="Johnson", email="chris@example.com", phone="4073995147", staff_type="physician", sort_order=1, is_active=True)
+            hidden_admin_surgeon = Surgeon(first_name="Developer", last_name="Admin", email="don@clermontitstore.com", phone="3526360051", staff_type="physician", sort_order=99, is_active=False)
+            admin = AdminUser(username="dnaile", email="don@clermontitstore.com", password_hash="x", is_active=True)
+            db.add_all([preview, hidden_admin_surgeon, admin])
+            db.commit()
+
+            with patch("app.routers.surgeon_otp.generate_sms_otp", return_value=(True, "123456", None)), patch("app.routers.surgeon_otp.send_email", return_value=True):
+                response = otp_request(OtpRequestBody(email="don@clermontitstore.com"), request=test_request(), db=db)
+
+            self.assertTrue(response["ok"])
+            link = db.query(MagicLink).one()
+            self.assertEqual(link.surgeon_id, preview.id)
+            row = db.query(SurgeonOtpAuditLog).one()
+            self.assertEqual(row.submitted_email, "don@clermontitstore.com")
+            self.assertEqual(row.surgeon_id, preview.id)
+            self.assertEqual(row.result, "requested")
+        finally:
+            db.close()
+
+    def test_active_admin_email_can_verify_preview_surgeon_otp(self):
+        db = self.Session()
+        try:
+            preview = Surgeon(first_name="Chris", last_name="Johnson", email="chris@example.com", phone="4073995147", staff_type="physician", sort_order=1, is_active=True)
+            admin = AdminUser(username="dnaile", email="don@clermontitstore.com", password_hash="x", is_active=True)
+            db.add_all([preview, admin])
+            db.commit()
+
+            with patch("app.routers.surgeon_otp.generate_sms_otp", return_value=(True, "123456", None)), patch("app.routers.surgeon_otp.send_email", return_value=True):
+                otp_request(OtpRequestBody(email="don@clermontitstore.com"), request=test_request(), db=db)
+            response = otp_verify(OtpVerifyBody(email="don@clermontitstore.com", code="123456"), request=test_request(), db=db)
+
+            self.assertIn("token", response)
+            device = db.query(SurgeonDevice).one()
+            self.assertEqual(device.surgeon_id, preview.id)
+            rows = db.query(SurgeonOtpAuditLog).order_by(SurgeonOtpAuditLog.id).all()
+            self.assertEqual([row.result for row in rows], ["requested", "verified"])
         finally:
             db.close()
 

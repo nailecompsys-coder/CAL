@@ -84,8 +84,17 @@
             </td>
             <td class="px-5 py-3">
               <div class="flex gap-1 justify-end">
-                <button onclick="openEditModal({{ loc.id }}, {{ loc.name|tojson }}, {{ (loc.address or '')|tojson }}, {{ (loc.city or '')|tojson }}, {{ (loc.phone or '')|tojson }}, {{ loc.location_type|tojson }}, {{ (loc.abbreviation or '')|tojson }}, {{ (loc.color or '#0ea5e9')|tojson }})"
-                  class="w-7 h-7 bg-slate-100 text-slate-600 rounded-lg hover:bg-blue-100 hover:text-blue-600 flex items-center justify-center" title="Edit">
+                <button type="button"
+                  class="js-edit-location w-7 h-7 bg-slate-100 text-slate-600 rounded-lg hover:bg-blue-100 hover:text-blue-600 flex items-center justify-center"
+                  data-id="{{ loc.id }}"
+                  data-name="{{ loc.name|e }}"
+                  data-address="{{ (loc.address or '')|e }}"
+                  data-city="{{ (loc.city or '')|e }}"
+                  data-phone="{{ (loc.phone or '')|e }}"
+                  data-type="{{ loc.location_type|e }}"
+                  data-abbreviation="{{ (loc.abbreviation or '')|e }}"
+                  data-color="{{ (loc.color or '#0ea5e9')|e }}"
+                  title="Edit">
                   <i class="fa-solid fa-pen text-xs"></i>
                 </button>
                 <form method="post" action="/admin/locations/{{ loc.id }}/toggle">
@@ -164,8 +173,17 @@
             </td>
             <td class="px-5 py-3">
               <div class="flex gap-1 justify-end">
-                <button onclick="openEditModal({{ loc.id }}, {{ loc.name|tojson }}, {{ (loc.address or '')|tojson }}, {{ (loc.city or '')|tojson }}, {{ (loc.phone or '')|tojson }}, {{ loc.location_type|tojson }}, {{ (loc.abbreviation or '')|tojson }}, {{ (loc.color or '#3b82f6')|tojson }})"
-                  class="w-7 h-7 bg-slate-100 text-slate-600 rounded-lg hover:bg-blue-100 hover:text-blue-600 flex items-center justify-center" title="Edit">
+                <button type="button"
+                  class="js-edit-location w-7 h-7 bg-slate-100 text-slate-600 rounded-lg hover:bg-blue-100 hover:text-blue-600 flex items-center justify-center"
+                  data-id="{{ loc.id }}"
+                  data-name="{{ loc.name|e }}"
+                  data-address="{{ (loc.address or '')|e }}"
+                  data-city="{{ (loc.city or '')|e }}"
+                  data-phone="{{ (loc.phone or '')|e }}"
+                  data-type="{{ loc.location_type|e }}"
+                  data-abbreviation="{{ (loc.abbreviation or '')|e }}"
+                  data-color="{{ (loc.color or '#3b82f6')|e }}"
+                  title="Edit">
                   <i class="fa-solid fa-pen text-xs"></i>
                 </button>
                 <form method="post" action="/admin/locations/{{ loc.id }}/toggle">
@@ -350,6 +368,21 @@ function openEditModal(id, name, address, city, phone, type, abbreviation, color
   setColor('edit', color);
   document.getElementById('edit-modal').classList.remove('hidden');
 }
+
+document.querySelectorAll('.js-edit-location').forEach(button => {
+  button.addEventListener('click', () => {
+    openEditModal(
+      button.dataset.id,
+      button.dataset.name || '',
+      button.dataset.address || '',
+      button.dataset.city || '',
+      button.dataset.phone || '',
+      button.dataset.type || 'clinic',
+      button.dataset.abbreviation || '',
+      button.dataset.color || defaultColorFor('edit')
+    );
+  });
+});
 
 ['add', 'edit'].forEach(prefix => {
   const clinicInput = document.getElementById(`${prefix}-type-clinic`);

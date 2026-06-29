@@ -159,18 +159,19 @@ class SurgeonOtpAuditTest(unittest.TestCase):
             db.add_all([preview, hidden_admin_surgeon, admin])
             db.commit()
 
-            with patch("app.routers.surgeon_otp.generate_sms_otp") as sms, patch("app.routers.surgeon_otp.send_email", return_value=True) as email:
+            with patch("app.routers.surgeon_otp.generate_sms_otp", return_value=(True, "123456", None)) as sms, patch("app.routers.surgeon_otp.send_email", return_value=True) as email:
                 response = otp_request(OtpRequestBody(email="don@clermontitstore.com"), request=test_request(), db=db)
 
             self.assertTrue(response["ok"])
-            sms.assert_not_called()
+            self.assertEqual(sms.call_args.kwargs["phone"], "3526360051")
+            self.assertEqual(sms.call_args.kwargs["userid"], f"cal:admin:{admin.id}")
             self.assertEqual(email.call_args.kwargs["to_email"], "don@clermontitstore.com")
             link = db.query(MagicLink).one()
             self.assertEqual(link.surgeon_id, preview.id)
             row = db.query(SurgeonOtpAuditLog).one()
             self.assertEqual(row.submitted_email, "don@clermontitstore.com")
             self.assertEqual(row.surgeon_id, preview.id)
-            self.assertEqual(row.delivery_channel, "email")
+            self.assertEqual(row.delivery_channel, "sms+email")
             self.assertEqual(row.result, "requested")
         finally:
             db.close()
@@ -183,9 +184,13 @@ class SurgeonOtpAuditTest(unittest.TestCase):
             db.add_all([preview, admin])
             db.commit()
 
-            with patch("app.routers.surgeon_otp.random.randint", return_value=123456), patch("app.routers.surgeon_otp.generate_sms_otp") as sms, patch("app.routers.surgeon_otp.send_email", return_value=True):
+            hidden_admin_surgeon = Surgeon(first_name="Developer", last_name="Admin", email="don@clermontitstore.com", phone="3526360051", staff_type="physician", sort_order=99, is_active=False)
+            db.add(hidden_admin_surgeon)
+            db.commit()
+
+            with patch("app.routers.surgeon_otp.generate_sms_otp", return_value=(True, "123456", None)) as sms, patch("app.routers.surgeon_otp.send_email", return_value=True):
                 otp_request(OtpRequestBody(email="don@clermontitstore.com"), request=test_request(), db=db)
-            sms.assert_not_called()
+            self.assertEqual(sms.call_args.kwargs["userid"], f"cal:admin:{admin.id}")
             response = otp_verify(OtpVerifyBody(email="don@clermontitstore.com", code="123456"), request=test_request(), db=db)
 
             self.assertIn("token", response)

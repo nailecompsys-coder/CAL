@@ -80,7 +80,7 @@ def _find_active_surgeon_by_identifier(db: Session, identifier: str) -> Surgeon 
     return _find_active_surgeon_by_phone(db, submitted)
 
 
-def _find_active_admin_email_by_identifier(db: Session, identifier: str) -> str | None:
+def _find_active_admin_by_identifier(db: Session, identifier: str) -> AdminUser | None:
     submitted = identifier.strip()
     if "@" not in submitted:
         return None
@@ -89,9 +89,7 @@ def _find_active_admin_email_by_identifier(db: Session, identifier: str) -> str 
         sql_func.lower(AdminUser.email) == submitted.lower(),
         AdminUser.is_active == True,  # noqa: E712
     ).first()
-    if not admin:
-        return None
-    return admin.email
+    return admin
 
 
 def _find_admin_preview_surgeon(db: Session) -> Surgeon | None:
@@ -107,15 +105,23 @@ def _find_admin_preview_surgeon(db: Session) -> Surgeon | None:
     return next((surgeon for surgeon in candidates if surgeon_is_visible(surgeon)), None)
 
 
-def _resolve_native_login_identity(db: Session, identifier: str) -> tuple[Surgeon | None, str | None]:
+def _admin_preview_phone(db: Session, admin: AdminUser) -> str | None:
+    contact = db.query(Surgeon).filter(
+        sql_func.lower(Surgeon.email) == admin.email.lower(),
+        Surgeon.phone.isnot(None),
+    ).first()
+    return contact.phone if contact else None
+
+
+def _resolve_native_login_identity(db: Session, identifier: str) -> tuple[Surgeon | None, AdminUser | None]:
     surgeon = _find_active_surgeon_by_identifier(db, identifier)
     if surgeon:
         return surgeon, None
 
-    admin_email = _find_active_admin_email_by_identifier(db, identifier)
-    if not admin_email:
+    admin = _find_active_admin_by_identifier(db, identifier)
+    if not admin:
         return None, None
-    return _find_admin_preview_surgeon(db), admin_email
+    return _find_admin_preview_surgeon(db), admin
 
 
 def _invalidate_existing_otp_codes(db: Session, surgeon_id: int) -> None:
@@ -170,6 +176,10 @@ def _textbelt_otp_userid(surgeon: Surgeon) -> str:
     return f"cal:surgeon:{surgeon.id}"
 
 
+def _textbelt_admin_otp_userid(admin: AdminUser) -> str:
+    return f"cal:admin:{admin.id}"
+
+
 def _client_ip(request: Request) -> str | None:
     forwarded_for = request.headers.get("x-forwarded-for", "")
     if forwarded_for:
@@ -208,7 +218,7 @@ def _audit_otp(
 @router.post("/otp/request")
 def otp_request(body: OtpRequestBody, request: Request, db: Session = Depends(get_db)):
     submitted_identifier = body.email.strip().lower()
-    surgeon, admin_preview_email = _resolve_native_login_identity(db, submitted_identifier)
+    surgeon, admin_preview = _resolve_native_login_identity(db, submitted_identifier)
     if not surgeon:
         # Don't reveal whether email exists
         _audit_otp(
@@ -225,12 +235,28 @@ def otp_request(body: OtpRequestBody, request: Request, db: Session = Depends(ge
         db.commit()
         return {"ok": True, "message": "If that email or phone is registered, a code was sent."}
 
-    delivery_channel = "email" if admin_preview_email else ("sms+email" if surgeon.phone else "email")
+    admin_preview_phone = _admin_preview_phone(db, admin_preview) if admin_preview else None
+    delivery_channel = "sms+email" if admin_preview_phone or (surgeon.phone and not admin_preview) else "email"
     delivery_success = False
     failure_reasons = []
     code = _generate_otp()
 
-    if surgeon.phone and not admin_preview_email:
+    if admin_preview_phone and admin_preview:
+        sms_success, sms_code, sms_failure = generate_sms_otp(
+            phone=admin_preview_phone,
+            userid=_textbelt_admin_otp_userid(admin_preview),
+            message=_otp_sms_message_template(),
+            lifetime=OTP_EXPIRE_MINUTES * 60,
+            length=6,
+        )
+        if sms_success and sms_code:
+            code = sms_code
+        elif sms_failure:
+            failure_reasons.append(sms_failure)
+        else:
+            failure_reasons.append("SMS provider failed to send code.")
+        delivery_success = sms_success
+    elif surgeon.phone and not admin_preview:
         sms_success, sms_code, sms_failure = generate_sms_otp(
             phone=surgeon.phone,
             userid=_textbelt_otp_userid(surgeon),
@@ -254,7 +280,7 @@ def otp_request(body: OtpRequestBody, request: Request, db: Session = Depends(ge
     ))
     db.commit()
 
-    email_success, email_failure = _send_otp_email(surgeon, code, to_email=admin_preview_email)
+    email_success, email_failure = _send_otp_email(surgeon, code, to_email=admin_preview.email if admin_preview else None)
     if email_failure:
         failure_reasons.append(email_failure)
     delivery_success = delivery_success or email_success

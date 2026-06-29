@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from starlette.requests import Request
 
 from app.models import Base, MagicLink, Surgeon, SurgeonDevice, SurgeonOtpAuditLog
-from app.routers.surgeon_otp import OtpRequestBody, OtpVerifyBody, otp_request, otp_verify
+from app.routers.surgeon_otp import OtpRequestBody, OtpVerifyBody, _otp_sms_message, otp_request, otp_verify
 
 
 def test_request() -> Request:
@@ -73,6 +73,12 @@ class SurgeonOtpAuditTest(unittest.TestCase):
             self.assertEqual(row.result, "requested")
         finally:
             db.close()
+
+    def test_sms_message_identifies_shared_rvu_cal_code(self):
+        self.assertEqual(
+            _otp_sms_message("123456"),
+            "RVU / CAL access code: 123456\nExpires in 15 min. Do not share.",
+        )
 
     def test_matching_phone_request_is_audited(self):
         db = self.Session()

@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 import os
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+
+EASTERN_TZ = ZoneInfo("America/New_York")
 
 
 APPOINTMENT_SQL = """
@@ -18,8 +22,8 @@ WITH filtered AS (
     a.ServiceSiteUid,
     a.RoomUid,
     a.Reason,
-    a.StartDateTime AS LocalStartDateTime,
-    a.EndDateTime AS LocalEndDateTime
+    a.StartDateTime AS AprimaStartDateTime,
+    a.EndDateTime AS AprimaEndDateTime
   FROM Appointment a
   WHERE a.StartDateTime >= %s
     AND a.StartDateTime < %s
@@ -31,9 +35,8 @@ WITH filtered AS (
 )
 SELECT
   CAST(appt.AppointmentUid AS VARCHAR(36)) AS appointment_id,
-  CAST(appt.LocalStartDateTime AS DATE) AS appointment_date,
-  CONVERT(VARCHAR(5), appt.LocalStartDateTime, 108) AS start_time,
-  CONVERT(VARCHAR(5), appt.LocalEndDateTime, 108) AS end_time,
+  appt.AprimaStartDateTime AS aprima_start_datetime,
+  appt.AprimaEndDateTime AS aprima_end_datetime,
   COALESCE(NULLIF(prov.Initials, ''), LEFT(pp.FirstName, 1) + LEFT(pp.LastName, 1)) AS surgeon_initials,
   LTRIM(RTRIM(COALESCE(pp.FirstName, '') + ' ' + COALESCE(pp.LastName, ''))) AS surgeon_name,
   LTRIM(RTRIM(COALESCE(pat.LastName, '') + ', ' + COALESCE(pat.FirstName, ''))) AS patient_name,
@@ -65,7 +68,7 @@ WHERE (las.IsCanceledStatus = 0 OR las.IsCanceledStatus IS NULL)
   AND UPPER(COALESCE(appt.Reason, '')) NOT LIKE '%POSSIBLE%'
   AND UPPER(COALESCE(appt.Reason, '')) NOT LIKE '%WAITLIST%'
   AND UPPER(COALESCE(appt.Reason, '')) NOT LIKE '%WAIT LIST%'
-ORDER BY CAST(appt.LocalStartDateTime AS DATE), surgeon_name, appt.LocalStartDateTime, patient_name
+ORDER BY appt.AprimaStartDateTime, surgeon_name, patient_name
 """
 
 
@@ -84,7 +87,11 @@ def native_patient_schedule(start_date: date, end_date: date) -> dict:
     try:
         with conn.cursor(as_dict=True) as cursor:
             cursor.execute(APPOINTMENT_SQL, _local_bounds_for_dates(start_date, end_date))
-            rows = [_serialize_row(row) for row in cursor.fetchall()]
+            rows = [
+                row
+                for row in (_serialize_row(row) for row in cursor.fetchall())
+                if start_date.isoformat() <= row["date"] <= end_date.isoformat()
+            ]
     finally:
         conn.close()
 
@@ -137,22 +144,26 @@ def _parse_connection_string(conn_string: str) -> dict[str, str]:
 
 
 def _local_bounds_for_dates(start_date: date, end_date: date) -> tuple[datetime, datetime]:
+    """Return Aprima UTC datetime bounds for Eastern calendar dates."""
+
+    local_start = datetime.combine(start_date, time.min, tzinfo=EASTERN_TZ)
+    local_end = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=EASTERN_TZ)
     return (
-        datetime.combine(start_date, time.min),
-        datetime.combine(end_date + timedelta(days=1), time.min),
+        local_start.astimezone(timezone.utc).replace(tzinfo=None),
+        local_end.astimezone(timezone.utc).replace(tzinfo=None),
     )
 
 
 def _serialize_row(row: dict) -> dict:
-    appointment_date = row.get("appointment_date")
-    if hasattr(appointment_date, "isoformat"):
-        appointment_date = appointment_date.isoformat()
+    local_start = _eastern_from_aprima_utc(row.get("aprima_start_datetime"))
+    local_end = _eastern_from_aprima_utc(row.get("aprima_end_datetime"))
 
     return {
         "id": row.get("appointment_id"),
-        "date": appointment_date,
-        "start": row.get("start_time") or "",
-        "end": row.get("end_time") or "",
+        "date": local_start.date().isoformat() if local_start else "",
+        "start": _format_hhmm(local_start),
+        "end": _format_hhmm(local_end),
+        "timeZone": "America/New_York",
         "surgeonInitials": (row.get("surgeon_initials") or "").strip(),
         "surgeonName": (row.get("surgeon_name") or "Unassigned").strip(),
         "patientName": (row.get("patient_name") or "").strip(),
@@ -163,3 +174,15 @@ def _serialize_row(row: dict) -> dict:
         "serviceSite": (row.get("service_site") or "").strip(),
         "room": (row.get("room") or "").strip(),
     }
+
+
+def _eastern_from_aprima_utc(value) -> datetime | None:
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(EASTERN_TZ)
+
+
+def _format_hhmm(value: datetime | None) -> str:
+    return value.strftime("%H:%M") if value else ""

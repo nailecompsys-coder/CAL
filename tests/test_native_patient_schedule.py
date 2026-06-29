@@ -10,7 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models import Base, Surgeon
-from app.native_patient_schedule_service import APPOINTMENT_SQL, _local_bounds_for_dates
+from app.native_patient_schedule_service import APPOINTMENT_SQL, _local_bounds_for_dates, _serialize_row
 from app.routers.native_api import native_patient_schedule
 
 
@@ -36,6 +36,7 @@ class NativePatientScheduleRouteTest(unittest.TestCase):
                         "date": "2026-06-12",
                         "start": "08:00",
                         "end": "08:30",
+                        "timeZone": "America/New_York",
                         "surgeonInitials": "CJ",
                         "surgeonName": "Chris Johnson",
                         "patientName": "Patient, Test",
@@ -61,14 +62,36 @@ class NativePatientScheduleRouteTest(unittest.TestCase):
         finally:
             db.close()
 
-    def test_aprima_query_bounds_use_aprima_local_datetimes(self):
+    def test_aprima_query_bounds_use_eastern_dates_as_aprima_utc_datetimes(self):
         start, end = _local_bounds_for_dates(date(2026, 6, 15), date(2026, 6, 21))
 
-        self.assertEqual(start, datetime(2026, 6, 15, 0, 0))
-        self.assertEqual(end, datetime(2026, 6, 22, 0, 0))
+        self.assertEqual(start, datetime(2026, 6, 15, 4, 0))
+        self.assertEqual(end, datetime(2026, 6, 22, 4, 0))
+
+    def test_aprima_rows_are_serialized_as_eastern_military_time(self):
+        row = _serialize_row({
+            "appointment_id": "appt-1",
+            "aprima_start_datetime": datetime(2026, 6, 15, 12, 20),
+            "aprima_end_datetime": datetime(2026, 6, 15, 12, 30),
+            "surgeon_initials": "LW",
+            "surgeon_name": "Lucille Woodley",
+            "patient_name": "Patient, Test",
+            "mrn": "123",
+            "appointment_type": "Office Visit",
+            "status": "Scheduled",
+            "reason": "Consult",
+            "service_site": "Winter Garden",
+            "room": "1",
+        })
+
+        self.assertEqual(row["date"], "2026-06-15")
+        self.assertEqual(row["start"], "08:20")
+        self.assertEqual(row["end"], "08:30")
+        self.assertEqual(row["timeZone"], "America/New_York")
 
     def test_aprima_query_only_reads_visible_scheduled_patient_appointments(self):
         self.assertNotIn("AT TIME ZONE", APPOINTMENT_SQL)
+        self.assertIn("a.StartDateTime AS AprimaStartDateTime", APPOINTMENT_SQL)
         self.assertIn("las.ShowOnSchedule = 1", APPOINTMENT_SQL)
         self.assertIn("a.PatientUid IS NOT NULL", APPOINTMENT_SQL)
         self.assertIn("pt.Inactive = 0", APPOINTMENT_SQL)

@@ -123,6 +123,10 @@ def _send_otp_email(surgeon: Surgeon, code: str) -> tuple[bool, str | None]:
         return False, f"Email send failed: {exc.__class__.__name__}"
 
 
+def _otp_sms_message(code: str) -> str:
+    return f"RVU / CAL access code: {code}\nExpires in {OTP_EXPIRE_MINUTES} min. Do not share."
+
+
 def _client_ip(request: Request) -> str | None:
     forwarded_for = request.headers.get("x-forwarded-for", "")
     if forwarded_for:
@@ -194,7 +198,7 @@ def otp_request(body: OtpRequestBody, request: Request, db: Session = Depends(ge
     if surgeon.phone:
         sms_success = send_sms(
             phone=surgeon.phone,
-            message=f"CAL access code: {code}\nExpires in {OTP_EXPIRE_MINUTES} min. Do not share.",
+            message=_otp_sms_message(code),
         )
         if not sms_success:
             failure_reasons.append("SMS provider failed to send code.")

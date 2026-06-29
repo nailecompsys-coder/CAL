@@ -61,17 +61,16 @@ def get_current_surgeon(
     surgeon_token: str | None = Cookie(default=None),
     db: Session = Depends(get_db),
 ) -> tuple[Surgeon, SurgeonDevice]:
-    token = (
-        surgeon_token
-        or request.cookies.get("surgeon_token")
-        or request.cookies.get("surgeon_token_preview")
-    )
-    if not token:
-        auth_header = request.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer "):
-            token = auth_header[7:].strip()
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header[7:].strip() if auth_header.startswith("Bearer ") else None
     if not token:
         token = (request.headers.get("X-CAL-Device-Token") or "").strip()
+    if not token:
+        token = (
+            surgeon_token
+            or request.cookies.get("surgeon_token")
+            or request.cookies.get("surgeon_token_preview")
+        )
 
     if not token:
         _raise_html_or_json_auth_error(request, "/surgeon/register")

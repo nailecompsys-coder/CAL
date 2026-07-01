@@ -9,6 +9,11 @@ dist/
 web-build/
 build/
 expo-env.d.ts
+*.apk
+*.ipa
+*.xcarchive
+*.xcarchive/
+DerivedData/
 
 # Native
 .kotlin/

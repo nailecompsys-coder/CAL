@@ -18,12 +18,20 @@ Expected result: `com.midfloridasurgical.calnative` launches on the CAL simulato
 
 ## Before TestFlight
 
-1. Confirm backend `main` is pushed and deployed as needed.
-2. Confirm native `native-ios` is pushed.
-3. Run the simulator verification command above.
-4. Confirm version/build number in Xcode project settings.
-5. Archive locally with Xcode or local `xcodebuild`; do not run EAS.
+1. Run `./scripts/check-native-guardrails.sh --release`.
+2. Confirm backend `main` is pushed and deployed as needed.
+3. Confirm native `native-ios` is pushed.
+4. Run the simulator verification command above.
+5. Confirm version/build number in Xcode project settings.
+6. Archive locally with Xcode or local `xcodebuild`; do not run EAS.
 
 ## Current Policy
 
 Only push to TestFlight when explicitly requested. Routine cleanup and simulator validation stop after the local simulator build/run succeeds.
+
+## Stack Guardrails
+
+- SwiftUI under `ios/CALNative` is the only production iOS lane.
+- Expo/React Native is a temporary Android bridge, not a TestFlight lane.
+- Jetpack Compose is the target Android lane, but it is not production until it has real CAL API integration and parity approval.
+- Any native workflow change must update `docs/cal-native-parity-ledger.md` in the same commit.

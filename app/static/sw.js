@@ -1,6 +1,6 @@
 // Service Worker — Mid Florida Surgical Scheduler
 // Only cache /static/* — never cache /surgeon/* or other HTML (avoids stale PWA UI after deploy).
-const CACHE_NAME = 'cal-1-3-5-beta-1-20260701T115830Z-static';
+const CACHE_NAME = 'cal-1-3-5-beta-1-20260701T120527Z-static';
 
 const OFFLINE_URLS = [
   '/static/manifest.json',

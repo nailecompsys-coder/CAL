@@ -318,6 +318,17 @@ function ensureMasterStack(frame) {
   return stack;
 }
 
+function collectVisibleMonthCells() {
+  if (!calendar || calendar.view.type !== 'dayGridMonth') return;
+  document.querySelectorAll('.fc-daygrid-day[data-date]').forEach(day => {
+    const key = day.getAttribute('data-date');
+    const frame = day.querySelector('.fc-daygrid-day-frame');
+    if (!key || !frame) return;
+    dayCellFrames.set(key, frame);
+    ensureMasterStack(frame);
+  });
+}
+
 function escapeHtml(value) {
   return String(value || '').replace(/[&<>"']/g, ch => ({
     '&': '&amp;',
@@ -407,6 +418,7 @@ function splitSession(ev) {
 
 function renderMasterMonthCells() {
   if (!calendar || calendar.view.type !== 'dayGridMonth') return;
+  collectVisibleMonthCells();
   for (const [key, frame] of dayCellFrames.entries()) {
     const stack = ensureMasterStack(frame);
     const events = visibleCalendarEvents.filter(ev => eventDateKey(ev) === key);

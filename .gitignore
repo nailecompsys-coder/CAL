@@ -17,6 +17,18 @@ __pycache__/
 .idea/
 memory.md
 
+# Native build/dependency artifacts if native lanes are ever checked from here
+node_modules/
+.expo/
+build/
+dist/
+web-build/
+DerivedData/
+*.xcarchive
+*.ipa
+*.apk
+*.xcuserstate
+
 # Mutable uploads and local scratch
 app/static/uploads/
 cal_live.dump

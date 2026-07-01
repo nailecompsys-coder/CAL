@@ -27,6 +27,7 @@
   .master-day-stack { clear:both; padding:0 1px 2px; display:flex; flex-direction:column; gap:2px; min-height:72px; font-size:.58rem; line-height:1.15; }
   .master-row { min-height:15px; border-radius:5px; padding:2px 4px; border:1px solid rgba(20,48,90,.08); background:rgba(255,255,255,.66); color:var(--cal-ink); overflow:hidden; }
   .master-row strong { font-weight:900; letter-spacing:.01em; }
+  .master-row s { color:rgba(74,96,128,.68); text-decoration-thickness:2px; }
   .master-row--off { background:rgba(187,247,208,.42); border-color:rgba(34,197,94,.16); color:#166534; }
   .master-row--call { background:rgba(219,234,254,.58); border-color:rgba(59,130,246,.16); color:#1e3a8a; }
   .master-row--clinic { background:rgba(255,255,255,.72); border-color:rgba(148,163,184,.18); }
@@ -337,6 +338,39 @@ function eventLabel(ev) {
   return ev.title || '';
 }
 
+function callGroupLabel(ev) {
+  const p = ev.extendedProps || {};
+  return ((ev.title || '').split(':')[0].trim() || groupAbbrev(p.call_group)).toUpperCase();
+}
+
+function callInitialsHtml(ev) {
+  const p = ev.extendedProps || {};
+  if (p.role === 'nc') return 'NC';
+  const current = escapeHtml(p.covering_initials || surgeonInitialsFromEvent(ev));
+  const original = escapeHtml(p.original_initials || '');
+  if (p.is_covered && original && current && original !== current) {
+    return `<s>${original}</s> ${current}`;
+  }
+  return current;
+}
+
+function callLabelHtml(ev) {
+  return `<strong>${escapeHtml(callGroupLabel(ev))}:</strong> ${callInitialsHtml(ev)}`;
+}
+
+function scheduleLabelHtml(ev) {
+  const p = ev.extendedProps || {};
+  const initials = surgeonInitialsFromEvent(ev);
+  let facility = '';
+  if (p.type === 'surgery') {
+    facility = shortName(p.location) || 'OR';
+  } else {
+    const titleParts = String(ev.title || '').trim().split(/\s+/);
+    facility = titleParts.slice(1).join(' ') || p.location || '';
+  }
+  return `<strong>${escapeHtml(initials)}</strong>: ${escapeHtml(facility)}`;
+}
+
 function splitSession(ev) {
   const p = ev.extendedProps || {};
   if (p.type === 'clinic') {
@@ -365,24 +399,24 @@ function buildMasterCellHtml(events) {
   const offId = off[0]?.id || '';
   let html = `<div class="master-row master-row--off ${offId ? 'master-click' : ''}" ${offId ? `data-master-event-id="${escapeHtml(offId)}"` : ''}><strong>OFF:</strong>${offInitials ? ` ${escapeHtml(offInitials)}` : ''}</div>`;
 
-  const callPriority = label => {
-    const group = String(label || '').split(':')[0].trim().toUpperCase();
+  const callPriority = ev => {
+    const group = callGroupLabel(ev);
     if (group === 'WG') return 0;
     if (group === 'AL') return 1;
     return 10 + group.charCodeAt(0);
   };
-  const calls = byType('oncall').sort((a, b) => callPriority(eventLabel(a)) - callPriority(eventLabel(b)));
+  const calls = byType('oncall').sort((a, b) => callPriority(a) - callPriority(b));
   if (calls.length) {
     for (let i = 0; i < calls.length; i += 2) {
       const left = calls[i];
       const right = calls[i + 1];
       html += `<div class="master-row master-row--call master-split">`
-        + `<span class="master-left master-click" data-master-event-id="${escapeHtml(left.id)}">${escapeHtml(eventLabel(left))}</span>`
-        + `<span class="master-right ${right ? 'master-click' : 'master-empty'}" ${right ? `data-master-event-id="${escapeHtml(right.id)}"` : ''}>${right ? escapeHtml(eventLabel(right)) : ''}</span>`
+        + `<span class="master-left master-click" data-master-event-id="${escapeHtml(left.id)}">${callLabelHtml(left)}</span>`
+        + `<span class="master-right ${right ? 'master-click' : 'master-empty'}" ${right ? `data-master-event-id="${escapeHtml(right.id)}"` : ''}>${right ? callLabelHtml(right) : ''}</span>`
         + `</div>`;
     }
   } else {
-    html += `<div class="master-row master-row--call master-split"><span class="master-left master-empty">WG:</span><span class="master-right master-empty">AL:</span></div>`;
+    html += `<div class="master-row master-row--call master-split"><span class="master-left master-empty"><strong>WG:</strong></span><span class="master-right master-empty"><strong>AL:</strong></span></div>`;
   }
 
   const scheduleRows = new Map();
@@ -397,8 +431,8 @@ function buildMasterCellHtml(events) {
     const left = leftEvents[0];
     const right = rightEvents[0];
     html += `<div class="master-row master-row--clinic master-split">`
-      + `<span class="master-left ${left ? 'master-click' : 'master-empty'}" ${left ? `data-master-event-id="${escapeHtml(left.id)}"` : ''}>${left ? escapeHtml(eventLabel(left)) : ''}</span>`
-      + `<span class="master-right ${right ? 'master-click' : 'master-empty'}" ${right ? `data-master-event-id="${escapeHtml(right.id)}"` : ''}>${right ? escapeHtml(eventLabel(right)) : ''}</span>`
+      + `<span class="master-left ${left ? 'master-click' : 'master-empty'}" ${left ? `data-master-event-id="${escapeHtml(left.id)}"` : ''}>${left ? scheduleLabelHtml(left) : ''}</span>`
+      + `<span class="master-right ${right ? 'master-click' : 'master-empty'}" ${right ? `data-master-event-id="${escapeHtml(right.id)}"` : ''}>${right ? scheduleLabelHtml(right) : ''}</span>`
       + `</div>`;
   }
 

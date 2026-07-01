@@ -20,6 +20,11 @@ def call_group_abbrev(name):
     if not name:
         return "?"
     s = re.sub(r"\s*(/|-)\s*", " ", name).strip()
+    lower = s.lower()
+    if "winter garden" in lower:
+        return "WG"
+    if "altamonte" in lower:
+        return "AL"
     words = [w for w in s.split() if len(w) >= 2 and w.lower() not in ("hospital", "and", "the")]
     if not words:
         return (s[:3] or "?").upper()

@@ -14,6 +14,8 @@ from .api_calendar_utils import (
     pastel_from_location_hex,
     surgeon_initials,
 )
+from .native_call_support import active_coverage_for_rotation
+from .surgeon_visibility import surgeon_is_visible
 
 
 def day_off_event(day, pairs: list[tuple]) -> dict:
@@ -41,7 +43,10 @@ def day_off_event(day, pairs: list[tuple]) -> dict:
 
 
 def call_rotation_event(rotation) -> dict:
-    surgeon = rotation.surgeon
+    original_surgeon = rotation.surgeon
+    coverage = active_coverage_for_rotation(rotation)
+    covering_surgeon = coverage.covering_surgeon if coverage else None
+    surgeon = covering_surgeon or (original_surgeon if surgeon_is_visible(original_surgeon) else None)
     group = rotation.call_group
     group_name = group.name if group else ""
     group_abbrev = call_group_abbrev(group_name) if group else "?"
@@ -64,6 +69,14 @@ def call_rotation_event(rotation) -> dict:
             "type": "oncall",
             "surgeon": surgeon.full_name,
             "surgeon_id": surgeon.id,
+            "original_surgeon": original_surgeon.full_name if surgeon_is_visible(original_surgeon) else "",
+            "original_surgeon_id": original_surgeon.id if surgeon_is_visible(original_surgeon) else None,
+            "original_initials": surgeon_initials(original_surgeon) if surgeon_is_visible(original_surgeon) else "NC",
+            "covering_surgeon": covering_surgeon.full_name if covering_surgeon else None,
+            "covering_surgeon_id": covering_surgeon.id if covering_surgeon else None,
+            "covering_initials": surgeon_initials(covering_surgeon) if covering_surgeon else None,
+            "is_covered": coverage is not None,
+            "coverage_id": coverage.id if coverage else None,
             "call_group": group_name,
             "sort_key": SORT_CALL,
         },

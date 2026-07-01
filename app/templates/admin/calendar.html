@@ -44,7 +44,7 @@
 {% block content %}
 <header class="portal-header px-5 py-3 flex items-center justify-between sticky top-0 z-10 flex-shrink-0">
   <div>
-    <h1 class="font-bold">Practice Calendar</h1>
+    <h1 class="font-bold">Master Calendar</h1>
     <p class="text-xs text-slate-500">Call, days off, meetings, clinic and OR coverage</p>
   </div>
   <div class="flex items-center gap-2">
@@ -54,9 +54,6 @@
       <button onclick="setFilter('meeting')" class="filter-btn px-3 py-1 rounded-lg text-xs font-bold" data-filter="meeting">Meetings</button>
       <button onclick="setFilter('dayoff')" class="filter-btn px-3 py-1 rounded-lg text-xs font-bold" data-filter="dayoff">Days Off</button>
     </div>
-    <a href="/admin/call-schedule" class="bg-blue-600 text-white text-xs font-bold px-3 py-2 rounded-xl hover:bg-blue-700 flex items-center gap-2">
-      <i class="fa-solid fa-phone"></i> Call Schedule
-    </a>
   </div>
 </header>
 
@@ -188,6 +185,7 @@ document.addEventListener('DOMContentLoaded', function() {
               const p = e.extendedProps || {};
               if (p.type === 'meeting') return true;
               if (p.type === 'dayoff' && Array.isArray(p.surgeon_ids)) return p.surgeon_ids.indexOf(activeSurgeonId) !== -1;
+              if (p.type === 'oncall') return p.surgeon_id === activeSurgeonId || p.original_surgeon_id === activeSurgeonId || p.covering_surgeon_id === activeSurgeonId;
               return p.surgeon_id === activeSurgeonId;
             });
           }
@@ -422,6 +420,7 @@ function showModal(event) {
   const startStr = event.startStr || event.start || '';
   let body = `<p><i class="fa-solid fa-calendar mr-2 text-slate-400"></i>${String(startStr).slice(0,10)}</p>`;
   if (p.surgeon) body += `<p><i class="fa-solid fa-user-doctor mr-2 text-slate-400"></i>${p.surgeon}</p>`;
+  if (p.is_covered) body += `<p><i class="fa-solid fa-right-left mr-2 text-slate-400"></i>Coverage: ${p.original_initials || 'NC'} → ${p.covering_initials || ''}</p>`;
   if (p.call_group) body += `<p><i class="fa-solid fa-shield mr-2 text-slate-400"></i>${p.call_group}</p>`;
   if (p.role && p.role !== 'nc') body += `<p><i class="fa-solid fa-phone mr-2 text-slate-400"></i>${p.role}</p>`;
   if (p.location) body += `<p><i class="fa-solid fa-location-dot mr-2 text-slate-400"></i>${p.location}</p>`;

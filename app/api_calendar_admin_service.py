@@ -13,7 +13,7 @@ from .api_calendar_admin_event_serializers import (
     surgery_event,
     unavailable_event,
 )
-from .models import Availability, CallRotation, ClinicSchedule, DayOff, Meeting, SurgicalCase
+from .models import Availability, CallCoverage, CallRotation, ClinicSchedule, DayOff, Meeting, SurgicalCase
 from .surgeon_visibility import surgeon_is_visible
 
 
@@ -38,13 +38,15 @@ def add_day_off_events(events: list[dict], db: Session, start_date, end_date) ->
 
 
 def add_call_rotation_events(events: list[dict], db: Session, start_date, end_date) -> None:
-    rotations = db.query(CallRotation).filter(
+    rotations = db.query(CallRotation).options(
+        joinedload(CallRotation.surgeon),
+        joinedload(CallRotation.call_group),
+        joinedload(CallRotation.coverages).joinedload(CallCoverage.covering_surgeon),
+    ).filter(
         CallRotation.date >= start_date,
         CallRotation.date <= end_date,
     ).all()
     for rotation in rotations:
-        if rotation.surgeon and not surgeon_is_visible(rotation.surgeon):
-            continue
         events.append(call_rotation_event(rotation))
 
 

@@ -4,6 +4,12 @@ Last updated: 2026-07-01
 
 Production decision: SwiftUI is the production iOS app. Expo/React Native is the temporary Android bridge. Jetpack Compose is the target Android app but is not production until it has real CAL API integration and parity approval.
 
+Current tracked lane imports:
+
+- iOS SwiftUI: `ios/`
+- Android Compose target: `android/`
+- Expo/React Native bridge: `legacy-react-native/`
+
 | Workflow | Backend Endpoint / Contract | iOS SwiftUI | Android Expo Temporary | Android Compose Target | Production Allowed | Notes |
 |---|---|---|---|---|---|---|
 | Auth / OTP | `POST /api/surgeon/otp/request`, `POST /api/surgeon/otp/verify` | Production | Temporary Android bridge | Not integrated | iOS + Expo Android | SMS/email OTP text must remain CAL-specific |

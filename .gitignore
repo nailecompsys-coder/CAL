@@ -28,6 +28,19 @@ DerivedData/
 *.ipa
 *.apk
 *.xcuserstate
+.gradle/
+.kotlin/
+ios/Pods/
+ios/build/
+ios/**/*.xcuserdata/
+android/.gradle/
+android/.kotlin/
+android/**/build/
+legacy-react-native/.expo/
+legacy-react-native/node_modules/
+legacy-react-native/build/
+legacy-react-native/dist/
+legacy-react-native/web-build/
 
 # Mutable uploads and local scratch
 app/static/uploads/

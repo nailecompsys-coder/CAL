@@ -70,9 +70,20 @@ check_artifacts "cal-app" "$app_changes"
 
 backend_native_pattern='^(app/native_|app/routers/native_api\.py|app/routers/surgeon_day_items\.py|app/routers/surgeon_otp\.py|app/routers/api_push\.py|app/push\.py|app/sms_service\.py)'
 native_contract_test_pattern='^tests/(test_native_|test_surgeon_otp_|test_push_)'
+imported_native_source_pattern='^(ios/|android/|legacy-react-native/)'
+imported_native_metadata_pattern='^(ios/CALNative\.xcodeproj/project\.pbxproj|ios/CALNative/Info\.plist|ios/Podfile|ios/Podfile\.lock|android/.*gradle.*|android/gradle/|legacy-react-native/app\.json|legacy-react-native/eas\.json|legacy-react-native/package(-lock)?\.json)'
+repo_native_doc_pattern='^docs/(cal-native-(parity-ledger|stack-guardrails)\.md|restructure-phase-[0-9]+.*\.md)$'
 
 if matches_any "$app_changes" "$backend_native_pattern" && ! matches_any "$app_changes" "$native_contract_test_pattern"; then
   add_failure "Backend native API/auth/push files changed without a native contract test update under tests/test_native_*.py, tests/test_surgeon_otp_*.py, or tests/test_push_*.py."
+fi
+
+if matches_any "$app_changes" "$imported_native_source_pattern" && ! matches_any "$app_changes" "$repo_native_doc_pattern"; then
+  add_failure "Imported native source changed under ios/, android/, or legacy-react-native/ without a parity ledger, guardrail, or restructure doc update."
+fi
+
+if matches_any "$app_changes" "$imported_native_metadata_pattern" && ! matches_any "$app_changes" "$repo_native_doc_pattern"; then
+  add_failure "Imported native build metadata changed without a parity ledger, guardrail, or restructure doc update."
 fi
 
 if [[ "$STRICT_RELEASE" == "1" ]]; then

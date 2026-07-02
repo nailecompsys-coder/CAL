@@ -22,6 +22,7 @@ Do not create new long-lived docs in loose top-level folders. Add them here so t
 | `restructure-phase-4-native-lane-import.md` | Native lane source import record |
 | `restructure-phase-5-ios-swiftui-detach.md` | Pure SwiftUI iOS detach record |
 | `restructure-phase-6-ios-release-proof.md` | iOS simulator, UI, and archive proof |
+| `restructure-phase-7-android-lane-proof.md` | Android Compose and Expo bridge proof |
 | `cal-native-stack-guardrails.md` | Native lane and release guardrails |
 | `cal-native-parity-ledger.md` | Platform parity ledger |
 

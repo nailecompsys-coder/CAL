@@ -11,14 +11,6 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-    "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.midfloridasurgical.calnative",
-      "buildNumber": "12",
-      "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
-      }
-    },
     "android": {
       "package": "com.midfloridasurgical.calnative",
       "versionCode": 10,

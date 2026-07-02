@@ -8,7 +8,7 @@ Current tracked lane imports:
 
 - iOS SwiftUI: `ios/` with no Expo, React Native, CocoaPods, or Node build dependency.
 - Android Compose target: `android/`
-- Expo/React Native bridge: `legacy-react-native/`
+- Expo/React Native bridge: `legacy-react-native/` for Android only; no Expo iOS target is allowed.
 
 | Workflow | Backend Endpoint / Contract | iOS SwiftUI | Android Expo Temporary | Android Compose Target | Production Allowed | Notes |
 |---|---|---|---|---|---|---|

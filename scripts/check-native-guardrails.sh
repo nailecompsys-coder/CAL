@@ -87,6 +87,18 @@ for forbidden_file in "${forbidden_ios_support_files[@]}"; do
   fi
 done
 
+if [[ -f "$ROOT/legacy-react-native/app.json" ]] && grep -q '"ios"[[:space:]]*:' "$ROOT/legacy-react-native/app.json"; then
+  add_failure "legacy-react-native/app.json must not define an Expo iOS target. The Expo bridge is Android-only."
+fi
+
+if [[ -f "$ROOT/legacy-react-native/package.json" ]] && grep -Eq '"(ios|testflight)"[[:space:]]*:' "$ROOT/legacy-react-native/package.json"; then
+  add_failure "legacy-react-native/package.json must not expose iOS/TestFlight scripts. SwiftUI under ios/ is the only iOS lane."
+fi
+
+if [[ -f "$ROOT/legacy-react-native/eas.json" ]] && grep -Eq '"ios"[[:space:]]*:|testflight|platform[ =:]ios|--platform[ =]ios' "$ROOT/legacy-react-native/eas.json"; then
+  add_failure "legacy-react-native/eas.json must not define iOS/TestFlight release behavior. Expo is Android-only until Compose replaces it."
+fi
+
 if matches_any "$app_changes" "$backend_native_pattern" && ! matches_any "$app_changes" "$native_contract_test_pattern"; then
   add_failure "Backend native API/auth/push files changed without a native contract test update under tests/test_native_*.py, tests/test_surgeon_otp_*.py, or tests/test_push_*.py."
 fi

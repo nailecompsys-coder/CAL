@@ -10,3 +10,8 @@ Production rule:
 - Expo/React Native remains the temporary Android bridge until Compose parity is approved.
 - Android screens and workflow must match the SwiftUI iOS app unless the parity ledger records a temporary gap.
 
+Verification:
+
+```sh
+./gradlew :app:assembleDebug
+```

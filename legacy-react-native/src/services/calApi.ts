@@ -234,7 +234,7 @@ export function saveSurgeryNotes(
   );
 }
 
-export function registerNativePushToken(token: string, pushToken: string, platform = "ios"): Promise<NativeSaveResponse> {
+export function registerNativePushToken(token: string, pushToken: string, platform = "android"): Promise<NativeSaveResponse> {
   return apiCall<NativeSaveResponse>(
     "/api/native/push-token",
     {

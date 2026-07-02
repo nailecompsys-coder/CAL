@@ -22,6 +22,7 @@ SwiftUI is the production iOS app. Jetpack Compose is the target Android app. Ex
 - Any backend endpoint used by native clients must have a contract test under `tests/test_native_*.py` or a directly related auth/push test.
 - React Native iOS builds are experimental only and must not be sent to TestFlight.
 - The imported `ios/` production lane must not contain `Podfile`, `.xcode.env`, Expo support files, React Native bundle phases, or CocoaPods build settings.
+- The `legacy-react-native/` bridge must remain Android-only. It must not define Expo iOS config, iOS EAS profiles, or TestFlight scripts.
 - Android must match the SwiftUI screen and workflow unless the parity ledger marks a temporary approved gap.
 - Build artifacts, dependency folders, local Expo state, Xcode archives, IPAs, APKs, and DerivedData must not be staged or tracked.
 
@@ -34,10 +35,13 @@ From `cal-app` before backend deploy:
 ./scripts/test-local.sh
 ```
 
-From `cal-native/app` before TestFlight or Android handoff:
+From `cal-app` before Android handoff:
 
 ```sh
 ./scripts/check-native-guardrails.sh --release
+npm --prefix legacy-react-native ci
+npm --prefix legacy-react-native run doctor
+cd android && ./gradlew :app:assembleDebug
 ```
 
 For iOS release, archive locally from the SwiftUI Xcode project:

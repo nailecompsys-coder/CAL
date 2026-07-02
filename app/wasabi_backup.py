@@ -14,6 +14,7 @@ from botocore.exceptions import ClientError
 
 from .wasabi_config import WASABI_CONFIG, parse_database_url, s3_client
 from .wasabi_postgres import dump_database_to_gzip, restore_database_from_gzip
+from .paths import SERVER_ROOT, VERSION_FILE
 
 WASABI_BUCKET = WASABI_CONFIG.bucket
 WASABI_KEY_ID = WASABI_CONFIG.key_id
@@ -42,7 +43,7 @@ def _parse_database_url():
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[1]
+    return SERVER_ROOT
 
 
 def _git_value(args: list[str]) -> str | None:
@@ -57,9 +58,8 @@ def _git_value(args: list[str]) -> str | None:
 
 
 def _version() -> str | None:
-    version_file = _repo_root() / "VERSION"
     try:
-        return version_file.read_text().strip() or None
+        return VERSION_FILE.read_text().strip() or None
     except Exception:
         return None
 

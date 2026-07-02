@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__ as app_release_version
 from .database import Base, SessionLocal, engine
 from .location_palette import ensure_location_palette_seeded
+from .paths import STATIC_DIR
 from . import migrate_surgeon_sort_order
 from . import migrate_clinic_schedule_off
 from . import migrate_location_admin_fields
@@ -73,7 +74,7 @@ async def surgeon_html_no_store(request: Request, call_next):
 
 
 # Static files (service worker, manifest, icons)
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # Routers
 app.include_router(auth.router)

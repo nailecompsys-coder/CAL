@@ -16,11 +16,11 @@ from ..jinja_env import templates
 from ..models import (
     AdminUser, CallRotation, DayOff, Meeting, SiteSettings, Surgeon,
 )
+from ..paths import UPLOADS_DIR
 from ..surgeon_visibility import surgeon_is_visible
 from .. import wasabi_backup
 from .. import __version__ as app_version
 
-UPLOADS_DIR = "app/static/uploads"
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 
 

@@ -16,6 +16,7 @@ cal_live.sql
 *.dump
 *.sql
 
+server/app/static/uploads/
 app/static/uploads/
 *.log
 *.pid

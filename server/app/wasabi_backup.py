@@ -122,7 +122,7 @@ def _dr_manifest(timestamp: str, db_size_bytes: int, wasabi_key: str) -> dict:
         "restore": {
             "code_source": "git",
             "minimum_files_required": ["db.sql.gz", "manifest.json", ".env"],
-            "script": "scripts/dr-restore-from-wasabi.sh",
+            "script": "server/scripts/dr-restore-from-wasabi.sh",
         },
         "env": _redacted_env_manifest(),
     }

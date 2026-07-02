@@ -43,6 +43,7 @@ legacy-react-native/dist/
 legacy-react-native/web-build/
 
 # Mutable uploads and local scratch
+server/app/static/uploads/
 app/static/uploads/
 cal_live.dump
 cal_live.sql

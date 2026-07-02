@@ -68,8 +68,8 @@ require_clean_and_pushed() {
 app_changes="$(repo_changes "$ROOT")"
 check_artifacts "cal-app" "$app_changes"
 
-backend_native_pattern='^(app/native_|app/routers/native_api\.py|app/routers/surgeon_day_items\.py|app/routers/surgeon_otp\.py|app/routers/api_push\.py|app/push\.py|app/sms_service\.py)'
-native_contract_test_pattern='^tests/(test_native_|test_surgeon_otp_|test_push_)'
+backend_native_pattern='^server/(app/native_|app/routers/native_api\.py|app/routers/surgeon_day_items\.py|app/routers/surgeon_otp\.py|app/routers/api_push\.py|app/push\.py|app/sms_service\.py)'
+native_contract_test_pattern='^server/tests/(test_native_|test_surgeon_otp_|test_push_)'
 imported_native_source_pattern='^(ios/|android/|legacy-react-native/)'
 imported_native_metadata_pattern='^(ios/CALNative\.xcodeproj/project\.pbxproj|ios/CALNative/Info\.plist|android/.*gradle.*|android/gradle/|legacy-react-native/app\.json|legacy-react-native/eas\.json|legacy-react-native/package(-lock)?\.json)'
 repo_native_doc_pattern='^docs/(cal-native-(parity-ledger|stack-guardrails)\.md|restructure-phase-[0-9]+.*\.md)$'

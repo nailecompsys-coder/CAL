@@ -55,7 +55,7 @@ cd /opt/cal
 
 ```bash
 cd /opt/cal
-scripts/dr-restore-from-wasabi.sh cal-backups/YYYYMMDD-HHMMSS
+server/scripts/dr-restore-from-wasabi.sh cal-backups/YYYYMMDD-HHMMSS
 ```
 
 The script downloads `db.sql.gz`, pulls Git, starts `cal_postgres`, restores the database, builds `cal_api`, starts it, and verifies `http://127.0.0.1:3005/health`.

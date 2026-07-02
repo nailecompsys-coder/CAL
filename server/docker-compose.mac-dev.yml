@@ -1,5 +1,3 @@
-# Compatibility compose entry from the repository root.
-# Prefer make mac-dev-up or ./server/scripts/bootstrap-mac-dev.sh.
 services:
   cal_db:
     image: postgres:16-alpine
@@ -23,7 +21,7 @@ services:
 
   cal_api:
     build:
-      context: ./server
+      context: .
       dockerfile: Dockerfile
       args:
         APP_VERSION: ${CAL_APP_VERSION:-mac-dev}
@@ -33,7 +31,7 @@ services:
     image: cal_api:local
     container_name: cal_api
     restart: unless-stopped
-    env_file: .env.mac-dev
+    env_file: ../.env.mac-dev
     environment:
       DATABASE_URL: postgresql://${CAL_DB_USER:-cal_user}:${CAL_DB_PASSWORD:-cal_local_dev_change_me}@cal_db:5432/${CAL_DB_NAME:-surgical_cal}
     depends_on:

@@ -1,5 +1,7 @@
-# Compatibility compose entry from the repository root.
-# Prefer ./server/scripts/rebuild-cal-api.sh for production deploys.
+# Standalone Cal API — no external Docker networks required.
+# Use on a host that does NOT have atlas-net / atlas_default:
+#   CAL_APP_VERSION=$(tr -d '[:space:]' < server/VERSION) docker compose -f server/docker-compose.standalone.yml up --build -d
+# Or: make deploy-cal-standalone
 services:
   cal_postgres:
     image: postgres:16-alpine
@@ -21,7 +23,7 @@ services:
 
   cal_api:
     build:
-      context: ./server
+      context: .
       dockerfile: Dockerfile
       args:
         APP_VERSION: ${CAL_APP_VERSION:-unknown}
@@ -32,7 +34,7 @@ services:
     pull_policy: build
     container_name: cal_api
     restart: unless-stopped
-    env_file: .env
+    env_file: ../.env
     depends_on:
       cal_postgres:
         condition: service_healthy

@@ -4,39 +4,39 @@ PYTHON ?= python3
 .PHONY: deploy-cal deploy-cal-standalone verify-cal bump-only compile test test-local mac-dev-up mac-dev-down mac-dev-status mac-dev-logs mac-dev-smoke
 
 deploy-cal:
-	@./scripts/rebuild-cal-api.sh
+	@./server/scripts/rebuild-cal-api.sh
 
 # Same as deploy-cal but never uses atlas-net (docker-compose.standalone.yml only)
 deploy-cal-standalone:
-	@CAL_STANDALONE=1 ./scripts/rebuild-cal-api.sh
+	@CAL_STANDALONE=1 ./server/scripts/rebuild-cal-api.sh
 
 verify-cal:
-	@./scripts/verify-cal-api.sh
+	@./server/scripts/verify-cal-api.sh
 
 bump-only:
-	@./scripts/bump-version.sh && ./scripts/sync-sw-cache-name.sh
+	@./server/scripts/bump-version.sh && ./server/scripts/sync-sw-cache-name.sh
 
 compile:
-	@$(PYTHON) -m compileall -q app && echo OK compileall
+	@cd server && $(PYTHON) -m compileall -q app && echo OK compileall
 
 test:
-	@$(PYTHON) -m unittest discover -s tests
+	@cd server && PYTHONPATH=. $(PYTHON) -m unittest discover -s tests
 
 test-local:
-	@./scripts/test-local.sh
+	@./server/scripts/test-local.sh
 
 # Mac local dev lifecycle (docker-compose.mac-dev.yml)
 mac-dev-up:
-	@./scripts/bootstrap-mac-dev.sh
+	@./server/scripts/bootstrap-mac-dev.sh
 
 mac-dev-down:
-	@docker compose -f docker-compose.mac-dev.yml down
+	@cd server && docker compose --env-file ../.env.mac-dev -f docker-compose.mac-dev.yml down
 
 mac-dev-status:
-	@docker compose -f docker-compose.mac-dev.yml ps
+	@cd server && docker compose --env-file ../.env.mac-dev -f docker-compose.mac-dev.yml ps
 
 mac-dev-logs:
-	@docker compose -f docker-compose.mac-dev.yml logs -f --tail=200 cal_api
+	@cd server && docker compose --env-file ../.env.mac-dev -f docker-compose.mac-dev.yml logs -f --tail=200 cal_api
 
 mac-dev-smoke:
-	@./scripts/smoke-mac-dev.sh
+	@./server/scripts/smoke-mac-dev.sh

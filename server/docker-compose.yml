@@ -1,9 +1,14 @@
-# Compatibility compose entry from the repository root.
-# The CAL server source now lives under ./server.
+# Deploy from THIS repo only:
+#   ./scripts/rebuild-cal-api.sh
+# or: docker compose build --no-cache cal_api && docker compose up -d cal_api
+#
+# `image: cal_api:local` + `pull_policy: build` = tag the local Dockerfile build and do
+# not pull a registry image (avoids stale tags like 1.3.0-beta5 shadowing your tree).
+# Requires Docker Compose v2.24+; if `pull_policy` errors, remove that line and keep `image:`.
 services:
   cal_api:
     build:
-      context: ./server
+      context: .
       dockerfile: Dockerfile
       args:
         APP_VERSION: ${CAL_APP_VERSION:-unknown}
@@ -14,7 +19,7 @@ services:
     pull_policy: build
     container_name: cal_api
     restart: unless-stopped
-    env_file: .env
+    env_file: ../.env
     ports:
       - "127.0.0.1:3005:3005"
     networks:

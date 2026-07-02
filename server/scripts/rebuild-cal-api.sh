@@ -24,6 +24,7 @@ COMPOSE_ENV_FILE="$REPO_ROOT/.env"
 if [[ ! -f "$COMPOSE_ENV_FILE" ]]; then
   COMPOSE_ENV_FILE="$REPO_ROOT/.env.example"
 fi
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-cal}"
 
 echo "==> Repo VERSION: $EXPECTED"
 echo "==> Stop/remove old container and local tag (avoids BuildKit 'image already exists' on cal_api:local)"

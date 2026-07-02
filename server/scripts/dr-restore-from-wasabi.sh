@@ -75,6 +75,7 @@ DOCKER=(docker)
 if ! docker ps >/dev/null 2>&1; then
   DOCKER=(sudo -n docker)
 fi
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-cal}"
 
 COMPOSE=("${DOCKER[@]}" compose --env-file "$ENV_FILE" -f docker-compose.standalone.yml)
 

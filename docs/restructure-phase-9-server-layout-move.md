@@ -44,6 +44,7 @@ NO_BUMP=1 CAL_STANDALONE=1 ./scripts/rebuild-cal-api.sh
 
 - Server scripts read `.env` and `.env.mac-dev` from the repo root.
 - Server compose files use `../.env` and `../.env.mac-dev`.
+- Server deploy scripts force `COMPOSE_PROJECT_NAME=cal` by default so moving compose files under `server/` does not create a second Docker project, network, or Postgres volume.
 - Git metadata in Docker labels still comes from the repository root.
 - Backup and DR scripts archive/restore from the repository root, not only the `server/` folder.
 - Native guardrails now look for backend native API and contract tests under `server/app` and `server/tests`.

@@ -20,6 +20,7 @@ Do not create new long-lived docs in loose top-level folders. Add them here so t
 | `restructure-phase-2-target-layout.md` | Final filesystem and Git target map |
 | `restructure-phase-3-docs-ai-consolidation.md` | Docs/AI import record |
 | `restructure-phase-4-native-lane-import.md` | Native lane source import record |
+| `restructure-phase-5-ios-swiftui-detach.md` | Pure SwiftUI iOS detach record |
 | `cal-native-stack-guardrails.md` | Native lane and release guardrails |
 | `cal-native-parity-ledger.md` | Platform parity ledger |
 

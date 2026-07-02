@@ -71,8 +71,21 @@ check_artifacts "cal-app" "$app_changes"
 backend_native_pattern='^(app/native_|app/routers/native_api\.py|app/routers/surgeon_day_items\.py|app/routers/surgeon_otp\.py|app/routers/api_push\.py|app/push\.py|app/sms_service\.py)'
 native_contract_test_pattern='^tests/(test_native_|test_surgeon_otp_|test_push_)'
 imported_native_source_pattern='^(ios/|android/|legacy-react-native/)'
-imported_native_metadata_pattern='^(ios/CALNative\.xcodeproj/project\.pbxproj|ios/CALNative/Info\.plist|ios/Podfile|ios/Podfile\.lock|android/.*gradle.*|android/gradle/|legacy-react-native/app\.json|legacy-react-native/eas\.json|legacy-react-native/package(-lock)?\.json)'
+imported_native_metadata_pattern='^(ios/CALNative\.xcodeproj/project\.pbxproj|ios/CALNative/Info\.plist|android/.*gradle.*|android/gradle/|legacy-react-native/app\.json|legacy-react-native/eas\.json|legacy-react-native/package(-lock)?\.json)'
 repo_native_doc_pattern='^docs/(cal-native-(parity-ledger|stack-guardrails)\.md|restructure-phase-[0-9]+.*\.md)$'
+forbidden_ios_support_files=(
+  "ios/Podfile"
+  "ios/Podfile.lock"
+  "ios/Podfile.properties.json"
+  "ios/.xcode.env"
+  "ios/CALNative/Supporting/Expo.plist"
+)
+
+for forbidden_file in "${forbidden_ios_support_files[@]}"; do
+  if [[ -e "$ROOT/$forbidden_file" ]]; then
+    add_failure "Pure SwiftUI iOS lane must not contain $forbidden_file. React Native, Expo, and CocoaPods are not production iOS dependencies."
+  fi
+done
 
 if matches_any "$app_changes" "$backend_native_pattern" && ! matches_any "$app_changes" "$native_contract_test_pattern"; then
   add_failure "Backend native API/auth/push files changed without a native contract test update under tests/test_native_*.py, tests/test_surgeon_otp_*.py, or tests/test_push_*.py."

@@ -6,7 +6,7 @@ Production decision: SwiftUI is the production iOS app. Expo/React Native is the
 
 Current tracked lane imports:
 
-- iOS SwiftUI: `ios/`
+- iOS SwiftUI: `ios/` with no Expo, React Native, CocoaPods, or Node build dependency.
 - Android Compose target: `android/`
 - Expo/React Native bridge: `legacy-react-native/`
 

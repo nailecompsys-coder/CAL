@@ -25,6 +25,7 @@ Do not create new long-lived docs in loose top-level folders. Add them here so t
 | `restructure-phase-7-android-lane-proof.md` | Android Compose and Expo bridge proof |
 | `restructure-phase-8-server-path-hardening.md` | Server path hardening before physical move |
 | `restructure-phase-9-server-layout-move.md` | Backend/admin portal move into `server/` with compatibility wrappers |
+| `restructure-phase-10-workspace-quarantine.md` | Local workspace quarantine and active path map |
 | `cal-native-stack-guardrails.md` | Native lane and release guardrails |
 | `cal-native-parity-ledger.md` | Platform parity ledger |
 

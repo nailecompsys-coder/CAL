@@ -108,6 +108,12 @@ rvu_scans          ← owned by RVU app, lives in this DB (RVU adds it on startu
 
 ## Deploy — THE CORRECT WAY
 
+Before Docker/deploy/debug work, run the read-only diagnostic from repo root:
+
+```bash
+make doctor
+```
+
 **Always use the rebuild script. Never use bare `docker compose up --build`.**
 
 ```bash
@@ -199,7 +205,7 @@ RVU (`/home/dnaile748/rvu/`) is a **separate app** that uses Cal's auth by desig
 2. Read `docs/APP_REFERENCE.md` — routes, models, rules engine
 3. Read `memory.md` — current state and next steps
 4. Read `.cursor/rules/PALETTES.md` before any UI work
-5. Run `docker compose ps` to confirm `cal_api` is healthy
+5. Before Docker/deploy/debug work, run `make doctor` from repo root
 6. Ask Don what to work on
 
 ---

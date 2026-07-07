@@ -26,6 +26,7 @@ Do not release from retired folders under `/Users/donnaile/dev/CAL-retired-20260
 ```sh
 ./scripts/check-native-guardrails.sh
 ./scripts/test-local.sh
+make doctor
 docker compose --env-file .env.example config
 ```
 

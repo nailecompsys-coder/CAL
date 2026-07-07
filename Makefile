@@ -1,7 +1,10 @@
 # Mid Florida Surgical Cal — local deploy helpers (run from repo root)
 PYTHON ?= python3
 
-.PHONY: deploy-cal deploy-cal-standalone verify-cal bump-only compile test test-local mac-dev-up mac-dev-down mac-dev-status mac-dev-logs mac-dev-smoke
+.PHONY: doctor deploy-cal deploy-cal-standalone verify-cal bump-only compile test test-local mac-dev-up mac-dev-down mac-dev-status mac-dev-logs mac-dev-smoke
+
+doctor:
+	@./server/scripts/doctor.sh
 
 deploy-cal:
 	@./server/scripts/rebuild-cal-api.sh

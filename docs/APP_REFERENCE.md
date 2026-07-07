@@ -39,6 +39,12 @@ uvicorn app.main:app --reload --port 3005
 
 ### Docker
 
+Use the read-only doctor first when checking Docker/runtime state:
+
+```bash
+make doctor
+```
+
 ```bash
 docker compose up --build
 # App: http://127.0.0.1:3005
@@ -67,10 +73,11 @@ make deploy-cal
 - **`docker-compose.yml`** — legacy `llm-core`/Atlas stack; expects external networks **`atlas-net`** and **`atlas_default`**. Build arg **`CAL_APP_VERSION`** is set from **`server/VERSION`** by the rebuild script.
 - **`docker-compose.standalone.yml`** — target production VM stack for `192.168.5.62`; runs **`cal_postgres`** and **`cal_api`** on an internal bridge network, with `cal_api` exposed as `${CAL_BIND_HOST:-0.0.0.0}:3005:3005`. Used automatically if Atlas networks are missing, or force with **`CAL_STANDALONE=1`** / **`make deploy-cal-standalone`**.
 
-**Other commands:** `make verify-cal`, `make bump-only`, `make compile`.
+**Other commands:** `make doctor`, `make verify-cal`, `make bump-only`, `make compile`.
 
 - **Release string:** **`server/VERSION`** (in image as `/app/VERSION`). Dockerfile **`LABEL org.opencontainers.image.version`** is filled from **`APP_VERSION` build-arg** (same value).
 - **Compose:** `cal_api` uses **`image: cal_api:local`** + **`pull_policy: build`** so Docker does not pull a stale registry tag.
+- **Doctor without changing state:** `make doctor` — reports Git state, Docker availability, selected compose mode, container state, `/health` version match, and safety warnings.
 - **Verify without rebuilding:** `./scripts/verify-cal-api.sh` — fails if `GET /health` `version` does not match `server/VERSION`.
 - **Dockerfile:** `python:3.11-slim`, `postgresql-client`, `uvicorn app.main:app --host 0.0.0.0 --port 3005 --workers 2`.
 - **Health:** `GET /health` → `{"status":"ok","version":"..."}`. Header **`X-App-Version`** matches (e.g. `curl -sI http://127.0.0.1:3005/health`).

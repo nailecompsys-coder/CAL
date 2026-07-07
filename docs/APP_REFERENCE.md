@@ -23,8 +23,7 @@
 
 ### Env (optional)
 
-- **`BASE_URL`** — For magic links (e.g. `https://cal.midfloridasurgical.com`).
-- **`MAGIC_LINK_EXPIRE_HOURS`** — Default 168 (7 days).
+- **`BASE_URL`** — Public CAL origin, e.g. `https://cal.midfloridasurgical.com`.
 - **`VAPID_PUBLIC_KEY`**, **`VAPID_PRIVATE_KEY`**, **`VAPID_EMAIL`** — Web Push (surgeon notifications). If missing, push is no-op.
 - **Wasabi backup:** `WASABI_BUCKET`, `WASABI_KEY_ID`, `WASABI_SECRET`, `WASABI_REGION` (default `us-east-1`), optional `WASABI_ENDPOINT`.
 
@@ -34,6 +33,7 @@ Ref: `.env.example`.
 
 ```bash
 # From project root, with .env present
+cd server
 uvicorn app.main:app --reload --port 3005
 ```
 
@@ -56,23 +56,23 @@ make deploy-cal
 
 **What `rebuild-cal-api.sh` does (default):**
 
-1. **`scripts/bump-version.sh`** — rewrites root **`VERSION`** to `<base>+<UTC timestamp>` so every deploy gets a new **Build** badge (footer + `/health` + `X-App-Version`).
-2. **`scripts/sync-sw-cache-name.sh`** — sets `CACHE_NAME` in **`app/static/sw.js`** from that version so the PWA drops old static caches.
-3. Stops/removes `cal_api`, **`docker compose build --no-cache`**, **`up -d`**, then **`verify-cal-api.sh`**.
+1. **`scripts/bump-version.sh`** — rewrites **`server/VERSION`** to `<base>+<UTC timestamp>` so every deploy gets a new **Build** badge (footer + `/health` + `X-App-Version`).
+2. **`scripts/sync-sw-cache-name.sh`** — sets `CACHE_NAME` in **`server/app/static/sw.js`** from that version so the PWA drops old static caches.
+3. Stops/removes `cal_api`, builds the local image, starts `cal_api`, then runs **`verify-cal-api.sh`**.
 
 **Opt out of bump** (e.g. quick rebuild same version): `NO_BUMP=1 ./scripts/rebuild-cal-api.sh`
 
 **Compose files:**
 
-- **`docker-compose.yml`** — legacy `llm-core`/Atlas stack; expects external networks **`atlas-net`** and **`atlas_default`**. Build arg **`CAL_APP_VERSION`** is set from **`VERSION`** by the rebuild script.
+- **`docker-compose.yml`** — legacy `llm-core`/Atlas stack; expects external networks **`atlas-net`** and **`atlas_default`**. Build arg **`CAL_APP_VERSION`** is set from **`server/VERSION`** by the rebuild script.
 - **`docker-compose.standalone.yml`** — target production VM stack for `192.168.5.62`; runs **`cal_postgres`** and **`cal_api`** on an internal bridge network, with `cal_api` exposed as `${CAL_BIND_HOST:-0.0.0.0}:3005:3005`. Used automatically if Atlas networks are missing, or force with **`CAL_STANDALONE=1`** / **`make deploy-cal-standalone`**.
 
 **Other commands:** `make verify-cal`, `make bump-only`, `make compile`.
 
-- **Release string:** repo root **`VERSION`** (in image as `/app/VERSION`). Dockerfile **`LABEL org.opencontainers.image.version`** is filled from **`APP_VERSION` build-arg** (same value).
+- **Release string:** **`server/VERSION`** (in image as `/app/VERSION`). Dockerfile **`LABEL org.opencontainers.image.version`** is filled from **`APP_VERSION` build-arg** (same value).
 - **Compose:** `cal_api` uses **`image: cal_api:local`** + **`pull_policy: build`** so Docker does not pull a stale registry tag.
-- **Verify without rebuilding:** `./scripts/verify-cal-api.sh` — fails if `GET /health` `version` ≠ `VERSION`.
-- **Dockerfile:** `python:3.11-slim`, `libpq-dev`, `postgresql-client`, `uvicorn app.main:app --host 0.0.0.0 --port 3005 --workers 2`.
+- **Verify without rebuilding:** `./scripts/verify-cal-api.sh` — fails if `GET /health` `version` does not match `server/VERSION`.
+- **Dockerfile:** `python:3.11-slim`, `postgresql-client`, `uvicorn app.main:app --host 0.0.0.0 --port 3005 --workers 2`.
 - **Health:** `GET /health` → `{"status":"ok","version":"..."}`. Header **`X-App-Version`** matches (e.g. `curl -sI http://127.0.0.1:3005/health`).
 
 ### Production host migration
@@ -106,7 +106,7 @@ make deploy-cal
 
 ### Surgeon (mobile)
 
-- **No password.** Registration via magic link: admin generates link (Surgeons → Magic link); surgeon opens `/register?token=...`, POST registers device and gets `surgeon_token` cookie (JWT, 1 year).
+- **No password.** Surgeons sign in with a six-digit OTP code sent by email or SMS. Successful verification registers the device and sets the `surgeon_token` cookie (JWT, 1 year).
 - **Logout:** `GET /surgeon/logout` → delete cookie, redirect `/surgeon/register`. Surgeon UI has “Log out” in top-right (base_surgeon.html).
 - **Dependency:** `get_current_surgeon` returns `(Surgeon, SurgeonDevice)`.
 
@@ -114,40 +114,28 @@ make deploy-cal
 
 ## 4. Project layout
 
-```
-cal/
-├── app/
-│   ├── __init__.py          # __version__ (release string; bump + rebuild image)
-│   ├── main.py               # FastAPI app, lifespan, /, /health
-│   ├── database.py           # engine, SessionLocal, get_db
-│   ├── models.py             # SQLAlchemy models (see below)
-│   ├── auth.py               # admin/surgeon JWT, magic link, get_current_*
-│   ├── conflicts.py          # check_conflicts() → calls rules engine, returns list[str]
-│   ├── push.py               # send_push_to_surgeon, VAPID
-│   ├── wasabi_backup.py      # list_backups, run_backup, restore
-│   ├── migrate_call_groups.py # run_migration() on startup
-│   ├── routers/
-│   │   ├── auth.py           # /admin/login, /admin/logout, /register, /surgeon/logout
-│   │   ├── admin.py          # prefix /admin — all admin HTML + POSTs
-│   │   ├── surgeon.py        # prefix /surgeon — mobile pages
-│   │   └── api.py            # prefix /api — events feed, push subscribe, health
-│   ├── rules_engine/
-│   │   ├── __init__.py       # re-exports evaluate, get_rule_config, Conflict, ALL_RULES
-│   │   ├── registry.py       # RuleDef, Conflict, ALL_RULES (built from checkers)
-│   │   ├── checkers.py       # one function per rule (overlap + buffer + location)
-│   │   └── engine.py         # get_rule_config(db), ensure_rule_config_seeded(db), evaluate()
-│   ├── templates/            # Jinja2
-│   │   ├── base_admin.html   # sidebar, request + admin + settings + app_version + wasabi_configured (+ pending_count when passed)
-│   │   ├── base_surgeon.html # mobile shell, bottom nav
-│   │   ├── admin/*.html      # dashboard, calendar, surgeons, call_schedule, call_groups, daysoff, meetings, patients, surgical_schedule, locations, clinic_schedule, settings, login
-│   │   └── surgeon/*.html    # register, schedule, call_schedule, availability, request_off, patients
-│   └── static/               # sw.js, manifest.json, icons
-├── docs/                     # ABBREVIATIONS.md, RULES_ENGINE_SPEC.md, FULL_CRITIQUE_AND_REVIEW.md, etc.
+```text
+CAL/
+├── server/
+│   ├── app/
+│   │   ├── __init__.py       # __version__ from server/VERSION
+│   │   ├── main.py           # FastAPI app, lifespan, /, /health
+│   │   ├── database.py       # engine, SessionLocal, get_db
+│   │   ├── models.py         # SQLAlchemy models
+│   │   ├── routers/          # admin, surgeon, API, native API routers
+│   │   ├── rules_engine/     # scheduling conflict rules
+│   │   ├── templates/        # Jinja2 templates
+│   │   └── static/           # sw.js, manifest.json, icons
+│   ├── requirements.txt
+│   ├── Dockerfile
+│   └── VERSION
+├── ios/                      # SwiftUI TestFlight lane
+├── android/                  # Jetpack Compose target lane
+├── legacy-react-native/      # temporary Android Expo bridge
+├── docs/
+├── scripts/
 ├── .env / .env.example
-├── requirements.txt
-├── Dockerfile
-├── docker-compose.yml
-└── seed.py
+└── docker-compose.yml
 ```
 
 ---
@@ -161,7 +149,7 @@ cal/
 | SchedulingRuleConfig | scheduling_rule_config | rule_id (unique), enabled, config (JSON text). Used by rules engine. |
 | Location | locations | name, address, city, location_type (clinic \| hospital), color. |
 | Surgeon | surgeons | first_name, last_name, specialty, suffix, staff_type (physician \| staff), email, color. full_name, initials @property. |
-| MagicLink | magic_links | surgeon_id, token_hash, expires_at, used_at. |
+| MagicLink | magic_links | Legacy table name now used to store hashed OTP login codes: surgeon_id, token_hash, expires_at, used_at. |
 | SurgeonDevice | surgeon_devices | surgeon_id, device_name, user_agent, token_hash (session). |
 | CallGroup | call_groups | name, sort_order. |
 | CallGroupLocation | call_group_locations | call_group_id, location_id (M2M). |
@@ -185,7 +173,7 @@ All require `get_current_admin` unless noted.
 |--------|------|---------|
 | GET | /dashboard | Dashboard (on-call today, pending days off, meetings, surgeons). |
 | GET | /calendar | FullCalendar view; events from /api/events. |
-| GET | /surgeons | List surgeons; add/edit/delete, magic link, revoke device. |
+| GET | /surgeons | List surgeons; add/edit/delete, OTP/device management, revoke device. |
 | GET | /call-schedule | Call rotation grid by week; assign, reclaim-orphans, copy-week, clear. |
 | GET | /call-groups | Call groups CRUD, attach locations. |
 | GET | /daysoff | Days off list; add, approve, deny, edit, delete. Passes pending_count for sidebar badge. |
@@ -298,13 +286,13 @@ All require `get_current_surgeon` (except register). Router also defines GET /re
 
 | Need to… | File(s) |
 |----------|--------|
-| Change port or startup | Dockerfile CMD, docker-compose ports, uvicorn. |
-| Add env var | .env.example, then use in app (e.g. database.py, auth.py, push.py, wasabi_backup.py). |
-| Add DB table/column | app/models.py; if migration needed before create_all, add in migrate_* or lifespan. |
-| Add admin page | app/routers/admin.py (GET + POST), app/templates/admin/*.html, sidebar link in base_admin.html. |
-| Add surgeon page | app/routers/surgeon.py, app/templates/surgeon/*.html, base_surgeon.html nav. |
-| Add API endpoint | app/routers/api.py. |
-| Change conflict rules | app/rules_engine/registry.py (RuleDef), app/rules_engine/checkers.py (new checker), engine.py get_rule_config if new config keys. |
-| Change Settings layout | app/templates/admin/settings.html. Scheduling rules is first card; Branding and Login & users follow. |
+| Change port or startup | `server/Dockerfile`, compose ports, uvicorn. |
+| Add env var | `.env.example`, then use in server app code. |
+| Add DB table/column | `server/app/models.py`; if migration needed before create_all, add in `server/app/migrate_*` or lifespan. |
+| Add admin page | `server/app/routers/admin*.py`, `server/app/templates/admin/*.html`, sidebar link in `base_admin.html`. |
+| Add surgeon page | `server/app/routers/surgeon*.py`, `server/app/templates/surgeon/*.html`, `base_surgeon.html` nav. |
+| Add API endpoint | `server/app/routers/api*.py` or `server/app/routers/native_api.py`. |
+| Change conflict rules | `server/app/rules_engine/registry.py`, checkers, and `engine.py`. |
+| Change Settings layout | `server/app/templates/admin/settings.html`. |
 
 This document is the single reference for the app; use it before asking how things work or where to change something.

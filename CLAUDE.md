@@ -32,22 +32,22 @@ Call schedule and surgical calendar management for MFSA.
 
 ```
 /opt/cal/
-├── app/
-│   ├── main.py              ← entry point — lifespan, create_all, middleware
-│   ├── auth.py              ← JWT, bcrypt, magic link, device sessions
-│   ├── database.py          ← PG connection pool (atlas-postgres:5432)
-│   ├── models.py            ← all SQLAlchemy models
-│   ├── conflicts.py         ← calls rules_engine.evaluate()
-│   ├── rules_engine/        ← scheduling conflict rules (config in DB)
-│   ├── routers/
-│   │   ├── admin.py         ← all admin routes
-│   │   ├── surgeon.py       ← surgeon-facing routes
-│   │   ├── api.py           ← /events feed, push subscribe
-│   │   └── auth.py          ← login, magic link, logout
-│   ├── static/              ← sw.js, manifest, icons, uploads
-│   └── templates/
-│       ├── admin/
-│       └── surgeon/
+├── server/
+│   ├── app/
+│   │   ├── main.py          ← entry point — lifespan, create_all, middleware
+│   │   ├── auth.py          ← JWT, bcrypt, device sessions
+│   │   ├── database.py      ← PG connection pool
+│   │   ├── models.py        ← all SQLAlchemy models
+│   │   ├── routers/         ← admin, surgeon, API, native API routes
+│   │   ├── rules_engine/    ← scheduling conflict rules
+│   │   ├── static/          ← sw.js, manifest, icons, uploads
+│   │   └── templates/       ← admin and surgeon Jinja2 templates
+│   ├── requirements.txt     ← all versions pinned
+│   ├── Dockerfile
+│   └── VERSION              ← current build version
+├── ios/                     ← SwiftUI TestFlight lane
+├── android/                 ← Jetpack Compose target lane
+├── legacy-react-native/     ← temporary Android Expo bridge
 ├── docs/
 │   └── APP_REFERENCE.md     ← full route/model/rules reference — READ THIS FIRST
 ├── scripts/
@@ -59,18 +59,14 @@ Call schedule and surgical calendar management for MFSA.
 │   ├── CLAUDE.md            ← extended Cursor rules
 │   ├── build_app.md         ← ATLAS workflow
 │   └── PALETTES.md          ← design tokens — Cal uses Clinical Trust
-├── VERSION                  ← current build version (e.g. 1.3.5-beta.1+20260327T200551Z)
-├── Dockerfile
 ├── docker-compose.yml            ← legacy llm-core / Atlas stack
 ├── docker-compose.standalone.yml ← target prod VM stack: cal_postgres + cal_api
 ├── .env                     ← secrets — NEVER commit
-├── memory.md                ← session state — update before closing
-└── requirements.txt         ← all versions pinned
+└── memory.md                ← session state — update before closing
 ```
 
-> `app/rvu/` — this folder contains only stale cache from before RVU was separated.
-> RVU now lives at `/home/dnaile748/rvu/` and runs as its own host process.
-> Do NOT add code to `app/rvu/`. Do NOT import from it.
+> `server/app/rvu/` should not exist. RVU now lives at `/home/dnaile748/rvu/` and runs as its own host process.
+> Do NOT add code to CAL for RVU internals. Do NOT import from RVU.
 
 ---
 
@@ -104,7 +100,7 @@ rvu_scans          ← owned by RVU app, lives in this DB (RVU adds it on startu
 ## Auth Model
 
 - **Admins:** username + password → `admin_token` cookie (JWT)
-- **Surgeons:** magic link → `SurgeonDevice` record → `surgeon_token` cookie (JWT, keyed to device_id, 365 days)
+- **Surgeons:** six-digit OTP code by email/SMS → `SurgeonDevice` record → `surgeon_token` cookie (JWT, keyed to device_id, 365 days)
 - `bcrypt==4.0.1` — **PINNED. Do not change.** Prevents passlib incompatibility.
 - `surgeon_token` cookie is shared with the RVU app (same SECRET_KEY, same domain) — surgeons log in once, RVU works automatically
 
@@ -120,13 +116,13 @@ cd /opt/cal
 ```
 
 What this script does that `docker compose up --build` does NOT:
-1. Bumps `VERSION` with a UTC build timestamp
+1. Bumps `server/VERSION` with a UTC build timestamp
 2. Syncs `sw.js` cache name (service worker — stale cache = surgeons see old UI)
 3. Stops and **removes** the old container
 4. **Removes** the `cal_api:local` Docker image (prevents BuildKit stale-tag confusion with `pull_policy: build`)
 5. Rebuilds with `--no-cache`
 6. Waits for `/health` to respond
-7. Verifies running version matches repo `VERSION`
+7. Verifies running version matches `server/VERSION`
 
 If you skip this script:
 - Surgeons get a stale PWA (old service worker, old VERSION badge)

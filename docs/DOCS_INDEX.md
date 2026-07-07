@@ -27,6 +27,7 @@ Do not create new long-lived docs in retired folders under `/Users/donnaile/dev/
 | `restructure-phase-9-server-layout-move.md` | Backend/admin portal move into `server/` with compatibility wrappers |
 | `restructure-phase-10-workspace-quarantine.md` | Local workspace quarantine and active path map |
 | `restructure-phase-11-top-level-promotion.md` | Promotion to final local top-level Git root |
+| `restructure-phase-12-release-readiness.md` | Release lane proof from the final top-level Git root |
 | `cal-native-stack-guardrails.md` | Native lane and release guardrails |
 | `cal-native-parity-ledger.md` | Platform parity ledger |
 
@@ -37,6 +38,7 @@ Do not create new long-lived docs in retired folders under `/Users/donnaile/dev/
 | `DISASTER_RECOVERY.md` | Backup/restore and recovery notes |
 | `MFSA_SERVER_SET_MASTER.md` | Server role map |
 | `APP_REFERENCE.md` | App reference |
+| `RELEASE_CHECKLIST.md` | Backend, iOS, Android, and beta release gates |
 | `RULES_ENGINE_SPEC.md` | Scheduling rules engine |
 
 ## Imported Transition Docs

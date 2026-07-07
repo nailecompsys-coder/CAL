@@ -2,6 +2,8 @@
 
 Last updated: 2026-07-07
 
+iOS test build target: `1.0.1 (13)` from the SwiftUI `ios/` lane.
+
 Production decision: SwiftUI is the production iOS app. Expo/React Native is the temporary Android bridge. Jetpack Compose is the target Android app but is not production until it has real CAL API integration and parity approval.
 
 Current tracked lane imports:

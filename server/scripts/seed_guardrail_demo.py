@@ -123,7 +123,7 @@ def reset_demo(db):
     demo_surgeons = db.query(Surgeon).filter(Surgeon.email.like(f"%@{DEMO_DOMAIN}")).all()
     for s in demo_surgeons:
         db.delete(s)
-    for loc_name in ["Demo Winter Garden OR", "Demo Lake Mary OR", "Demo Main Office"]:
+    for loc_name in ["Demo Winter Garden OR", "Demo Lake Mary OR", "Demo Main Office", "Demo Main Clinic"]:
         loc = db.query(Location).filter(Location.name == loc_name).first()
         if loc:
             db.delete(loc)
@@ -157,7 +157,7 @@ def seed():
 
         wg_or = location(db, "Demo Winter Garden OR", "DWG", "hospital")
         lm_or = location(db, "Demo Lake Mary OR", "DLM", "hospital")
-        main_office = location(db, "Demo Main Office", "DMO", "clinic")
+        main_office = location(db, "Demo Main Clinic", "DMC", "clinic")
 
         wg = clinic_group(db, "Winter Garden", "WG", 2)
         lm = clinic_group(db, "Lake Mary", "LM", 1)

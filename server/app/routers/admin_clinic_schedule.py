@@ -25,19 +25,39 @@ router = APIRouter(prefix="/admin")
 def clinic_schedule_page(
     request: Request,
     week_offset: int = 0,
+    surgeon_id: str = "all",
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    surgeons = [
+    all_surgeons = [
         row for row in db.query(Surgeon).filter(Surgeon.is_active == True).order_by(Surgeon.last_name).all()
         if surgeon_is_visible(row)
     ]
-    surgeons = _sort_surgeons_physicians_first(surgeons)
+    all_surgeons = _sort_surgeons_physicians_first(all_surgeons)
+    selected_surgeon_id = None
+    if surgeon_id != "all":
+        try:
+            selected_surgeon_id = int(surgeon_id)
+        except ValueError:
+            selected_surgeon_id = None
+    surgeons = all_surgeons
+    if selected_surgeon_id is not None:
+        surgeons = [row for row in all_surgeons if row.id == selected_surgeon_id]
     data = page_data(db, week_offset)
+    copy_source_count = sum(
+        len(day_rows)
+        for sid, surgeon_days in data["sched_map"].items()
+        if selected_surgeon_id is None or sid == selected_surgeon_id
+        for day_rows in surgeon_days.values()
+    )
 
     return templates.TemplateResponse("admin/clinic_schedule.html", _base(
         request, admin, db=db,
         surgeons=surgeons,
+        all_surgeons=all_surgeons,
+        selected_surgeon_id=selected_surgeon_id,
+        selected_surgeon_value=str(selected_surgeon_id) if selected_surgeon_id is not None else "all",
+        copy_source_count=copy_source_count,
         clinics=data["clinic_locations"],
         hospitals=data["hospital_locations"],
         all_locations=data["all_locations"],
@@ -59,23 +79,25 @@ def assign_clinic(
     session: str = Form("full"),
     notes: str = Form(""),
     week_offset: int = Form(0),
+    selected_surgeon_id: str = Form("all"),
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
     d = date.fromisoformat(schedule_date)
     conflicts = assign_clinic_service(db, d, surgeon_id, location_choice, session, notes)
-    return _warn_redirect(f"/admin/clinic-schedule?week_offset={week_offset}", conflicts)
+    return _warn_redirect(f"/admin/clinic-schedule?week_offset={week_offset}&surgeon_id={selected_surgeon_id}", conflicts)
 
 
 @router.post("/clinic-schedule/clear")
 def clear_clinic(
     schedule_id: int = Form(...),
     week_offset: int = Form(0),
+    selected_surgeon_id: str = Form("all"),
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
     clear_clinic_service(db, schedule_id)
-    return RedirectResponse(f"/admin/clinic-schedule?week_offset={week_offset}", status_code=303)
+    return RedirectResponse(f"/admin/clinic-schedule?week_offset={week_offset}&surgeon_id={selected_surgeon_id}", status_code=303)
 
 
 @router.post("/clinic-schedule/copy-week")
@@ -93,6 +115,6 @@ def copy_clinic_week(
             status_code=303,
         )
     return RedirectResponse(
-        f"/admin/clinic-schedule?week_offset={result['next_offset']}&msg=week_copied&created={result['created']}&replaced={result['replaced']}",
+        f"/admin/clinic-schedule?week_offset={result['next_offset']}&surgeon_id={surgeon_id}&msg=week_copied&created={result['created']}&replaced={result['replaced']}",
         status_code=303,
     )

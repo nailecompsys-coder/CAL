@@ -7,6 +7,20 @@ from sqlalchemy.orm import Session
 from .models import ClinicSchedule, Location, SurgicalCase
 
 
+SESSION_SORT_ORDER = {
+    "am": 0,
+    "pm": 1,
+    "full": 2,
+}
+
+
+def clinic_schedule_sort_key(schedule: ClinicSchedule) -> tuple[int, int]:
+    return (
+        SESSION_SORT_ORDER.get((schedule.session or "full").lower(), 9),
+        schedule.id or 0,
+    )
+
+
 def week_days_for_offset(week_offset: int) -> tuple[date, list[date]]:
     today = date.today()
     week_start = today - timedelta(days=today.weekday()) + timedelta(weeks=week_offset)
@@ -46,7 +60,7 @@ def page_data(db: Session, week_offset: int) -> dict:
         ClinicSchedule.date <= week_days[6],
     ).all()
     sched_map = {}
-    for schedule in schedules:
+    for schedule in sorted(schedules, key=clinic_schedule_sort_key):
         sched_map.setdefault(schedule.surgeon_id, {}).setdefault(schedule.date, []).append(schedule)
 
     surgical_cases = (

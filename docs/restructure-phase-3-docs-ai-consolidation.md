@@ -10,6 +10,8 @@ Phase 3 consolidates scattered documentation and AI context into the tracked pro
 
 Loose docs and AI context were imported into `cal-app/docs` so they are now protected by Git on `main`.
 
+After Phase 11 promotion, the active docs path is `/Users/donnaile/dev/CAL/docs`.
+
 Imported from top-level loose docs:
 
 ```text
@@ -42,10 +44,10 @@ Imported from AI/Cursor context:
 ## New Tracked Locations
 
 ```text
-cal-app/docs/imported/top-level/
-cal-app/docs/imported/native/
-cal-app/docs/imported/web-placeholder/
-cal-app/docs/ai/
+docs/imported/top-level/
+docs/imported/native/
+docs/imported/web-placeholder/
+docs/ai/
 ```
 
 ## Canonical Docs During Transition
@@ -53,10 +55,10 @@ cal-app/docs/ai/
 Until `/Users/donnaile/dev/CAL` becomes the single Git root, the canonical tracked docs are inside:
 
 ```text
-/Users/donnaile/dev/CAL/cal-app/docs/
+/Users/donnaile/dev/CAL/docs/
 ```
 
-The loose top-level copies remain as source-history breadcrumbs only. Do not edit loose copies for new work. Edit the tracked copies under `cal-app/docs`.
+The loose top-level copies were later moved to `/Users/donnaile/dev/CAL-retired-20260707`. Do not edit retired copies for new work. Edit the tracked copies under `docs/`.
 
 ## Why Originals Were Not Deleted
 

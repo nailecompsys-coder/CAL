@@ -32,19 +32,19 @@ No production server files were moved. Production still runs from `/opt/cal` wit
 Future iOS path:
 
 ```text
-/Users/donnaile/dev/CAL/cal-app/ios/CALNative.xcworkspace
+/Users/donnaile/dev/CAL/ios/CALNative.xcworkspace
 ```
 
 Future Android Compose path:
 
 ```text
-/Users/donnaile/dev/CAL/cal-app/android
+/Users/donnaile/dev/CAL/android
 ```
 
 Temporary Android bridge path:
 
 ```text
-/Users/donnaile/dev/CAL/cal-app/legacy-react-native
+/Users/donnaile/dev/CAL/legacy-react-native
 ```
 
 These paths become final only after simulator/build verification passes and later phases move the top-level Git root.

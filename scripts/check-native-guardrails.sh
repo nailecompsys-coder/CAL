@@ -66,7 +66,7 @@ require_clean_and_pushed() {
 }
 
 app_changes="$(repo_changes "$ROOT")"
-check_artifacts "cal-app" "$app_changes"
+check_artifacts "CAL repo" "$app_changes"
 
 backend_native_pattern='^server/(app/native_|app/routers/native_api\.py|app/routers/surgeon_day_items\.py|app/routers/surgeon_otp\.py|app/routers/api_push\.py|app/push\.py|app/sms_service\.py)'
 native_contract_test_pattern='^server/tests/(test_native_|test_surgeon_otp_|test_push_)'
@@ -100,7 +100,7 @@ if [[ -f "$ROOT/legacy-react-native/eas.json" ]] && grep -Eq '"ios"[[:space:]]*:
 fi
 
 if matches_any "$app_changes" "$backend_native_pattern" && ! matches_any "$app_changes" "$native_contract_test_pattern"; then
-  add_failure "Backend native API/auth/push files changed without a native contract test update under tests/test_native_*.py, tests/test_surgeon_otp_*.py, or tests/test_push_*.py."
+  add_failure "Backend native API/auth/push files changed without a native contract test update under server/tests/test_native_*.py, server/tests/test_surgeon_otp_*.py, or server/tests/test_push_*.py."
 fi
 
 if matches_any "$app_changes" "$imported_native_source_pattern" && ! matches_any "$app_changes" "$repo_native_doc_pattern"; then
@@ -112,11 +112,11 @@ if matches_any "$app_changes" "$imported_native_metadata_pattern" && ! matches_a
 fi
 
 if [[ "$STRICT_RELEASE" == "1" ]]; then
-  require_clean_and_pushed "$ROOT" "cal-app"
+  require_clean_and_pushed "$ROOT" "CAL repo"
 fi
 
-NATIVE_REPO="${NATIVE_REPO:-$ROOT/../cal-native/app}"
-if [[ -d "$NATIVE_REPO/.git" ]]; then
+NATIVE_REPO="${NATIVE_REPO:-}"
+if [[ -n "$NATIVE_REPO" && -d "$NATIVE_REPO/.git" ]]; then
   native_changes="$(repo_changes "$NATIVE_REPO")"
   check_artifacts "cal-native/app" "$native_changes"
 
@@ -144,8 +144,8 @@ if [[ -d "$NATIVE_REPO/.git" ]]; then
   if [[ "$STRICT_RELEASE" == "1" ]]; then
     require_clean_and_pushed "$NATIVE_REPO" "cal-native/app"
   fi
-else
-  echo "WARN: native repo not found at $NATIVE_REPO; checked cal-app only." >&2
+elif [[ -n "$NATIVE_REPO" ]]; then
+  echo "WARN: native repo not found at $NATIVE_REPO; checked CAL repo only." >&2
 fi
 
 if [[ ${#failures[@]} -gt 0 ]]; then

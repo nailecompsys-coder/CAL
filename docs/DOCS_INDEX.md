@@ -1,16 +1,16 @@
 # CAL Documentation Index
 
-Last updated: 2026-07-01
+Last updated: 2026-07-07
 
-## Canonical Location During Restructure
+## Canonical Location
 
-Until CAL is migrated to a single top-level Git root, canonical tracked documentation lives in:
+CAL is now promoted to a single top-level Git root. Canonical tracked documentation lives in:
 
 ```text
-/Users/donnaile/dev/CAL/cal-app/docs/
+/Users/donnaile/dev/CAL/docs/
 ```
 
-Do not create new long-lived docs in loose top-level folders. Add them here so they are committed and pushed.
+Do not create new long-lived docs in retired folders under `/Users/donnaile/dev/CAL-retired-20260707`.
 
 ## Restructure Docs
 
@@ -26,6 +26,7 @@ Do not create new long-lived docs in loose top-level folders. Add them here so t
 | `restructure-phase-8-server-path-hardening.md` | Server path hardening before physical move |
 | `restructure-phase-9-server-layout-move.md` | Backend/admin portal move into `server/` with compatibility wrappers |
 | `restructure-phase-10-workspace-quarantine.md` | Local workspace quarantine and active path map |
+| `restructure-phase-11-top-level-promotion.md` | Promotion to final local top-level Git root |
 | `cal-native-stack-guardrails.md` | Native lane and release guardrails |
 | `cal-native-parity-ledger.md` | Platform parity ledger |
 
@@ -49,4 +50,4 @@ docs/imported/web-placeholder/
 docs/ai/
 ```
 
-Treat these as preserved source material until they are reviewed, deduplicated, and moved into the final `docs/` or `ai/` folders after the top-level Git root migration.
+Treat these as preserved source material until they are reviewed and deduplicated.

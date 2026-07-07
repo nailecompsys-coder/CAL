@@ -6,16 +6,22 @@ Last updated: 2026-07-01
 
 Phase 6 proves that the new imported pure SwiftUI iOS lane can build, launch, render real CAL UI on the CAL simulator, and produce a signed Release archive from the new repository path.
 
-## Source Path
+## Source Path During Phase 6
 
 ```text
 /Users/donnaile/dev/CAL/cal-app/ios
 ```
 
+## Active Source Path After Phase 11
+
+```text
+/Users/donnaile/dev/CAL/ios
+```
+
 Production iOS project:
 
 ```text
-/Users/donnaile/dev/CAL/cal-app/ios/CALNative.xcodeproj
+/Users/donnaile/dev/CAL/ios/CALNative.xcodeproj
 ```
 
 Scheme:
@@ -36,7 +42,7 @@ Command:
 
 ```sh
 xcodebuildmcp simulator build-and-run \
-  --project-path /Users/donnaile/dev/CAL/cal-app/ios/CALNative.xcodeproj \
+  --project-path /Users/donnaile/dev/CAL/ios/CALNative.xcodeproj \
   --scheme CALNative \
   --simulator-id 623FFD67-1A18-4AF2-9EFE-1FD49B7A7808 \
   --configuration Debug \

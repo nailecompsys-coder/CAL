@@ -1,6 +1,7 @@
 import os
 import unittest
 from datetime import date, time
+from unittest.mock import patch
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
@@ -19,6 +20,12 @@ from app.models import (
     SurgeonDayItem,
 )
 from app.native_home_service import build_native_home
+
+
+class FixedDate(date):
+    @classmethod
+    def today(cls):
+        return cls(2026, 6, 4)
 
 
 class NativeHomeContractTest(unittest.TestCase):
@@ -101,7 +108,8 @@ class NativeHomeContractTest(unittest.TestCase):
             ])
             db.commit()
 
-            payload = build_native_home(db, surgeon, date(2026, 6, 4), date(2026, 6, 8))
+            with patch("app.native_home_service.date", FixedDate):
+                payload = build_native_home(db, surgeon, date(2026, 6, 4), date(2026, 6, 8))
 
             self.assertEqual(
                 {

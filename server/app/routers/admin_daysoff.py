@@ -11,6 +11,7 @@ from ..admin_dayoff_service import (
     add_approved_dayoff,
     approve_dayoff as approve_dayoff_service,
     bulk_approve_dayoffs,
+    dayoff_is_current_or_future,
     delete_dayoff as delete_dayoff_service,
     deny_dayoff as deny_dayoff_service,
     edit_dayoff as edit_dayoff_service,
@@ -29,6 +30,7 @@ router = APIRouter(prefix="/admin")
 
 @router.get("/daysoff", response_class=HTMLResponse)
 def daysoff_page(request: Request, surgeon_id: Optional[int] = None, db: Session = Depends(get_db), admin=Depends(get_current_admin)):
+    today = date.today()
     surgeons = [
         row for row in db.query(Surgeon).filter(Surgeon.is_active == True).order_by(Surgeon.last_name).all()
         if surgeon_is_visible(row)
@@ -39,8 +41,15 @@ def daysoff_page(request: Request, surgeon_id: Optional[int] = None, db: Session
     if surgeon_id:
         q = q.filter(DayOff.surgeon_id == surgeon_id)
 
-    pending = [row for row in q.filter(DayOff.status == "pending").order_by(DayOff.start_date).all() if surgeon_is_visible(row.surgeon)]
-    resolved = [row for row in q.filter(DayOff.status != "pending").order_by(DayOff.start_date).all() if surgeon_is_visible(row.surgeon)]
+    active_q = q.filter(DayOff.end_date >= today)
+    pending = [
+        row for row in active_q.filter(DayOff.status == "pending").order_by(DayOff.start_date).all()
+        if dayoff_is_current_or_future(row, today) and surgeon_is_visible(row.surgeon)
+    ]
+    resolved = [
+        row for row in active_q.filter(DayOff.status != "pending").order_by(DayOff.start_date).all()
+        if dayoff_is_current_or_future(row, today) and surgeon_is_visible(row.surgeon)
+    ]
 
     months = resolved_months(resolved)
     conflict_map = pending_conflict_map(db, pending)

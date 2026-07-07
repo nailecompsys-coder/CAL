@@ -26,6 +26,11 @@ def resolved_months(resolved: list[DayOff]) -> list[dict]:
     ]
 
 
+def dayoff_is_current_or_future(dayoff: DayOff, today: date | None = None) -> bool:
+    today = today or date.today()
+    return bool(dayoff.end_date and dayoff.end_date >= today)
+
+
 def pending_conflict_map(db: Session, pending: list[DayOff]) -> dict[int, list[dict]]:
     conflict_map = {}
     for dayoff in pending:

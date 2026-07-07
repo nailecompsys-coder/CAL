@@ -104,7 +104,10 @@ def dashboard(request: Request, db: Session = Depends(get_db), admin=Depends(get
     ]
 
     pending_daysoff = [
-        row for row in db.query(DayOff).filter(DayOff.status == "pending").all()
+        row for row in db.query(DayOff).filter(
+            DayOff.status == "pending",
+            DayOff.end_date >= today,
+        ).all()
         if surgeon_is_visible(row.surgeon)
     ]
 

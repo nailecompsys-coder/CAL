@@ -80,12 +80,20 @@ def settings_page(
 async def save_settings(
     request: Request,
     practice_name: str = Form(""),
+    show_or_patient_procedure_form: str = Form(""),
     logo: UploadFile = File(None),
     db: Session = Depends(get_db),
     current_admin=Depends(get_current_admin),
 ):
     page_settings = admin._get_settings(db)
-    msg = await save_practice_settings(db, page_settings, practice_name, logo, admin.UPLOADS_DIR)
+    msg = await save_practice_settings(
+        db,
+        page_settings,
+        practice_name,
+        logo,
+        admin.UPLOADS_DIR,
+        show_or_patient_procedure_form == "1",
+    )
     admin._settings_cache = page_settings
     return RedirectResponse(f"/admin/settings?msg={msg}", status_code=303)
 

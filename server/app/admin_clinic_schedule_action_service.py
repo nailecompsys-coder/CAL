@@ -25,7 +25,19 @@ def assign_clinic(
     location_choice: str,
     session: str,
     notes: str,
+    schedule_id: int | None = None,
 ) -> list[str]:
+    if schedule_id:
+        selected_schedule = db.get(ClinicSchedule, schedule_id)
+        if not selected_schedule:
+            return ["Selected clinic/OR assignment was not found. Refresh the page and try again."]
+        if selected_schedule.surgeon_id != surgeon_id:
+            return ["Selected clinic/OR assignment no longer matches this surgeon. Refresh the page and try again."]
+        if selected_schedule.date != schedule_date:
+            return ["Selected clinic/OR assignment no longer matches this date. Refresh the page and try again."]
+        db.delete(selected_schedule)
+        db.flush()
+
     assignment_type = "off" if location_choice == "__off__" else "assigned"
     location_id = None if assignment_type == "off" else int(location_choice)
     slot_query = db.query(ClinicSchedule).filter(

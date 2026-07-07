@@ -7,7 +7,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.admin_clinic_schedule_action_service import copy_clinic_week
+from app.admin_clinic_schedule_action_service import assign_clinic, copy_clinic_week
 from app.admin_clinic_schedule_page_service import clinic_schedule_sort_key
 from app.migrate_location_admin_fields import normalize_office_location_name
 from app.models import Base, ClinicSchedule, Location, Surgeon
@@ -60,6 +60,50 @@ class AdminClinicScheduleTest(unittest.TestCase):
             self.assertEqual(len(copied), 1)
             self.assertEqual(copied[0].surgeon_id, chris.id)
             self.assertEqual(copied[0].session, "am")
+        finally:
+            db.close()
+
+    def test_edit_existing_assignment_by_id_does_not_leave_old_session(self):
+        db = self.Session()
+        try:
+            surgeon = self._surgeon(db, "Chris", "Johnson")
+            clinic = Location(name="Winter Garden Clinic", abbreviation="WG", location_type="clinic", is_active=True)
+            hospital = Location(name="Winter Garden OR", abbreviation="WG-OR", location_type="hospital", is_active=True)
+            db.add_all([clinic, hospital])
+            db.flush()
+
+            schedule_date = date(2026, 7, 8)
+            existing = ClinicSchedule(
+                surgeon_id=surgeon.id,
+                location_id=clinic.id,
+                date=schedule_date,
+                session="am",
+                assignment_type="assigned",
+                notes="old note",
+            )
+            db.add(existing)
+            db.commit()
+            existing_id = existing.id
+
+            conflicts = assign_clinic(
+                db,
+                schedule_date,
+                surgeon.id,
+                str(hospital.id),
+                "pm",
+                "new note",
+                schedule_id=existing_id,
+            )
+
+            self.assertEqual(conflicts, [])
+            rows = db.query(ClinicSchedule).filter(
+                ClinicSchedule.surgeon_id == surgeon.id,
+                ClinicSchedule.date == schedule_date,
+            ).all()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].location_id, hospital.id)
+            self.assertEqual(rows[0].session, "pm")
+            self.assertEqual(rows[0].notes, "new note")
         finally:
             db.close()
 

@@ -6,9 +6,17 @@ from os import PathLike
 from sqlalchemy.orm import Session
 
 
-async def save_practice_settings(db: Session, page_settings, practice_name: str, logo, uploads_dir: str | PathLike[str]) -> str:
+async def save_practice_settings(
+    db: Session,
+    page_settings,
+    practice_name: str,
+    logo,
+    uploads_dir: str | PathLike[str],
+    show_or_patient_procedure_form: bool = False,
+) -> str:
     if practice_name.strip():
         page_settings.practice_name = practice_name.strip()
+    page_settings.show_or_patient_procedure_form = show_or_patient_procedure_form
     if logo and logo.filename:
         ext = os.path.splitext(logo.filename)[1].lower()
         if ext not in (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"):

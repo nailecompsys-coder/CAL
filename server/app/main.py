@@ -14,6 +14,7 @@ from . import migrate_clinic_schedule_off
 from . import migrate_location_admin_fields
 from . import migrate_native_parity
 from . import migrate_scheduling_guardrails
+from . import migrate_site_settings_tools
 from .routers import (
     admin_otp_audit,
     admin, admin_call_groups, admin_call_schedule, admin_clinic_schedule, admin_daysoff,
@@ -40,6 +41,7 @@ async def lifespan(app: FastAPI):
     migrate_location_admin_fields.run_migration()
     migrate_native_parity.run_migration()
     migrate_scheduling_guardrails.run_migration()
+    migrate_site_settings_tools.run_migration()
     db = SessionLocal()
     try:
         admin._get_settings(db)

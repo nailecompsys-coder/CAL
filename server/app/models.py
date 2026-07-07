@@ -34,6 +34,7 @@ class SiteSettings(Base):
     id = Column(Integer, primary_key=True)           # always row 1
     practice_name = Column(String(128), default="Mid Florida Surgical")
     logo_filename = Column(String(255))              # e.g. "logo.png" stored in static/uploads/
+    show_or_patient_procedure_form = Column(Boolean, default=False, server_default="false")
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 

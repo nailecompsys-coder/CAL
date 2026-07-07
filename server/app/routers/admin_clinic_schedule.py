@@ -75,6 +75,7 @@ def clinic_schedule_page(
 def assign_clinic(
     schedule_date: str = Form(...),
     surgeon_id: int = Form(...),
+    schedule_id: str = Form(""),
     location_choice: str = Form(...),
     session: str = Form("full"),
     notes: str = Form(""),
@@ -84,7 +85,8 @@ def assign_clinic(
     admin=Depends(get_current_admin),
 ):
     d = date.fromisoformat(schedule_date)
-    conflicts = assign_clinic_service(db, d, surgeon_id, location_choice, session, notes)
+    selected_schedule_id = int(schedule_id) if schedule_id.strip() else None
+    conflicts = assign_clinic_service(db, d, surgeon_id, location_choice, session, notes, selected_schedule_id)
     return _warn_redirect(f"/admin/clinic-schedule?week_offset={week_offset}&surgeon_id={selected_surgeon_id}", conflicts)
 
 

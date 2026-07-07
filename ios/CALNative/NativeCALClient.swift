@@ -1,7 +1,11 @@
 import Foundation
 
 struct NativeCALClient {
+  #if DEBUG
+  private let baseURL = URL(string: "http://127.0.0.1:3005")!
+  #else
   private let baseURL = URL(string: "https://cal.midfloridasurgical.com")!
+  #endif
 
   func requestOtp(email: String) async throws -> String {
     var request = URLRequest(url: baseURL.appendingPathComponent("/api/surgeon/otp/request"))
@@ -67,7 +71,7 @@ struct NativeCALClient {
     return try JSONDecoder().decode(NativePatientScheduleResponse.self, from: data)
   }
 
-  func submitRequestOff(token: String, startDate: Date, endDate: Date, reason: String, notes: String, segments: [RequestSegment]) async throws {
+  func submitRequestOff(token: String, startDate: Date, endDate: Date, reason: String, notes: String, segments: [RequestSegment]) async throws -> [String] {
     let url = baseURL.appendingPathComponent("/api/native/request-off")
     let normalizedSegments = segments.isEmpty ? [RequestSegment(date: startDate, isFullDay: true, start: "07:00", end: "17:00")] : segments
     let firstPartial = normalizedSegments.first { !$0.isFullDay }
@@ -99,6 +103,7 @@ struct NativeCALClient {
     if !result.ok {
       throw NativeCALError.requestRejected(result.warnings.joined(separator: " "))
     }
+    return result.warnings
   }
 
   func submitCallCoverage(token: String, rotationId: Int, coveringSurgeonId: Int, notes: String = "") async throws -> NativeCallAssignmentResponse {

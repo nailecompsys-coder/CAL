@@ -53,6 +53,7 @@ def serialize_day_off(row: DayOff) -> dict:
         "reason": row.reason or "",
         "notes": row.notes or "",
         "adminNote": row.admin_note or "",
+        "reviewFindings": row.review_findings or "",
         "status": row.status or "pending",
         "isFullDay": row.is_full_day if row.is_full_day is not None else True,
         "start": fmt_time(row.start_time),

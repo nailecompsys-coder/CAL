@@ -8,6 +8,8 @@ from .api_calendar_utils import location_abbrev
 
 
 def run_migration():
+    if engine.dialect.name == "sqlite":
+        return
     with engine.begin() as conn:
         conn.execute(text("""
             ALTER TABLE locations

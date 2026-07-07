@@ -207,3 +207,32 @@ def check_overlap_meeting(
             conflicting_entity_type="meeting",
             conflicting_entity_id=m.id,
         )
+
+
+def check_clinic_group_day_off_capacity(
+    surgeon_id: int,
+    start_date: date,
+    end_date: date,
+    db: Session,
+    config: dict,
+    exclude_entity: Optional[tuple[str, int]] = None,
+    target_entity: Optional[dict] = None,
+) -> Iterator[Conflict]:
+    if (target_entity or {}).get("type") != "day_off":
+        return
+
+    from ..models import Surgeon
+    from ..scheduling_guardrails_service import clinic_group_day_off_findings
+
+    surgeon = db.get(Surgeon, surgeon_id)
+    exclude_dayoff_id = exclude_entity[1] if exclude_entity and exclude_entity[0] == "day_off" else None
+    for finding in clinic_group_day_off_findings(db, surgeon, start_date, end_date, exclude_dayoff_id):
+        yield Conflict(
+            rule_id="CLINIC_GROUP_DAY_OFF_CAPACITY",
+            surgeon_id=surgeon_id,
+            date=finding.date,
+            message=finding.message,
+            severity="warning",
+            conflicting_entity_type="clinic_group",
+            conflicting_entity_id=finding.clinic_group_id,
+        )

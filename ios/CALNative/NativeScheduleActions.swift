@@ -14,12 +14,12 @@ struct NativeScheduleActions {
     reason: String,
     notes: String,
     segments: [RequestSegment]
-  ) async throws {
+  ) async throws -> [String] {
     guard !token.isEmpty else {
       throw NativeCALError.missingSession
     }
 
-    try await client.submitRequestOff(
+    return try await client.submitRequestOff(
       token: token,
       startDate: startDate,
       endDate: endDate,

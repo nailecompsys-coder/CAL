@@ -5,9 +5,9 @@ from datetime import date, datetime, time, timedelta
 
 from sqlalchemy.orm import Session
 
-from .conflicts import check_conflicts
 from .models import SurgicalCase
 from .push import send_push_to_surgeon
+from .scheduling_guardrails_service import surgical_case_warning_messages
 
 
 def week_offset_for_date(target_date: date) -> int:
@@ -51,22 +51,18 @@ def surgery_fields(
 
 
 def conflict_warning_query(db: Session, surgical_case: SurgicalCase, exclude_case_id: int | None = None) -> str:
-    conflicts = check_conflicts(
+    conflicts = surgical_case_warning_messages(
+        db,
         surgical_case.surgeon_id,
         surgical_case.date,
-        surgical_case.date,
-        db,
-        exclude_surgical_case_id=exclude_case_id,
-        target_entity={
-            "type": "surgical_case",
-            "date": surgical_case.date,
-            "start_time": surgical_case.start_time,
-            "end_time": surgical_case.end_time,
-        },
+        surgical_case.start_time,
+        surgical_case.end_time,
+        surgical_case.location_id,
+        exclude_case_id,
     )
     if not conflicts:
         return ""
-    return "&warn=" + urllib.parse.quote(" Â· ".join(conflicts[:8]))
+    return "&warn=" + urllib.parse.quote(" · ".join(conflicts[:8]))
 
 
 def add_surgical_case(db: Session, fields: dict) -> tuple[SurgicalCase, str]:
@@ -79,7 +75,7 @@ def add_surgical_case(db: Session, fields: dict) -> tuple[SurgicalCase, str]:
         f"Surgery added {surgical_case.date.strftime('%b %-d')} {surgical_case.start_time.strftime('%-I:%M %p')}",
         db,
     )
-    return surgical_case, conflict_warning_query(db, surgical_case)
+    return surgical_case, conflict_warning_query(db, surgical_case, exclude_case_id=surgical_case.id)
 
 
 def update_surgical_case(db: Session, surgical_case: SurgicalCase, fields: dict) -> str:

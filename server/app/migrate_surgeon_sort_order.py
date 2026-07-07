@@ -4,6 +4,8 @@ from .database import engine
 
 
 def run_migration():
+    if engine.dialect.name == "sqlite":
+        return
     with engine.begin() as conn:
         conn.execute(text("""
             ALTER TABLE surgeons

@@ -1,6 +1,6 @@
 # CAL Native Parity Ledger
 
-Last updated: 2026-07-01
+Last updated: 2026-07-07
 
 Production decision: SwiftUI is the production iOS app. Expo/React Native is the temporary Android bridge. Jetpack Compose is the target Android app but is not production until it has real CAL API integration and parity approval.
 
@@ -17,7 +17,7 @@ Current tracked lane imports:
 | Daily Schedule | `GET /api/native/home` | Production | Temporary Android bridge | Not integrated | iOS + Expo Android | Daily view is required for all device users |
 | Week | `GET /api/native/home` | Production | Temporary Android bridge | Not integrated | iOS + Expo Android | Week navigation must use shared date range semantics |
 | Month | `GET /api/native/home` | Production | Temporary Android bridge | Not integrated | iOS + Expo Android | Month must show meaningful labels, not anonymous dots |
-| Time Off | `/api/native/request-off*`, `GET /api/native/home` | Production | Temporary Android bridge | Not integrated | iOS + Expo Android | Supports multi-day and half-day segment selection |
+| Time Off | `/api/native/request-off*`, `GET /api/native/home` | Production | Temporary Android bridge | Not integrated | iOS + Expo Android | Supports multi-day and half-day segment selection. Backend returns clinic-group warning text on submit; iOS shows plain two-line confirmation/warning copy without blocking submission. |
 | On Call Coverage | `POST /api/native/call-coverage`, `GET /api/native/home` | Production | Temporary Android bridge | Not integrated | iOS + Expo Android | Coverage shows original crossed out and covering initials |
 | Meetings | `GET /api/native/home` | Production | Temporary Android bridge | Not integrated | iOS + Expo Android | Today and next item display are required |
 | Personal Items | `/surgeon/api/day-items*`, `GET /api/native/home` | Production | Temporary Android bridge | Not integrated | iOS + Expo Android | Today and next item display are required |

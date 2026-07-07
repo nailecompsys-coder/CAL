@@ -185,12 +185,12 @@ final class NativeScheduleStore: ObservableObject {
     hasBootstrapped = true
   }
 
-  func submitTimeOffRequest(startDate: Date, endDate: Date, reason: String, notes: String, segments: [RequestSegment]) async throws {
+  func submitTimeOffRequest(startDate: Date, endDate: Date, reason: String, notes: String, segments: [RequestSegment]) async throws -> [String] {
     guard let token = sessionToken, !token.isEmpty else {
       throw NativeCALError.missingSession
     }
 
-    try await actions.submitTimeOffRequest(
+    let warnings = try await actions.submitTimeOffRequest(
       token: token,
       startDate: startDate,
       endDate: endDate,
@@ -199,6 +199,7 @@ final class NativeScheduleStore: ObservableObject {
       segments: segments
     )
     await load(containing: startDate, scope: .month)
+    return warnings
   }
 
   func submitCallCoverage(assignment: ScheduleAssignment, coveringSurgeon: NativeSurgeon, selectedDate: Date, scope: ScheduleScope) async throws {

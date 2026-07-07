@@ -86,8 +86,8 @@
 
     <div class="space-y-2" id="pending-list">
       {% for d in pending %}
-      {% set conflicts = conflict_map.get(d.id, []) %}
-      <div class="clinical-glass overflow-hidden {% if conflicts %}ring-1 ring-amber-200{% endif %}">
+      {% set findings = conflict_map.get(d.id, []) %}
+      <div class="clinical-glass overflow-hidden {% if findings %}ring-1 ring-amber-200{% endif %}">
         <div class="px-4 py-3 flex items-center gap-3 flex-wrap">
           <input type="checkbox" name="ids" value="{{ d.id }}" form="bulk-approve-form"
             class="pending-cb rounded w-4 h-4 flex-shrink-0 cursor-pointer accent-blue-600"
@@ -104,10 +104,10 @@
               {% if d.notes %}<span class="text-slate-400">{{ d.notes }}</span>{% endif %}
             </div>
           </div>
-          {% if conflicts %}
-          <div class="bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1 text-xs text-amber-700 flex-shrink-0">
+          {% if findings %}
+          <div class="bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1 text-xs text-amber-700 flex-shrink-0" title="{{ findings[0].message }}">
             <i class="fa-solid fa-triangle-exclamation mr-1"></i>
-            On-call {{ conflicts[0].date.strftime('%b %-d') }}{% if conflicts|length > 1 %} +{{ conflicts|length - 1 }}{% endif %}
+            Finding{% if findings|length > 1 %}s {{ findings|length }}{% endif %}
           </div>
           {% else %}
           <div class="bg-green-50 border border-green-200 rounded-lg px-2.5 py-1 text-xs text-green-700 flex-shrink-0">
@@ -134,6 +134,16 @@
             </form>
           </div>
         </div>
+        {% if findings %}
+        <div class="px-4 pb-3 -mt-1 ml-16 space-y-1">
+          {% for finding in findings[:4] %}
+          <div class="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-800">
+            <span class="font-bold">{{ finding.kind|replace('_', ' ')|title }}:</span>
+            {{ finding.message }}
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
       </div>
       {% endfor %}
     </div>

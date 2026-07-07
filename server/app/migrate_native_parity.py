@@ -5,6 +5,8 @@ from .database import engine
 
 
 def run_migration():
+    if engine.dialect.name == "sqlite":
+        return
     with engine.begin() as conn:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS call_coverages (

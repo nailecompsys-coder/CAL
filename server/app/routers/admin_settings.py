@@ -112,10 +112,11 @@ def add_admin_user(
     username: str = Form(...),
     email: str = Form(...),
     password: str = Form(...),
+    role: str = Form("admin"),
     db: Session = Depends(get_db),
     current_admin=Depends(get_current_admin),
 ):
-    msg = add_admin_user_service(db, username, email, password)
+    msg = add_admin_user_service(db, username, email, password, role)
     return RedirectResponse(f"/admin/settings?msg={msg}", status_code=303)
 
 
@@ -146,10 +147,11 @@ def edit_admin_user(
     username: str = Form(...),
     email: str = Form(...),
     new_password: str = Form(""),
+    role: str = Form("admin"),
     db: Session = Depends(get_db),
     current_admin=Depends(get_current_admin),
 ):
-    msg = edit_admin_user_service(db, user_id, username, email, new_password)
+    msg = edit_admin_user_service(db, user_id, username, email, new_password, role)
     return RedirectResponse(f"/admin/settings?msg={msg}", status_code=303)
 
 

@@ -114,6 +114,8 @@ def normalize_surgeon_colors(conn):
 
 def run_migration():
     """Idempotent: safe to call every startup."""
+    if engine.dialect.name == "sqlite":
+        return
     try:
         run()
         seed_default_call_groups()

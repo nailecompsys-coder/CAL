@@ -9,6 +9,11 @@ from sqlalchemy.orm import Session
 from .conflicts import check_conflicts
 from .models import CallRotation, DayOff, Surgeon
 from .push import send_push_to_surgeon
+from .scheduling_guardrails_service import (
+    decode_findings,
+    finding_dicts,
+    store_dayoff_findings,
+)
 
 
 def resolved_months(resolved: list[DayOff]) -> list[dict]:
@@ -21,14 +26,23 @@ def resolved_months(resolved: list[DayOff]) -> list[dict]:
     ]
 
 
-def pending_conflict_map(db: Session, pending: list[DayOff]) -> dict[int, list[CallRotation]]:
+def pending_conflict_map(db: Session, pending: list[DayOff]) -> dict[int, list[dict]]:
     conflict_map = {}
     for dayoff in pending:
-        conflict_map[dayoff.id] = db.query(CallRotation).filter(
+        findings = decode_findings(dayoff.review_findings)
+        call_rows = db.query(CallRotation).filter(
             CallRotation.surgeon_id == dayoff.surgeon_id,
             CallRotation.date >= dayoff.start_date,
             CallRotation.date <= dayoff.end_date,
         ).all()
+        for row in call_rows:
+            findings.append({
+                "severity": "warning",
+                "kind": "call_assignment",
+                "date": row.date.isoformat(),
+                "message": f"On-call assignment on {row.date.strftime('%b %-d')}",
+            })
+        conflict_map[dayoff.id] = findings
     return conflict_map
 
 
@@ -67,13 +81,15 @@ def add_approved_dayoff(
     )
     db.add(dayoff)
     db.commit()
+    db.refresh(dayoff)
+    findings = store_dayoff_findings(db, dayoff)
     send_push_to_surgeon(
         surgeon_id,
         "Day Off Added",
         f"Admin added approved time off: {start.strftime('%b %d')}–{end.strftime('%b %d')}.",
         db,
     )
-    return conflict_messages_for_dayoff(db, dayoff)
+    return [f["message"] for f in finding_dicts(findings)] + conflict_messages_for_dayoff(db, dayoff)
 
 
 def approve_dayoff(db: Session, dayoff_id: int, approved_by: int) -> list[str] | None:
@@ -82,7 +98,7 @@ def approve_dayoff(db: Session, dayoff_id: int, approved_by: int) -> list[str] |
         return None
     dayoff.status = "approved"
     dayoff.approved_by = approved_by
-    db.commit()
+    store_dayoff_findings(db, dayoff)
     send_push_to_surgeon(
         dayoff.surgeon_id,
         "Days Off Approved",
@@ -119,6 +135,7 @@ def edit_dayoff(db: Session, dayoff_id: int, start: date, end: date, reason: str
         dayoff.end_date = end
         dayoff.reason = reason
         dayoff.notes = notes
+        store_dayoff_findings(db, dayoff)
         db.commit()
 
 

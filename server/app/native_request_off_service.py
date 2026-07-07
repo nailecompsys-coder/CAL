@@ -14,6 +14,7 @@ from .native_request_off_helpers import (
 )
 from .native_support import serialize_day_off
 from .push import send_native_push_to_surgeon
+from .scheduling_guardrails_service import dayoff_surgeon_warning, store_dayoff_findings
 
 
 def create_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequestOffInput) -> dict:
@@ -42,6 +43,9 @@ def create_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequ
     db.add(row)
     db.commit()
     db.refresh(row)
+    findings = store_dayoff_findings(db, row)
+    if findings:
+        conflict_msgs.append(dayoff_surgeon_warning(findings))
     send_native_push_to_surgeon(
         surgeon.id,
         "Days off request pending",
@@ -49,7 +53,7 @@ def create_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequ
         db,
         {"type": "day_off", "requestId": row.id},
     )
-    return {"ok": True, "request": serialize_day_off(row), "warnings": conflict_msgs[:3]}
+    return {"ok": True, "request": serialize_day_off(row), "warnings": [msg for msg in conflict_msgs if msg][:3]}
 
 
 def update_native_request_off(db: Session, surgeon: Surgeon, dayoff_id: int, payload: NativeRequestOffInput) -> dict:
@@ -79,6 +83,8 @@ def update_native_request_off(db: Session, surgeon: Surgeon, dayoff_id: int, pay
     row.admin_note = None
     db.commit()
     db.refresh(row)
+    findings = store_dayoff_findings(db, row)
+    conflict_msgs.extend([dayoff_surgeon_warning(findings)] if findings else [])
     send_native_push_to_surgeon(
         surgeon.id,
         "Days off request updated",
@@ -86,7 +92,7 @@ def update_native_request_off(db: Session, surgeon: Surgeon, dayoff_id: int, pay
         db,
         {"type": "day_off", "requestId": row.id},
     )
-    return {"ok": True, "request": serialize_day_off(row), "warnings": []}
+    return {"ok": True, "request": serialize_day_off(row), "warnings": [msg for msg in conflict_msgs if msg][:3]}
 
 
 def cancel_native_request_off(db: Session, surgeon: Surgeon, dayoff_id: int) -> dict:

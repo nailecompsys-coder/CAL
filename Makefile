@@ -1,10 +1,13 @@
 # Mid Florida Surgical Cal — local deploy helpers (run from repo root)
 PYTHON ?= python3
 
-.PHONY: doctor deploy-cal deploy-cal-standalone verify-cal bump-only compile test test-local mac-dev-up mac-dev-down mac-dev-status mac-dev-logs mac-dev-smoke
+.PHONY: doctor seed-guardrail-demo deploy-cal deploy-cal-standalone verify-cal bump-only compile test test-local mac-dev-up mac-dev-down mac-dev-status mac-dev-logs mac-dev-smoke
 
 doctor:
 	@./server/scripts/doctor.sh
+
+seed-guardrail-demo:
+	@cd server && ./.venv-test/bin/python scripts/seed_guardrail_demo.py
 
 deploy-cal:
 	@./server/scripts/rebuild-cal-api.sh

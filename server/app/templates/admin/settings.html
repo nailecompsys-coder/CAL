@@ -176,6 +176,7 @@
           <tr class="border-b border-slate-200 text-left">
             <th class="pb-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">User</th>
             <th class="pb-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Email</th>
+            <th class="pb-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Role</th>
             <th class="pb-2 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
             <th class="pb-2 text-right text-xs font-semibold text-slate-500 uppercase tracking-wide">Actions</th>
           </tr>
@@ -185,6 +186,7 @@
           <tr class="{% if not u.is_active %}opacity-50{% endif %}">
             <td class="py-3 font-medium text-slate-800">{{ u.username }}</td>
             <td class="py-3 text-slate-600">{{ u.email }}</td>
+            <td class="py-3 text-slate-600">{{ u.role }}</td>
             <td class="py-3">
               {% if u.is_active %}
               <span class="text-xs font-medium px-2 py-0.5 rounded-full status-approved">Active</span>
@@ -194,7 +196,7 @@
             </td>
             <td class="py-3 text-right">
               <button type="button" class="edit-admin-user text-blue-600 hover:text-blue-800 text-xs font-medium mr-2"
-                data-user-id="{{ u.id }}" data-username="{{ u.username|e }}" data-email="{{ u.email|e }}">Edit</button>
+                data-user-id="{{ u.id }}" data-username="{{ u.username|e }}" data-email="{{ u.email|e }}" data-role="{{ u.role }}">Edit</button>
               <button type="button" onclick="openPasswordModal({{ u.id }}, '{{ u.username|e }}')"
                 class="text-blue-600 hover:text-blue-800 text-xs font-medium mr-2">Set password</button>
               <form method="post" action="/admin/settings/users/{{ u.id }}/toggle" class="inline mr-2">
@@ -228,6 +230,13 @@
           <label class="block text-xs font-semibold text-slate-600 mb-1 uppercase tracking-wide">Password</label>
           <input type="password" name="password" required minlength="8" placeholder="Min 8 characters"
             class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </div>
+        <div class="min-w-[140px]">
+          <label class="block text-xs font-semibold text-slate-600 mb-1 uppercase tracking-wide">Role</label>
+          <select name="role" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+            <option value="admin">Admin</option>
+            <option value="scheduler">Scheduler only</option>
+          </select>
         </div>
         <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700">
           Add user
@@ -475,6 +484,13 @@
           <input type="password" name="new_password" id="edit-user-password" minlength="8" autocomplete="new-password" placeholder="Optional"
             class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Role</label>
+          <select name="role" id="edit-user-role" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+            <option value="admin">Admin</option>
+            <option value="scheduler">Scheduler only</option>
+          </select>
+        </div>
         <div class="flex gap-2">
           <button type="submit" class="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">Save</button>
           <button type="button" onclick="document.getElementById('edit-user-modal').classList.add('hidden')" class="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-lg text-sm font-medium">Cancel</button>
@@ -563,16 +579,17 @@ dz.addEventListener('drop', e => {
   previewLogo(input);
 });
 
-function openEditUserModal(userId, username, email) {
+function openEditUserModal(userId, username, email, role) {
   document.getElementById('edit-user-form').action = '/admin/settings/users/' + userId + '/edit';
   document.getElementById('edit-user-username').value = username;
   document.getElementById('edit-user-email').value = email;
+  document.getElementById('edit-user-role').value = role || 'admin';
   document.getElementById('edit-user-password').value = '';
   document.getElementById('edit-user-modal').classList.remove('hidden');
 }
 document.querySelectorAll('.edit-admin-user').forEach(function(btn) {
   btn.addEventListener('click', function() {
-    openEditUserModal(parseInt(this.dataset.userId, 10), this.dataset.username || '', this.dataset.email || '');
+    openEditUserModal(parseInt(this.dataset.userId, 10), this.dataset.username || '', this.dataset.email || '', this.dataset.role || 'admin');
   });
 });
 

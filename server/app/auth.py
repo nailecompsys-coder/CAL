@@ -53,6 +53,15 @@ def get_current_admin(
     admin = db.get(AdminUser, admin_id)
     if not admin or not admin.is_active:
         _raise_html_or_json_auth_error(request, "/admin/login")
+    if admin.role == "scheduler":
+        allowed = {
+            "/admin/scheduler-availability",
+            "/admin/logout",
+        }
+        if request.url.path == "/admin" or request.url.path == "/admin/dashboard":
+            _raise_html_or_json_auth_error(request, "/admin/scheduler-availability")
+        if request.url.path not in allowed:
+            _raise_html_or_json_auth_error(request, "/admin/scheduler-availability")
     return admin
 
 

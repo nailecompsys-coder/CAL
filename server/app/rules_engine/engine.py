@@ -78,6 +78,7 @@ def evaluate(
             "OVERLAP_CLINIC",
             "OVERLAP_SURGERY",
             "OVERLAP_MEETING",
+            "CLINIC_GROUP_DAY_OFF_CAPACITY",
         },
         "availability": {
             "OVERLAP_DAY_OFF",

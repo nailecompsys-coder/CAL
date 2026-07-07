@@ -13,10 +13,12 @@ from . import migrate_surgeon_sort_order
 from . import migrate_clinic_schedule_off
 from . import migrate_location_admin_fields
 from . import migrate_native_parity
+from . import migrate_scheduling_guardrails
 from .routers import (
     admin_otp_audit,
     admin, admin_call_groups, admin_call_schedule, admin_clinic_schedule, admin_daysoff,
-    admin_locations, admin_meetings, admin_metrics, admin_settings, admin_surgeons,
+    admin_clinic_groups, admin_locations, admin_meetings, admin_metrics, admin_scheduler_availability, admin_settings, admin_surgeons,
+    admin_surgical_blocks,
     admin_schedule_templates, admin_surgical_schedule, api, api_calendar, api_push, auth,
     native_api, surgeon, surgeon_availability, surgeon_call_schedule, surgeon_day_items, surgeon_otp,
     surgeon_request_off, surgeon_schedule, surgeon_surgical_cases,
@@ -37,6 +39,7 @@ async def lifespan(app: FastAPI):
     migrate_call_groups.run_migration()
     migrate_location_admin_fields.run_migration()
     migrate_native_parity.run_migration()
+    migrate_scheduling_guardrails.run_migration()
     db = SessionLocal()
     try:
         admin._get_settings(db)
@@ -85,10 +88,13 @@ app.include_router(admin_call_schedule.router)
 app.include_router(admin_clinic_schedule.router)
 app.include_router(admin_schedule_templates.router)
 app.include_router(admin_call_groups.router)
+app.include_router(admin_clinic_groups.router)
 app.include_router(admin_daysoff.router)
 app.include_router(admin_locations.router)
 app.include_router(admin_meetings.router)
 app.include_router(admin_metrics.router)
+app.include_router(admin_scheduler_availability.router)
+app.include_router(admin_surgical_blocks.router)
 app.include_router(admin_settings.router)
 app.include_router(admin_surgical_schedule.router)
 app.include_router(surgeon.router)

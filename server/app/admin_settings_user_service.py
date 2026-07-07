@@ -36,7 +36,11 @@ def save_rule_config(db: Session, form) -> None:
     db.commit()
 
 
-def add_admin_user(db: Session, username: str, email: str, password: str) -> str:
+def _normalize_role(role: str) -> str:
+    return "scheduler" if role == "scheduler" else "admin"
+
+
+def add_admin_user(db: Session, username: str, email: str, password: str, role: str = "admin") -> str:
     username = username.strip().lower()
     email = email.strip().lower()
     if not username or not email:
@@ -52,7 +56,7 @@ def add_admin_user(db: Session, username: str, email: str, password: str) -> str
             username=username,
             email=email,
             password_hash=hash_password(password),
-            role="admin",
+            role=_normalize_role(role),
             is_active=True,
         )
     )
@@ -83,7 +87,7 @@ def toggle_admin_user(db: Session, user_id: int) -> str:
     return "user_updated"
 
 
-def edit_admin_user(db: Session, user_id: int, username: str, email: str, new_password: str) -> str:
+def edit_admin_user(db: Session, user_id: int, username: str, email: str, new_password: str, role: str = "admin") -> str:
     user = db.get(AdminUser, user_id)
     if not user:
         return "user_not_found"
@@ -99,6 +103,7 @@ def edit_admin_user(db: Session, user_id: int, username: str, email: str, new_pa
         return "email_taken"
     user.username = username
     user.email = email
+    user.role = _normalize_role(role)
     if new_password and len(new_password.strip()) >= 8:
         user.password_hash = hash_password(new_password.strip())
     db.commit()

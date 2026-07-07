@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models import Base, DayOff, Surgeon
+from app.models import Base, ClinicGroup, ClinicGroupMember, DayOff, Surgeon
 from app.routers.native_api import (
     NativeRequestOffBody,
     native_cancel_request_off,
@@ -131,6 +131,40 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
         finally:
             db.close()
 
+    def test_create_request_warns_and_persists_clinic_group_findings(self):
+        db = self.Session()
+        try:
+            approved = self._seed_surgeon(db, "Lucy", "Woodley", "lucy@example.com", 1)
+            requester = self._seed_surgeon(db, "Jorge", "Florin", "jorge@example.com", 2)
+            group = ClinicGroup(name="Lake Mary", abbreviation="LM", max_approved_off_per_day=1, is_active=True)
+            db.add(group)
+            db.flush()
+            db.add_all([
+                ClinicGroupMember(clinic_group_id=group.id, surgeon_id=approved.id),
+                ClinicGroupMember(clinic_group_id=group.id, surgeon_id=requester.id),
+                DayOff(
+                    surgeon_id=approved.id,
+                    start_date=date.today() + timedelta(days=9),
+                    end_date=date.today() + timedelta(days=9),
+                    reason="Approved",
+                    status="approved",
+                ),
+            ])
+            db.commit()
+            start = date.today() + timedelta(days=9)
+            body = NativeRequestOffBody(start_date=start, end_date=start, reason="Day Off", is_full_day=True)
+
+            with patch("app.native_request_off_service.send_native_push_to_surgeon"):
+                response = native_request_off(body, db=db, auth=(requester, "token"))
+
+            self.assertTrue(response["ok"])
+            self.assertTrue(any("Lake Mary" in warning for warning in response["warnings"]))
+            row = db.get(DayOff, response["request"]["id"])
+            self.assertIsNotNone(row.review_findings)
+            self.assertIn("clinic_group_capacity", row.review_findings)
+        finally:
+            db.close()
+
     def test_update_rejects_other_surgeons_request(self):
         db = self.Session()
         try:
@@ -171,13 +205,13 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
         finally:
             db.close()
 
-    def _seed_surgeon(self, db):
+    def _seed_surgeon(self, db, first_name="Chris", last_name="Johnson", email="chris@example.com", sort_order=1):
         surgeon = Surgeon(
-            first_name="Chris",
-            last_name="Johnson",
-            email="chris@example.com",
+            first_name=first_name,
+            last_name=last_name,
+            email=email,
             staff_type="physician",
-            sort_order=1,
+            sort_order=sort_order,
             is_active=True,
         )
         db.add(surgeon)

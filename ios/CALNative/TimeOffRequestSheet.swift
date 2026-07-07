@@ -140,7 +140,7 @@ struct TimeOffRequestForm: View {
     message = nil
 
     do {
-      try await store.submitTimeOffRequest(
+      let warnings = try await store.submitTimeOffRequest(
         startDate: startDate,
         endDate: endDate,
         reason: reason,
@@ -148,7 +148,7 @@ struct TimeOffRequestForm: View {
         segments: segments
       )
       isSubmitting = false
-      dismiss()
+      message = submissionMessage(warnings: warnings)
     } catch {
       isSubmitting = false
       message = error.localizedDescription
@@ -177,6 +177,36 @@ struct TimeOffRequestForm: View {
         return RequestSegment(date: segment.date, isFullDay: false, start: "12:00", end: "17:00")
       }
     }
+  }
+
+  private func submissionMessage(warnings: [String]) -> String {
+    let rangeLine = "Request for \(requestDateLabel(startDate)) to \(requestDateLabel(endDate))"
+    guard let warning = primaryWarning(from: warnings) else {
+      return "\(rangeLine)\nNo conflicts noted, submitted for approval."
+    }
+    return "\(rangeLine)\n\(cleanWarning(warning))"
+  }
+
+  private func primaryWarning(from warnings: [String]) -> String? {
+    warnings.first { warning in
+      warning.localizedCaseInsensitiveContains("already has")
+        && warning.localizedCaseInsensitiveContains("approved off")
+    } ?? warnings.first
+  }
+
+  private func cleanWarning(_ warning: String) -> String {
+    var cleaned = warning
+      .replacingOccurrences(of: "Heads up: ", with: "")
+      .replacingOccurrences(of: "Submitted. ", with: "")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    if !cleaned.hasSuffix(".") {
+      cleaned += "."
+    }
+    return cleaned
+  }
+
+  private func requestDateLabel(_ date: Date) -> String {
+    date.formatted(.dateTime.month(.abbreviated).day())
   }
 
   private func datesBetween(_ start: Date, _ end: Date) -> [Date] {

@@ -67,6 +67,7 @@ def _build_rules() -> list[RuleDef]:
         check_buffer_same_site_am_pm,
         check_buffer_surgery_to_clinic,
         check_location_drive_time,
+        check_clinic_group_day_off_capacity,
         check_overlap_call,
         check_overlap_clinic,
         check_overlap_day_off,
@@ -92,6 +93,15 @@ def _build_rules() -> list[RuleDef]:
             default_config={},
             config_schema=[],
             checker=check_overlap_call,
+        ),
+        RuleDef(
+            rule_id="CLINIC_GROUP_DAY_OFF_CAPACITY",
+            name="Clinic group day-off capacity",
+            category="overlap",
+            description="Warn when approved physicians already off meet the clinic group limit",
+            default_config={},
+            config_schema=[],
+            checker=check_clinic_group_day_off_capacity,
         ),
         RuleDef(
             rule_id="OVERLAP_CLINIC",

@@ -78,6 +78,8 @@ class Surgeon(Base):
     clinic_schedules = relationship("ClinicSchedule", back_populates="surgeon", cascade="all, delete-orphan")
     surgical_cases = relationship("SurgicalCase", back_populates="surgeon", cascade="all, delete-orphan")
     day_items = relationship("SurgeonDayItem", back_populates="surgeon", cascade="all, delete-orphan")
+    clinic_group_memberships = relationship("ClinicGroupMember", back_populates="surgeon", cascade="all, delete-orphan")
+    surgical_blocks = relationship("SurgicalBlock", back_populates="surgeon", cascade="all, delete-orphan")
 
     def _strip_dr(self, name: str) -> str:
         """Remove leading 'Dr.' or 'Dr ' for display; do not store prefix in DB."""
@@ -287,6 +289,7 @@ class DayOff(Base):
     status = Column(String(16), default="pending")  # pending | approved | denied
     notes = Column(Text)  # surgeon's note
     admin_note = Column(Text)  # admin's response
+    review_findings = Column(Text)  # JSON list of system findings for scheduler approval review
     approved_by = Column(Integer, ForeignKey("admin_users.id"))
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
@@ -377,6 +380,47 @@ class SurgicalCase(Base):
     updated_at = Column(DateTime, onupdate=func.now())
 
     surgeon = relationship("Surgeon", back_populates="surgical_cases")
+    location = relationship("Location")
+
+
+class ClinicGroup(Base):
+    __tablename__ = "clinic_groups"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(128), nullable=False, unique=True)
+    abbreviation = Column(String(12), nullable=False)
+    max_approved_off_per_day = Column(Integer, default=1, server_default="1", nullable=False)
+    is_active = Column(Boolean, default=True, server_default="true", nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    members = relationship("ClinicGroupMember", back_populates="clinic_group", cascade="all, delete-orphan")
+
+
+class ClinicGroupMember(Base):
+    __tablename__ = "clinic_group_members"
+    __table_args__ = (UniqueConstraint("clinic_group_id", "surgeon_id"),)
+    id = Column(Integer, primary_key=True)
+    clinic_group_id = Column(Integer, ForeignKey("clinic_groups.id"), nullable=False)
+    surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=False)
+
+    clinic_group = relationship("ClinicGroup", back_populates="members")
+    surgeon = relationship("Surgeon", back_populates="clinic_group_memberships")
+
+
+class SurgicalBlock(Base):
+    __tablename__ = "surgical_blocks"
+    id = Column(Integer, primary_key=True)
+    surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=False)
+    location_id = Column(Integer, ForeignKey("locations.id"))
+    day_of_week = Column(Integer)  # 0=Mon ... 6=Sun for weekly blocks
+    block_date = Column(Date)  # optional one-day block override
+    start_time = Column(Time, nullable=False)
+    end_time = Column(Time, nullable=False)
+    recurrence = Column(String(16), default="weekly", server_default="weekly")  # weekly | once
+    is_active = Column(Boolean, default=True, server_default="true", nullable=False)
+    notes = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+
+    surgeon = relationship("Surgeon", back_populates="surgical_blocks")
     location = relationship("Location")
 
 

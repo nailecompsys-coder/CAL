@@ -42,7 +42,12 @@ class NativeMiscRoutesTest(unittest.TestCase):
             db.commit()
 
             response = native_push_token(
-                NativePushTokenBody(token=" ExponentPushToken[abc] ", platform="ios"),
+                NativePushTokenBody(
+                    token=" ExponentPushToken[abc] ",
+                    platform="ios",
+                    provider="apns",
+                    deviceName="iPhone",
+                ),
                 db=db,
                 auth=(second, None),
             )
@@ -51,6 +56,8 @@ class NativeMiscRoutesTest(unittest.TestCase):
             db.refresh(token)
             self.assertEqual(token.surgeon_id, second.id)
             self.assertTrue(token.is_active)
+            self.assertEqual(token.provider, "apns")
+            self.assertEqual(token.device_name, "iPhone")
         finally:
             db.close()
 

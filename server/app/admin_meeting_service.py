@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from .conflicts import check_conflicts
 from .models import Meeting, MeetingAttendee, Surgeon
-from .push import send_push_to_surgeon
+from .push import notify_schedule_change
 from .surgeon_visibility import surgeon_is_visible
 
 
@@ -75,12 +75,12 @@ def notify_and_check_meeting_conflicts(
 ) -> list[str]:
     conflicts = []
     for surgeon_id in target_surgeon_ids(db, attendee_ids):
-        send_push_to_surgeon(
-            surgeon_id,
+        notify_schedule_change(
+            [surgeon_id],
             "Schedule updated",
             f"Meeting {message_action} {fields['date'].strftime('%a')} {message_time or 'TBD'}: {fields['title']}",
             db,
-            url="/surgeon/schedule",
+            payload={"type": "meeting", "meetingId": meeting.id},
         )
         surgeon = db.get(Surgeon, surgeon_id)
         raw = check_conflicts(
@@ -147,15 +147,16 @@ def update_meeting(
 def delete_meeting(db: Session, meeting: Meeting) -> None:
     attendee_ids = [row.surgeon_id for row in meeting.attendees]
     surgeon_ids = target_surgeon_ids(db, attendee_ids)
+    meeting_id = meeting.id
     meeting_date = meeting.date
     meeting_title = meeting.title
     db.delete(meeting)
     db.commit()
     for surgeon_id in surgeon_ids:
-        send_push_to_surgeon(
-            surgeon_id,
+        notify_schedule_change(
+            [surgeon_id],
             "Schedule updated",
             f"Meeting removed {meeting_date.strftime('%a')}: {meeting_title}",
             db,
-            url="/surgeon/schedule",
+            payload={"type": "meeting", "meetingId": meeting_id},
         )

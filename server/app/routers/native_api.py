@@ -193,6 +193,8 @@ def native_save_surgery_notes(
 class NativePushTokenBody(BaseModel):
     token: str
     platform: str = "ios"
+    provider: str = "expo"
+    deviceName: str | None = None
 
 
 @router.post("/push-token")
@@ -205,4 +207,4 @@ def native_push_token(
     token = body.token.strip()
     if not token:
         raise HTTPException(400, "Push token is required")
-    return save_push_token(db, surgeon, device, token, body.platform)
+    return save_push_token(db, surgeon, device, token, body.platform, body.provider, body.deviceName)

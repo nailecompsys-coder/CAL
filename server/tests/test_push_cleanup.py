@@ -1,6 +1,6 @@
 import os
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
@@ -51,7 +51,7 @@ class PushCleanupTest(unittest.TestCase):
             surgeon = Surgeon(first_name="Chris", last_name="Johnson", email="chris@example.com", is_active=True)
             db.add(surgeon)
             db.flush()
-            token = NativePushToken(surgeon_id=surgeon.id, token="ExponentPushToken[stale]", is_active=True)
+            token = NativePushToken(surgeon_id=surgeon.id, token="ExponentPushToken[stale]", provider="expo", is_active=True)
             db.add(token)
             db.commit()
 
@@ -65,6 +65,32 @@ class PushCleanupTest(unittest.TestCase):
                 ]
             }
             with patch("app.push.requests.post", return_value=response):
+                send_native_push_to_surgeon(surgeon.id, "Title", "Body", db)
+
+            db.refresh(token)
+            self.assertFalse(token.is_active)
+        finally:
+            db.close()
+
+    def test_stale_apns_token_is_deactivated(self):
+        db = self.Session()
+        try:
+            surgeon = Surgeon(first_name="Chris", last_name="Johnson", email="chris@example.com", is_active=True)
+            db.add(surgeon)
+            db.flush()
+            token = NativePushToken(surgeon_id=surgeon.id, token="apns-stale", provider="apns", is_active=True)
+            db.add(token)
+            db.commit()
+
+            response = Mock(status_code=410)
+            response.json.return_value = {"reason": "Unregistered"}
+            client = Mock()
+            client.post.return_value = response
+            context = MagicMock()
+            context.__enter__.return_value = client
+            context.__exit__.return_value = False
+
+            with patch("app.push._apns_jwt", return_value="jwt"), patch("app.push.httpx.Client", return_value=context):
                 send_native_push_to_surgeon(surgeon.id, "Title", "Body", db)
 
             db.refresh(token)

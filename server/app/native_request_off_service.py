@@ -13,7 +13,7 @@ from .native_request_off_helpers import (
     validate_request_dates,
 )
 from .native_support import serialize_day_off
-from .push import send_native_push_to_surgeon
+from .push import notify_admins, send_native_push_to_surgeon
 from .scheduling_guardrails_service import dayoff_surgeon_warning, store_dayoff_findings
 
 
@@ -46,6 +46,14 @@ def create_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequ
     findings = store_dayoff_findings(db, row)
     if findings:
         conflict_msgs.append(dayoff_surgeon_warning(findings))
+    notify_admins(
+        "CAL request pending",
+        f"{surgeon.full_name} requested {payload.start_date.strftime('%b %-d')} to {payload.end_date.strftime('%b %-d')}.",
+        db,
+        kind="day_off_request",
+        payload={"dayOffId": row.id, "surgeonId": surgeon.id},
+        require_dayoff_opt_in=True,
+    )
     send_native_push_to_surgeon(
         surgeon.id,
         "Days off request pending",
@@ -85,6 +93,14 @@ def update_native_request_off(db: Session, surgeon: Surgeon, dayoff_id: int, pay
     db.refresh(row)
     findings = store_dayoff_findings(db, row)
     conflict_msgs.extend([dayoff_surgeon_warning(findings)] if findings else [])
+    notify_admins(
+        "CAL request updated",
+        f"{surgeon.full_name} updated request {payload.start_date.strftime('%b %-d')} to {payload.end_date.strftime('%b %-d')}.",
+        db,
+        kind="day_off_request",
+        payload={"dayOffId": row.id, "surgeonId": surgeon.id},
+        require_dayoff_opt_in=True,
+    )
     send_native_push_to_surgeon(
         surgeon.id,
         "Days off request updated",

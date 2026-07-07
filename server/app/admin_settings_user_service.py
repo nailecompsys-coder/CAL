@@ -5,6 +5,7 @@ import json
 from sqlalchemy.orm import Session
 
 from .auth import hash_password
+from .admin_surgeon_service import format_us_phone
 from .models import AdminUser, SchedulingRuleConfig
 from .rules_engine.registry import ALL_RULES
 
@@ -40,7 +41,19 @@ def _normalize_role(role: str) -> str:
     return "scheduler" if role == "scheduler" else "admin"
 
 
-def add_admin_user(db: Session, username: str, email: str, password: str, role: str = "admin") -> str:
+def add_admin_user(
+    db: Session,
+    username: str,
+    email: str,
+    password: str,
+    role: str = "admin",
+    first_name: str = "",
+    last_name: str = "",
+    phone: str = "",
+    notify_day_off_requests: bool = True,
+    notify_schedule_changes: bool = True,
+    sms_fallback_enabled: bool = False,
+) -> str:
     username = username.strip().lower()
     email = email.strip().lower()
     if not username or not email:
@@ -54,9 +67,15 @@ def add_admin_user(db: Session, username: str, email: str, password: str, role: 
     db.add(
         AdminUser(
             username=username,
+            first_name=first_name.strip() or None,
+            last_name=last_name.strip() or None,
             email=email,
+            phone=format_us_phone(phone),
             password_hash=hash_password(password),
             role=_normalize_role(role),
+            notify_day_off_requests=notify_day_off_requests,
+            notify_schedule_changes=notify_schedule_changes,
+            sms_fallback_enabled=sms_fallback_enabled,
             is_active=True,
         )
     )
@@ -87,7 +106,20 @@ def toggle_admin_user(db: Session, user_id: int) -> str:
     return "user_updated"
 
 
-def edit_admin_user(db: Session, user_id: int, username: str, email: str, new_password: str, role: str = "admin") -> str:
+def edit_admin_user(
+    db: Session,
+    user_id: int,
+    username: str,
+    email: str,
+    new_password: str,
+    role: str = "admin",
+    first_name: str = "",
+    last_name: str = "",
+    phone: str = "",
+    notify_day_off_requests: bool = True,
+    notify_schedule_changes: bool = True,
+    sms_fallback_enabled: bool = False,
+) -> str:
     user = db.get(AdminUser, user_id)
     if not user:
         return "user_not_found"
@@ -102,8 +134,14 @@ def edit_admin_user(db: Session, user_id: int, username: str, email: str, new_pa
     if other_email:
         return "email_taken"
     user.username = username
+    user.first_name = first_name.strip() or None
+    user.last_name = last_name.strip() or None
     user.email = email
+    user.phone = format_us_phone(phone)
     user.role = _normalize_role(role)
+    user.notify_day_off_requests = notify_day_off_requests
+    user.notify_schedule_changes = notify_schedule_changes
+    user.sms_fallback_enabled = sms_fallback_enabled
     if new_password and len(new_password.strip()) >= 8:
         user.password_hash = hash_password(new_password.strip())
     db.commit()

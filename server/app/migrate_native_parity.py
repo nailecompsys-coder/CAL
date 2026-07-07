@@ -49,10 +49,20 @@ def run_migration():
                 device_id INTEGER REFERENCES surgeon_devices(id),
                 token TEXT NOT NULL UNIQUE,
                 platform VARCHAR(32) DEFAULT 'ios',
+                provider VARCHAR(32) DEFAULT 'expo',
+                device_name VARCHAR(128),
                 is_active BOOLEAN DEFAULT TRUE,
                 created_at TIMESTAMP DEFAULT now(),
                 updated_at TIMESTAMP
             )
+        """))
+        conn.execute(text("""
+            ALTER TABLE native_push_tokens
+            ADD COLUMN IF NOT EXISTS provider VARCHAR(32) DEFAULT 'expo'
+        """))
+        conn.execute(text("""
+            ALTER TABLE native_push_tokens
+            ADD COLUMN IF NOT EXISTS device_name VARCHAR(128)
         """))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS native_schedule_alerts (
@@ -69,4 +79,44 @@ def run_migration():
         conn.execute(text("""
             CREATE INDEX IF NOT EXISTS ix_native_schedule_alerts_surgeon_read_created
             ON native_schedule_alerts(surgeon_id, read_at, created_at DESC)
+        """))
+        conn.execute(text("""
+            ALTER TABLE admin_users
+            ADD COLUMN IF NOT EXISTS first_name VARCHAR(64)
+        """))
+        conn.execute(text("""
+            ALTER TABLE admin_users
+            ADD COLUMN IF NOT EXISTS last_name VARCHAR(64)
+        """))
+        conn.execute(text("""
+            ALTER TABLE admin_users
+            ADD COLUMN IF NOT EXISTS phone VARCHAR(32)
+        """))
+        conn.execute(text("""
+            ALTER TABLE admin_users
+            ADD COLUMN IF NOT EXISTS notify_day_off_requests BOOLEAN DEFAULT TRUE
+        """))
+        conn.execute(text("""
+            ALTER TABLE admin_users
+            ADD COLUMN IF NOT EXISTS notify_schedule_changes BOOLEAN DEFAULT TRUE
+        """))
+        conn.execute(text("""
+            ALTER TABLE admin_users
+            ADD COLUMN IF NOT EXISTS sms_fallback_enabled BOOLEAN DEFAULT FALSE
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS admin_notifications (
+                id SERIAL PRIMARY KEY,
+                admin_user_id INTEGER NOT NULL REFERENCES admin_users(id) ON DELETE CASCADE,
+                title VARCHAR(255) NOT NULL,
+                body TEXT NOT NULL,
+                kind VARCHAR(64) DEFAULT 'schedule',
+                payload TEXT,
+                read_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT now()
+            )
+        """))
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_admin_notifications_user_read_created
+            ON admin_notifications(admin_user_id, read_at, created_at DESC)
         """))

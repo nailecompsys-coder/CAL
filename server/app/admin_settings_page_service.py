@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from . import wasabi_backup
-from .models import Surgeon, SurgeonDevice, SurgeonOtpAuditLog
+from .models import AdminNotification, Surgeon, SurgeonDevice, SurgeonOtpAuditLog
 
 
 def settings_backups(request) -> list[dict]:
@@ -35,6 +35,23 @@ def recent_otp_audit_logs(db: Session, limit: int = 50) -> list[SurgeonOtpAuditL
         .limit(limit)
         .all()
     )
+
+
+def recent_admin_notifications(db: Session, admin_user_id: int, limit: int = 20) -> list[AdminNotification]:
+    return (
+        db.query(AdminNotification)
+        .filter(AdminNotification.admin_user_id == admin_user_id)
+        .order_by(AdminNotification.created_at.desc(), AdminNotification.id.desc())
+        .limit(limit)
+        .all()
+    )
+
+
+def unread_admin_notification_count(db: Session, admin_user_id: int) -> int:
+    return db.query(AdminNotification).filter(
+        AdminNotification.admin_user_id == admin_user_id,
+        AdminNotification.read_at.is_(None),
+    ).count()
 
 
 def rules_engine_settings(db: Session) -> tuple[dict, list]:

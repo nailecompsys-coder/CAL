@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models import Base, ClinicGroup, ClinicGroupMember, DayOff, Surgeon
+from app.models import AdminNotification, AdminUser, Base, ClinicGroup, ClinicGroupMember, DayOff, Surgeon
 from app.routers.native_api import (
     NativeRequestOffBody,
     native_cancel_request_off,
@@ -128,6 +128,44 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
             self.assertIsNotNone(response["request"])
             self.assertEqual(response["warnings"], [])
             self.assertEqual(db.query(DayOff).count(), 1)
+        finally:
+            db.close()
+
+    def test_create_request_notifies_day_off_admins(self):
+        db = self.Session()
+        try:
+            surgeon = self._seed_surgeon(db)
+            db.add(AdminUser(
+                username="shannon",
+                email="shannon@example.com",
+                password_hash="hash",
+                role="admin",
+                is_active=True,
+                notify_day_off_requests=True,
+                notify_schedule_changes=False,
+            ))
+            db.add(AdminUser(
+                username="quiet",
+                email="quiet@example.com",
+                password_hash="hash",
+                role="admin",
+                is_active=True,
+                notify_day_off_requests=False,
+                notify_schedule_changes=True,
+            ))
+            db.commit()
+
+            start = date.today() + timedelta(days=11)
+            body = NativeRequestOffBody(start_date=start, end_date=start, reason="Day Off", is_full_day=True)
+
+            with patch("app.native_request_off_service.send_native_push_to_surgeon"), patch("app.push.send_sms"):
+                response = native_request_off(body, db=db, auth=(surgeon, "token"))
+
+            self.assertTrue(response["ok"])
+            alerts = db.query(AdminNotification).all()
+            self.assertEqual(len(alerts), 1)
+            self.assertEqual(alerts[0].title, "CAL request pending")
+            self.assertIn("requested", alerts[0].body)
         finally:
             db.close()
 

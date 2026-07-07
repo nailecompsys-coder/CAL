@@ -115,6 +115,33 @@
     </div>
   </div>
 
+  {% if admin_notifications %}
+  <div class="bento-card clinical-panel p-4" style="--i:4">
+    <div class="flex items-center justify-between gap-3 mb-3">
+      <div class="flex items-center gap-2.5">
+        <div class="w-7 h-7 rounded-xl bg-teal-600 flex items-center justify-center flex-shrink-0">
+          <i class="fa-solid fa-bell text-white text-xs"></i>
+        </div>
+        <h2 class="font-bold text-slate-800">Admin Notifications</h2>
+      </div>
+      {% if admin_unread_notifications %}
+      <span class="text-xs font-bold text-teal-700 bg-teal-50 border border-teal-100 px-2 py-1 rounded-full">{{ admin_unread_notifications }} unread</span>
+      {% endif %}
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+      {% for row in admin_notifications %}
+      <div class="rounded-xl border {% if row.read_at %}border-slate-100 bg-white/60{% else %}border-teal-100 bg-teal-50/70{% endif %} px-3 py-2">
+        <div class="flex items-center justify-between gap-2">
+          <p class="text-sm font-bold text-slate-800 truncate">{{ row.title }}</p>
+          <p class="text-[11px] text-slate-400 whitespace-nowrap">{% if row.created_at %}{{ row.created_at.strftime('%b %d %H:%M') }}{% endif %}</p>
+        </div>
+        <p class="text-xs text-slate-600 mt-1 line-clamp-2">{{ row.body }}</p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
   <!-- ── Main content row ──────────────────────────────────────────── -->
   <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
 

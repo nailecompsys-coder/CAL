@@ -9,6 +9,7 @@ from sqlalchemy import func as sql_func
 from sqlalchemy.orm import Session, joinedload
 
 from .models import CallGroup, CallRotation, DayOff, Surgeon
+from .push import notify_admins
 from .scheduling_guardrails_service import dayoff_surgeon_warning, store_dayoff_findings
 from .surgeon_visibility import surgeon_is_visible
 
@@ -163,6 +164,14 @@ def submit_request_off(db: Session, surgeon: Surgeon, start_date: str, end_date:
     findings = store_dayoff_findings(db, dayoff)
     if findings:
         conflict_msgs.append(dayoff_surgeon_warning(findings))
+    notify_admins(
+        "CAL request pending",
+        f"{surgeon.full_name} requested {start.strftime('%b %-d')} to {end.strftime('%b %-d')}.",
+        db,
+        kind="day_off_request",
+        payload={"dayOffId": dayoff.id, "surgeonId": surgeon.id},
+        require_dayoff_opt_in=True,
+    )
     warn_param = ""
     if conflict_msgs:
         warn_param = "&warn=" + urllib.parse.quote(" · ".join(conflict_msgs[:3]))

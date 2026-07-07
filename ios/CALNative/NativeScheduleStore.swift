@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum NativeLoadState: Equatable {
   case idle
@@ -14,9 +15,12 @@ final class NativeScheduleStore: ObservableObject {
   @Published private(set) var patientAppointments: [PatientAppointment] = []
   @Published private(set) var currentSurgeon: NativeSurgeon?
   @Published private(set) var surgeons: [NativeSurgeon] = []
+  @Published private(set) var alerts = NativeAlertSummary(unreadCount: 0, recent: [])
   @Published private(set) var loadState: NativeLoadState = .idle
   @Published private(set) var sessionToken: String?
   @Published private(set) var hasBootstrapped = false
+  @Published private(set) var canUnlockStoredSession = false
+  @Published private(set) var biometricBusy = false
   @Published private(set) var authBusy = false
   @Published private(set) var authMessage: String?
 
@@ -24,6 +28,8 @@ final class NativeScheduleStore: ObservableObject {
   private let actions = NativeScheduleActions()
   private let loader = NativeScheduleLoader()
   private let session = NativeSessionService()
+  private let biometric = NativeBiometricService()
+  private let pushRegistrar = NativePushRegistrar.shared
   private var projection: NativeScheduleProjection {
     NativeScheduleProjection(days: days)
   }
@@ -40,17 +46,15 @@ final class NativeScheduleStore: ObservableObject {
   }
 
   func bootstrap(containing date: Date, scope: ScheduleScope) async {
-    restoreStoredTokenIfNeeded()
     hasBootstrapped = true
-    if sessionToken != nil {
+    if await unlockStoredSessionIfPossible() {
       await load(containing: date, scope: scope)
     }
   }
 
   func bootstrapLookahead(containing date: Date, daysAhead: Int = 30) async {
-    restoreStoredTokenIfNeeded()
     hasBootstrapped = true
-    if sessionToken != nil {
+    if await unlockStoredSessionIfPossible() {
       await loadLookahead(containing: date, daysAhead: daysAhead)
     }
   }
@@ -120,6 +124,10 @@ final class NativeScheduleStore: ObservableObject {
     surgeons = snapshot.surgeons
     days = snapshot.days
     timeOffRequests = snapshot.timeOffRequests
+    alerts = snapshot.alerts
+    Task {
+      await registerForPushIfPossible()
+    }
   }
 
   func requestOtp(email: String) async -> Bool {
@@ -152,6 +160,7 @@ final class NativeScheduleStore: ObservableObject {
     do {
       let token = try await session.verifyOtp(email: normalizedEmail, code: normalizedCode)
       sessionToken = token
+      canUnlockStoredSession = false
       authMessage = nil
       await load(containing: Date(), scope: .week)
     } catch {
@@ -165,11 +174,13 @@ final class NativeScheduleStore: ObservableObject {
     days = []
     timeOffRequests = []
     patientAppointments = []
+    alerts = NativeAlertSummary(unreadCount: 0, recent: [])
     currentSurgeon = nil
     surgeons = []
     loadState = .idle
     authMessage = nil
     hasBootstrapped = true
+    canUnlockStoredSession = false
   }
 
   private func expireSession() {
@@ -178,11 +189,13 @@ final class NativeScheduleStore: ObservableObject {
     days = []
     timeOffRequests = []
     patientAppointments = []
+    alerts = NativeAlertSummary(unreadCount: 0, recent: [])
     currentSurgeon = nil
     surgeons = []
     loadState = .idle
     authMessage = "For security, please sign in again."
     hasBootstrapped = true
+    canUnlockStoredSession = session.hasStoredToken()
   }
 
   func submitTimeOffRequest(startDate: Date, endDate: Date, reason: String, notes: String, segments: [RequestSegment]) async throws -> [String] {
@@ -219,10 +232,69 @@ final class NativeScheduleStore: ObservableObject {
     loadState = .warning(message)
   }
 
-  private func restoreStoredTokenIfNeeded() {
-    if sessionToken == nil {
-      sessionToken = session.storedToken()
+  func unlockSavedSession() async {
+    _ = await unlockStoredSessionIfPossible(forcePrompt: true)
+    if sessionToken != nil {
+      await loadLookahead(containing: Date(), daysAhead: 30)
     }
+  }
+
+  func markAlertsRead() async {
+    guard let token = activeToken else { return }
+    do {
+      try await client.markAlertsRead(token: token)
+      alerts = NativeAlertSummary(
+        unreadCount: 0,
+        recent: alerts.recent.map { NativeScheduleAlert(
+          id: $0.id,
+          title: $0.title,
+          body: $0.body,
+          kind: $0.kind,
+          isRead: true,
+          createdAt: $0.createdAt
+        ) }
+      )
+      await loadLookahead(containing: Date(), daysAhead: 30)
+    } catch {
+      authMessage = error.localizedDescription
+    }
+  }
+
+  private func unlockStoredSessionIfPossible(forcePrompt: Bool = false) async -> Bool {
+    guard sessionToken == nil, session.hasStoredToken() else {
+      return sessionToken != nil
+    }
+    canUnlockStoredSession = biometric.canUnlockSavedSession()
+    guard canUnlockStoredSession || forcePrompt else {
+      authMessage = "Use your 6-digit code to sign in on this device."
+      return false
+    }
+    biometricBusy = true
+    defer { biometricBusy = false }
+    do {
+      try await biometric.unlockSavedSession()
+      sessionToken = session.storedToken()
+      canUnlockStoredSession = false
+      authMessage = nil
+      return sessionToken != nil
+    } catch {
+      authMessage = "Face ID was not completed. Use your 6-digit code to sign in."
+      canUnlockStoredSession = true
+      return false
+    }
+  }
+
+  private func registerForPushIfPossible() async {
+    guard let token = activeToken else { return }
+    guard let pushToken = await pushRegistrar.requestToken(), !pushToken.isEmpty else { return }
+    let deviceName = UIDevice.current.localizedModel
+    try? await client.registerPushToken(
+      token: token,
+      pushToken: pushToken,
+      platform: "ios",
+      provider: "apns",
+      deviceName: deviceName
+    )
   }
 
   private var activeToken: String? {

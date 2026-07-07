@@ -11,11 +11,22 @@ class AdminUser(Base):
     __tablename__ = "admin_users"
     id = Column(Integer, primary_key=True)
     username = Column(String(64), unique=True, nullable=False)
+    first_name = Column(String(64))
+    last_name = Column(String(64))
     email = Column(String(255), unique=True, nullable=False)
+    phone = Column(String(32))
     password_hash = Column(String(255), nullable=False)
     role = Column(String(32), default="admin")  # admin | superadmin
+    notify_day_off_requests = Column(Boolean, default=True, server_default="true")
+    notify_schedule_changes = Column(Boolean, default=True, server_default="true")
+    sms_fallback_enabled = Column(Boolean, default=False, server_default="false")
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
+
+    @property
+    def full_name(self) -> str:
+        name = f"{self.first_name or ''} {self.last_name or ''}".strip()
+        return name or self.username
 
 
 class SiteSettings(Base):
@@ -445,6 +456,8 @@ class NativePushToken(Base):
     device_id = Column(Integer, ForeignKey("surgeon_devices.id"))
     token = Column(Text, nullable=False, unique=True)
     platform = Column(String(32), default="ios")
+    provider = Column(String(32), default="expo", server_default="expo")
+    device_name = Column(String(128))
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
@@ -465,3 +478,17 @@ class NativeScheduleAlert(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     surgeon = relationship("Surgeon", back_populates="native_schedule_alerts")
+
+
+class AdminNotification(Base):
+    __tablename__ = "admin_notifications"
+    id = Column(Integer, primary_key=True)
+    admin_user_id = Column(Integer, ForeignKey("admin_users.id"), nullable=False)
+    title = Column(String(255), nullable=False)
+    body = Column(Text, nullable=False)
+    kind = Column(String(64), default="schedule")
+    payload = Column(Text)
+    read_at = Column(DateTime)
+    created_at = Column(DateTime, server_default=func.now())
+
+    admin_user = relationship("AdminUser")

@@ -5,6 +5,7 @@ struct NativeHomeResponse: Decodable {
   let days: [NativeDayResponse]
   let requests: [NativeDayOffRequestResponse]
   let surgeons: [NativeSurgeon]?
+  let alerts: NativeAlertSummary?
 }
 
 struct NativePatientScheduleResponse: Decodable {

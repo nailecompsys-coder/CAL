@@ -30,6 +30,9 @@
 			6A45D71F2D0F41B4A3C5E901 /* NativeCallCoverageAPIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A45D7202D0F41B4A3C5E901 /* NativeCallCoverageAPIModels.swift */; };
 			6A45D7212D0F41B4A3C5E901 /* NativeScheduleLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A45D7222D0F41B4A3C5E901 /* NativeScheduleLoader.swift */; };
 			6A45D7232D0F41B4A3C5E901 /* PatientScheduleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A45D7242D0F41B4A3C5E901 /* PatientScheduleView.swift */; };
+			6A45D7252D0F41B4A3C5E901 /* NativeBiometricService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A45D7262D0F41B4A3C5E901 /* NativeBiometricService.swift */; };
+			6A45D7272D0F41B4A3C5E901 /* NativePushRegistrar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A45D7282D0F41B4A3C5E901 /* NativePushRegistrar.swift */; };
+			6A45D7292D0F41B4A3C5E901 /* cal_alert.wav in Resources */ = {isa = PBXBuildFile; fileRef = 6A45D72A2D0F41B4A3C5E901 /* cal_alert.wav */; };
 		6A45D6F42D0F41B4A3C5E901 /* CALNativeTabShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A45D6F22D0F41B4A3C5E901 /* CALNativeTabShell.swift */; };
 		6A45D6F92D0F41B4A3C5E901 /* CALNativeModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A45D6FA2D0F41B4A3C5E901 /* CALNativeModels.swift */; };
 		6A45D6FB2D0F41B4A3C5E901 /* NativeScheduleStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A45D6FC2D0F41B4A3C5E901 /* NativeScheduleStore.swift */; };
@@ -63,6 +66,9 @@
 			6A45D7202D0F41B4A3C5E901 /* NativeCallCoverageAPIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeCallCoverageAPIModels.swift; path = CALNative/NativeCallCoverageAPIModels.swift; sourceTree = "<group>"; };
 			6A45D7222D0F41B4A3C5E901 /* NativeScheduleLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeScheduleLoader.swift; path = CALNative/NativeScheduleLoader.swift; sourceTree = "<group>"; };
 			6A45D7242D0F41B4A3C5E901 /* PatientScheduleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = PatientScheduleView.swift; path = CALNative/PatientScheduleView.swift; sourceTree = "<group>"; };
+			6A45D7262D0F41B4A3C5E901 /* NativeBiometricService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeBiometricService.swift; path = CALNative/NativeBiometricService.swift; sourceTree = "<group>"; };
+			6A45D7282D0F41B4A3C5E901 /* NativePushRegistrar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativePushRegistrar.swift; path = CALNative/NativePushRegistrar.swift; sourceTree = "<group>"; };
+			6A45D72A2D0F41B4A3C5E901 /* cal_alert.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; name = cal_alert.wav; path = CALNative/cal_alert.wav; sourceTree = "<group>"; };
 		6A45D6F22D0F41B4A3C5E901 /* CALNativeTabShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CALNativeTabShell.swift; path = CALNative/CALNativeTabShell.swift; sourceTree = "<group>"; };
 		6A45D6FA2D0F41B4A3C5E901 /* CALNativeModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CALNativeModels.swift; path = CALNative/CALNativeModels.swift; sourceTree = "<group>"; };
 		6A45D6FC2D0F41B4A3C5E901 /* NativeScheduleStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeScheduleStore.swift; path = CALNative/NativeScheduleStore.swift; sourceTree = "<group>"; };
@@ -106,6 +112,8 @@
 					6A45D7082D0F41B4A3C5E901 /* NativeScheduleActions.swift */,
 					6A45D70A2D0F41B4A3C5E901 /* NativeScheduleProjection.swift */,
 					6A45D70C2D0F41B4A3C5E901 /* NativeSessionService.swift */,
+					6A45D7262D0F41B4A3C5E901 /* NativeBiometricService.swift */,
+					6A45D7282D0F41B4A3C5E901 /* NativePushRegistrar.swift */,
 					6A45D6FE2D0F41B4A3C5E901 /* NativeCALClient.swift */,
 					6A45D7002D0F41B4A3C5E901 /* CALKeychain.swift */,
 					6A45D6F62D0F41B4A3C5E901 /* CALNativeComponents.swift */,
@@ -118,6 +126,7 @@
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */,
+				6A45D72A2D0F41B4A3C5E901 /* cal_alert.wav */,
 				151105DC6B8973393A22AE45 /* PrivacyInfo.xcprivacy */,
 			);
 			name = CALNative;
@@ -216,6 +225,7 @@
 			files = (
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
+				6A45D7292D0F41B4A3C5E901 /* cal_alert.wav in Resources */,
 				5AFFFA6BFD36BE5C3A7F0A2C /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -251,6 +261,8 @@
 					6A45D7072D0F41B4A3C5E901 /* NativeScheduleActions.swift in Sources */,
 					6A45D7092D0F41B4A3C5E901 /* NativeScheduleProjection.swift in Sources */,
 					6A45D70B2D0F41B4A3C5E901 /* NativeSessionService.swift in Sources */,
+					6A45D7252D0F41B4A3C5E901 /* NativeBiometricService.swift in Sources */,
+					6A45D7272D0F41B4A3C5E901 /* NativePushRegistrar.swift in Sources */,
 					6A45D6FD2D0F41B4A3C5E901 /* NativeCALClient.swift in Sources */,
 					6A45D6FF2D0F41B4A3C5E901 /* CALKeychain.swift in Sources */,
 			);

@@ -16,6 +16,7 @@ from app.models import (
     DayOff,
     Location,
     Meeting,
+    NativeScheduleAlert,
     Surgeon,
     SurgeonDayItem,
 )
@@ -105,6 +106,12 @@ class NativeHomeContractTest(unittest.TestCase):
                     title="Dentist",
                     sort_order=1,
                 ),
+                NativeScheduleAlert(
+                    surgeon_id=surgeon.id,
+                    title="Schedule updated",
+                    body="Dept Surgery moved to 07:30.",
+                    kind="schedule",
+                ),
             ])
             db.commit()
 
@@ -145,7 +152,9 @@ class NativeHomeContractTest(unittest.TestCase):
             self.assertTrue(any(request["status"] == "pending" for request in payload["requests"]))
             self.assertEqual(payload["callGroups"], [{"id": group.id, "name": group.name}])
             self.assertFalse(any(item["type"] == "patients" for day in payload["days"] for item in day["items"]))
-            self.assertIn("unreadCount", payload["alerts"])
+            self.assertEqual(payload["alerts"]["unreadCount"], 1)
+            self.assertEqual(payload["alerts"]["recent"][0]["title"], "Schedule updated")
+            self.assertFalse(payload["alerts"]["recent"][0]["isRead"])
         finally:
             db.close()
 

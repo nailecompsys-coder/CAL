@@ -14,7 +14,7 @@ from ..auth import (
 from ..database import get_db
 from ..jinja_env import templates
 from ..models import (
-    AdminUser, CallRotation, DayOff, Meeting, SiteSettings, Surgeon,
+    AdminNotification, AdminUser, CallRotation, DayOff, Meeting, SiteSettings, Surgeon,
 )
 from ..paths import UPLOADS_DIR
 from ..surgeon_visibility import surgeon_is_visible
@@ -112,6 +112,13 @@ def dashboard(request: Request, db: Session = Depends(get_db), admin=Depends(get
         Meeting.date >= today,
         Meeting.date <= week_end,
     ).order_by(Meeting.date, Meeting.start_time).limit(5).all()
+    admin_notifications = db.query(AdminNotification).filter(
+        AdminNotification.admin_user_id == admin.id,
+    ).order_by(AdminNotification.created_at.desc(), AdminNotification.id.desc()).limit(5).all()
+    admin_unread_notifications = db.query(AdminNotification).filter(
+        AdminNotification.admin_user_id == admin.id,
+        AdminNotification.read_at.is_(None),
+    ).count()
 
     surgeons = [row for row in db.query(Surgeon).filter(Surgeon.is_active == True).all() if surgeon_is_visible(row)]
     surgeons = _sort_surgeons_physicians_first(surgeons)
@@ -131,6 +138,8 @@ def dashboard(request: Request, db: Session = Depends(get_db), admin=Depends(get
         on_call_today=on_call_today,
         pending_daysoff=pending_daysoff,
         upcoming_meetings=upcoming_meetings,
+        admin_notifications=admin_notifications,
+        admin_unread_notifications=admin_unread_notifications,
         surgeons=surgeons,
         active_count=active_count,
         available_count=available_count,

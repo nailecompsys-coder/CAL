@@ -12,6 +12,7 @@ from ..admin_settings_service import (
     add_admin_user as add_admin_user_service,
     delete_admin_user as delete_admin_user_service,
     edit_admin_user as edit_admin_user_service,
+    recent_admin_notifications,
     recent_otp_audit_logs,
     registered_surgeon_devices,
     remove_practice_logo,
@@ -22,6 +23,7 @@ from ..admin_settings_service import (
     set_admin_password as set_admin_password_service,
     settings_backups,
     toggle_admin_user as toggle_admin_user_service,
+    unread_admin_notification_count,
 )
 from ..auth import get_current_admin, verify_password
 from ..database import get_db
@@ -45,6 +47,8 @@ def settings_page(
     backup_job = backup_status()
     registered_devices = registered_surgeon_devices(db)
     otp_audit_logs = recent_otp_audit_logs(db)
+    admin_notifications = recent_admin_notifications(db, current_admin.id)
+    admin_unread_notifications = unread_admin_notification_count(db, current_admin.id)
     rule_config = {}
     all_rules = []
     try:
@@ -64,6 +68,8 @@ def settings_page(
             wasabi_configured=wasabi_backup.is_configured(),
             registered_devices=registered_devices,
             otp_audit_logs=otp_audit_logs,
+            admin_notifications=admin_notifications,
+            admin_unread_notifications=admin_unread_notifications,
             rule_config=rule_config,
             all_rules=all_rules,
         ),
@@ -110,13 +116,31 @@ def remove_logo(
 @router.post("/settings/users/add")
 def add_admin_user(
     username: str = Form(...),
+    first_name: str = Form(""),
+    last_name: str = Form(""),
     email: str = Form(...),
+    phone: str = Form(""),
     password: str = Form(...),
     role: str = Form("admin"),
+    notify_day_off_requests: str = Form(""),
+    notify_schedule_changes: str = Form(""),
+    sms_fallback_enabled: str = Form(""),
     db: Session = Depends(get_db),
     current_admin=Depends(get_current_admin),
 ):
-    msg = add_admin_user_service(db, username, email, password, role)
+    msg = add_admin_user_service(
+        db,
+        username,
+        email,
+        password,
+        role,
+        first_name,
+        last_name,
+        phone,
+        notify_day_off_requests == "1",
+        notify_schedule_changes == "1",
+        sms_fallback_enabled == "1",
+    )
     return RedirectResponse(f"/admin/settings?msg={msg}", status_code=303)
 
 
@@ -145,13 +169,32 @@ def toggle_admin_user(
 def edit_admin_user(
     user_id: int,
     username: str = Form(...),
+    first_name: str = Form(""),
+    last_name: str = Form(""),
     email: str = Form(...),
+    phone: str = Form(""),
     new_password: str = Form(""),
     role: str = Form("admin"),
+    notify_day_off_requests: str = Form(""),
+    notify_schedule_changes: str = Form(""),
+    sms_fallback_enabled: str = Form(""),
     db: Session = Depends(get_db),
     current_admin=Depends(get_current_admin),
 ):
-    msg = edit_admin_user_service(db, user_id, username, email, new_password, role)
+    msg = edit_admin_user_service(
+        db,
+        user_id,
+        username,
+        email,
+        new_password,
+        role,
+        first_name,
+        last_name,
+        phone,
+        notify_day_off_requests == "1",
+        notify_schedule_changes == "1",
+        sms_fallback_enabled == "1",
+    )
     return RedirectResponse(f"/admin/settings?msg={msg}", status_code=303)
 
 

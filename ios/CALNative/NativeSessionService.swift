@@ -5,10 +5,17 @@ struct NativeSessionService {
 
   init(client: NativeCALClient = NativeCALClient()) {
     self.client = client
+    if CommandLine.arguments.contains("--reset-cal-session") {
+      CALKeychain.deleteSessionToken()
+    }
   }
 
   func storedToken() -> String? {
     CALKeychain.readSessionToken()
+  }
+
+  func hasStoredToken() -> Bool {
+    storedToken() != nil
   }
 
   func requestOtp(email: String) async throws -> String {

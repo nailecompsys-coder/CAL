@@ -124,6 +124,32 @@ struct NativeCALClient {
     return result.assignment
   }
 
+  func markAlertsRead(token: String) async throws {
+    let url = baseURL.appendingPathComponent("/api/native/alerts/read")
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.setValue(token, forHTTPHeaderField: "X-CAL-Device-Token")
+    _ = try await perform(request)
+  }
+
+  func registerPushToken(token: String, pushToken: String, platform: String = "ios", provider: String = "apns", deviceName: String? = nil) async throws {
+    let url = baseURL.appendingPathComponent("/api/native/push-token")
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.setValue(token, forHTTPHeaderField: "X-CAL-Device-Token")
+    request.httpBody = try JSONEncoder().encode(NativePushTokenPayload(
+      token: pushToken,
+      platform: platform,
+      provider: provider,
+      deviceName: deviceName
+    ))
+    _ = try await perform(request)
+  }
+
   private func perform(_ request: URLRequest) async throws -> Data {
     let (data, response) = try await URLSession.shared.data(for: request)
     guard let http = response as? HTTPURLResponse else {
@@ -197,4 +223,11 @@ enum NativeCALError: LocalizedError {
 private struct APIErrorPayload: Decodable {
   let detail: String?
   let message: String?
+}
+
+private struct NativePushTokenPayload: Encodable {
+  let token: String
+  let platform: String
+  let provider: String
+  let deviceName: String?
 }

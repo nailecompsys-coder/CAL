@@ -31,6 +31,7 @@ from app.models import (  # noqa: E402
     Meeting,
     MeetingAttendee,
     MagicLink,
+    NativeScheduleAlert,
     Surgeon,
     SurgicalBlock,
     SurgicalCase,
@@ -270,6 +271,12 @@ def seed():
             surgeon_id=lm2.id,
             token_hash=_hash_otp("111111") + ":otp",
             expires_at=datetime.now(timezone.utc) + timedelta(days=7),
+        ))
+        db.add(NativeScheduleAlert(
+            surgeon_id=lm2.id,
+            title="Schedule updated",
+            body="Demo meeting assigned for review in CAL.",
+            kind="schedule",
         ))
         db.commit()
         print("Guardrail demo data seeded.")

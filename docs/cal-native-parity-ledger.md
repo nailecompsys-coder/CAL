@@ -12,7 +12,7 @@ Current tracked lane imports:
 
 | Workflow | Backend Endpoint / Contract | iOS SwiftUI | Android Expo Temporary | Android Compose Target | Production Allowed | Notes |
 |---|---|---|---|---|---|---|
-| Auth / OTP | `POST /api/surgeon/otp/request`, `POST /api/surgeon/otp/verify` | Production | Temporary Android bridge | Not integrated | iOS + Expo Android | SMS/email OTP text must remain CAL-specific |
+| Auth / OTP | `POST /api/surgeon/otp/request`, `POST /api/surgeon/otp/verify` | Production with saved-session Face ID/passcode unlock | Temporary Android bridge | Not integrated | iOS + Expo Android | First login remains CAL-specific SMS/email OTP; repeat iPhone opens use Keychain token behind Face ID/Touch ID/passcode |
 | Today | `GET /api/native/home` | Production | Temporary Android bridge | Not integrated | iOS + Expo Android | At-a-glance view must match backend data |
 | Daily Schedule | `GET /api/native/home` | Production | Temporary Android bridge | Not integrated | iOS + Expo Android | Daily view is required for all device users |
 | Week | `GET /api/native/home` | Production | Temporary Android bridge | Not integrated | iOS + Expo Android | Week navigation must use shared date range semantics |
@@ -22,7 +22,7 @@ Current tracked lane imports:
 | Meetings | `GET /api/native/home` | Production | Temporary Android bridge | Not integrated | iOS + Expo Android | Today and next item display are required |
 | Personal Items | `/surgeon/api/day-items*`, `GET /api/native/home` | Production | Temporary Android bridge | Not integrated | iOS + Expo Android | Today and next item display are required |
 | Patient Schedule | `GET /api/native/patient-schedule` | Production | Temporary Android bridge | Not integrated | iOS + Expo Android | Must show only actual scheduled patients with correct Eastern times |
-| Push Alerts | `/api/native/push-token`, `/api/native/alerts/read`, `GET /api/native/home` | Needs explicit iOS release verification | Temporary Android bridge | Not integrated | Expo Android only until iOS verified | Native push parity must be verified before marking iOS production-complete |
+| Push Alerts | `/api/native/push-token`, `/api/native/alerts/read`, `GET /api/native/home` | Simulator/test lane implemented; needs TestFlight verification before production | Temporary Android bridge | Not integrated | iOS test only + Expo Android | iOS registers APNs tokens, decodes alert inbox/banner, and marks alerts read; production push requires APNs env and TestFlight review |
 
 ## Ledger Rules
 

@@ -55,6 +55,29 @@ struct NativeSurgeon: Identifiable, Decodable {
   }
 }
 
+struct NativeScheduleAlert: Identifiable, Decodable {
+  let id: Int
+  let title: String
+  let body: String
+  let kind: String
+  let isRead: Bool
+  let createdAt: String
+
+  var createdDate: Date? {
+    ISO8601DateFormatter().date(from: createdAt)
+  }
+
+  var displayTime: String {
+    guard let createdDate else { return "" }
+    return createdDate.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+  }
+}
+
+struct NativeAlertSummary: Decodable {
+  let unreadCount: Int
+  let recent: [NativeScheduleAlert]
+}
+
 struct DoctorScheduleItem: Identifiable {
   let id: String
   let period: String

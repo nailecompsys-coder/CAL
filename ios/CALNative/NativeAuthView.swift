@@ -121,23 +121,6 @@ private struct CALAuthCard: View {
         .lineLimit(1)
         .minimumScaleFactor(0.82)
 
-      if store.canUnlockStoredSession {
-        Button {
-          Task {
-            await store.unlockSavedSession()
-          }
-        } label: {
-          Label(store.biometricBusy ? "Unlocking" : "Unlock with Face ID", systemImage: "faceid")
-            .font(.subheadline.weight(.bold))
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 9)
-        }
-        .buttonStyle(.borderedProminent)
-        .tint(ClinicalPalette.teal)
-        .disabled(store.biometricBusy)
-        .padding(.bottom, 4)
-      }
-
       TextField("Email or iPhone", text: $email)
         .keyboardType(.emailAddress)
         .textInputAutocapitalization(.never)

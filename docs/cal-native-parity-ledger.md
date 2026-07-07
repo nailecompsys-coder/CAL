@@ -12,7 +12,7 @@ Current tracked lane imports:
 
 | Workflow | Backend Endpoint / Contract | iOS SwiftUI | Android Expo Temporary | Android Compose Target | Production Allowed | Notes |
 |---|---|---|---|---|---|---|
-| Auth / OTP | `POST /api/surgeon/otp/request`, `POST /api/surgeon/otp/verify` | Production with saved-session Face ID/passcode unlock | Temporary Android bridge | Not integrated | iOS + Expo Android | First login remains CAL-specific SMS/email OTP; repeat iPhone opens use Keychain token behind Face ID/Touch ID/passcode |
+| Auth / OTP | `POST /api/surgeon/otp/request`, `POST /api/surgeon/otp/verify` | Production with saved-session Face ID unlock | Temporary Android bridge | Not integrated | iOS + Expo Android | First login remains CAL-specific SMS/email OTP; repeat iPhone opens silently try Face ID against the saved Keychain token, then fall back to OTP with no separate visible unlock button |
 | Today | `GET /api/native/home` | Production | Temporary Android bridge | Not integrated | iOS + Expo Android | At-a-glance view must match backend data |
 | Daily Schedule | `GET /api/native/home` | Production | Temporary Android bridge | Not integrated | iOS + Expo Android | Daily view is required for all device users |
 | Week | `GET /api/native/home` | Production | Temporary Android bridge | Not integrated | iOS + Expo Android | Week navigation must use shared date range semantics |

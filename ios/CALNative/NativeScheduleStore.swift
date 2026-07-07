@@ -19,8 +19,6 @@ final class NativeScheduleStore: ObservableObject {
   @Published private(set) var loadState: NativeLoadState = .idle
   @Published private(set) var sessionToken: String?
   @Published private(set) var hasBootstrapped = false
-  @Published private(set) var canUnlockStoredSession = false
-  @Published private(set) var biometricBusy = false
   @Published private(set) var authBusy = false
   @Published private(set) var authMessage: String?
 
@@ -160,7 +158,6 @@ final class NativeScheduleStore: ObservableObject {
     do {
       let token = try await session.verifyOtp(email: normalizedEmail, code: normalizedCode)
       sessionToken = token
-      canUnlockStoredSession = false
       authMessage = nil
       await load(containing: Date(), scope: .week)
     } catch {
@@ -180,7 +177,6 @@ final class NativeScheduleStore: ObservableObject {
     loadState = .idle
     authMessage = nil
     hasBootstrapped = true
-    canUnlockStoredSession = false
   }
 
   private func expireSession() {
@@ -195,7 +191,6 @@ final class NativeScheduleStore: ObservableObject {
     loadState = .idle
     authMessage = "For security, please sign in again."
     hasBootstrapped = true
-    canUnlockStoredSession = session.hasStoredToken()
   }
 
   func submitTimeOffRequest(startDate: Date, endDate: Date, reason: String, notes: String, segments: [RequestSegment]) async throws -> [String] {
@@ -232,13 +227,6 @@ final class NativeScheduleStore: ObservableObject {
     loadState = .warning(message)
   }
 
-  func unlockSavedSession() async {
-    _ = await unlockStoredSessionIfPossible(forcePrompt: true)
-    if sessionToken != nil {
-      await loadLookahead(containing: Date(), daysAhead: 30)
-    }
-  }
-
   func markAlertsRead() async {
     guard let token = activeToken else { return }
     do {
@@ -260,26 +248,20 @@ final class NativeScheduleStore: ObservableObject {
     }
   }
 
-  private func unlockStoredSessionIfPossible(forcePrompt: Bool = false) async -> Bool {
+  private func unlockStoredSessionIfPossible() async -> Bool {
     guard sessionToken == nil, session.hasStoredToken() else {
       return sessionToken != nil
     }
-    canUnlockStoredSession = biometric.canUnlockSavedSession()
-    guard canUnlockStoredSession || forcePrompt else {
-      authMessage = "Use your 6-digit code to sign in on this device."
+    guard biometric.canUnlockSavedSession() else {
       return false
     }
-    biometricBusy = true
-    defer { biometricBusy = false }
     do {
       try await biometric.unlockSavedSession()
       sessionToken = session.storedToken()
-      canUnlockStoredSession = false
       authMessage = nil
       return sessionToken != nil
     } catch {
-      authMessage = "Face ID was not completed. Use your 6-digit code to sign in."
-      canUnlockStoredSession = true
+      authMessage = nil
       return false
     }
   }

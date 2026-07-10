@@ -30,7 +30,9 @@
             <td class="px-4 py-3 text-slate-500 whitespace-nowrap text-xs">
               {% if row.created_at %}{{ row.created_at.strftime('%b %d %H:%M') }}{% else %}—{% endif %}
             </td>
-            <td class="px-4 py-3 font-semibold text-slate-800">{{ row.title }}</td>
+            <td class="px-4 py-3 font-semibold text-slate-800">
+              {% if row.title == 'CAL request pending' %}Pending Request{% else %}{{ row.title }}{% endif %}
+            </td>
             <td class="px-4 py-3 text-slate-600">{{ row.body }}</td>
             <td class="px-4 py-3">
               {% if row.read_at %}

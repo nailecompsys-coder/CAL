@@ -165,11 +165,11 @@ def submit_request_off(db: Session, surgeon: Surgeon, start_date: str, end_date:
     if findings:
         conflict_msgs.append(dayoff_surgeon_warning(findings))
     notify_admins(
-        "CAL request pending",
+        "Pending Request",
         f"{surgeon.full_name} requested {start.strftime('%b %-d')} to {end.strftime('%b %-d')}.",
         db,
         kind="day_off_request",
-        payload={"dayOffId": dayoff.id, "surgeonId": surgeon.id},
+        payload={"dayOffId": dayoff.id, "surgeonId": surgeon.id, "startDate": start.isoformat(), "endDate": end.isoformat()},
         require_dayoff_opt_in=True,
     )
     warn_param = ""

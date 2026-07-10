@@ -164,7 +164,7 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
             self.assertTrue(response["ok"])
             alerts = db.query(AdminNotification).all()
             self.assertEqual(len(alerts), 1)
-            self.assertEqual(alerts[0].title, "CAL request pending")
+            self.assertEqual(alerts[0].title, "Pending Request")
             self.assertIn("requested", alerts[0].body)
         finally:
             db.close()

@@ -116,27 +116,50 @@
   </div>
 
   {% if admin_notifications %}
-  <div class="bento-card clinical-panel p-4" style="--i:4">
-    <div class="flex items-center justify-between gap-3 mb-3">
-      <div class="flex items-center gap-2.5">
-        <div class="w-7 h-7 rounded-xl bg-teal-600 flex items-center justify-center flex-shrink-0">
-          <i class="fa-solid fa-bell text-white text-xs"></i>
+  <div class="bento-card clinical-panel p-3" style="--i:4">
+    <div class="flex items-center justify-between gap-3 mb-2">
+      <div class="flex items-center gap-2">
+        <div class="w-6 h-6 rounded-lg bg-teal-600 flex items-center justify-center flex-shrink-0">
+          <i class="fa-solid fa-bell text-white text-[10px]"></i>
         </div>
-        <h2 class="font-bold text-slate-800">Admin Notifications</h2>
+        <h2 class="font-bold text-slate-800 text-sm">Admin Notifications</h2>
       </div>
       {% if admin_unread_notifications %}
-      <span class="text-xs font-bold text-teal-700 bg-teal-50 border border-teal-100 px-2 py-1 rounded-full">{{ admin_unread_notifications }} unread</span>
+      <span class="text-[10px] font-bold text-teal-700 bg-teal-50 border border-teal-100 px-1.5 py-0.5 rounded-full">{{ admin_unread_notifications }} unread</span>
       {% endif %}
     </div>
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-1.5">
       {% for row in admin_notifications %}
-      <div class="rounded-xl border {% if row.read_at %}border-slate-100 bg-white/60{% else %}border-teal-100 bg-teal-50/70{% endif %} px-3 py-2">
+      {% set payload = (row.payload|from_json) if row.payload else {} %}
+      {% set is_dayoff = row.kind == 'day_off_request' %}
+      {% set notif_title = 'Pending Request' if row.title == 'CAL request pending' else row.title %}
+      {% if is_dayoff and payload.get('dayOffId') and payload.get('startDate') %}
+        {% set dayoff_href = '/admin/daysoff?focus=' ~ payload.get('dayOffId') ~ '&gantt_start=' ~ payload.get('startDate') ~ '&gantt_end=' ~ (payload.get('endDate') or payload.get('startDate')) %}
+      {% elif is_dayoff and payload.get('dayOffId') %}
+        {% set dayoff_href = '/admin/daysoff?focus=' ~ payload.get('dayOffId') %}
+      {% elif is_dayoff %}
+        {% set dayoff_href = '/admin/daysoff' %}
+      {% else %}
+        {% set dayoff_href = '' %}
+      {% endif %}
+      {% if is_dayoff %}
+      <a href="{{ dayoff_href }}"
+        class="rounded-lg border {% if row.read_at %}border-slate-100 bg-white/60{% else %}border-teal-100 bg-teal-50/70{% endif %} px-2.5 py-1.5 block hover:border-teal-300 hover:bg-teal-50 transition-colors">
         <div class="flex items-center justify-between gap-2">
-          <p class="text-sm font-bold text-slate-800 truncate">{{ row.title }}</p>
-          <p class="text-[11px] text-slate-400 whitespace-nowrap">{% if row.created_at %}{{ row.created_at.strftime('%b %d %H:%M') }}{% endif %}</p>
+          <p class="text-xs font-bold text-slate-800 truncate">{{ notif_title }}</p>
+          <p class="text-[10px] text-slate-400 whitespace-nowrap">{% if row.created_at %}{{ row.created_at.strftime('%b %d %H:%M') }}{% endif %}</p>
         </div>
-        <p class="text-xs text-slate-600 mt-1 line-clamp-2">{{ row.body }}</p>
+        <p class="text-[11px] text-slate-600 mt-0.5 line-clamp-1">{{ row.body }}</p>
+      </a>
+      {% else %}
+      <div class="rounded-lg border {% if row.read_at %}border-slate-100 bg-white/60{% else %}border-teal-100 bg-teal-50/70{% endif %} px-2.5 py-1.5">
+        <div class="flex items-center justify-between gap-2">
+          <p class="text-xs font-bold text-slate-800 truncate">{{ notif_title }}</p>
+          <p class="text-[10px] text-slate-400 whitespace-nowrap">{% if row.created_at %}{{ row.created_at.strftime('%b %d %H:%M') }}{% endif %}</p>
+        </div>
+        <p class="text-[11px] text-slate-600 mt-0.5 line-clamp-1">{{ row.body }}</p>
       </div>
+      {% endif %}
       {% endfor %}
     </div>
   </div>

@@ -57,11 +57,11 @@ def create_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequ
     if findings:
         conflict_msgs.append(dayoff_surgeon_warning(findings))
     notify_admins(
-        "CAL request pending",
+        "Pending Request",
         f"{surgeon.full_name} requested {payload.start_date.strftime('%b %-d')} to {payload.end_date.strftime('%b %-d')}.",
         db,
         kind="day_off_request",
-        payload={"dayOffId": row.id, "surgeonId": surgeon.id},
+        payload={"dayOffId": row.id, "surgeonId": surgeon.id, "startDate": payload.start_date.isoformat(), "endDate": payload.end_date.isoformat()},
         require_dayoff_opt_in=True,
     )
     send_native_push_to_surgeon(

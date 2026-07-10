@@ -33,11 +33,27 @@ router = APIRouter(prefix="/admin")
 def daysoff_page(
     request: Request,
     surgeon_id: Optional[int] = None,
-    month_offset: int = 0,
+    month_offset: Optional[int] = None,
+    focus: Optional[int] = None,
+    gantt_start: str = "",
+    gantt_end: str = "",
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    month = month_window(month_offset)
+    today = date.today()
+    resolved_offset = 0 if month_offset is None else month_offset
+    if month_offset is None and gantt_start:
+        try:
+            focus_day = date.fromisoformat(gantt_start)
+            resolved_offset = (focus_day.year * 12 + focus_day.month) - (today.year * 12 + today.month)
+        except ValueError:
+            resolved_offset = 0
+    elif month_offset is None and focus:
+        focused = db.get(DayOff, focus)
+        if focused and focused.start_date:
+            resolved_offset = (focused.start_date.year * 12 + focused.start_date.month) - (today.year * 12 + today.month)
+
+    month = month_window(resolved_offset)
     today = month["today"]
     surgeons = [
         row for row in db.query(Surgeon).filter(Surgeon.is_active == True).order_by(Surgeon.last_name).all()
@@ -83,7 +99,7 @@ def daysoff_page(
         conflict_map=conflict_map,
         surgeons=surgeons,
         selected_surgeon_id=surgeon_id,
-        month_offset=month_offset,
+        month_offset=resolved_offset,
         month_label=month["month_label"],
         month_start=month["month_start"],
         month_end=month["month_end"],

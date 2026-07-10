@@ -1,10 +1,12 @@
 # CAL Native Parity Ledger
 
-Last updated: 2026-07-09
+Last updated: 2026-07-10
 
-iOS test build target: `1.0.1 (13)` from the SwiftUI `ios/` lane.
+iOS test build target: `1.0.1 (15)` from the SwiftUI `ios/` lane.
 
 Production decision: SwiftUI is the production iOS app. Expo/React Native is the temporary Android bridge. Jetpack Compose is the target Android app but is not production until it has real CAL API integration and parity approval.
+
+Adaptive layout (2026-07-10): `ClinicalTypography` + `CalNavigation` (NavigationStack on iOS 16+) + readable columns for iPad. Mac Catalyst and Designed for iPad are enabled in the Xcode target (`SUPPORTS_MACCATALYST`, min window 980×700). Mac is a local/dev destination only until signing and TestFlight Mac distribution are explicitly approved.
 
 Current tracked lane imports:
 

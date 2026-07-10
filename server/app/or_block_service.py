@@ -543,7 +543,7 @@ def block_assignment_warnings(
         block.date,
         db,
         target_entity={
-            "type": "surgical_case",
+            "type": "or_block",
             "date": block.date,
             "start_time": start,
             "end_time": end,
@@ -553,10 +553,11 @@ def block_assignment_warnings(
         label = {
             "OVERLAP_SURGERY": "Overlaps another surgical case",
             "OVERLAP_CLINIC": "Overlaps clinic schedule",
-            "OVERLAP_DAY_OFF": "Overlaps approved day off",
+            "OVERLAP_DAY_OFF": "Overlaps day off",
             "OVERLAP_MEETING": "Overlaps assigned meeting",
             "OVERLAP_UNAVAILABLE": "Overlaps unavailable time",
             "OVERLAP_CALL": "Surgeon is on call",
+            "OVERLAP_OR_BLOCK": "Overlaps another OR block assignment",
         }.get(conflict.rule_id, "Schedule warning")
         warnings.append(scheduler_safe_warning(f"{label}: {conflict.message}"))
     assigned_blocks = db.query(ORBlockAssignment, ORBlockInstance).join(

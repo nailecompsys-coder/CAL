@@ -16,7 +16,7 @@ struct TimeOffRequestForm: View {
   private let reasons = ["Day Off", "No Call", "Vacation", "CME", "Partial Day", "Medical"]
 
   var body: some View {
-    NavigationView {
+    CalNavigation {
       ZStack {
         ScheduleWaterBackground()
 
@@ -304,7 +304,7 @@ private struct RequestDatePickerSheet: View {
   @Environment(\.dismiss) private var dismiss
 
   var body: some View {
-    NavigationView {
+    CalNavigation {
       DatePicker(title, selection: $date, displayedComponents: .date)
         .datePickerStyle(.graphical)
         .padding()

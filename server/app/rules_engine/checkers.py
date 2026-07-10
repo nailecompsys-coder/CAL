@@ -12,6 +12,7 @@ from .overlap_checkers import (
     check_overlap_clinic,
     check_overlap_day_off,
     check_overlap_meeting,
+    check_overlap_or_block,
     check_overlap_surgery,
     check_overlap_unavailable,
 )
@@ -27,6 +28,7 @@ __all__ = [
     "check_overlap_clinic",
     "check_overlap_day_off",
     "check_overlap_meeting",
+    "check_overlap_or_block",
     "check_overlap_surgery",
     "check_overlap_unavailable",
 ]

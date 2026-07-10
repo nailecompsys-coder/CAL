@@ -57,7 +57,7 @@ struct CompactWeekDayCard: View {
 
           if !day.meetings.isEmpty {
             Image(systemName: "person.2.fill")
-              .font(.system(size: 10, weight: .semibold))
+              .font(ClinicalTypography.captionEmphasized)
               .foregroundStyle(ClinicalPalette.lavender)
           }
         }
@@ -142,10 +142,10 @@ private struct SmallCoverageInitialsView: View {
       HStack(spacing: 2) {
         StruckInitialsText(
           text: assignment.originalInitials,
-          font: .system(.caption, design: .rounded).weight(.semibold)
+          font: ClinicalTypography.monoChip
         )
         Text(assignment.coveringInitials ?? assignment.surgeon)
-          .font(.system(.caption, design: .rounded).weight(.semibold))
+          .font(ClinicalTypography.monoChip)
           .foregroundStyle(.primary)
       }
       .padding(.horizontal, 3)
@@ -153,7 +153,7 @@ private struct SmallCoverageInitialsView: View {
       .background(ClinicalPalette.teal.opacity(0.08), in: Capsule())
     } else {
       Text(assignment.surgeon)
-        .font(.system(.caption, design: .rounded).weight(.semibold))
+        .font(ClinicalTypography.monoChip)
         .foregroundStyle(.primary)
         .padding(.horizontal, 4)
         .padding(.vertical, 1)
@@ -170,7 +170,7 @@ private struct ScheduleStatusLine: View {
   var body: some View {
     HStack(spacing: 6) {
       Text(prefix)
-        .font(.caption2.weight(.bold))
+        .font(ClinicalTypography.badge)
         .foregroundStyle(tint)
         .frame(width: 26, alignment: .leading)
 
@@ -180,7 +180,7 @@ private struct ScheduleStatusLine: View {
           .foregroundStyle(.secondary)
       } else {
         Text(value)
-          .font(.system(.caption, design: .rounded).weight(.semibold))
+          .font(ClinicalTypography.caption)
           .foregroundStyle(.primary)
           .lineLimit(1)
           .minimumScaleFactor(0.72)

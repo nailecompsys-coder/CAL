@@ -145,33 +145,18 @@ def clinic_group_day_off_findings(
 
 
 def dayoff_review_findings(db: Session, dayoff: DayOff) -> list[DayOffFinding]:
-    surgeon = dayoff.surgeon or db.get(Surgeon, dayoff.surgeon_id)
-    return clinic_group_day_off_findings(
-        db,
-        surgeon,
-        dayoff.start_date,
-        dayoff.end_date,
-        exclude_dayoff_id=dayoff.id,
-    )
+    from .scheduling_gate_service import build_dayoff_review_findings
+    return build_dayoff_review_findings(db, dayoff)
 
 
 def store_dayoff_findings(db: Session, dayoff: DayOff) -> list[DayOffFinding]:
-    findings = dayoff_review_findings(db, dayoff)
-    dayoff.review_findings = encode_findings(findings)
-    db.commit()
-    return findings
+    from .scheduling_gate_service import store_full_dayoff_findings
+    return store_full_dayoff_findings(db, dayoff)
 
 
 def dayoff_surgeon_warning(findings: list[DayOffFinding] | list[dict]) -> str:
-    messages = []
-    for finding in findings:
-        if isinstance(finding, dict):
-            msg = finding.get("surgeonMessage") or finding.get("message")
-        else:
-            msg = finding.surgeon_message
-        if msg and msg not in messages:
-            messages.append(msg)
-    return " · ".join(messages[:4])
+    from .scheduling_gate_service import surgeon_friendly_conflict_message
+    return surgeon_friendly_conflict_message(findings)
 
 
 def memberships_by_group(db: Session) -> dict[int, set[int]]:

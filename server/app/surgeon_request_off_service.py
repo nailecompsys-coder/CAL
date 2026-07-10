@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from .models import CallGroup, CallRotation, DayOff, Surgeon
 from .push import notify_admins
-from .scheduling_guardrails_service import dayoff_surgeon_warning, store_dayoff_findings
+from .scheduling_guardrails_service import store_dayoff_findings
 from .surgeon_visibility import surgeon_is_visible
 
 
@@ -130,7 +130,15 @@ def staff_sections(months: list[tuple[int, int]], all_requests: list[DayOff]) ->
 
 
 def submit_request_off(db: Session, surgeon: Surgeon, start_date: str, end_date: str, reason: str, notes: str) -> dict:
-    today = date.today()
+    from .scheduling_gate_service import (
+        DUPLICATE_REJECT_MESSAGE,
+        practice_today,
+        purge_newer_duplicates_for_request,
+        reject_if_duplicate_day_off,
+        surgeon_friendly_conflict_message,
+    )
+
+    today = practice_today()
     start = date.fromisoformat(start_date)
     end = date.fromisoformat(end_date)
     if start < today or end < today:
@@ -138,17 +146,8 @@ def submit_request_off(db: Session, surgeon: Surgeon, start_date: str, end_date:
     if end < start:
         return {"ok": False, "warn": "End date must be the same day or after the start date."}
 
-    conflict_msgs = []
-    overlap = db.query(DayOff).filter(
-        DayOff.surgeon_id == surgeon.id,
-        DayOff.status.in_(["pending", "approved"]),
-        DayOff.start_date <= end,
-        DayOff.end_date >= start,
-    ).first()
-    if overlap:
-        conflict_msgs.append(
-            f"You already have a request for {overlap.start_date.strftime('%b %-d')}–{overlap.end_date.strftime('%b %-d')}"
-        )
+    if reject_if_duplicate_day_off(db, surgeon.id, start, end):
+        return {"ok": False, "warn": DUPLICATE_REJECT_MESSAGE}
 
     dayoff = DayOff(
         surgeon_id=surgeon.id,
@@ -161,9 +160,11 @@ def submit_request_off(db: Session, surgeon: Surgeon, start_date: str, end_date:
     db.add(dayoff)
     db.commit()
     db.refresh(dayoff)
+    purge_newer_duplicates_for_request(db, surgeon.id, start, end, keep_id=dayoff.id)
     findings = store_dayoff_findings(db, dayoff)
+    conflict_msgs = []
     if findings:
-        conflict_msgs.append(dayoff_surgeon_warning(findings))
+        conflict_msgs.append(surgeon_friendly_conflict_message(findings))
     notify_admins(
         "Pending Request",
         f"{surgeon.full_name} requested {start.strftime('%b %-d')} to {end.strftime('%b %-d')}.",
@@ -174,5 +175,5 @@ def submit_request_off(db: Session, surgeon: Surgeon, start_date: str, end_date:
     )
     warn_param = ""
     if conflict_msgs:
-        warn_param = "&warn=" + urllib.parse.quote(" · ".join(conflict_msgs[:3]))
+        warn_param = "&warn=" + urllib.parse.quote(conflict_msgs[0][:500])
     return {"ok": True, "warn_param": warn_param}

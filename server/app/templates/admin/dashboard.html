@@ -128,7 +128,8 @@
       <span class="text-[10px] font-bold text-teal-700 bg-teal-50 border border-teal-100 px-1.5 py-0.5 rounded-full">{{ admin_unread_notifications }} unread</span>
       {% endif %}
     </div>
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-1.5">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-1.5" style="direction:ltr;">
+      {# FIFO: oldest request first — top-left, then right, then next row #}
       {% for row in admin_notifications %}
       {% set payload = (row.payload|from_json) if row.payload else {} %}
       {% set is_dayoff = row.kind == 'day_off_request' %}

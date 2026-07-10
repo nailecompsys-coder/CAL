@@ -214,7 +214,7 @@ private struct GlanceOnCallLine: View {
 
         if assignment.rotationId != nil {
           Image(systemName: "chevron.right")
-            .font(.system(size: 9, weight: .bold))
+            .font(ClinicalTypography.badge)
             .foregroundStyle(.tertiary)
         }
       }
@@ -233,16 +233,16 @@ private struct CoverageInitialsView: View {
       HStack(spacing: 3) {
         StruckInitialsText(
           text: assignment.originalInitials,
-          font: .system(.caption, design: .monospaced).weight(.semibold)
+          font: ClinicalTypography.monoChip
         )
 
         Text(assignment.coveringInitials ?? assignment.surgeon)
-          .font(.system(.caption, design: .monospaced).weight(.semibold))
+          .font(ClinicalTypography.monoChip)
           .foregroundStyle(.primary)
       }
     } else {
       Text(assignment.surgeon)
-        .font(.system(.caption, design: .monospaced).weight(.semibold))
+        .font(ClinicalTypography.monoChip)
         .foregroundStyle(.primary)
     }
   }
@@ -252,7 +252,6 @@ struct FlowLine: View {
   let items: [String]
 
   var body: some View {
-    // Wrap-friendly flow using flexible layout
     FlexibleInitialsWrap(items: items)
   }
 }
@@ -266,7 +265,7 @@ private struct FlexibleInitialsWrap: View {
         HStack(spacing: 4) {
           ForEach(row, id: \.self) { item in
             Text(item)
-              .font(.caption2.weight(.semibold))
+              .font(ClinicalTypography.captionEmphasized)
               .padding(.horizontal, 6)
               .padding(.vertical, 3)
               .background(ClinicalPalette.porcelainChip.opacity(0.94), in: Capsule())

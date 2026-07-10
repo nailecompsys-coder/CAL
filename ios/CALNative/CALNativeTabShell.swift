@@ -37,6 +37,7 @@ struct CALNativeTabShell: View {
         }
         .padding(.horizontal, 14)
         .padding(.top, 54)
+        .calReadableColumn(ClinicalLayout.contentColumn)
         .transition(.move(edge: .top).combined(with: .opacity))
       }
     }
@@ -56,6 +57,7 @@ private struct NativeAlertBanner: View {
   let alert: NativeScheduleAlert
   let unreadCount: Int
   let action: () -> Void
+  @ScaledMetric(relativeTo: .title3) private var bellSize: CGFloat = 34
 
   var body: some View {
     Button(action: action) {
@@ -64,11 +66,11 @@ private struct NativeAlertBanner: View {
           Image(systemName: "bell.badge")
             .font(.title3.weight(.bold))
             .foregroundStyle(ClinicalPalette.teal)
-            .frame(width: 34, height: 34)
+            .frame(width: bellSize, height: bellSize)
             .background(ClinicalPalette.tealSoft.opacity(0.9), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
           Text("\(unreadCount)")
-            .font(.system(size: 10, weight: .black))
+            .font(ClinicalTypography.badge)
             .foregroundStyle(.white)
             .padding(.horizontal, 5)
             .padding(.vertical, 2)
@@ -78,16 +80,17 @@ private struct NativeAlertBanner: View {
 
         VStack(alignment: .leading, spacing: 2) {
           Text(alert.title)
-            .font(.subheadline.weight(.bold))
+            .font(ClinicalTypography.rowTitleStrong)
             .foregroundStyle(ClinicalPalette.ink)
             .lineLimit(1)
+            .minimumScaleFactor(0.85)
           Text(alert.body)
             .font(.caption.weight(.medium))
             .foregroundStyle(ClinicalPalette.muted)
             .lineLimit(2)
           if !alert.displayTime.isEmpty {
             Text(alert.displayTime)
-              .font(.caption2.weight(.semibold))
+              .font(ClinicalTypography.captionEmphasized)
               .foregroundStyle(ClinicalPalette.teal)
           }
         }
@@ -95,7 +98,7 @@ private struct NativeAlertBanner: View {
         Spacer(minLength: 4)
 
         Image(systemName: "chevron.right")
-          .font(.caption.weight(.bold))
+          .font(ClinicalTypography.caption)
           .foregroundStyle(ClinicalPalette.teal)
           .padding(.top, 8)
       }
@@ -114,7 +117,7 @@ private struct NativeAlertInbox: View {
   @Environment(\.dismiss) private var dismiss
 
   var body: some View {
-    NavigationView {
+    CalNavigation {
       List {
         if alerts.isEmpty {
           Label("No CAL alerts", systemImage: "bell.slash")
@@ -230,9 +233,9 @@ struct CALNativeTitleMenu: View {
     } label: {
       HStack(spacing: 4) {
         Text(selectedSection.rawValue)
-          .font(.headline.weight(.semibold))
+          .font(ClinicalTypography.headline)
         Image(systemName: "chevron.down")
-          .font(.caption2.weight(.bold))
+          .font(ClinicalTypography.badge)
       }
       .foregroundStyle(.primary)
     }

@@ -84,7 +84,7 @@ struct ScheduleHomeView: View {
   }
 
   var body: some View {
-    NavigationView {
+    CalNavigation {
       ZStack {
         ScheduleWaterBackground()
 
@@ -99,6 +99,7 @@ struct ScheduleHomeView: View {
           .padding(.top, 8)
           .padding(.bottom, 8)
           .background(.ultraThinMaterial)
+          .calReadableColumn(ClinicalLayout.wideColumn)
 
           ScheduleDateStepper(
             title: stepperTitle,
@@ -111,6 +112,7 @@ struct ScheduleHomeView: View {
           )
           .padding(.horizontal, 16)
           .padding(.bottom, 8)
+          .calReadableColumn(ClinicalLayout.wideColumn)
 
           Group {
             if scope == .day {
@@ -125,6 +127,7 @@ struct ScheduleHomeView: View {
                   selectedSection = .patients
                 }
               )
+              .calReadableColumn(ClinicalLayout.contentColumn)
               .transition(.opacity)
             } else {
               ScrollView {
@@ -188,6 +191,7 @@ struct ScheduleHomeView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 4)
                 .padding(.bottom, 18)
+                .calReadableColumn(scope == .month ? ClinicalLayout.wideColumn : ClinicalLayout.contentColumn)
               }
               .refreshable {
                 await loadCurrentScope()
@@ -213,7 +217,7 @@ struct ScheduleHomeView: View {
         }
       }
       .sheet(isPresented: $showingDatePicker) {
-        NavigationView {
+        CalNavigation {
           DatePicker("Schedule Date", selection: $selectedDate, displayedComponents: .date)
             .datePickerStyle(.graphical)
             .padding()

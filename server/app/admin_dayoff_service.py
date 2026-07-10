@@ -6,8 +6,7 @@ from datetime import date
 
 from sqlalchemy.orm import Session
 
-from .conflicts import check_conflicts
-from .models import CallRotation, DayOff, Surgeon
+from .models import DayOff, Surgeon
 from .or_block_service import log_schedule_change
 from .push import send_push_to_surgeon
 from .scheduling_guardrails_service import (
@@ -124,10 +123,8 @@ def gantt_rows(
             "hasBars": bool(bars),
             "laneCount": max(1, lane_count) if bars else 1,
         })
-    # Show surgeons with time off first, then the rest (keeps sort order within each group)
-    with_bars = [row for row in rows if row["hasBars"]]
-    without = [row for row in rows if not row["hasBars"]]
-    return with_bars + without
+    # Keep People / practice-rank order exactly (seniority). Never bump "who's off" to the top.
+    return rows
 
 
 def dayoff_is_current_or_future(dayoff: DayOff, today: date | None = None) -> bool:
@@ -136,38 +133,35 @@ def dayoff_is_current_or_future(dayoff: DayOff, today: date | None = None) -> bo
 
 
 def pending_conflict_map(db: Session, pending: list[DayOff]) -> dict[int, list[dict]]:
+    """Full schedule findings for pending cards (not just clinic-group + raw call)."""
+    from .scheduling_gate_service import build_dayoff_review_findings
+    from .scheduling_guardrails_service import finding_dicts
+
     conflict_map = {}
     for dayoff in pending:
-        findings = decode_findings(dayoff.review_findings)
-        call_rows = db.query(CallRotation).filter(
-            CallRotation.surgeon_id == dayoff.surgeon_id,
-            CallRotation.date >= dayoff.start_date,
-            CallRotation.date <= dayoff.end_date,
-        ).all()
-        for row in call_rows:
-            findings.append({
-                "severity": "warning",
-                "kind": "call_assignment",
-                "date": row.date.isoformat(),
-                "message": f"On-call assignment on {row.date.strftime('%b %-d')}",
-            })
-        conflict_map[dayoff.id] = findings
+        stored = decode_findings(dayoff.review_findings)
+        if stored:
+            conflict_map[dayoff.id] = stored
+            continue
+        conflict_map[dayoff.id] = finding_dicts(build_dayoff_review_findings(db, dayoff))
     return conflict_map
 
 
 def conflict_messages_for_dayoff(db: Session, dayoff: DayOff) -> list[str]:
-    conflicts = check_conflicts(
+    from .scheduling_gate_service import evaluate_day_off_conflicts, target_entity_from_dayoff
+
+    conflicts = evaluate_day_off_conflicts(
+        db,
         dayoff.surgeon_id,
         dayoff.start_date,
         dayoff.end_date,
-        db,
+        target_entity=target_entity_from_dayoff(dayoff),
         exclude_dayoff_id=dayoff.id,
-        target_entity={"type": "day_off", "start_date": dayoff.start_date, "end_date": dayoff.end_date},
     )
     surgeon = db.get(Surgeon, dayoff.surgeon_id)
     if surgeon and conflicts:
-        return [f"{surgeon.full_name}: " + conflict for conflict in conflicts]
-    return conflicts
+        return [f"{surgeon.full_name}: {c.message}" for c in conflicts]
+    return [c.message for c in conflicts]
 
 
 def add_approved_dayoff(
@@ -179,6 +173,11 @@ def add_approved_dayoff(
     notes: str,
     approved_by: int,
 ) -> list[str]:
+    from .scheduling_gate_service import reject_if_duplicate_day_off, DUPLICATE_REJECT_MESSAGE
+
+    if reject_if_duplicate_day_off(db, surgeon_id, start, end):
+        return [DUPLICATE_REJECT_MESSAGE]
+
     dayoff = DayOff(
         surgeon_id=surgeon_id,
         start_date=start,

@@ -32,7 +32,7 @@ struct NativeSchedulerShell: View {
   }
 
   var body: some View {
-    NavigationView {
+    CalNavigation {
       ZStack {
         ScheduleWaterBackground()
         VStack(spacing: 0) {
@@ -41,6 +41,7 @@ struct NativeSchedulerShell: View {
             windowTitle: windowTitle,
             jump: jumpDate
           )
+          .calReadableColumn(ClinicalLayout.wideColumn)
 
           Picker("Scheduler", selection: $selectedTab) {
             ForEach(SchedulerTab.allCases) { tab in
@@ -51,6 +52,7 @@ struct NativeSchedulerShell: View {
           .padding(.horizontal, 16)
           .padding(.vertical, 10)
           .background(.ultraThinMaterial)
+          .calReadableColumn(ClinicalLayout.wideColumn)
 
           if selectedTab == .blocks {
             SchedulerOpenBlocksView(
@@ -61,8 +63,10 @@ struct NativeSchedulerShell: View {
                 Task { await store.loadSchedulerBlock(block) }
               }
             )
+            .calReadableColumn(ClinicalLayout.contentColumn)
           } else {
             SchedulerChangesView(changes: store.schedulerChanges)
+              .calReadableColumn(ClinicalLayout.contentColumn)
           }
         }
       }
@@ -138,7 +142,6 @@ struct NativeSchedulerShell: View {
         )
       }
     }
-    .navigationViewStyle(.stack)
     .task {
       await store.loadScheduler(containing: selectedDate)
     }
@@ -227,27 +230,59 @@ private struct SchedulerDateControl: View {
         .buttonStyle(.bordered)
       }
 
-      HStack(spacing: 8) {
-        Text(windowTitle)
-          .font(.caption.weight(.bold))
-          .foregroundStyle(.secondary)
-        Spacer()
-        Button("+1 mo") {
-          jump(.month, 1)
-        }
-        .font(.caption.weight(.bold))
-        .buttonStyle(.bordered)
-        Button("+6 wk") {
-          jump(.day, 42)
-        }
-        .font(.caption.weight(.bold))
-        .buttonStyle(.borderedProminent)
-      }
+      jumpControls
     }
     .padding(.horizontal, 16)
     .padding(.top, 10)
     .padding(.bottom, 8)
     .background(.ultraThinMaterial)
+  }
+
+  @ViewBuilder
+  private var jumpControls: some View {
+    if #available(iOS 16.0, *) {
+      ViewThatFits(in: .horizontal) {
+        jumpRow
+        VStack(alignment: .leading, spacing: 8) {
+          Text(windowTitle)
+            .font(ClinicalTypography.caption)
+            .foregroundStyle(.secondary)
+          HStack(spacing: 8) {
+            jumpButtons
+            Spacer(minLength: 0)
+          }
+        }
+      }
+    } else {
+      jumpRow
+    }
+  }
+
+  private var jumpRow: some View {
+    HStack(spacing: 8) {
+      Text(windowTitle)
+        .font(ClinicalTypography.caption)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .minimumScaleFactor(0.85)
+      Spacer(minLength: 4)
+      jumpButtons
+    }
+  }
+
+  private var jumpButtons: some View {
+    HStack(spacing: 8) {
+      Button("+1 mo") {
+        jump(.month, 1)
+      }
+      .font(ClinicalTypography.caption)
+      .buttonStyle(.bordered)
+      Button("+6 wk") {
+        jump(.day, 42)
+      }
+      .font(ClinicalTypography.caption)
+      .buttonStyle(.borderedProminent)
+    }
   }
 }
 
@@ -280,21 +315,24 @@ private struct SchedulerOpenBlocksView: View {
         ForEach(dayGroups) { day in
           VStack(alignment: .leading, spacing: 8) {
             Text(day.title)
-              .font(.subheadline.weight(.black))
+              .font(ClinicalTypography.rowTitleStrong)
               .foregroundStyle(ClinicalPalette.ink)
               .padding(.horizontal, 4)
 
             ForEach(day.groups) { group in
               VStack(alignment: .leading, spacing: 8) {
-                HStack {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
                   Text(group.location)
-                    .font(.headline.weight(.black))
+                    .font(ClinicalTypography.headlineStrong)
                     .foregroundStyle(ClinicalPalette.teal)
-                    .frame(width: 52, alignment: .leading)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                   Text("\(group.start)-\(group.end)")
-                    .font(.caption.weight(.semibold))
+                    .font(ClinicalTypography.caption)
                     .foregroundStyle(.secondary)
-                  Spacer()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                  Spacer(minLength: 0)
                 }
 
                 ForEach(group.blocks) { block in
@@ -436,16 +474,16 @@ private struct SchedulerAssignSheet: View {
   }
 
   var body: some View {
-    NavigationView {
+    CalNavigation {
       ScrollView {
         VStack(alignment: .leading, spacing: 12) {
           HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
               Text("\(liveBlock.displayLocation)  \(liveBlock.start)-\(liveBlock.end)")
-                .font(.headline.weight(.black))
+                .font(ClinicalTypography.headlineStrong)
                 .foregroundStyle(ClinicalPalette.ink)
               Text(liveBlock.displayDate)
-                .font(.caption.weight(.semibold))
+                .font(ClinicalTypography.caption)
                 .foregroundStyle(.secondary)
             }
             Spacer()
@@ -456,7 +494,7 @@ private struct SchedulerAssignSheet: View {
 
           VStack(alignment: .leading, spacing: 8) {
             Text("ON THIS BLOCK")
-              .font(.caption.weight(.black))
+              .font(ClinicalTypography.sectionLabel)
               .foregroundStyle(.secondary)
             if assignedRows.isEmpty {
               Text("No surgeons yet — pick one below")
@@ -505,7 +543,7 @@ private struct SchedulerAssignSheet: View {
           if mode != .idle || assignedRows.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
               Text(mode == .editing ? "EDIT SLOT" : "NEW SLOT")
-                .font(.caption.weight(.black))
+                .font(ClinicalTypography.sectionLabel)
                 .foregroundStyle(.secondary)
               HStack(spacing: 12) {
                 DatePicker("Start", selection: $startTime, displayedComponents: .hourAndMinute)
@@ -528,7 +566,7 @@ private struct SchedulerAssignSheet: View {
 
             VStack(alignment: .leading, spacing: 8) {
               Text("PICK SURGEON")
-                .font(.caption.weight(.black))
+                .font(ClinicalTypography.sectionLabel)
                 .foregroundStyle(.secondary)
 
               if candidates.isEmpty {
@@ -757,22 +795,25 @@ private struct AssignedSurgeonPill: View {
       Button(action: onSelect) {
         HStack(spacing: 10) {
           Text(assignment.surgeonInitials.isEmpty ? "—" : assignment.surgeonInitials)
-            .font(.caption.weight(.black))
+            .font(ClinicalTypography.sectionLabel)
             .foregroundStyle(.white)
-            .frame(width: 40, height: 28)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
             .background(isSelected ? ClinicalPalette.teal : ClinicalPalette.teal.opacity(0.75), in: Capsule())
           VStack(alignment: .leading, spacing: 2) {
             Text(assignment.surgeon.isEmpty ? assignment.label : assignment.surgeon)
-              .font(.subheadline.weight(.bold))
+              .font(ClinicalTypography.rowTitleStrong)
               .foregroundStyle(ClinicalPalette.ink)
+              .lineLimit(1)
+              .minimumScaleFactor(0.85)
             Text("\(assignment.start) · \(assignment.caseCount) case\(assignment.caseCount == 1 ? "" : "s")")
-              .font(.caption.weight(.semibold))
+              .font(ClinicalTypography.caption)
               .foregroundStyle(.secondary)
           }
           Spacer(minLength: 0)
           if isSelected {
             Text("Editing")
-              .font(.caption2.weight(.bold))
+              .font(ClinicalTypography.badge)
               .foregroundStyle(ClinicalPalette.teal)
           }
         }
@@ -811,14 +852,17 @@ private struct CandidatePickRow: View {
     Button(action: action) {
       HStack(alignment: .center, spacing: 10) {
         Text(candidate.initials)
-          .font(.caption.weight(.black))
+          .font(ClinicalTypography.sectionLabel)
           .foregroundStyle(candidate.isClear ? ClinicalPalette.teal : .secondary)
-          .frame(width: 38, height: 28)
+          .padding(.horizontal, 10)
+          .padding(.vertical, 6)
           .background(Color(.secondarySystemBackground), in: Capsule())
         VStack(alignment: .leading, spacing: 2) {
           Text(candidate.name)
-            .font(.subheadline.weight(.bold))
+            .font(ClinicalTypography.rowTitleStrong)
             .foregroundStyle(ClinicalPalette.ink)
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
           Text(candidate.availability)
             .font(.caption)
             .foregroundStyle(candidate.isClear ? Color.secondary : Color.orange)
@@ -857,10 +901,10 @@ private struct SchedulerChangesView: View {
           VStack(alignment: .leading, spacing: 4) {
             HStack {
               Text(change.surgeonInitials.isEmpty ? "CAL" : change.surgeonInitials)
-                .font(.caption.weight(.black))
+                .font(ClinicalTypography.sectionLabel)
                 .foregroundStyle(ClinicalPalette.teal)
               Text(change.title)
-                .font(.subheadline.weight(.bold))
+                .font(ClinicalTypography.rowTitleStrong)
             }
             Text(change.body)
               .font(.caption)
@@ -888,7 +932,7 @@ private struct SchedulerSectionTitle: View {
 
   var body: some View {
     Text(text.uppercased())
-      .font(.caption.weight(.black))
+      .font(ClinicalTypography.sectionLabel)
       .foregroundStyle(.secondary)
   }
 }
@@ -898,7 +942,7 @@ private struct SchedulerEmptyRow: View {
 
   var body: some View {
     Text(text)
-      .font(.subheadline.weight(.semibold))
+      .font(ClinicalTypography.rowTitle)
       .foregroundStyle(.secondary)
       .padding(12)
       .frame(maxWidth: .infinity, alignment: .leading)

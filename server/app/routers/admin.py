@@ -5,7 +5,7 @@ from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from ..aprima_schedule_service import fetch_main_office_patients_by_weekday
@@ -109,7 +109,7 @@ def dashboard(request: Request, db: Session = Depends(get_db), admin=Depends(get
         row for row in db.query(DayOff).filter(
             DayOff.status == "pending",
             DayOff.end_date >= today,
-        ).all()
+        ).order_by(DayOff.created_at.asc().nullsfirst(), DayOff.id.asc()).all()
         if surgeon_is_visible(row.surgeon)
     ]
 
@@ -121,9 +121,8 @@ def dashboard(request: Request, db: Session = Depends(get_db), admin=Depends(get
         ).order_by(Meeting.date, Meeting.start_time).all()
         if not is_clinic_day_meeting(row)
     ][:5]
-    admin_notifications = db.query(AdminNotification).filter(
-        AdminNotification.admin_user_id == admin.id,
-    ).order_by(AdminNotification.created_at.desc(), AdminNotification.id.desc()).limit(5).all()
+    from ..admin_settings_page_service import recent_admin_notifications
+    admin_notifications = recent_admin_notifications(db, admin.id, limit=8)
     admin_unread_notifications = db.query(AdminNotification).filter(
         AdminNotification.admin_user_id == admin.id,
         AdminNotification.read_at.is_(None),

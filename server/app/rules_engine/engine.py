@@ -53,6 +53,46 @@ def ensure_rule_config_seeded(db: Session) -> None:
     db.commit()
 
 
+_DAY_OFF_RULES = {
+    "OVERLAP_DAY_OFF",
+    "OVERLAP_CALL",
+    "OVERLAP_CLINIC",
+    "OVERLAP_SURGERY",
+    "OVERLAP_OR_BLOCK",
+    "OVERLAP_MEETING",
+    "CLINIC_GROUP_DAY_OFF_CAPACITY",
+}
+
+_AVAILABILITY_RULES = {
+    "OVERLAP_DAY_OFF",
+    "OVERLAP_CALL",
+    "OVERLAP_CLINIC",
+    "OVERLAP_SURGERY",
+    "OVERLAP_OR_BLOCK",
+    "OVERLAP_MEETING",
+}
+
+_MEETING_RULES = {
+    "OVERLAP_DAY_OFF",
+    "OVERLAP_CALL",
+    "OVERLAP_CLINIC",
+    "OVERLAP_SURGERY",
+    "OVERLAP_OR_BLOCK",
+    "OVERLAP_MEETING",
+    "OVERLAP_UNAVAILABLE",
+}
+
+_CALL_RULES = {
+    "OVERLAP_DAY_OFF",
+    "OVERLAP_CALL",
+    "OVERLAP_CLINIC",
+    "OVERLAP_SURGERY",
+    "OVERLAP_OR_BLOCK",
+    "OVERLAP_MEETING",
+    "OVERLAP_UNAVAILABLE",
+}
+
+
 def evaluate(
     surgeon_id: int,
     start_date: date,
@@ -64,50 +104,39 @@ def evaluate(
 ) -> list[Conflict]:
     """
     Run all enabled rules for the surgeon over [start_date, end_date].
-    exclude_entity: ("surgical_case", id) or ("day_off", id) etc. to skip that entity when checking.
-    rule_config: from get_rule_config(db); if None, load from DB.
+    Only evaluates today-forward (practice timezone). Past windows return [].
     """
+    from ..scheduling_gate_service import clip_window_to_now, notify_missing_rule
+
+    clipped = clip_window_to_now(start_date, end_date)
+    if clipped is None:
+        return []
+    start_date, end_date = clipped
+
     if rule_config is None:
         rule_config = get_rule_config(db)
     results = []
     target_type = (target_entity or {}).get("type")
     applicable_rules = {
-        "day_off": {
-            "OVERLAP_DAY_OFF",
-            "OVERLAP_CALL",
-            "OVERLAP_CLINIC",
-            "OVERLAP_SURGERY",
-            "OVERLAP_MEETING",
-            "CLINIC_GROUP_DAY_OFF_CAPACITY",
-        },
-        "availability": {
-            "OVERLAP_DAY_OFF",
-            "OVERLAP_CALL",
-            "OVERLAP_CLINIC",
-            "OVERLAP_SURGERY",
-            "OVERLAP_MEETING",
-        },
+        "day_off": _DAY_OFF_RULES,
+        "availability": _AVAILABILITY_RULES,
         "clinic_schedule": {rule.rule_id for rule in ALL_RULES},
         "surgical_case": {rule.rule_id for rule in ALL_RULES},
-        "meeting": {
-            "OVERLAP_DAY_OFF",
-            "OVERLAP_CALL",
-            "OVERLAP_CLINIC",
-            "OVERLAP_SURGERY",
-            "OVERLAP_MEETING",
-            "OVERLAP_UNAVAILABLE",
-        },
-        "call_rotation": {
-            "OVERLAP_DAY_OFF",
-            "OVERLAP_CALL",
-            "OVERLAP_CLINIC",
-            "OVERLAP_SURGERY",
-            "OVERLAP_MEETING",
-            "OVERLAP_UNAVAILABLE",
-        },
+        "or_block": {rule.rule_id for rule in ALL_RULES},
+        "meeting": _MEETING_RULES,
+        "call_rotation": _CALL_RULES,
+        "call_coverage": _CALL_RULES,
     }
+    if target_type and target_type not in applicable_rules:
+        notify_missing_rule(
+            db,
+            "TARGET_TYPE_MAP",
+            f"No applicable rule set for target type {target_type!r} (surgeon {surgeon_id})",
+        )
+
     for rule in ALL_RULES:
         if not rule.checker:
+            notify_missing_rule(db, rule.rule_id, "Rule has no checker function")
             continue
         if target_type and rule.rule_id not in applicable_rules.get(target_type, set()):
             continue
@@ -125,9 +154,12 @@ def evaluate(
                 exclude_entity,
                 target_entity,
             ):
+                if c.date < start_date:
+                    continue
                 results.append(c)
-        except Exception:
+        except Exception as exc:
             log.exception("Scheduling rule failed: %s", rule.rule_id)
+            notify_missing_rule(db, rule.rule_id, f"{type(exc).__name__}: {exc}")
             continue
     return results
 

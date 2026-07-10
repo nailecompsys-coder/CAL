@@ -69,7 +69,7 @@ app_changes="$(repo_changes "$ROOT")"
 check_artifacts "CAL repo" "$app_changes"
 
 backend_native_pattern='^server/(app/native_|app/routers/native_api\.py|app/routers/native_scheduler_api\.py|app/routers/surgeon_day_items\.py|app/routers/surgeon_otp\.py|app/routers/api_push\.py|app/push\.py|app/sms_service\.py)'
-native_contract_test_pattern='^server/tests/(test_native_|test_surgeon_otp_|test_push_)'
+native_contract_test_pattern='^server/tests/(test_native_|test_surgeon_otp_|test_push_|test_scheduling_gate)'
 imported_native_source_pattern='^(ios/|android/|legacy-react-native/)'
 imported_native_metadata_pattern='^(ios/CALNative\.xcodeproj/project\.pbxproj|ios/CALNative/Info\.plist|android/.*gradle.*|android/gradle/|legacy-react-native/app\.json|legacy-react-native/eas\.json|legacy-react-native/package(-lock)?\.json)'
 repo_native_doc_pattern='^docs/(cal-native-(parity-ledger|stack-guardrails)\.md|CAL_AGENT_GUARDRAILS\.md|SCHEDULER_AND_ANDROID_EXECUTION_PLAN\.md|restructure-phase-[0-9]+.*\.md)$'
@@ -138,6 +138,18 @@ swift_color_hits="$(
 if [[ -n "$swift_color_hits" ]]; then
   add_failure "Swift hardcoded colors are forbidden. Use ClinicalPalette / Images.xcassets colorsets only (.cursor/rules/swift-color-standard.mdc).
 $swift_color_hits"
+fi
+
+# Semantic typography: ban fixed-point .font(.system(size: …)) in CALNative.
+swift_font_hits="$(
+  grep -RInE '\.font\(\.system\(size:' \
+    "$ROOT/ios/CALNative" --include='*.swift' 2>/dev/null \
+    | grep -vE '^\S+:[0-9]+:\s*//' \
+    || true
+)"
+if [[ -n "$swift_font_hits" ]]; then
+  add_failure "Hardcoded .font(.system(size: …)) is forbidden in ios/CALNative. Use ClinicalTypography or semantic Font styles (.largeTitle, .headline, .caption, …).
+$swift_font_hits"
 fi
 
 if [[ "$STRICT_RELEASE" == "1" ]]; then

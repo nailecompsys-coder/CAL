@@ -53,7 +53,7 @@ struct TimeOffHomeView: View {
   }
 
   var body: some View {
-    NavigationView {
+    CalNavigation {
       ZStack {
         ScheduleWaterBackground()
 
@@ -120,6 +120,7 @@ struct TimeOffHomeView: View {
           .padding(.horizontal, 16)
           .padding(.top, 8)
           .padding(.bottom, 18)
+          .calReadableColumn(ClinicalLayout.wideColumn)
         }
       }
       .navigationTitle("Time Off")
@@ -167,20 +168,25 @@ private struct TimeOffRequestRow: View {
       StatusDot(status: request.status)
 
       Text(request.dateRange)
-        .font(.caption.weight(.semibold))
+        .font(ClinicalTypography.caption)
         .foregroundStyle(ClinicalPalette.ink)
-        .frame(width: 78, alignment: .leading)
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
+        .fixedSize(horizontal: true, vertical: false)
+        .layoutPriority(1)
 
       Text(request.reason.isEmpty ? "Time off" : request.reason)
         .font(.caption)
         .foregroundStyle(.secondary)
         .lineLimit(1)
+        .minimumScaleFactor(0.85)
 
       Spacer(minLength: 4)
 
       Text(request.status.capitalized)
-        .font(.caption2.weight(.bold))
+        .font(ClinicalTypography.badge)
         .foregroundStyle(statusColor(request.status))
+        .fixedSize(horizontal: true, vertical: false)
     }
   }
 

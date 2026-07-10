@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from sqlalchemy import case
 from sqlalchemy.orm import Session
 
 from . import wasabi_backup
@@ -38,13 +39,28 @@ def recent_otp_audit_logs(db: Session, limit: int = 50) -> list[SurgeonOtpAuditL
 
 
 def recent_admin_notifications(db: Session, admin_user_id: int, limit: int = 20) -> list[AdminNotification]:
-    return (
+    """FIFO: oldest entered first (top-left → right → down). Unread before read."""
+    rows = (
         db.query(AdminNotification)
         .filter(AdminNotification.admin_user_id == admin_user_id)
-        .order_by(AdminNotification.created_at.desc(), AdminNotification.id.desc())
-        .limit(limit)
+        .order_by(
+            case((AdminNotification.read_at.is_(None), 0), else_=1),
+            AdminNotification.created_at.asc().nullsfirst(),
+            AdminNotification.id.asc(),
+        )
+        .limit(max(limit * 3, limit))
         .all()
     )
+    # Belt-and-suspenders: never trust DB nulls / driver quirks for display order.
+    rows = sorted(
+        rows,
+        key=lambda row: (
+            1 if row.read_at is not None else 0,
+            row.created_at or row.id or 0,
+            row.id or 0,
+        ),
+    )
+    return rows[:limit]
 
 
 def unread_admin_notification_count(db: Session, admin_user_id: int) -> int:

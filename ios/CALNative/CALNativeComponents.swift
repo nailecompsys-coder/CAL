@@ -1,9 +1,7 @@
 import SwiftUI
 
-/// Clinical Trust palette — **Asset Catalog only**.
-/// Never add RGB constructors here. Add a `.colorset` under
-/// `Images.xcassets`, then expose it as `Color("Clinical…")`.
-/// Enforced by `.cursor/rules/swift-color-standard.mdc` + `check-native-guardrails.sh`.
+/// Clinical Trust palette — Asset Catalog only.
+/// Add a `.colorset` under `Images.xcassets`, then expose it as `Color("Clinical…")`.
 enum ClinicalPalette {
   static let pageTop = Color("ClinicalPageTop")
   static let pageMiddle = Color("ClinicalPageMiddle")
@@ -18,19 +16,69 @@ enum ClinicalPalette {
   static let mint = Color("ClinicalMint")
   static let amber = Color("ClinicalAmber")
   static let lavender = Color("ClinicalLavender")
-  /// Portal `--meeting-cal` lilac wash (#DCC9F5).
   static let meeting = Color("ClinicalMeeting")
-  /// Stronger lilac for small month/day signal dots.
   static let meetingStrong = Color("ClinicalMeetingStrong")
-  /// Pastel rose for Block OR signals.
   static let block = Color("ClinicalBlock")
-  /// Stronger rose for small Block OR dots.
   static let blockStrong = Color("ClinicalBlockStrong")
   static let ink = Color("ClinicalInk")
   static let muted = Color("ClinicalMuted")
   static let stroke = Color("ClinicalStroke")
   static let shadow = Color("ClinicalShadow")
   static let authAccent = Color("ClinicalAuthAccent")
+}
+
+enum ClinicalTypography {
+  static let largeTitle = Font.largeTitle.weight(.bold)
+  static let headline = Font.headline.weight(.semibold)
+  static let headlineStrong = Font.headline.weight(.black)
+  static let rowTitle = Font.subheadline.weight(.semibold)
+  static let rowTitleStrong = Font.subheadline.weight(.bold)
+  static let sectionLabel = Font.caption.weight(.black)
+  static let caption = Font.caption.weight(.semibold)
+  static let captionEmphasized = Font.caption2.weight(.semibold)
+  static let badge = Font.caption2.weight(.black)
+  static let monoCaption = Font.caption.monospacedDigit().weight(.semibold)
+  static let monoTitle = Font.system(.title3, design: .monospaced).weight(.bold)
+  static let monoRow = Font.system(.subheadline, design: .monospaced).weight(.bold)
+  static let monoChip = Font.system(.caption, design: .monospaced).weight(.semibold)
+}
+
+enum ClinicalLayout {
+  static let authColumn: CGFloat = 520
+  static let contentColumn: CGFloat = 840
+  static let wideColumn: CGFloat = .infinity
+}
+
+/// Horizontal chips when they fit; adaptive grid when they do not.
+struct AdaptiveChipRow<Content: View>: View {
+  var minimumChipWidth: CGFloat = 96
+  var spacing: CGFloat = 8
+  @ViewBuilder var content: () -> Content
+
+  var body: some View {
+    if #available(iOS 16.0, *) {
+      ViewThatFits(in: .horizontal) {
+        HStack(alignment: .center, spacing: spacing) {
+          content()
+        }
+        LazyVGrid(
+          columns: [GridItem(.adaptive(minimum: minimumChipWidth), spacing: spacing)],
+          alignment: .leading,
+          spacing: spacing
+        ) {
+          content()
+        }
+      }
+    } else {
+      LazyVGrid(
+        columns: [GridItem(.adaptive(minimum: minimumChipWidth), spacing: spacing)],
+        alignment: .leading,
+        spacing: spacing
+      ) {
+        content()
+      }
+    }
+  }
 }
 
 struct ScheduleWaterBackground: View {
@@ -92,23 +140,23 @@ struct CompactDatePickerRow: View {
   }
 }
 
-/// Centered date/range stepper shared by Schedule Day / Week / Month.
+/// Shared date stepper for Schedule Day / Week / Month.
 struct ScheduleDateStepper: View {
   let title: String
   let subtitle: String?
   let previousAction: () -> Void
   let nextAction: () -> Void
   var onTitleTap: (() -> Void)?
-  /// Shown when the user has stepped away from today / current range.
   var todayAction: (() -> Void)?
   var showsTodayButton: Bool = false
+  @ScaledMetric(relativeTo: .body) private var controlSize: CGFloat = 36
 
   var body: some View {
     HStack(spacing: 0) {
       Button(action: previousAction) {
         Image(systemName: "chevron.left")
-          .font(.subheadline.weight(.semibold))
-          .frame(width: 36, height: 36)
+          .font(ClinicalTypography.rowTitle)
+          .frame(width: controlSize, height: controlSize)
           .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
@@ -118,7 +166,7 @@ struct ScheduleDateStepper: View {
       } label: {
         VStack(spacing: 2) {
           Text(title)
-            .font(.subheadline.weight(.semibold))
+            .font(ClinicalTypography.rowTitle)
             .foregroundStyle(ClinicalPalette.ink)
             .lineLimit(1)
             .minimumScaleFactor(0.85)
@@ -136,7 +184,7 @@ struct ScheduleDateStepper: View {
 
       if showsTodayButton, let todayAction {
         Button("Today", action: todayAction)
-          .font(.caption.weight(.bold))
+          .font(ClinicalTypography.caption)
           .foregroundStyle(ClinicalPalette.teal)
           .padding(.horizontal, 8)
           .padding(.vertical, 6)
@@ -146,8 +194,8 @@ struct ScheduleDateStepper: View {
 
       Button(action: nextAction) {
         Image(systemName: "chevron.right")
-          .font(.subheadline.weight(.semibold))
-          .frame(width: 36, height: 36)
+          .font(ClinicalTypography.rowTitle)
+          .frame(width: controlSize, height: controlSize)
           .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
@@ -166,6 +214,17 @@ extension View {
     } else {
       self
     }
+  }
+
+  /// Keep NavigationView single-column on iPad (avoids empty detail pane).
+  /// Must be applied to the NavigationView, not its root content.
+  func calStackNavigation() -> some View {
+    navigationViewStyle(.stack)
+  }
+
+  /// Center content on regular-width size classes (iPad / landscape).
+  func calReadableColumn(_ maxWidth: CGFloat = ClinicalLayout.contentColumn) -> some View {
+    modifier(CalReadableColumnModifier(maxWidth: maxWidth))
   }
 
   func liquidGlassCard(
@@ -195,5 +254,34 @@ extension View {
       }
       .shadow(color: ClinicalPalette.shadow.opacity(0.12), radius: 14, x: 0, y: 8)
       .shadow(color: Color.white.opacity(0.80), radius: 1, x: 0, y: -1)
+  }
+}
+
+private struct CalReadableColumnModifier: ViewModifier {
+  @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+  let maxWidth: CGFloat
+
+  func body(content: Content) -> some View {
+    content
+      .frame(maxWidth: horizontalSizeClass == .regular ? maxWidth : .infinity)
+      .frame(maxWidth: .infinity)
+  }
+}
+
+/// Single-column navigation on iPhone and iPad (NavigationStack when available).
+struct CalNavigation<Content: View>: View {
+  @ViewBuilder var content: () -> Content
+
+  var body: some View {
+    if #available(iOS 16.0, *) {
+      NavigationStack {
+        content()
+      }
+    } else {
+      NavigationView {
+        content()
+      }
+      .navigationViewStyle(.stack)
+    }
   }
 }

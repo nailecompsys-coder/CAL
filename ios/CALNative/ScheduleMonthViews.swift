@@ -41,43 +41,47 @@ private struct MonthDotLegend: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
       Text("Your month")
-        .font(.caption2.weight(.bold))
+        .font(ClinicalTypography.captionEmphasized)
         .foregroundStyle(ClinicalPalette.muted)
 
-      HStack(spacing: 10) {
+      AdaptiveChipRow(minimumChipWidth: 88, spacing: 10) {
         legendOff
         legendDot(color: ClinicalPalette.amber, label: "Clinic/OR")
         legendDot(color: ClinicalPalette.blockStrong, label: "Block")
         legendDot(color: ClinicalPalette.meetingStrong, label: "Meeting")
       }
     }
-    .font(.caption2.weight(.semibold))
+    .font(ClinicalTypography.captionEmphasized)
     .foregroundStyle(ClinicalPalette.ink.opacity(0.75))
   }
 
   private var legendOff: some View {
     HStack(spacing: 4) {
       Text("OFF")
-        .font(.system(size: 8, weight: .black))
+        .font(ClinicalTypography.badge)
         .foregroundStyle(ClinicalPalette.scrubInk)
-        .padding(.horizontal, 4)
+        .padding(.horizontal, 5)
         .padding(.vertical, 2)
         .background(ClinicalPalette.mint, in: RoundedRectangle(cornerRadius: 3, style: .continuous))
-      Text("Approved off")
+      Text("Off")
+        .lineLimit(1)
+        .minimumScaleFactor(0.85)
     }
   }
 
   private func legendDot(color: Color, label: String) -> some View {
     HStack(spacing: 4) {
-      MonthSignalDot(color: color, size: 9)
+      MonthSignalDot(color: color)
       Text(label)
+        .lineLimit(1)
+        .minimumScaleFactor(0.85)
     }
   }
 }
 
 private struct MonthSignalDot: View {
   let color: Color
-  var size: CGFloat = 8
+  @ScaledMetric(relativeTo: .caption2) private var size: CGFloat = 9
 
   var body: some View {
     ZStack {
@@ -168,7 +172,7 @@ private struct MonthHeatmapCell: View {
 
         if cell.hasMyApprovedOff {
           Text("OFF")
-            .font(.system(size: 8, weight: .black))
+            .font(ClinicalTypography.badge)
             .foregroundStyle(ClinicalPalette.scrubInk)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 2)
@@ -181,16 +185,16 @@ private struct MonthHeatmapCell: View {
 
         HStack(spacing: 3) {
           if cell.hasClinicOr {
-            MonthSignalDot(color: ClinicalPalette.amber, size: 9)
+            MonthSignalDot(color: ClinicalPalette.amber)
           }
           if cell.hasBlockTime {
-            MonthSignalDot(color: ClinicalPalette.blockStrong, size: 9)
+            MonthSignalDot(color: ClinicalPalette.blockStrong)
           }
           if cell.hasMeeting {
-            MonthSignalDot(color: ClinicalPalette.meetingStrong, size: 9)
+            MonthSignalDot(color: ClinicalPalette.meetingStrong)
           }
           if !hasSignals {
-            Color.clear.frame(width: 9, height: 9)
+            MonthSignalDot(color: .clear).opacity(0)
           }
         }
         .frame(minHeight: 11)

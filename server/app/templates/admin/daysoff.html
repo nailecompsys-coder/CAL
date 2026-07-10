@@ -35,11 +35,6 @@
   <div><strong>Scheduling conflict:</strong> {{ request.query_params.get('warn') }}</div>
 </div>
 {% endif %}
-{% if request.query_params.get('msg') == 'bulk_approved' %}
-<div class="mx-5 mt-4 status-approved border rounded-xl px-4 py-3 text-sm font-semibold">
-  <i class="fa-solid fa-circle-check mr-1.5"></i> {{ request.query_params.get('n', '0') }} request(s) approved.
-</div>
-{% endif %}
 
 {# ── Surgeon filter chips ──────────────────────────────────────────────── #}
 <div class="px-6 pt-4 pb-2 flex items-center gap-2 flex-wrap">
@@ -61,8 +56,6 @@
 
   {# ── Pending section — compact pills, 2–3 across so Gantt stays visible ── #}
   {% if pending %}
-  {% set clear_ids = [] %}
-  {% for d in pending %}{% if not conflict_map.get(d.id) %}{% set _ = clear_ids.append(d.id) %}{% endif %}{% endfor %}
 
   <div>
     <div class="flex items-center gap-2 mb-2 flex-wrap">
@@ -70,32 +63,7 @@
       <h2 class="font-extrabold text-slate-700 text-[11px] uppercase tracking-wide">Pending Approval</h2>
       <span class="text-[10px] font-bold px-1.5 py-0 rounded-full status-pending leading-4">{{ pending|length }}</span>
       <div class="flex-1 h-px bg-slate-200 min-w-[24px]"></div>
-      <label class="flex items-center gap-1 text-[11px] text-slate-500 cursor-pointer select-none">
-        <input type="checkbox" id="select-all-cb" class="rounded w-3.5 h-3.5" onchange="toggleSelectAll(this.checked)" />
-        Select all
-      </label>
-      {% if clear_ids %}
-      <form method="post" action="/admin/daysoff/bulk-approve" id="approve-clear-form">
-        {% for cid in clear_ids %}<input type="hidden" name="ids" value="{{ cid }}" />{% endfor %}
-        <button type="submit"
-          class="flex items-center gap-1 bg-blue-600 text-white text-[11px] font-bold px-2.5 py-1 rounded-lg hover:bg-blue-700"
-          onclick="return confirm('Approve {{ clear_ids|length }} request(s) with no call conflicts?')">
-          <i class="fa-solid fa-check-double"></i> Approve clear ({{ clear_ids|length }})
-        </button>
-      </form>
-      {% endif %}
     </div>
-
-    <form method="post" action="/admin/daysoff/bulk-approve" id="bulk-approve-form" class="hidden mb-2">
-      <div id="bulk-bar" class="clinical-glass flex items-center gap-2 px-3 py-1.5">
-        <span id="bulk-count" class="text-xs font-semibold text-blue-700">0 selected</span>
-        <div class="flex-1"></div>
-        <button type="submit" class="flex items-center gap-1 bg-blue-600 text-white text-[11px] font-bold px-3 py-1 rounded-lg hover:bg-blue-700">
-          <i class="fa-solid fa-check"></i> Approve selected
-        </button>
-        <button type="button" onclick="clearSelection()" class="text-[11px] text-blue-500 hover:text-blue-700">Cancel</button>
-      </div>
-    </form>
 
     <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-1.5" id="pending-list">
       {% for d in pending %}
@@ -103,17 +71,12 @@
       <div class="clinical-glass pending-request-card rounded-xl {% if findings %}ring-1 ring-amber-200{% endif %}"
            id="pending-request-{{ d.id }}"
            data-dayoff-id="{{ d.id }}"
+           data-surgeon-id="{{ d.surgeon_id }}"
            data-start="{{ d.start_date.isoformat() }}"
            data-end="{{ d.end_date.isoformat() }}">
         <div class="px-2.5 py-1.5 cursor-pointer"
-             onclick="focusDayoffGantt('{{ d.start_date.isoformat() }}', '{{ d.end_date.isoformat() }}', {{ d.id }})">
+             onclick="focusDayoffGantt('{{ d.start_date.isoformat() }}', '{{ d.end_date.isoformat() }}', {{ d.id }}, {{ d.surgeon_id }})">
           <div class="flex items-center gap-1.5 min-w-0">
-            <input type="checkbox" name="ids" value="{{ d.id }}" form="bulk-approve-form"
-              class="pending-cb rounded w-3.5 h-3.5 flex-shrink-0 cursor-pointer accent-blue-600"
-              data-start="{{ d.start_date.isoformat() }}"
-              data-end="{{ d.end_date.isoformat() }}"
-              onclick="event.stopPropagation()"
-              onchange="onPendingCheckboxChange(this)" />
             <div class="w-6 h-6 rounded-full flex items-center justify-center font-bold text-[10px] flex-shrink-0 staff-avatar">{{ d.surgeon.initials }}</div>
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-1 min-w-0">
@@ -128,9 +91,21 @@
             {% if findings %}
             <span class="text-[9px] font-bold text-amber-700 flex-shrink-0" title="{{ findings[0].message }}"><i class="fa-solid fa-triangle-exclamation"></i></span>
             {% else %}
-            <span class="text-[9px] font-bold text-emerald-600 flex-shrink-0" title="Clear"><i class="fa-solid fa-circle-check"></i></span>
+            <span class="text-[9px] font-bold text-emerald-600 flex-shrink-0" title="No schedule conflict"><i class="fa-solid fa-circle-check"></i></span>
             {% endif %}
           </div>
+          {% if findings %}
+          <p class="mt-1 text-[10px] leading-snug text-amber-800 font-medium line-clamp-2" title="{% for f in findings %}{{ f.message }}{% if not loop.last %} · {% endif %}{% endfor %}">
+            <i class="fa-solid fa-triangle-exclamation text-amber-600 mr-0.5"></i>
+            {% for f in findings[:2] %}{{ f.message }}{% if not loop.last %} · {% endif %}{% endfor %}
+            {% if findings|length > 2 %} · +{{ findings|length - 2 }} more{% endif %}
+          </p>
+          {% else %}
+          <p class="mt-1 text-[10px] leading-snug text-emerald-700 font-medium">
+            <i class="fa-solid fa-circle-check text-emerald-600 mr-0.5"></i>
+            No schedule conflict
+          </p>
+          {% endif %}
           <div class="mt-1 flex items-center gap-1" onclick="event.stopPropagation()">
             <form method="post" action="/admin/daysoff/{{ d.id }}/approve" class="flex-1">
               <button class="w-full status-approved border px-1.5 py-0.5 rounded-md text-[10px] font-extrabold hover:bg-blue-600 hover:text-white">Approve</button>
@@ -167,7 +142,7 @@
     </div>
 
     {% set is_current_month = (month_start.year == today.year and month_start.month == today.month) %}
-    {% set gantt_visible = coverage_rows | selectattr('hasBars') | list %}
+    {% set gantt_rows_all = coverage_rows %}
     <style>
       /* Fluid day columns: fill wide monitors; scroll when below min cell width */
       #dayoff-gantt-track {
@@ -194,8 +169,8 @@
       }
     </style>
     <div class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-      {% if not gantt_visible %}
-      <div class="px-4 py-8 text-center text-sm text-slate-400">No requested or approved time off this month.</div>
+      {% if not gantt_rows_all %}
+      <div class="px-4 py-8 text-center text-sm text-slate-400">No surgeons to show.</div>
       {% else %}
       <div class="flex items-stretch">
         {# Sticky surgeon names — never scrolls sideways #}
@@ -203,8 +178,10 @@
           <div class="h-9 px-3 flex items-center text-[10px] font-semibold uppercase tracking-wide text-slate-500 border-b border-slate-300">
             Surgeon
           </div>
-          {% for row in gantt_visible %}
-          <div class="px-3 border-b border-slate-300 flex items-center gap-2"
+          {% for row in gantt_rows_all %}
+          <div id="gantt-name-{{ row.surgeon.id }}"
+               class="gantt-surgeon-name px-3 border-b border-slate-300 flex items-center gap-2 {% if not row.hasBars %}opacity-55{% endif %}"
+               data-surgeon-id="{{ row.surgeon.id }}"
                style="min-height: {{ row.laneCount * 1.75 + 0.5 }}rem;">
             <div class="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 staff-avatar">{{ row.surgeon.initials }}</div>
             <span class="text-xs font-semibold text-slate-800 truncate">{{ row.surgeon.last_name }}</span>
@@ -223,15 +200,18 @@
               {% for n in day_numbers %}
               {% set cell_date = month_start.replace(day=n) %}
               <div id="gantt-day-{{ n }}"
-                   class="text-center text-[10px] font-semibold h-9 leading-9 border-r border-slate-200 last:border-r-0
+                   data-gantt-date="{{ cell_date.isoformat() }}"
+                   class="gantt-day-header text-center text-[10px] font-semibold h-9 leading-9 border-r border-slate-200 last:border-r-0
                    {% if cell_date == today %}text-teal-700 font-extrabold bg-teal-50{% elif cell_date.weekday() >= 5 %}text-slate-300{% else %}text-slate-500{% endif %}">
                 {{ n }}
               </div>
               {% endfor %}
             </div>
 
-            {% for row in gantt_visible %}
-            <div class="relative border-b border-slate-300 hover:bg-slate-50/40"
+            {% for row in gantt_rows_all %}
+            <div id="gantt-row-{{ row.surgeon.id }}"
+                 class="gantt-surgeon-row relative border-b border-slate-300 hover:bg-slate-50/40 {% if not row.hasBars %}opacity-55{% endif %}"
+                 data-surgeon-id="{{ row.surgeon.id }}"
                  style="min-height: {{ row.laneCount * 1.75 + 0.5 }}rem;">
               <div class="absolute inset-0 dayoff-day-grid pointer-events-none">
                 {% for n in day_numbers %}
@@ -242,7 +222,11 @@
               </div>
               {% for bar in row.bars %}
               <button type="button"
-                class="absolute left-0 rounded-md shadow-sm block-gradient border border-black/5 text-left px-1.5 overflow-hidden hover:opacity-90 z-[1]"
+                id="gantt-bar-{{ bar.id }}"
+                class="gantt-bar absolute left-0 rounded-md shadow-sm block-gradient border border-black/5 text-left px-1.5 overflow-hidden hover:opacity-90 z-[1]"
+                data-bar-id="{{ bar.id }}"
+                data-start="{{ bar.startIso }}"
+                data-end="{{ bar.endIso }}"
                 style="top: {{ 0.25 + (bar.lane|default(0)) * 1.65 }}rem; height: 1.4rem; left: calc({{ bar.leftPct }}% + 1px); width: calc({{ bar.widthPct }}% - 2px); --block-c: {% if bar.status == 'pending' %}var(--dayoff-pending){% else %}var(--dayoff-approved){% endif %}; color:#1e293b;"
                 title="{{ row.surgeon.full_name }} · {{ bar.startIso }} → {{ bar.endIso }}{% if bar.reason %} · {{ bar.reason }}{% endif %}"
                 onclick="openEditModal({{ bar.id }}, {{ row.surgeon.full_name|tojson }}, '{{ bar.startIso }}', '{{ bar.endIso }}', {{ (bar.reason or '')|tojson }}, {{ (bar.notes or '')|tojson }})">
@@ -431,72 +415,82 @@ function openEditModal(id, surgeonName, startDate, endDate, reason, notes) {
   document.getElementById('edit-dayoff-modal').classList.remove('hidden');
 }
 
-function toggleSelectAll(checked) {
-  document.querySelectorAll('.pending-cb').forEach(cb => cb.checked = checked);
-  updateBulkBar();
-}
+function focusDayoffGantt(startIso, endIso, dayOffId, surgeonId) {
+  if (!startIso) return;
+  const viewMonth = '{{ month_start.isoformat()[:7] }}';
+  const startMonth = String(startIso).slice(0, 7);
+  const endIsoSafe = endIso || startIso;
 
-function updateBulkBar() {
-  const checked = document.querySelectorAll('.pending-cb:checked');
-  const form = document.getElementById('bulk-approve-form');
-  const count = document.getElementById('bulk-count');
-  if (checked.length > 0) {
-    form.classList.remove('hidden');
-    count.textContent = checked.length + ' selected';
-  } else {
-    form.classList.add('hidden');
+  // Wrong month → reload into the request's month, then focus.
+  if (startMonth !== viewMonth) {
+    const params = new URLSearchParams();
+    if (dayOffId) params.set('focus', String(dayOffId));
+    params.set('gantt_start', startIso);
+    params.set('gantt_end', endIsoSafe);
+    window.location.href = '/admin/daysoff?' + params.toString();
+    return;
   }
-  const allCbs = document.querySelectorAll('.pending-cb');
-  const selectAll = document.getElementById('select-all-cb');
-  if (selectAll) selectAll.checked = allCbs.length > 0 && checked.length === allCbs.length;
-}
 
-function clearSelection() {
-  document.querySelectorAll('.pending-cb').forEach(cb => cb.checked = false);
-  const selectAll = document.getElementById('select-all-cb');
-  if (selectAll) selectAll.checked = false;
-  updateBulkBar();
-}
-
-function onPendingCheckboxChange(cb) {
-  updateBulkBar();
-  if (cb.checked) {
-    focusDayoffGantt(cb.dataset.start, cb.dataset.end, Number(cb.value));
-  }
-}
-
-function focusDayoffGantt(startIso, endIso, dayOffId) {
   const section = document.getElementById('dayoff-gantt-section');
   if (section) {
     section.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
+
   document.querySelectorAll('.pending-request-card').forEach(card => {
-    card.classList.toggle('ring-2', Number(card.dataset.dayoffId) === Number(dayOffId));
-    card.classList.toggle('ring-blue-400', Number(card.dataset.dayoffId) === Number(dayOffId));
+    const on = Number(card.dataset.dayoffId) === Number(dayOffId);
+    card.classList.toggle('ring-2', on);
+    card.classList.toggle('ring-blue-400', on);
   });
-  const scroll = document.getElementById('dayoff-gantt-scroll');
-  if (!scroll || !startIso) return;
+
   const startDay = Number(String(startIso).slice(8, 10));
-  const endDay = Number(String(endIso || startIso).slice(8, 10));
-  const startMonth = String(startIso).slice(0, 7);
-  const viewMonth = '{{ month_start.isoformat()[:7] }}';
-  // If request is outside the visible month, still jump to gantt; bars may be empty.
-  const targetDay = (startMonth === viewMonth) ? startDay : startDay;
-  const startEl = document.getElementById('gantt-day-' + targetDay);
-  if (!startEl) return;
+  const endDay = Number(String(endIsoSafe).slice(8, 10));
+  const endMonth = String(endIsoSafe).slice(0, 7);
+  const rangeEndDay = (endMonth === viewMonth) ? endDay : {{ days_in_month }};
+
+  const scroll = document.getElementById('dayoff-gantt-scroll');
+  const startEl = document.getElementById('gantt-day-' + startDay);
+  const rowEl = surgeonId ? document.getElementById('gantt-row-' + surgeonId) : null;
+  const nameEl = surgeonId ? document.getElementById('gantt-name-' + surgeonId) : null;
+  const barEl = dayOffId ? document.getElementById('gantt-bar-' + dayOffId) : null;
+
+  // Clear previous highlights
+  document.querySelectorAll('.gantt-day-header').forEach(el => {
+    el.classList.remove('bg-amber-100', 'bg-amber-100/80', 'ring-1', 'ring-amber-400', 'ring-amber-300');
+  });
+  document.querySelectorAll('.gantt-surgeon-row, .gantt-surgeon-name').forEach(el => {
+    el.classList.remove('bg-amber-50', 'ring-2', 'ring-inset', 'ring-amber-300');
+  });
+  document.querySelectorAll('.gantt-bar').forEach(el => {
+    el.classList.remove('ring-2', 'ring-blue-500', 'z-[3]');
+  });
+
   window.setTimeout(() => {
-    if (scroll.scrollWidth > scroll.clientWidth + 2) {
-      const left = startEl.offsetLeft - (scroll.clientWidth / 3);
-      scroll.scrollLeft = Math.max(0, left);
+    if (scroll && startEl && scroll.scrollWidth > scroll.clientWidth + 2) {
+      const left = startEl.offsetLeft - Math.max(24, scroll.clientWidth / 4);
+      scroll.scrollTo({ left: Math.max(0, left), behavior: 'smooth' });
     }
-    document.querySelectorAll('[id^="gantt-day-"]').forEach(el => {
-      const day = Number(el.id.replace('gantt-day-', ''));
-      const inRange = startMonth === viewMonth && day >= startDay && day <= endDay;
-      el.classList.toggle('bg-amber-100/80', inRange);
-      el.classList.toggle('ring-1', inRange);
-      el.classList.toggle('ring-amber-300', inRange);
-    });
-  }, 80);
+
+    for (let day = startDay; day <= rangeEndDay; day++) {
+      const el = document.getElementById('gantt-day-' + day);
+      if (!el) continue;
+      el.classList.add('bg-amber-100', 'ring-1', 'ring-amber-400');
+    }
+
+    if (rowEl) {
+      rowEl.classList.add('bg-amber-50', 'ring-2', 'ring-inset', 'ring-amber-300');
+      rowEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    if (nameEl) {
+      nameEl.classList.add('bg-amber-50', 'ring-2', 'ring-inset', 'ring-amber-300');
+    }
+    if (barEl) {
+      barEl.classList.add('ring-2', 'ring-blue-500', 'z-[3]');
+      // Keep bar visible after row scroll
+      window.setTimeout(() => {
+        barEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+      }, 120);
+    }
+  }, 60);
 }
 
 function applyFocusFromQuery() {
@@ -507,12 +501,17 @@ function applyFocusFromQuery() {
   if (focusId) {
     const card = document.getElementById('pending-request-' + focusId);
     if (card) {
-      focusDayoffGantt(card.dataset.start || start, card.dataset.end || end, Number(focusId));
+      focusDayoffGantt(
+        card.dataset.start || start,
+        card.dataset.end || end,
+        Number(focusId),
+        Number(card.dataset.surgeonId)
+      );
       return;
     }
   }
   if (start) {
-    focusDayoffGantt(start, end || start, focusId ? Number(focusId) : null);
+    focusDayoffGantt(start, end || start, focusId ? Number(focusId) : null, null);
     return;
   }
   scheduleCenterDayoffGantt();

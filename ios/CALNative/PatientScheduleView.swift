@@ -36,7 +36,7 @@ struct PatientScheduleView: View {
   }
 
   var body: some View {
-    NavigationView {
+    CalNavigation {
       ZStack {
         ScheduleWaterBackground()
 
@@ -73,6 +73,7 @@ struct PatientScheduleView: View {
           .padding(.horizontal, 16)
           .padding(.top, 10)
           .padding(.bottom, 18)
+          .calReadableColumn(ClinicalLayout.contentColumn)
         }
       }
       .navigationTitle("Patients")
@@ -130,7 +131,7 @@ private struct PatientRangeHeader: View {
 
       VStack(alignment: .leading, spacing: 2) {
         Text("My Patients")
-          .font(.headline.weight(.semibold))
+          .font(ClinicalTypography.headline)
         Text("\(selectedDate.formatted(.dateTime.month(.abbreviated).day())) - \(endDate.formatted(.dateTime.month(.abbreviated).day().year()))")
           .font(.caption)
           .foregroundStyle(.secondary)
@@ -152,7 +153,7 @@ private struct PatientRangeHeader: View {
 private struct EmptyPatientScheduleCard: View {
   var body: some View {
     Label("No patients scheduled in this range", systemImage: "calendar.badge.checkmark")
-      .font(.subheadline)
+      .font(ClinicalTypography.rowTitle)
       .foregroundStyle(.secondary)
       .padding(.horizontal, 12)
       .padding(.vertical, 18)
@@ -169,11 +170,11 @@ private struct PatientDayCard: View {
     VStack(alignment: .leading, spacing: 6) {
       HStack {
         Text(day.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
-          .font(.subheadline.weight(.semibold))
+          .font(ClinicalTypography.rowTitle)
           .foregroundStyle(ClinicalPalette.ink)
         Spacer()
         Text("\(appointments.count)")
-          .font(.caption.weight(.bold))
+          .font(ClinicalTypography.caption)
           .foregroundStyle(.white)
           .frame(minWidth: 24, minHeight: 22)
           .padding(.horizontal, 6)
@@ -194,24 +195,15 @@ private struct PatientAppointmentRow: View {
   let appointment: PatientAppointment
 
   var body: some View {
-    HStack(alignment: .top, spacing: 10) {
-      Text(appointment.timeRange)
-        .font(.caption.monospacedDigit().weight(.semibold))
-        .foregroundStyle(ClinicalPalette.teal)
-        .frame(width: 82, alignment: .leading)
-
-      VStack(alignment: .leading, spacing: 2) {
-        Text(appointment.patientName.isEmpty ? "Patient" : appointment.patientName)
-          .font(.subheadline.weight(.semibold))
-          .foregroundStyle(ClinicalPalette.ink)
-
-        Text(detailLine)
-          .font(.caption)
-          .foregroundStyle(ClinicalPalette.muted)
-          .lineLimit(2)
+    Group {
+      if #available(iOS 16.0, *) {
+        ViewThatFits(in: .horizontal) {
+          appointmentHStack
+          appointmentVStack
+        }
+      } else {
+        appointmentHStack
       }
-
-      Spacer(minLength: 0)
     }
     .padding(.vertical, 5)
     .padding(.horizontal, 8)
@@ -219,6 +211,44 @@ private struct PatientAppointmentRow: View {
       RoundedRectangle(cornerRadius: 10, style: .continuous)
         .fill(ClinicalPalette.porcelainChip.opacity(0.82))
     )
+  }
+
+  private var appointmentHStack: some View {
+    HStack(alignment: .top, spacing: 10) {
+      timeLabel
+        .fixedSize(horizontal: true, vertical: false)
+      detailStack
+      Spacer(minLength: 0)
+    }
+  }
+
+  private var appointmentVStack: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      timeLabel
+      detailStack
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  private var timeLabel: some View {
+    Text(appointment.timeRange)
+      .font(ClinicalTypography.monoCaption)
+      .foregroundStyle(ClinicalPalette.teal)
+  }
+
+  private var detailStack: some View {
+    VStack(alignment: .leading, spacing: 2) {
+      Text(appointment.patientName.isEmpty ? "Patient" : appointment.patientName)
+        .font(ClinicalTypography.rowTitle)
+        .foregroundStyle(ClinicalPalette.ink)
+        .lineLimit(2)
+        .minimumScaleFactor(0.85)
+
+      Text(detailLine)
+        .font(.caption)
+        .foregroundStyle(ClinicalPalette.muted)
+        .lineLimit(2)
+    }
   }
 
   private var detailLine: String {

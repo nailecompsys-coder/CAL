@@ -13,7 +13,7 @@ struct NativeAuthView: View {
   }
 
   var body: some View {
-    NavigationView {
+    CalNavigation {
       ZStack {
         CALAuthBackground()
 
@@ -42,13 +42,13 @@ struct NativeAuthView: View {
             .padding(.top, 14)
             .padding(.bottom, geometry.safeAreaInsets.bottom + 30)
             .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .top)
+            .calReadableColumn(ClinicalLayout.authColumn)
           }
         }
       }
       .navigationBarTitleDisplayMode(.inline)
       .navigationBarHidden(true)
     }
-    .navigationViewStyle(.stack)
   }
 
   private static var todayText: String {
@@ -74,29 +74,14 @@ struct NativeAuthView: View {
 
 private struct CALAuthHeader: View {
   let todayText: String
+  @ScaledMetric(relativeTo: .title) private var logoSize: CGFloat = 34
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
-      HStack(spacing: 10) {
-        Image("CALLogo")
-          .resizable()
-          .scaledToFill()
-          .frame(width: 34, height: 34)
-          .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-          .shadow(color: .black.opacity(0.18), radius: 10, y: 6)
-
-        Text("CAL")
-          .font(.headline.weight(.semibold))
-          .foregroundStyle(.primary)
-
-        Text("Mid Florida Surgical")
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-      }
+      authTitleRow
 
       Text("Sign in")
-        .font(.system(size: 34, weight: .bold, design: .default))
+        .font(ClinicalTypography.largeTitle)
         .foregroundStyle(.primary)
 
       Text(todayText)
@@ -104,6 +89,27 @@ private struct CALAuthHeader: View {
         .foregroundStyle(.secondary)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  private var authTitleRow: some View {
+    HStack(spacing: 10) {
+      Image("CALLogo")
+        .resizable()
+        .scaledToFit()
+        .frame(width: logoSize, height: logoSize)
+        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .shadow(color: .black.opacity(0.18), radius: 10, y: 6)
+
+      Text("CAL")
+        .font(ClinicalTypography.headline)
+        .foregroundStyle(.primary)
+
+      Text("Mid Florida Surgical")
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+        .minimumScaleFactor(0.85)
+    }
   }
 }
 
@@ -150,7 +156,8 @@ private struct CALAuthCard: View {
           Text("Send")
             .font(.subheadline.weight(.bold))
             .foregroundStyle(ClinicalPalette.teal)
-            .frame(width: 58, height: 28)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
             .background(Color(.secondarySystemBackground), in: Capsule())
         }
         .buttonStyle(.plain)
@@ -177,7 +184,7 @@ private struct CALAuthCard: View {
         }
         .foregroundStyle(.white)
         .frame(maxWidth: .infinity)
-        .frame(height: 32)
+        .padding(.vertical, 10)
         .background(LinearGradient.calAuthPrimary, in: Capsule())
       }
       .buttonStyle(.plain)

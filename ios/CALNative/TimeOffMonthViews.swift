@@ -239,7 +239,7 @@ struct TimeOffGanttView: View {
   private var stickyNameColumn: some View {
     VStack(alignment: .leading, spacing: 0) {
       Text("MD")
-        .font(.system(size: 9, weight: .bold))
+        .font(ClinicalTypography.badge)
         .foregroundStyle(.secondary)
         .frame(width: labelWidth, height: headerHeight, alignment: .leading)
         .overlay(alignment: .bottom) {
@@ -266,7 +266,7 @@ struct TimeOffGanttView: View {
     HStack(spacing: 0) {
       ForEach(model.dayNumbers, id: \.self) { day in
         Text("\(day)")
-          .font(.system(size: 8, weight: .semibold))
+          .font(ClinicalTypography.captionEmphasized)
           .foregroundStyle(isToday(day) ? ClinicalPalette.teal : .secondary)
           .frame(width: dayWidth, height: headerHeight)
           .background(isToday(day) ? ClinicalPalette.tealSoft.opacity(0.55) : Color.clear)
@@ -309,7 +309,7 @@ struct TimeOffGanttView: View {
           }
           .overlay {
             Text(barLabel(bar))
-              .font(.system(size: 8, weight: .bold))
+              .font(ClinicalTypography.badge)
               .foregroundStyle(ClinicalPalette.ink.opacity(0.85))
               .lineLimit(1)
               .minimumScaleFactor(0.6)
@@ -426,9 +426,9 @@ private struct TimeOffStatusLine: View {
   var body: some View {
     HStack(alignment: .firstTextBaseline, spacing: 7) {
       Text(label)
-        .font(.caption2.weight(.semibold))
+        .font(ClinicalTypography.captionEmphasized)
         .foregroundStyle(ClinicalPalette.muted)
-        .frame(width: 58, alignment: .leading)
+        .fixedSize(horizontal: true, vertical: false)
 
       TimeOffInitialsPills(items: initials, tint: tint, textColor: textColor)
     }

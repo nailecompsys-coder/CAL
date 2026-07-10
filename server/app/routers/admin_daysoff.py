@@ -56,7 +56,7 @@ def daysoff_page(
     month = month_window(resolved_offset)
     today = month["today"]
     surgeons = [
-        row for row in db.query(Surgeon).filter(Surgeon.is_active == True).order_by(Surgeon.last_name).all()
+        row for row in db.query(Surgeon).filter(Surgeon.is_active == True).all()
         if surgeon_is_visible(row)
     ]
     surgeons = _sort_surgeons_physicians_first(surgeons)
@@ -66,12 +66,12 @@ def daysoff_page(
     if surgeon_id:
         q = q.filter(DayOff.surgeon_id == surgeon_id)
 
-    # Pending list: still today-forward for approve workflow
+    # Pending list: FIFO by request time (who asked first wins capacity conflicts)
     pending = [
         row for row in q.filter(
             DayOff.status == "pending",
             DayOff.end_date >= today,
-        ).order_by(DayOff.start_date).all()
+        ).order_by(DayOff.created_at.asc().nullsfirst(), DayOff.id.asc()).all()
         if dayoff_is_current_or_future(row, today) and surgeon_is_visible(row.surgeon)
     ]
 

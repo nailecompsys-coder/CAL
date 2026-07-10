@@ -35,7 +35,10 @@
 {% if request.query_params.get('warn') %}
 <div class="mx-4 mt-2 bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 flex items-start gap-2 text-amber-800 text-sm">
   <i class="fa-solid fa-triangle-exclamation text-amber-500 mt-0.5 flex-shrink-0"></i>
-  <div><strong>Heads up:</strong> {{ request.query_params.get('warn') }}</div>
+  <div>
+    <p class="font-semibold">Heads up — schedule note</p>
+    <p class="mt-0.5 text-[13px] leading-snug">{{ request.query_params.get('warn') }}</p>
+  </div>
 </div>
 {% endif %}
 

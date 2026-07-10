@@ -4,6 +4,7 @@ struct NativeAuthView: View {
   @ObservedObject var store: NativeScheduleStore
   @State private var email = ""
   @State private var code = ""
+  @State private var loginRole: NativeSessionRole = .surgeon
   @FocusState private var focusedField: AuthField?
 
   enum AuthField {
@@ -28,6 +29,7 @@ struct NativeAuthView: View {
                 store: store,
                 email: $email,
                 code: $code,
+                loginRole: $loginRole,
                 focusedField: $focusedField,
                 requestCode: requestCode,
                 signIn: signIn
@@ -56,7 +58,7 @@ struct NativeAuthView: View {
   private func requestCode() {
     Task {
       focusedField = nil
-      if await store.requestOtp(email: email) {
+      if await store.requestOtp(email: email, role: loginRole) {
         focusedField = .code
       }
     }
@@ -65,7 +67,7 @@ struct NativeAuthView: View {
   private func signIn() {
     Task {
       focusedField = nil
-      await store.verifyOtp(email: email, code: code)
+      await store.verifyOtp(email: email, code: code, role: loginRole)
     }
   }
 }
@@ -109,16 +111,28 @@ private struct CALAuthCard: View {
   @ObservedObject var store: NativeScheduleStore
   @Binding var email: String
   @Binding var code: String
+  @Binding var loginRole: NativeSessionRole
   var focusedField: FocusState<NativeAuthView.AuthField?>.Binding
   let requestCode: () -> Void
   let signIn: () -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
-      Text("Enter email or iPhone, tap Send, then enter the 6-digit code.")
+      Picker("Sign in as", selection: $loginRole) {
+        Text("Surgeon").tag(NativeSessionRole.surgeon)
+        Text("Scheduler").tag(NativeSessionRole.scheduler)
+      }
+      .pickerStyle(.segmented)
+      .padding(.bottom, 2)
+
+      Text(
+        loginRole == .scheduler
+          ? "Scheduler email, tap Send, then enter the 6-digit code."
+          : "Surgeon email or iPhone, tap Send, then enter the 6-digit code."
+      )
         .font(.caption.weight(.semibold))
         .foregroundStyle(.secondary)
-        .lineLimit(1)
+        .lineLimit(2)
         .minimumScaleFactor(0.82)
 
       TextField("Email or iPhone", text: $email)
@@ -254,7 +268,7 @@ private extension LinearGradient {
     colors: [
       ClinicalPalette.scrubInk,
       ClinicalPalette.teal,
-      Color(red: 0.10, green: 0.62, blue: 0.68)
+      ClinicalPalette.authAccent
     ],
     startPoint: .topLeading,
     endPoint: .bottomTrailing

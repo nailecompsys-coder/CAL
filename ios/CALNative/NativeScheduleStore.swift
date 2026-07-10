@@ -18,6 +18,10 @@ final class NativeScheduleStore: ObservableObject {
   @Published private(set) var alerts = NativeAlertSummary(unreadCount: 0, recent: [])
   @Published private(set) var loadState: NativeLoadState = .idle
   @Published private(set) var sessionToken: String?
+  @Published private(set) var sessionRole: NativeSessionRole = .surgeon
+  @Published private(set) var schedulerBlocks: [NativeSchedulerBlock] = []
+  @Published private(set) var schedulerChanges: [NativeSchedulerChange] = []
+  @Published private(set) var selectedSchedulerDetail: NativeSchedulerBlockDetailResponse?
   @Published private(set) var hasBootstrapped = false
   @Published private(set) var authBusy = false
   @Published private(set) var authMessage: String?
@@ -46,16 +50,44 @@ final class NativeScheduleStore: ObservableObject {
   func bootstrap(containing date: Date, scope: ScheduleScope) async {
     hasBootstrapped = true
     if await unlockStoredSessionIfPossible() {
-      await load(containing: date, scope: scope)
+      if sessionRole == .scheduler {
+        await loadScheduler(containing: date)
+      } else {
+        await load(containing: date, scope: scope)
+      }
     }
   }
 
   func bootstrapLookahead(containing date: Date, daysAhead: Int = 30) async {
     hasBootstrapped = true
+    #if DEBUG
+    if let email = Self.debugLoginEmail() {
+      session.clearToken()
+      sessionToken = nil
+      sessionRole = .surgeon
+      await verifyOtp(email: email, code: "654321", role: .surgeon)
+      return
+    }
+    #endif
     if await unlockStoredSessionIfPossible() {
-      await loadLookahead(containing: date, daysAhead: daysAhead)
+      if sessionRole == .scheduler {
+        await loadScheduler(containing: date)
+      } else {
+        await loadLookahead(containing: date, daysAhead: daysAhead)
+      }
     }
   }
+
+  #if DEBUG
+  private static func debugLoginEmail() -> String? {
+    guard let arg = CommandLine.arguments.first(where: { $0.hasPrefix("--cal-login=") }) else {
+      return nil
+    }
+    let email = String(arg.dropFirst("--cal-login=".count))
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    return email.isEmpty ? nil : email
+  }
+  #endif
 
   func load(containing date: Date, scope: ScheduleScope) async {
     guard let token = activeToken else {
@@ -128,7 +160,7 @@ final class NativeScheduleStore: ObservableObject {
     }
   }
 
-  func requestOtp(email: String) async -> Bool {
+  func requestOtp(email: String, role: NativeSessionRole = .surgeon) async -> Bool {
     let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !normalizedEmail.isEmpty else { return false }
 
@@ -137,8 +169,12 @@ final class NativeScheduleStore: ObservableObject {
     defer { authBusy = false }
 
     do {
-      _ = try await session.requestOtp(email: normalizedEmail)
-      authMessage = "Check your email for the CAL access code."
+      let message = try await session.requestOtp(email: normalizedEmail, role: role)
+      authMessage = message.isEmpty
+        ? (role == .scheduler
+          ? "Check your email for the CAL scheduler code."
+          : "Check your email for the CAL access code.")
+        : message
       return true
     } catch {
       authMessage = error.localizedDescription
@@ -146,7 +182,7 @@ final class NativeScheduleStore: ObservableObject {
     }
   }
 
-  func verifyOtp(email: String, code: String) async {
+  func verifyOtp(email: String, code: String, role: NativeSessionRole = .surgeon) async {
     let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
     let normalizedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !normalizedEmail.isEmpty, !normalizedCode.isEmpty else { return }
@@ -156,10 +192,15 @@ final class NativeScheduleStore: ObservableObject {
     defer { authBusy = false }
 
     do {
-      let token = try await session.verifyOtp(email: normalizedEmail, code: normalizedCode)
-      sessionToken = token
+      let verified = try await session.verifyOtp(email: normalizedEmail, code: normalizedCode, role: role)
+      sessionToken = verified.token
+      sessionRole = verified.role
       authMessage = nil
-      await load(containing: Date(), scope: .week)
+      if verified.role == .scheduler {
+        await loadScheduler(containing: Date())
+      } else {
+        await load(containing: Date(), scope: .week)
+      }
     } catch {
       authMessage = error.localizedDescription
     }
@@ -171,6 +212,10 @@ final class NativeScheduleStore: ObservableObject {
     days = []
     timeOffRequests = []
     patientAppointments = []
+    schedulerBlocks = []
+    schedulerChanges = []
+    selectedSchedulerDetail = nil
+    sessionRole = .surgeon
     alerts = NativeAlertSummary(unreadCount: 0, recent: [])
     currentSurgeon = nil
     surgeons = []
@@ -185,6 +230,10 @@ final class NativeScheduleStore: ObservableObject {
     days = []
     timeOffRequests = []
     patientAppointments = []
+    schedulerBlocks = []
+    schedulerChanges = []
+    selectedSchedulerDetail = nil
+    sessionRole = .surgeon
     alerts = NativeAlertSummary(unreadCount: 0, recent: [])
     currentSurgeon = nil
     surgeons = []
@@ -258,6 +307,7 @@ final class NativeScheduleStore: ObservableObject {
     do {
       try await biometric.unlockSavedSession()
       sessionToken = session.storedToken()
+      sessionRole = session.storedRole()
       authMessage = nil
       return sessionToken != nil
     } catch {
@@ -282,6 +332,108 @@ final class NativeScheduleStore: ObservableObject {
   private var activeToken: String? {
     guard let sessionToken, !sessionToken.isEmpty else { return nil }
     return sessionToken
+  }
+
+  func loadScheduler(containing date: Date) async {
+    guard let token = activeToken else {
+      clearScheduleForMissingSession()
+      return
+    }
+    loadState = .loading
+    let calendar = Calendar.current
+    let start = calendar.startOfDay(for: date)
+    let end = calendar.date(byAdding: .day, value: 56, to: start) ?? start
+    do {
+      let response = try await client.fetchSchedulerHome(token: token, start: start, end: end)
+      schedulerBlocks = response.blocks
+      schedulerChanges = response.changes
+      loadState = .loaded
+    } catch let error as NativeCALError where error.isAuthenticationFailure {
+      expireSession()
+    } catch {
+      loadState = .warning("Scheduler sync failed. \(error.localizedDescription)")
+    }
+  }
+
+  func loadSchedulerBlock(_ block: NativeSchedulerBlock) async {
+    guard let token = activeToken else { return }
+    do {
+      selectedSchedulerDetail = try await client.fetchSchedulerBlock(token: token, blockId: block.id)
+    } catch {
+      loadState = .warning(error.localizedDescription)
+    }
+  }
+
+  func assignSchedulerBlock(blockId: Int, surgeonId: Int, startTime: String, caseCount: Int, note: String) async throws -> [String] {
+    guard let token = activeToken else {
+      throw NativeCALError.missingSession
+    }
+    let response = try await client.assignSchedulerBlock(
+      token: token,
+      blockId: blockId,
+      surgeonId: surgeonId,
+      startTime: startTime,
+      caseCount: caseCount,
+      note: note
+    )
+    await refreshSchedulerAfterMutation(blockId: blockId, dateString: response.block.date)
+    return response.warnings
+  }
+
+  func updateSchedulerAssignment(
+    blockId: Int,
+    assignmentId: Int,
+    surgeonId: Int,
+    startTime: String,
+    caseCount: Int,
+    note: String
+  ) async throws -> [String] {
+    guard let token = activeToken else {
+      throw NativeCALError.missingSession
+    }
+    let response = try await client.updateSchedulerAssignment(
+      token: token,
+      blockId: blockId,
+      assignmentId: assignmentId,
+      surgeonId: surgeonId,
+      startTime: startTime,
+      caseCount: caseCount,
+      note: note
+    )
+    await refreshSchedulerAfterMutation(blockId: blockId, dateString: response.block.date)
+    return response.warnings
+  }
+
+  func removeSchedulerAssignment(blockId: Int, assignmentId: Int) async throws {
+    guard let token = activeToken else {
+      throw NativeCALError.missingSession
+    }
+    let response = try await client.removeSchedulerAssignment(
+      token: token,
+      blockId: blockId,
+      assignmentId: assignmentId
+    )
+    await refreshSchedulerAfterMutation(blockId: blockId, dateString: response.block.date)
+  }
+
+  func clearSchedulerBlock(blockId: Int) async throws {
+    guard let token = activeToken else {
+      throw NativeCALError.missingSession
+    }
+    let response = try await client.clearSchedulerBlock(token: token, blockId: blockId)
+    selectedSchedulerDetail = nil
+    await loadScheduler(containing: NativeDayResponse.dateFormatter.date(from: response.block.date) ?? Date())
+  }
+
+  private func refreshSchedulerAfterMutation(blockId: Int, dateString: String) async {
+    guard let token = activeToken else { return }
+    do {
+      selectedSchedulerDetail = try await client.fetchSchedulerBlock(token: token, blockId: blockId)
+    } catch {
+      selectedSchedulerDetail = nil
+      setWarningMessage(error.localizedDescription)
+    }
+    await loadScheduler(containing: NativeDayResponse.dateFormatter.date(from: dateString) ?? Date())
   }
 
   private func clearScheduleForMissingSession() {

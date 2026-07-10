@@ -4,57 +4,99 @@
 <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.css" rel="stylesheet" />
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js"></script>
 <style>
-  .fc { --fc-border-color: rgba(179, 209, 209, 0.62); --fc-today-bg-color: rgba(194, 237, 230, 0.28); color: var(--cal-ink); }
-  .fc .fc-toolbar-title { font-size:1rem!important;font-weight:800!important;color:var(--cal-ink); letter-spacing:0; }
-  .fc .fc-button { background:rgba(255,255,255,.68)!important;border:1px solid rgba(179,209,209,.76)!important;color:var(--cal-muted)!important;font-size:.76rem!important;border-radius:.75rem!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.72)!important; }
-  .fc .fc-button:hover { background:rgba(194,237,230,.46)!important;color:var(--cal-ink)!important; }
-  .fc .fc-button-primary:not(:disabled).fc-button-active { background:linear-gradient(145deg,var(--cal-teal),var(--cal-teal-2))!important;color:#fff!important;border-color:transparent!important; }
+  .fc { --fc-border-color: rgba(180, 196, 220, 0.45); --fc-today-bg-color: rgba(214, 235, 255, 0.35); color: var(--cal-ink); }
+  .fc .fc-toolbar { margin-bottom: 0.85rem !important; gap: 0.5rem; flex-wrap: wrap; }
+  .fc .fc-toolbar-title { font-size:1.05rem!important;font-weight:700!important;color:var(--cal-ink); letter-spacing:-0.02em; }
+  .fc .fc-button { background:rgba(255,255,255,.78)!important;border:1px solid rgba(180,196,220,.55)!important;color:var(--cal-muted)!important;font-size:.75rem!important;font-weight:600!important;border-radius:.85rem!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.85)!important; padding:0.4rem 0.7rem!important; text-transform:none!important; }
+  .fc .fc-button:hover { background:rgba(214,235,255,.55)!important;color:var(--cal-ink)!important; }
+  .fc .fc-button:disabled { opacity:0.45!important; }
+  .fc .fc-button-primary:not(:disabled).fc-button-active,
+  .fc .fc-button-primary:not(:disabled):active { background:rgba(214,235,255,.95)!important;color:#0055d4!important;border-color:rgba(0,122,255,.22)!important;box-shadow:inset 0 0 0 1px rgba(0,122,255,.12)!important; }
+  .fc .fc-toolbar .fc-button-group { gap: 0.25rem; }
+  .fc .fc-toolbar .fc-button-group > .fc-button { border-radius: 0.85rem !important; margin: 0 !important; }
+  /* Hide stock Month/Week/Day — custom segmented control owns view switching */
+  .fc .fc-dayGridMonth-button,
+  .fc .fc-dayGridWeek-button,
+  .fc .fc-dayGridDay-button { display: none !important; }
   .fc-event { border-radius:8px!important;border:none!important;font-size:.68rem!important;padding:1px 4px!important;line-height:1.25;box-shadow:none!important; }
   .fc-event .fc-event-main { padding:0; }
   .fc-event.fc-event-gradient { background: linear-gradient(145deg, var(--ev-bg) 0%, color-mix(in srgb, var(--ev-bg) 70%, white) 100%) !important; }
-  .fc-daygrid-day-frame { padding: 2px; }
-  .fc-daygrid-day.fc-day-today { background:rgba(194,237,230,.34)!important; box-shadow:inset 0 0 0 1px rgba(8,121,103,.38); }
-  .fc-daygrid-day.fc-day-today .fc-daygrid-day-number { background:var(--cal-teal);color:#fff!important;border-radius:9999px;width:1.55rem;height:1.55rem;display:inline-flex;align-items:center;justify-content:center;font-weight:800; }
-  .fc-daygrid-day-number { font-size:.76rem;color:var(--cal-muted); }
-  .fc-col-header-cell-cushion { color:var(--cal-muted);font-size:.68rem;font-weight:800;text-transform:uppercase;letter-spacing:.05em; }
-  .fc-daygrid-more-link { font-size:.68rem;color:var(--cal-teal);font-weight:800; }
+  .fc-daygrid-day-frame { padding: 4px; }
+  .fc-daygrid-day.fc-day-today { background:rgba(214,235,255,.38)!important; box-shadow:inset 0 0 0 1px rgba(0,122,255,.22); }
+  .fc-daygrid-day.fc-day-today .fc-daygrid-day-number { background:#007aff;color:#fff!important;border-radius:9999px;width:1.55rem;height:1.55rem;display:inline-flex;align-items:center;justify-content:center;font-weight:700; }
+  .fc-daygrid-day-number { font-size:.76rem;color:var(--cal-muted); font-weight:600; }
+  .fc-col-header-cell-cushion { color:var(--cal-muted);font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em; }
+  .fc-daygrid-more-link { font-size:.68rem;color:#007aff;font-weight:700; }
   .fc-event-title { overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%; }
-  .fc-event-pill { display:inline-flex;align-items:center;padding:1px 4px;border-radius:4px;font-weight:600;white-space:nowrap;max-width:100%; }
-  .fc-event-pill--dayoff { font-size:0.7rem; }
-  .fc-event-pill--oncall, .fc-event-pill--clinic { font-size:0.68rem; }
-  .fc-event-pill--meeting, .fc-event-pill--surgery { font-size:0.65rem; }
-  .fc-dayGridMonth-view .fc-daygrid-event-harness { display:none!important; }
+  .fc-dayGridMonth-view .fc-daygrid-event-harness,
+  .fc-dayGridWeek-view .fc-daygrid-event-harness,
+  .fc-dayGridDay-view .fc-daygrid-event-harness { display:none!important; }
   .master-day-stack { clear:both; padding:0 1px 2px; display:flex; flex-direction:column; gap:2px; min-height:72px; font-size:.58rem; line-height:1.15; }
-  .master-row { min-height:15px; border-radius:5px; padding:2px 4px; border:1px solid rgba(20,48,90,.08); background:rgba(255,255,255,.66); color:var(--cal-ink); overflow:hidden; }
-  .master-row strong { font-weight:900; letter-spacing:.01em; }
+  .fc-dayGridWeek-view .master-day-stack,
+  .fc-dayGridDay-view .master-day-stack { min-height: 220px; font-size: .68rem; gap: 4px; }
+  .fc-dayGridDay-view .fc-daygrid-day-frame { min-height: calc(100vh - 260px); }
+  .fc-dayGridWeek-view .fc-daygrid-day-frame { min-height: 280px; }
+  .master-row { min-height:15px; border-radius:7px; padding:3px 6px; border:1px solid rgba(28,48,80,.07); background:rgba(255,255,255,.72); color:var(--cal-ink); overflow:hidden; }
+  .fc-dayGridWeek-view .master-row,
+  .fc-dayGridDay-view .master-row { min-height: 22px; padding: 5px 8px; border-radius: 9px; }
+  .master-row strong { font-weight:800; letter-spacing:.01em; }
   .master-row s { color:rgba(74,96,128,.68); text-decoration-thickness:2px; }
-  .master-row--off { background:rgba(187,247,208,.42); border-color:rgba(34,197,94,.16); color:#166534; }
-  .master-row--call { background:rgba(219,234,254,.58); border-color:rgba(59,130,246,.16); color:#1e3a8a; }
-  .master-row--clinic { background:rgba(255,255,255,.72); border-color:rgba(148,163,184,.18); }
-  .master-row--meeting { background:rgba(252,231,243,.5); border-color:rgba(219,39,119,.12); color:#831843; }
+  .master-row--off { background:rgba(223,245,234,.72); border-color:rgba(31,107,78,.14); color:#1f6b4e; }
+  .master-row--call { background:rgba(214,235,255,.72); border-color:rgba(0,122,255,.14); color:#1e3a8a; }
+  .master-row--clinic { background:rgba(255,255,255,.78); border-color:rgba(148,163,184,.16); }
+  .master-row--meeting { background:rgba(235,228,255,.72); border-color:rgba(109,40,217,.12); color:#5b21b6; }
   .master-split { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:4px; align-items:center; }
   .master-left, .master-right { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .master-right { text-align:right; }
   .master-empty { color:rgba(74,96,128,.48); }
   .master-click { cursor:pointer; }
-  .master-click:hover { filter:brightness(.97); box-shadow:inset 0 0 0 1px rgba(8,121,103,.18); }
+  .master-click:hover { filter:brightness(.97); box-shadow:inset 0 0 0 1px rgba(0,122,255,.18); }
   .fc-daygrid-day-frame { min-height:116px; }
+
+  /* Apple-style Month | Week | Day control */
+  .cal-view-seg {
+    display: inline-flex;
+    align-items: stretch;
+    gap: 0;
+    padding: 3px;
+    border-radius: 11px;
+    background: rgba(118, 128, 145, 0.12);
+    border: none;
+    box-shadow: none;
+  }
+  .cal-view-seg button {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: #5c6b7e;
+    font-size: 0.78rem;
+    font-weight: 650;
+    letter-spacing: -0.015em;
+    padding: 0.42rem 0.95rem;
+    border-radius: 9px;
+    cursor: pointer;
+    line-height: 1.2;
+    transition: background .14s ease, color .14s ease, box-shadow .14s ease;
+  }
+  .cal-view-seg button:hover { color: #1c2430; }
+  .cal-view-seg button.is-active {
+    background: #fff;
+    color: #1c2430;
+    box-shadow: 0 1px 3px rgba(28, 48, 80, 0.12), 0 0 0 0.5px rgba(28, 48, 80, 0.06);
+  }
 </style>
 {% endblock %}
 
 {% block content %}
-<header class="portal-header px-5 py-3 flex items-center justify-between sticky top-0 z-10 flex-shrink-0">
-  <div>
+<header class="portal-header px-5 py-3 flex items-center justify-between gap-3 sticky top-0 z-10 flex-shrink-0">
+  <div class="min-w-0">
     <h1 class="font-bold">Master Calendar</h1>
     <p class="text-xs text-slate-500">Call, days off, meetings, clinic and OR coverage</p>
   </div>
-  <div class="flex items-center gap-2">
-    <div class="clinical-segmented flex items-center gap-1 rounded-xl p-1 text-sm" id="filter-btns">
-      <button onclick="setFilter('all')" class="filter-btn active px-3 py-1 rounded-lg text-xs font-bold" data-filter="all">All</button>
-      <button onclick="setFilter('oncall')" class="filter-btn px-3 py-1 rounded-lg text-xs font-bold" data-filter="oncall">Call</button>
-      <button onclick="setFilter('meeting')" class="filter-btn px-3 py-1 rounded-lg text-xs font-bold" data-filter="meeting">Meetings</button>
-      <button onclick="setFilter('dayoff')" class="filter-btn px-3 py-1 rounded-lg text-xs font-bold" data-filter="dayoff">Days Off</button>
-    </div>
+  <div class="cal-view-seg" id="cal-view-seg" role="tablist" aria-label="Calendar view">
+    <button type="button" role="tab" data-view="dayGridMonth" class="is-active" aria-selected="true">Month</button>
+    <button type="button" role="tab" data-view="dayGridWeek" aria-selected="false">Week</button>
+    <button type="button" role="tab" data-view="dayGridDay" aria-selected="false">Day</button>
   </div>
 </header>
 
@@ -153,34 +195,44 @@
 
 {% block scripts %}
 <style>
-  .clinical-segmented { background: rgba(255,255,255,.58); border: 1px solid rgba(179,209,209,.68); }
-  .clinical-segmented .filter-btn { color: var(--cal-muted); }
-  .clinical-segmented .filter-btn:hover { background: rgba(194,237,230,.42); color: var(--cal-ink); }
-  .clinical-segmented .filter-btn.active { background: linear-gradient(145deg,var(--cal-teal),var(--cal-teal-2)); color: white; box-shadow: 0 6px 14px rgba(8,121,103,.16); }
   .surgeon-toggle { transition: background .12s, color .12s; }
-  .surgeon-toggle:hover { background: rgba(194,237,230,.38); }
-  .surgeon-toggle.active-toggle { background: rgba(194,237,230,.62); }
-  .surgeon-toggle.active-toggle > span { color: var(--cal-teal); font-weight: 800; }
+  .surgeon-toggle:hover { background: rgba(214,235,255,.42); }
+  .surgeon-toggle.active-toggle { background: rgba(214,235,255,.72); }
+  .surgeon-toggle.active-toggle > span { color: #007aff; font-weight: 800; }
 </style>
 <script>
-let calendar, activeFilter = 'all', activeSurgeonId = null;
+let calendar, activeSurgeonId = null;
 let visibleCalendarEvents = [];
 const dayCellFrames = new Map();
+
+function isDayGridView(type) {
+  return type === 'dayGridMonth' || type === 'dayGridWeek' || type === 'dayGridDay';
+}
+
+function syncViewSeg(viewType) {
+  document.querySelectorAll('#cal-view-seg button').forEach(btn => {
+    const on = btn.dataset.view === viewType;
+    btn.classList.toggle('is-active', on);
+    btn.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+}
 
 document.addEventListener('DOMContentLoaded', function() {
   const calEl = document.getElementById('calendar');
   calendar = new FullCalendar.Calendar(calEl, {
     initialView: 'dayGridMonth',
-    headerToolbar: { left:'prev,next today', center:'title', right:'dayGridMonth,timeGridWeek,timeGridDay' },
+    headerToolbar: { left:'prev,next today', center:'title', right:'' },
+    views: {
+      dayGridWeek: { dayHeaderFormat: { weekday: 'short', month: 'numeric', day: 'numeric', omitCommas: true } },
+      dayGridDay: { dayHeaderFormat: { weekday: 'long', month: 'long', day: 'numeric' } },
+    },
+    buttonText: { today: 'Today', month: 'Month', week: 'Week', day: 'Day' },
     events: function(info, success, fail) {
       fetch(`/api/events?start=${info.startStr}&end=${info.endStr}`, {
         headers: { Accept: 'application/json' }
       })
         .then(r => r.json())
         .then(events => {
-          if (activeFilter !== 'all') {
-            events = events.filter(e => e.extendedProps?.type === activeFilter);
-          }
           if (activeSurgeonId !== null) {
             events = events.filter(e => {
               const p = e.extendedProps || {};
@@ -200,12 +252,13 @@ document.addEventListener('DOMContentLoaded', function() {
         syncMasterEventsFromCalendar();
       }
     },
-    datesSet: function() {
+    datesSet: function(arg) {
       dayCellFrames.clear();
+      syncViewSeg(arg.view.type);
       setTimeout(renderMasterMonthCells, 0);
     },
     dayCellDidMount: function(arg) {
-      if (arg.view.type !== 'dayGridMonth') return;
+      if (!isDayGridView(arg.view.type)) return;
       const frame = arg.el.querySelector('.fc-daygrid-day-frame');
       if (!frame) return;
       dayCellFrames.set(dateKey(arg.date), frame);
@@ -245,6 +298,13 @@ document.addEventListener('DOMContentLoaded', function() {
     nowIndicator: true,
   });
   calendar.render();
+  syncViewSeg(calendar.view.type);
+
+  document.getElementById('cal-view-seg').addEventListener('click', function(e) {
+    const btn = e.target.closest('button[data-view]');
+    if (!btn || !calendar) return;
+    calendar.changeView(btn.dataset.view);
+  });
 
   calEl.addEventListener('click', function(e) {
     const target = e.target.closest('[data-master-event-id]');
@@ -281,14 +341,6 @@ function togglePhysician(id, el) {
   calendar.refetchEvents();
 }
 
-function setFilter(f) {
-  activeFilter = f;
-  document.querySelectorAll('.filter-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.filter === f);
-  });
-  calendar.refetchEvents();
-}
-
 function dateKey(date) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -319,7 +371,7 @@ function ensureMasterStack(frame) {
 }
 
 function collectVisibleMonthCells() {
-  if (!calendar || calendar.view.type !== 'dayGridMonth') return;
+  if (!calendar || !isDayGridView(calendar.view.type)) return;
   document.querySelectorAll('.fc-daygrid-day[data-date]').forEach(day => {
     const key = day.getAttribute('data-date');
     const frame = day.querySelector('.fc-daygrid-day-frame');
@@ -417,7 +469,7 @@ function splitSession(ev) {
 }
 
 function renderMasterMonthCells() {
-  if (!calendar || calendar.view.type !== 'dayGridMonth') return;
+  if (!calendar || !isDayGridView(calendar.view.type)) return;
   collectVisibleMonthCells();
   for (const [key, frame] of dayCellFrames.entries()) {
     const stack = ensureMasterStack(frame);

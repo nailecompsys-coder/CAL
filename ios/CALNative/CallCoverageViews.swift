@@ -27,7 +27,7 @@ struct CallCoverageSheet: View {
   @State private var selectedSurgeonId: Int?
 
   private var selectedSurgeon: NativeSurgeon? {
-    surgeons.first { $0.id == selectedSurgeonId } ?? surgeons.first
+    surgeons.first { $0.id == selectedSurgeonId }
   }
 
   var body: some View {
@@ -53,9 +53,14 @@ struct CallCoverageSheet: View {
               Image(systemName: "arrow.right")
                 .font(.caption.weight(.bold))
                 .foregroundStyle(.secondary)
-              Text(selectedSurgeon?.initials ?? currentSurgeon?.initials ?? "Me")
+              Text(selectedSurgeon?.initials ?? "—")
                 .font(.system(.title3, design: .monospaced).weight(.bold))
-                .foregroundStyle(.primary)
+                .foregroundStyle(selectedSurgeon == nil ? .secondary : .primary)
+            }
+            if selectedSurgeon == nil {
+              Text("Select covering surgeon")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
             }
           }
           .padding(14)
@@ -124,7 +129,10 @@ struct CallCoverageSheet: View {
               Spacer()
             }
             .padding(.vertical, 12)
-            .background(ClinicalPalette.teal, in: RoundedRectangle(cornerRadius: 14))
+            .background(
+              (selectedSurgeon == nil || isSaving ? ClinicalPalette.muted : ClinicalPalette.teal),
+              in: RoundedRectangle(cornerRadius: 14)
+            )
             .foregroundStyle(.white)
           }
           .disabled(selectedSurgeon == nil || isSaving)
@@ -140,9 +148,8 @@ struct CallCoverageSheet: View {
       }
     }
     .onAppear {
-      selectedSurgeonId = currentSurgeon.flatMap { current in
-        surgeons.contains { $0.id == current.id } ? current.id : nil
-      } ?? surgeons.first?.id
+      // Safety: never pre-select a covering surgeon (avoids accidental save).
+      selectedSurgeonId = nil
     }
   }
 }

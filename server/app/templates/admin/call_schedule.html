@@ -2,147 +2,143 @@
 {% block title %}Call Schedule{% endblock %}
 
 {% block content %}
-<header class="portal-header px-5 py-3 sticky top-0 z-10 flex-shrink-0">
-  <div class="flex items-center justify-between gap-4">
-    <div>
-      <h1 class="font-bold">Call Schedule</h1>
-      <p class="text-xs text-slate-500">Daily call coverage with requested and approved time off</p>
-    </div>
-    <div class="flex items-center gap-2">
-      <a href="/admin/call-schedule?month_offset={{ month_offset - 1 }}"
-         class="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600">
-        <i class="fa-solid fa-chevron-left text-xs"></i>
-      </a>
-      <span class="text-sm font-extrabold text-slate-800 w-36 text-center rounded-full px-3 py-1.5" style="background:rgba(255,255,255,.58);border:1px solid rgba(179,209,209,.68);">{{ month_label }}</span>
-      <a href="/admin/call-schedule?month_offset={{ month_offset + 1 }}"
-         class="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600">
-        <i class="fa-solid fa-chevron-right text-xs"></i>
-      </a>
-      {% if month_offset != 0 %}
-      <a href="/admin/call-schedule" class="text-xs font-bold text-blue-600 hover:underline ml-1">Today</a>
-      {% endif %}
-    </div>
-    <a href="/admin/call-groups" class="text-xs font-bold text-slate-500 hover:text-blue-600">Groups</a>
+<header class="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 flex-shrink-0 gap-4">
+  <div class="min-w-0">
+    <h1 class="text-xl font-bold text-slate-800">Call Schedule</h1>
+    <p class="text-sm text-slate-500">{{ month_label }}</p>
+  </div>
+  <div class="flex items-center gap-2 flex-shrink-0">
+    <a href="/admin/call-groups" class="bg-slate-100 text-slate-600 text-sm px-3 py-2 rounded-lg hover:bg-slate-200">Groups</a>
+    <a href="/admin/call-schedule?month_offset={{ month_offset - 1 }}"
+       class="w-9 h-9 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 flex items-center justify-center">
+      <i class="fa-solid fa-chevron-left text-xs"></i>
+    </a>
+    <a href="/admin/call-schedule?month_offset=0"
+       class="bg-blue-600 text-white text-sm px-3 py-2 rounded-lg hover:bg-blue-700">Today</a>
+    <a href="/admin/call-schedule?month_offset={{ month_offset + 1 }}"
+       class="w-9 h-9 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 flex items-center justify-center">
+      <i class="fa-solid fa-chevron-right text-xs"></i>
+    </a>
   </div>
 </header>
 
 {% if request.query_params.get('msg') == 'week_copied' %}
-<div class="mx-5 mt-3 status-approved border rounded-xl px-4 py-2 text-sm font-semibold">{{ request.query_params.get('n', '0') }} assignment(s) copied.</div>
+<div class="mx-6 mt-4 bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-green-700 text-sm">{{ request.query_params.get('n', '0') }} assignment(s) copied.</div>
 {% endif %}
 {% if request.query_params.get('warn') %}
-<div class="mx-5 mt-3 status-pending border rounded-xl px-4 py-2 flex items-start gap-2 text-sm">
+<div class="mx-6 mt-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-start gap-2 text-amber-800 text-sm">
   <i class="fa-solid fa-triangle-exclamation text-amber-500 mt-0.5 flex-shrink-0"></i>
-  <div>{{ request.query_params.get('warn') }}</div>
+  <div><strong>Scheduling conflict:</strong> {{ request.query_params.get('warn') }}</div>
 </div>
 {% endif %}
 
-<div class="p-4">
-  <div class="clinical-glass p-3">
-    {# Day-of-week header: Sun – Sat #}
-    <div class="grid grid-cols-7 gap-1 mb-1">
-      {% for wd in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'] %}
-      <div class="text-center text-[10px] font-semibold uppercase tracking-wide text-slate-400 py-1">{{ wd }}</div>
-      {% endfor %}
+<div class="p-6 overflow-x-auto">
+  {% if group_rows|length == 0 %}
+  <div class="bg-amber-50 border border-amber-200 rounded-xl px-5 py-4 flex items-start gap-3">
+    <i class="fa-solid fa-triangle-exclamation text-amber-500 mt-0.5"></i>
+    <div>
+      <p class="font-semibold text-amber-800 text-sm">No call groups yet.</p>
+      <p class="text-amber-700 text-sm mt-0.5"><a href="/admin/call-groups" class="underline">Add a group</a> to get started.</p>
     </div>
-
-    {% if group_rows|length == 0 %}
-    <div class="py-8 text-center text-slate-500 text-sm border border-dashed border-slate-200 rounded-lg">
-      No call groups yet. <a href="/admin/call-groups" class="text-blue-600 hover:underline">Add a group</a> to get started.
-    </div>
-    {% else %}
-
-    {# Calculate trailing padding #}
-    {% set total_cells = pad_start + schedule_days|length %}
-    {% set pad_end = (7 - (total_cells % 7)) % 7 %}
-
-    <div class="grid grid-cols-7 gap-1">
-      {# Leading empty cells #}
-      {% for _ in range(pad_start) %}
-      <div class="rounded-xl min-h-[4.5rem]" style="background:rgba(255,255,255,.32);border:1px dashed rgba(179,209,209,.42);"></div>
-      {% endfor %}
-
-      {# Day cells #}
-      {% for day in schedule_days %}
-      {% set off_bucket = day_off_by_date.get(day, {'pending': [], 'approved': []}) %}
-      <div class="rounded-xl border min-h-[7.5rem] {% if day == today %}border-clinical-teal bg-clinical-tealSoft/40{% elif day.weekday() >= 5 %}border-clinical-stroke bg-clinical-porcelain/60{% else %}border-clinical-stroke bg-white/70{% endif %} overflow-hidden shadow-sm">
-        {# Date header #}
-        <div class="px-1.5 pt-1 pb-0.5">
-          <span class="text-[11px] font-extrabold {% if day == today %}text-blue-600{% elif day.weekday() >= 5 %}text-slate-400{% else %}text-slate-700{% endif %}">{{ day.strftime('%-d') }}</span>
-        </div>
-        {# One slot per call group #}
-        <div class="px-1 pb-1 space-y-0.5">
-          {% for group, rot_map in group_rows %}
-          {% set rot = rot_map.get(day) %}
-          {% if rot %}
-          <div class="flex items-center justify-between gap-0.5 rounded-lg px-1.5 py-1 {% if rot.surgeon %}bg-white/70 text-slate-700 border border-clinical-stroke/60{% else %}bg-clinical-porcelain/70 text-slate-500 border border-clinical-stroke/50{% endif %}">
-            <span class="text-[9px] font-extrabold text-slate-400 leading-none flex-shrink-0 mr-0.5">{{ group.name[:3].upper() }}</span>
-            {% set cov = rot.active_coverage %}
-            <span class="text-[10px] font-bold truncate min-w-0 leading-none">
-              {% if cov and cov.covering_surgeon and surgeon_is_visible(cov.covering_surgeon) %}
-                <span class="text-red-600 line-through">{% if rot.surgeon %}{{ rot.surgeon.initials }}{% else %}NC{% endif %}</span>
-                <span class="text-slate-800">{{ cov.covering_surgeon.initials }}</span>
-              {% elif rot.surgeon %}
-                {{ rot.surgeon.last_name }}
-              {% else %}
-                —
-              {% endif %}
-            </span>
-            <form method="post" action="/admin/call-schedule/clear" class="flex-shrink-0 leading-none">
-              <input type="hidden" name="rotation_date" value="{{ day.isoformat() }}" />
-              <input type="hidden" name="call_group_id" value="{{ group.id }}" />
-              <input type="hidden" name="month_offset" value="{{ month_offset }}" />
-              <button class="text-slate-300 hover:text-slate-600 leading-none text-[9px]">✕</button>
-            </form>
-          </div>
-          {% else %}
-          <button onclick="openAssign('{{ day.isoformat() }}', {{ group.id }}, '{{ group.name|e }}')"
-            class="w-full flex items-center gap-0.5 rounded-lg px-1.5 py-1 border border-dashed border-slate-200 hover:border-clinical-teal hover:bg-clinical-tealSoft/40 text-slate-300 hover:text-blue-400 transition-colors">
-            <span class="text-[9px] font-extrabold text-slate-400 leading-none flex-shrink-0">{{ group.name[:3].upper() }}</span>
-            <span class="text-[9px] ml-auto leading-none"><i class="fa-solid fa-plus"></i></span>
-          </button>
-          {% endif %}
-          {% endfor %}
-        </div>
-        {% if off_bucket.pending or off_bucket.approved %}
-        <div class="mx-1 mb-1 border-t border-slate-200/80 pt-1 space-y-0.5">
-          {% if off_bucket.pending %}
-          <div class="flex items-start gap-1">
-            <span class="text-[8px] font-extrabold uppercase text-amber-700 leading-[1.15] w-6 flex-shrink-0">Req</span>
-            <div class="flex flex-wrap gap-0.5 min-w-0">
-              {% for s in off_bucket.pending %}
-              <span title="{{ s.full_name }} requested off"
-                    class="inline-flex items-center rounded-full bg-amber-100 border border-amber-300 px-1 py-0.5 text-[9px] font-bold leading-none text-amber-800">{{ s.initials }}</span>
-              {% endfor %}
-            </div>
-          </div>
-          {% endif %}
-          {% if off_bucket.approved %}
-          <div class="flex items-start gap-1">
-            <span class="text-[8px] font-extrabold uppercase leading-[1.15] w-6 flex-shrink-0" style="color:#1a6b4c;">Off</span>
-            <div class="flex flex-wrap gap-0.5 min-w-0">
-              {% for s in off_bucket.approved %}
-              <span title="{{ s.full_name }} approved off"
-                    class="inline-flex items-center rounded-full status-approved border px-1 py-0.5 text-[9px] font-extrabold leading-none">{{ s.initials }}</span>
-              {% endfor %}
-            </div>
-          </div>
-          {% endif %}
-        </div>
-        {% endif %}
-      </div>
-      {% endfor %}
-
-      {# Trailing empty cells #}
-      {% for _ in range(pad_end) %}
-      <div class="rounded-xl min-h-[4.5rem]" style="background:rgba(255,255,255,.32);border:1px dashed rgba(179,209,209,.42);"></div>
-      {% endfor %}
-    </div>
-
-    {% endif %}
   </div>
+  {% else %}
+
+  <div class="flex flex-wrap items-center gap-3 mb-3 text-[11px] font-semibold text-slate-500">
+    {% for group, rot_map in group_rows %}
+    {% set gcolor = call_group_display_color(group) %}
+    <span class="inline-flex items-center gap-1.5">
+      <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold shadow-sm block-gradient" style="--block-c: {{ gcolor }}; color:#1e293b">{{ group.name[:3]|upper }}</span>
+      {{ group.name }}
+    </span>
+    {% endfor %}
+  </div>
+
+  {% set total_cells = pad_start + schedule_days|length %}
+  {% set pad_end = (7 - (total_cells % 7)) % 7 %}
+
+  <table class="w-full border-collapse min-w-[720px]">
+    <thead>
+      <tr>
+        {% for wd in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'] %}
+        <th class="px-2 py-3 bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wide">{{ wd }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+      {% for _ in range(pad_start) %}
+        <td class="px-2 py-2 border border-slate-200 bg-slate-50/60 align-top h-[7.5rem]"></td>
+      {% endfor %}
+      {% for day in schedule_days %}
+        {% if (pad_start + loop.index0) % 7 == 0 and not loop.first %}</tr><tr>{% endif %}
+        {% set off_bucket = day_off_by_date.get(day, {'pending': [], 'approved': []}) %}
+        {% set is_today = day == today %}
+        <td class="px-2 py-2 border border-slate-200 align-top {% if is_today %}bg-blue-50/30{% else %}bg-white{% endif %}">
+          <div class="min-h-[88px] space-y-1">
+            <div class="text-[11px] font-extrabold {% if is_today %}text-blue-600{% elif day.weekday() >= 5 %}text-slate-400{% else %}text-slate-700{% endif %}">
+              {{ day.strftime('%-d') }}{% if is_today %} <span class="font-normal text-blue-500">·today</span>{% endif %}
+            </div>
+            {% for group, rot_map in group_rows %}
+            {% set rot = rot_map.get(day) %}
+            {% set gcolor = call_group_display_color(group) %}
+            {% if rot %}
+            <div class="flex items-center gap-1 group/entry">
+              <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-md leading-tight flex-1 truncate block-gradient shadow-sm"
+                    style="--block-c: {{ gcolor }}; color:#1e293b"
+                    title="{{ group.name }}">
+                <span class="opacity-70 text-[9px] font-extrabold">{{ group.name[:3]|upper }}</span>
+                {% set cov = rot.active_coverage %}
+                {% if cov and cov.covering_surgeon and surgeon_is_visible(cov.covering_surgeon) %}
+                  <span class="line-through opacity-50">{% if rot.surgeon %}{{ rot.surgeon.initials }}{% else %}NC{% endif %}</span>
+                  <span class="font-bold">{{ cov.covering_surgeon.initials }}</span>
+                {% elif rot.surgeon %}
+                  <span class="font-bold">{{ rot.surgeon.last_name }}</span>
+                {% else %}
+                  <span class="font-bold">NO call</span>
+                {% endif %}
+              </span>
+              <form method="post" action="/admin/call-schedule/clear" onclick="event.stopPropagation()">
+                <input type="hidden" name="rotation_date" value="{{ day.isoformat() }}" />
+                <input type="hidden" name="call_group_id" value="{{ group.id }}" />
+                <input type="hidden" name="month_offset" value="{{ month_offset }}" />
+                <button class="opacity-0 group-hover/entry:opacity-100 w-4 h-4 bg-rose-100 text-rose-500 rounded flex items-center justify-center hover:bg-rose-200" title="Clear">
+                  <i class="fa-solid fa-xmark text-[8px]"></i>
+                </button>
+              </form>
+            </div>
+            {% else %}
+            <button type="button" onclick="openAssign('{{ day.isoformat() }}', {{ group.id }}, '{{ group.name|e }}')"
+              class="w-full text-slate-300 text-[10px] text-center py-0.5 hover:text-slate-400">
+              <i class="fa-solid fa-plus text-[8px]"></i> {{ group.name[:3]|upper }}
+            </button>
+            {% endif %}
+            {% endfor %}
+            {% if off_bucket.pending %}
+            <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-md leading-tight bg-amber-100 text-amber-800 shadow-sm truncate"
+                  title="{% for s in off_bucket.pending %}{{ s.full_name }}{% if not loop.last %}, {% endif %}{% endfor %}">
+              <span class="font-extrabold">REQ:</span>
+              <span class="font-bold truncate">{% for s in off_bucket.pending %}{{ s.initials }}{% if not loop.last %} {% endif %}{% endfor %}</span>
+            </span>
+            {% endif %}
+            {% if off_bucket.approved %}
+            <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-md leading-tight bg-slate-200 text-slate-700 shadow-sm truncate"
+                  title="{% for s in off_bucket.approved %}{{ s.full_name }}{% if not loop.last %}, {% endif %}{% endfor %}">
+              <span class="font-extrabold">OFF:</span>
+              <span class="font-bold truncate">{% for s in off_bucket.approved %}{{ s.initials }}{% if not loop.last %} {% endif %}{% endfor %}</span>
+            </span>
+            {% endif %}
+          </div>
+        </td>
+      {% endfor %}
+      {% for _ in range(pad_end) %}
+        <td class="px-2 py-2 border border-slate-200 bg-slate-50/60 align-top"></td>
+      {% endfor %}
+      </tr>
+    </tbody>
+  </table>
+  {% endif %}
 </div>
 
-<!-- Assign modal -->
 <div id="assign-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden">
   <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6">
     <div class="flex items-center justify-between mb-4">
@@ -154,9 +150,7 @@
       <input type="hidden" name="rotation_type" value="primary" />
       <input type="hidden" name="call_group_id" id="assign-call-group-id" />
       <input type="hidden" name="month_offset" value="{{ month_offset }}" />
-      <div>
-        <p id="assign-label" class="text-sm text-slate-700 font-medium"></p>
-      </div>
+      <p id="assign-label" class="text-sm text-slate-700 font-medium"></p>
       <div>
         <label class="block text-xs font-medium text-slate-500 mb-2">Physician</label>
         <div class="space-y-1 max-h-64 overflow-y-auto">
@@ -168,7 +162,7 @@
           {% for s in surgeons %}
           <label class="flex items-center gap-3 px-3 py-2 rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50">
             <input type="radio" name="surgeon_id" value="{{ s.id }}" class="sr-only" />
-            <div class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0 bg-slate-600">{{ s.initials }}</div>
+            <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 staff-avatar">{{ s.initials }}</div>
             <p class="text-sm font-medium text-slate-800">{{ s.full_name }}{% if s.suffix %} {{ s.suffix }}{% endif %}</p>
           </label>
           {% endfor %}
@@ -189,8 +183,8 @@ function openAssign(date, groupId, groupName) {
   document.getElementById('assign-date').value = date;
   document.getElementById('assign-call-group-id').value = groupId;
   const d = new Date(date + 'T12:00:00');
-  const label = d.toLocaleDateString('en-US', {weekday:'long', month:'long', day:'numeric'});
-  document.getElementById('assign-label').textContent = label + ' — ' + groupName;
+  document.getElementById('assign-label').textContent =
+    d.toLocaleDateString('en-US', {weekday:'long', month:'long', day:'numeric'}) + ' — ' + groupName;
   document.getElementById('assign-modal').classList.remove('hidden');
 }
 document.getElementById('assign-modal').addEventListener('click', function(e) {

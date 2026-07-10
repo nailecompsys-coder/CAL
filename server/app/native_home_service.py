@@ -7,6 +7,7 @@ from .models import Surgeon
 from .native_home_items import (
     append_clinic_items,
     append_meetings,
+    append_block_or_items,
     append_my_call_items,
     append_my_day_off_items,
     append_personal_items,
@@ -41,6 +42,7 @@ class NativeHomeService:
         append_my_day_off_items(self.my_day_off_rows, self.start_date, self.end_date, self.by_date)
         append_meetings(self.db, self.surgeon, self.start_date, self.end_date, self.by_date)
         append_clinic_items(self.db, self.surgeon, self.start_date, self.end_date, self.by_date, self.my_day_off_rows)
+        append_block_or_items(self.db, self.surgeon, self.start_date, self.end_date, self.by_date, self.my_day_off_rows)
         append_surgical_items(self.db, self.surgeon, self.start_date, self.end_date, self.by_date, self.my_day_off_rows)
         append_personal_items(self.db, self.surgeon, self.start_date, self.end_date, self.by_date)
         sort_day_items(self.days)

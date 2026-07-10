@@ -12,6 +12,7 @@ from .auth_tokens import (
     SURGEON_TOKEN_EXPIRE_DAYS,
     cookie_secure,
     create_admin_token,
+    create_native_scheduler_token,
     create_surgeon_session_token,
     decode_subject_token,
     hash_password,
@@ -54,14 +55,16 @@ def get_current_admin(
     if not admin or not admin.is_active:
         _raise_html_or_json_auth_error(request, "/admin/login")
     if admin.role == "scheduler":
-        allowed = {
+        path = request.url.path
+        if path in {"/admin", "/admin/dashboard"}:
+            _raise_html_or_json_auth_error(request, "/admin/block-or")
+        allowed = path in {
+            "/admin/block-or",
             "/admin/scheduler-availability",
             "/admin/logout",
-        }
-        if request.url.path == "/admin" or request.url.path == "/admin/dashboard":
-            _raise_html_or_json_auth_error(request, "/admin/scheduler-availability")
-        if request.url.path not in allowed:
-            _raise_html_or_json_auth_error(request, "/admin/scheduler-availability")
+        } or path.startswith("/admin/block-or/")
+        if not allowed:
+            _raise_html_or_json_auth_error(request, "/admin/block-or")
     return admin
 
 
@@ -82,24 +85,42 @@ def get_current_surgeon(
         )
 
     if not token:
-        _raise_html_or_json_auth_error(request, "/surgeon/register")
+        _raise_html_or_json_auth_error(request, "/admin/login")
     try:
         device_id = _decode_subject_token(token, "surgeon")
     except (JWTError, ValueError):
-        _raise_html_or_json_auth_error(request, "/surgeon/register")
+        _raise_html_or_json_auth_error(request, "/admin/login")
 
     device = db.get(SurgeonDevice, device_id)
     if not device or not device.is_active:
-        _raise_html_or_json_auth_error(request, "/surgeon/register")
+        _raise_html_or_json_auth_error(request, "/admin/login")
 
     device.last_seen = datetime.now(timezone.utc)
     db.commit()
 
     surgeon = db.get(Surgeon, device.surgeon_id)
     if not surgeon_is_visible(surgeon):
-        _raise_html_or_json_auth_error(request, "/surgeon/register")
+        _raise_html_or_json_auth_error(request, "/admin/login")
 
     return surgeon, device
+
+
+def get_current_native_scheduler(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> AdminUser:
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header[7:].strip() if auth_header.startswith("Bearer ") else None
+    if not token:
+        _raise_html_or_json_auth_error(request, "/admin/login")
+    try:
+        admin_id = _decode_subject_token(token, "native_scheduler")
+    except (JWTError, ValueError):
+        _raise_html_or_json_auth_error(request, "/admin/login")
+    admin = db.get(AdminUser, admin_id)
+    if not admin or not admin.is_active or admin.role not in {"scheduler", "admin", "superadmin"}:
+        _raise_html_or_json_auth_error(request, "/admin/login")
+    return admin
 
 
 __all__ = [
@@ -110,8 +131,10 @@ __all__ = [
     "SURGEON_TOKEN_EXPIRE_DAYS",
     "cookie_secure",
     "create_admin_token",
+    "create_native_scheduler_token",
     "create_surgeon_session_token",
     "get_current_admin",
+    "get_current_native_scheduler",
     "get_current_surgeon",
     "hash_password",
     "pwd_context",

@@ -1,6 +1,6 @@
 # CAL Release Checklist
 
-Last updated: 2026-07-07
+Last updated: 2026-07-10
 
 Use this before any backend deploy, TestFlight build, or Android handoff. The goal is to keep local, Git, production, TestFlight, and Android release lanes from drifting.
 
@@ -103,7 +103,39 @@ Compose is not a production release lane until the parity ledger marks auth, tod
 - Patient/Aprima changes must stay read-only against Aprima SQL and belong under `server/`.
 - No build artifacts, APKs, IPAs, archives, `node_modules`, `.expo`, Gradle caches, or DerivedData may be committed.
 
-## 7. Beta Exit Gate
+## 7. Block OR + Scheduler Smoke
+
+Portal (admin account):
+
+1. Open **Block OR** → create an open block (facility + date + AM/PM).
+2. Open **Clinics / OR** → Open Block top row shows that OR pill (`LOC 7-12` + cases).
+3. Open **Availability** (`/admin/scheduler-availability`) → non-PHI case/warning list loads.
+4. Delete an **unassigned** open block → succeeds (no 500). Assigned blocks must warn first.
+
+Mobile scheduler (iOS Blocks tab):
+
+1. Scheduler OTP → Blocks shell loads.
+2. Assign surgeon + start + case count on the open block.
+3. Surgeon My Schedule / Changes tab reflect the non-PHI assignment.
+4. Clear or remove assignment → portal Open Block returns to open.
+
+Daily digest (ops):
+
+```sh
+# Local / host dry-run (no email)
+cd /opt/cal/server   # or repo server/ on Mac-dev
+PYTHONPATH=. python3 scripts/send_scheduler_digest.py --dry-run
+
+# Print cron line (does not install)
+./scripts/install-scheduler-digest-cron.sh
+
+# Install on prod host only after Don confirms
+CONFIRM=1 CAL_APP_ROOT=/opt/cal ./scripts/install-scheduler-digest-cron.sh
+```
+
+Digest recipients: active `admin` / `scheduler` / `superadmin` with `notify_schedule_changes` and an email. Payload is non-PHI (changes + open Block OR only).
+
+## 8. Beta Exit Gate
 
 Before removing beta language or calling CAL production-ready:
 
@@ -112,4 +144,5 @@ Before removing beta language or calling CAL production-ready:
 - Android users have either approved Expo bridge behavior or approved Compose parity.
 - OTP sign-in works by email and phone.
 - Patient schedule data is verified against Aprima source times.
-- Admin portal critical flows work: calendar, call schedule, days off, physicians, locations, metrics, settings, backup status.
+- Admin portal critical flows work: calendar, call schedule, days off, physicians, locations, metrics, settings, backup status, Block OR, Availability.
+- Scheduler digest cron is installed on prod (06:00 America/New_York) and a dry-run has been reviewed.

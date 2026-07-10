@@ -1,23 +1,36 @@
 import SwiftUI
 
+/// Clinical Trust palette — **Asset Catalog only**.
+/// Never add RGB constructors here. Add a `.colorset` under
+/// `Images.xcassets`, then expose it as `Color("Clinical…")`.
+/// Enforced by `.cursor/rules/swift-color-standard.mdc` + `check-native-guardrails.sh`.
 enum ClinicalPalette {
-  static let pageTop = Color(red: 0.94, green: 0.98, blue: 0.98)
-  static let pageMiddle = Color(red: 0.99, green: 1.00, blue: 0.98)
-  static let pageBottom = Color(red: 0.93, green: 0.98, blue: 0.95)
-  static let card = Color(red: 0.99, green: 1.00, blue: 0.98)
-  static let cardStrong = Color(red: 1.00, green: 1.00, blue: 0.97)
-  static let teal = Color(red: 0.00, green: 0.46, blue: 0.50)
-  static let tealSoft = Color(red: 0.76, green: 0.93, blue: 0.90)
-  static let scrub = Color(red: 0.82, green: 0.94, blue: 0.84)
-  static let scrubInk = Color(red: 0.10, green: 0.42, blue: 0.30)
-  static let porcelainChip = Color(red: 0.97, green: 0.98, blue: 0.95)
-  static let mint = Color(red: 0.88, green: 0.97, blue: 0.88)
-  static let amber = Color(red: 1.00, green: 0.92, blue: 0.74)
-  static let lavender = Color(red: 0.94, green: 0.91, blue: 1.00)
-  static let ink = Color(red: 0.07, green: 0.12, blue: 0.15)
-  static let muted = Color(red: 0.36, green: 0.43, blue: 0.46)
-  static let stroke = Color(red: 0.70, green: 0.82, blue: 0.82)
-  static let shadow = Color(red: 0.08, green: 0.24, blue: 0.24)
+  static let pageTop = Color("ClinicalPageTop")
+  static let pageMiddle = Color("ClinicalPageMiddle")
+  static let pageBottom = Color("ClinicalPageBottom")
+  static let card = Color("ClinicalCard")
+  static let cardStrong = Color("ClinicalCardStrong")
+  static let teal = Color("ClinicalTeal")
+  static let tealSoft = Color("ClinicalTealSoft")
+  static let scrub = Color("ClinicalScrub")
+  static let scrubInk = Color("ClinicalScrubInk")
+  static let porcelainChip = Color("ClinicalPorcelainChip")
+  static let mint = Color("ClinicalMint")
+  static let amber = Color("ClinicalAmber")
+  static let lavender = Color("ClinicalLavender")
+  /// Portal `--meeting-cal` lilac wash (#DCC9F5).
+  static let meeting = Color("ClinicalMeeting")
+  /// Stronger lilac for small month/day signal dots.
+  static let meetingStrong = Color("ClinicalMeetingStrong")
+  /// Pastel rose for Block OR signals.
+  static let block = Color("ClinicalBlock")
+  /// Stronger rose for small Block OR dots.
+  static let blockStrong = Color("ClinicalBlockStrong")
+  static let ink = Color("ClinicalInk")
+  static let muted = Color("ClinicalMuted")
+  static let stroke = Color("ClinicalStroke")
+  static let shadow = Color("ClinicalShadow")
+  static let authAccent = Color("ClinicalAuthAccent")
 }
 
 struct ScheduleWaterBackground: View {
@@ -76,6 +89,72 @@ struct CompactDatePickerRow: View {
   var body: some View {
     DatePicker(title, selection: $date, displayedComponents: .date)
       .font(.subheadline)
+  }
+}
+
+/// Centered date/range stepper shared by Schedule Day / Week / Month.
+struct ScheduleDateStepper: View {
+  let title: String
+  let subtitle: String?
+  let previousAction: () -> Void
+  let nextAction: () -> Void
+  var onTitleTap: (() -> Void)?
+  /// Shown when the user has stepped away from today / current range.
+  var todayAction: (() -> Void)?
+  var showsTodayButton: Bool = false
+
+  var body: some View {
+    HStack(spacing: 0) {
+      Button(action: previousAction) {
+        Image(systemName: "chevron.left")
+          .font(.subheadline.weight(.semibold))
+          .frame(width: 36, height: 36)
+          .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+
+      Button {
+        onTitleTap?()
+      } label: {
+        VStack(spacing: 2) {
+          Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(ClinicalPalette.ink)
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
+          if let subtitle, !subtitle.isEmpty {
+            Text(subtitle)
+              .font(.caption2)
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+          }
+        }
+        .frame(maxWidth: .infinity)
+      }
+      .buttonStyle(.plain)
+      .disabled(onTitleTap == nil)
+
+      if showsTodayButton, let todayAction {
+        Button("Today", action: todayAction)
+          .font(.caption.weight(.bold))
+          .foregroundStyle(ClinicalPalette.teal)
+          .padding(.horizontal, 8)
+          .padding(.vertical, 6)
+          .background(ClinicalPalette.tealSoft, in: Capsule())
+          .buttonStyle(.plain)
+      }
+
+      Button(action: nextAction) {
+        Image(systemName: "chevron.right")
+          .font(.subheadline.weight(.semibold))
+          .frame(width: 36, height: 36)
+          .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+    }
+    .padding(.horizontal, 8)
+    .padding(.vertical, 6)
+    .liquidGlassCard(cornerRadius: 16, tint: ClinicalPalette.cardStrong)
   }
 }
 

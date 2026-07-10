@@ -1,7 +1,7 @@
 # Mid Florida Surgical Cal — local deploy helpers (run from repo root)
 PYTHON ?= python3
 
-.PHONY: doctor seed-guardrail-demo deploy-cal deploy-cal-standalone verify-cal bump-only compile test test-local mac-dev-up mac-dev-down mac-dev-status mac-dev-logs mac-dev-smoke
+.PHONY: doctor seed-guardrail-demo deploy-cal deploy-cal-standalone verify-cal bump-only compile test test-local mac-dev-up mac-dev-down mac-dev-status mac-dev-logs mac-dev-smoke mac-dev-restore-dump scheduler-digest-dry-run
 
 doctor:
 	@./server/scripts/doctor.sh
@@ -46,3 +46,13 @@ mac-dev-logs:
 
 mac-dev-smoke:
 	@./server/scripts/smoke-mac-dev.sh
+
+# Wipe LOCAL Docker DB and load cal_live.dump (or DUMP=path). Requires CONFIRM=1.
+# Never touches production. See docs/LOCAL_DEV_REAL_DATA.md
+mac-dev-restore-dump:
+	@CONFIRM=$${CONFIRM:-} ./server/scripts/restore-mac-dev-dump.sh $${DUMP:-}
+
+# Build digest payload + recipient list without sending email (runs in mac-dev cal_api)
+scheduler-digest-dry-run:
+	@docker cp server/scripts/send_scheduler_digest.py cal_api:/tmp/send_scheduler_digest.py
+	@docker exec -w /app cal_api python -c "import importlib.util,sys; sys.path.insert(0,'/app'); spec=importlib.util.spec_from_file_location('d','/tmp/send_scheduler_digest.py'); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); raise SystemExit(m.main(['--dry-run']))"

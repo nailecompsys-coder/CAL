@@ -15,8 +15,9 @@ from ..admin_dayoff_service import (
     delete_dayoff as delete_dayoff_service,
     deny_dayoff as deny_dayoff_service,
     edit_dayoff as edit_dayoff_service,
+    gantt_rows,
+    month_window,
     pending_conflict_map,
-    resolved_months,
 )
 from ..auth import get_current_admin
 from ..database import get_db
@@ -29,38 +30,67 @@ router = APIRouter(prefix="/admin")
 
 
 @router.get("/daysoff", response_class=HTMLResponse)
-def daysoff_page(request: Request, surgeon_id: Optional[int] = None, db: Session = Depends(get_db), admin=Depends(get_current_admin)):
-    today = date.today()
+def daysoff_page(
+    request: Request,
+    surgeon_id: Optional[int] = None,
+    month_offset: int = 0,
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    month = month_window(month_offset)
+    today = month["today"]
     surgeons = [
         row for row in db.query(Surgeon).filter(Surgeon.is_active == True).order_by(Surgeon.last_name).all()
         if surgeon_is_visible(row)
     ]
     surgeons = _sort_surgeons_physicians_first(surgeons)
+    gantt_surgeons = [s for s in surgeons if (not surgeon_id) or s.id == surgeon_id]
 
     q = db.query(DayOff)
     if surgeon_id:
         q = q.filter(DayOff.surgeon_id == surgeon_id)
 
-    active_q = q.filter(DayOff.end_date >= today)
+    # Pending list: still today-forward for approve workflow
     pending = [
-        row for row in active_q.filter(DayOff.status == "pending").order_by(DayOff.start_date).all()
-        if dayoff_is_current_or_future(row, today) and surgeon_is_visible(row.surgeon)
-    ]
-    resolved = [
-        row for row in active_q.filter(DayOff.status != "pending").order_by(DayOff.start_date).all()
+        row for row in q.filter(
+            DayOff.status == "pending",
+            DayOff.end_date >= today,
+        ).order_by(DayOff.start_date).all()
         if dayoff_is_current_or_future(row, today) and surgeon_is_visible(row.surgeon)
     ]
 
-    months = resolved_months(resolved)
+    # Gantt: approved + pending that overlap the visible month
+    month_dayoffs = [
+        row for row in q.filter(
+            DayOff.status.in_(("approved", "pending")),
+            DayOff.start_date <= month["month_end"],
+            DayOff.end_date >= month["month_start"],
+        ).order_by(DayOff.start_date).all()
+        if surgeon_is_visible(row.surgeon)
+    ]
+    coverage_rows = gantt_rows(
+        gantt_surgeons,
+        month_dayoffs,
+        month_start=month["month_start"],
+        month_end=month["month_end"],
+        days_in_month=month["days_in_month"],
+    )
     conflict_map = pending_conflict_map(db, pending)
 
     return templates.TemplateResponse("admin/daysoff.html", _base(
         request, admin, db=db,
         pending=pending,
-        months=months,
         conflict_map=conflict_map,
         surgeons=surgeons,
         selected_surgeon_id=surgeon_id,
+        month_offset=month_offset,
+        month_label=month["month_label"],
+        month_start=month["month_start"],
+        month_end=month["month_end"],
+        days_in_month=month["days_in_month"],
+        day_numbers=month["day_numbers"],
+        today=today,
+        coverage_rows=coverage_rows,
     ))
 
 

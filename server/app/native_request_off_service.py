@@ -13,6 +13,7 @@ from .native_request_off_helpers import (
     validate_request_dates,
 )
 from .native_support import serialize_day_off
+from .or_block_service import log_schedule_change
 from .push import notify_admins, send_native_push_to_surgeon
 from .scheduling_guardrails_service import dayoff_surgeon_warning, store_dayoff_findings
 
@@ -43,6 +44,15 @@ def create_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequ
     db.add(row)
     db.commit()
     db.refresh(row)
+    log_schedule_change(
+        db,
+        event_type="day_off_requested",
+        surgeon_id=surgeon.id,
+        event_date=payload.start_date,
+        title="Time off requested",
+        body=f"{surgeon.initials}: {payload.start_date.strftime('%b %-d')} to {payload.end_date.strftime('%b %-d')}",
+    )
+    db.commit()
     findings = store_dayoff_findings(db, row)
     if findings:
         conflict_msgs.append(dayoff_surgeon_warning(findings))
@@ -91,6 +101,15 @@ def update_native_request_off(db: Session, surgeon: Surgeon, dayoff_id: int, pay
     row.admin_note = None
     db.commit()
     db.refresh(row)
+    log_schedule_change(
+        db,
+        event_type="day_off_updated",
+        surgeon_id=surgeon.id,
+        event_date=payload.start_date,
+        title="Time off request updated",
+        body=f"{surgeon.initials}: {payload.start_date.strftime('%b %-d')} to {payload.end_date.strftime('%b %-d')}",
+    )
+    db.commit()
     findings = store_dayoff_findings(db, row)
     conflict_msgs.extend([dayoff_surgeon_warning(findings)] if findings else [])
     notify_admins(

@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from ..aprima_schedule_service import fetch_main_office_patients_by_weekday
 from ..auth import (
     get_current_admin,
 )
@@ -16,6 +17,7 @@ from ..jinja_env import templates
 from ..models import (
     AdminNotification, AdminUser, CallRotation, DayOff, Meeting, SiteSettings, Surgeon,
 )
+from ..native_home_serializers import is_clinic_day_meeting
 from ..paths import UPLOADS_DIR
 from ..surgeon_visibility import surgeon_is_visible
 from .. import wasabi_backup
@@ -111,10 +113,14 @@ def dashboard(request: Request, db: Session = Depends(get_db), admin=Depends(get
         if surgeon_is_visible(row.surgeon)
     ]
 
-    upcoming_meetings = db.query(Meeting).filter(
-        Meeting.date >= today,
-        Meeting.date <= week_end,
-    ).order_by(Meeting.date, Meeting.start_time).limit(5).all()
+    upcoming_meetings = [
+        row
+        for row in db.query(Meeting).filter(
+            Meeting.date >= today,
+            Meeting.date <= week_end,
+        ).order_by(Meeting.date, Meeting.start_time).all()
+        if not is_clinic_day_meeting(row)
+    ][:5]
     admin_notifications = db.query(AdminNotification).filter(
         AdminNotification.admin_user_id == admin.id,
     ).order_by(AdminNotification.created_at.desc(), AdminNotification.id.desc()).limit(5).all()
@@ -135,6 +141,7 @@ def dashboard(request: Request, db: Session = Depends(get_db), admin=Depends(get
     ).all()
     off_ids = {d.surgeon_id for d in off_today if surgeon_is_visible(d.surgeon)}
     available_count = active_count - len(off_ids)
+    surgical_one_week = fetch_main_office_patients_by_weekday(today)
 
     return templates.TemplateResponse("admin/dashboard.html", _base(
         request, admin, db=db,
@@ -147,6 +154,7 @@ def dashboard(request: Request, db: Session = Depends(get_db), admin=Depends(get
         active_count=active_count,
         available_count=available_count,
         off_ids=off_ids,
+        surgical_one_week=surgical_one_week,
     ))
 
 

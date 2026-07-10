@@ -54,33 +54,59 @@ struct DayScheduleSections: View {
 
 struct MyScheduleRow: View {
   let item: DoctorScheduleItem
+  var openPatientsAction: (() -> Void)?
+
+  private var accent: Color {
+    if item.isBlockOr {
+      return ClinicalPalette.blockStrong
+    }
+    return ClinicalPalette.amber
+  }
 
   var body: some View {
-    HStack(spacing: 10) {
-      Text(item.period)
-        .font(.caption2.weight(.bold))
-        .foregroundStyle(ClinicalPalette.teal)
-        .frame(width: 28, alignment: .leading)
+    Button {
+      openPatientsAction?()
+    } label: {
+      HStack(spacing: 10) {
+        RoundedRectangle(cornerRadius: 2, style: .continuous)
+          .fill(accent)
+          .frame(width: 4, height: 28)
 
-      VStack(alignment: .leading, spacing: 2) {
-        Text(item.title)
-          .font(.subheadline.weight(.semibold))
-        if !item.subtitle.isEmpty {
-          Text(item.subtitle)
-            .font(.caption2)
+        Text(item.period)
+          .font(.caption2.weight(.bold))
+          .foregroundStyle(accent)
+          .frame(width: 28, alignment: .leading)
+
+        VStack(alignment: .leading, spacing: 2) {
+          Text(item.title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(ClinicalPalette.ink)
+          if !item.subtitle.isEmpty {
+            Text(item.subtitle)
+              .font(.caption2)
+              .foregroundStyle(.secondary)
+          }
+        }
+
+        Spacer()
+
+        if !item.timeRange.isEmpty {
+          Text(item.timeRange)
+            .font(.caption2.weight(.semibold))
             .foregroundStyle(.secondary)
         }
-      }
 
-      Spacer()
-
-      if !item.timeRange.isEmpty {
-        Text(item.timeRange)
-          .font(.caption2.weight(.semibold))
-          .foregroundStyle(.secondary)
+        if openPatientsAction != nil {
+          Image(systemName: "chevron.right")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(ClinicalPalette.teal.opacity(0.7))
+        }
       }
+      .padding(.vertical, 1)
+      .contentShape(Rectangle())
     }
-    .padding(.vertical, 1)
+    .buttonStyle(.plain)
+    .disabled(openPatientsAction == nil)
   }
 }
 
@@ -89,9 +115,13 @@ private struct MeetingRow: View {
 
   var body: some View {
     HStack(spacing: 10) {
+      RoundedRectangle(cornerRadius: 2, style: .continuous)
+        .fill(ClinicalPalette.meetingStrong)
+        .frame(width: 4, height: 28)
+
       Image(systemName: "person.2.wave.2")
         .font(.caption)
-        .foregroundStyle(ClinicalPalette.teal)
+        .foregroundStyle(ClinicalPalette.meetingStrong)
         .frame(width: 20)
 
       VStack(alignment: .leading, spacing: 2) {
@@ -121,24 +151,46 @@ struct ScheduleDailyGlanceCard: View {
   var coverAction: ((ScheduleAssignment) -> Void)?
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      Text("On Call")
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(.secondary)
+    HStack(alignment: .top, spacing: 8) {
+      VStack(alignment: .leading, spacing: 6) {
+        Text("On Call")
+          .font(.caption2.weight(.semibold))
+          .foregroundStyle(.secondary)
 
-      if !day.assignments.isEmpty {
-        Divider().opacity(0.45)
-        VStack(spacing: 8) {
-          ForEach(day.assignments) { assignment in
-            GlanceOnCallLine(assignment: assignment, coverAction: coverAction)
+        if day.assignments.isEmpty {
+          Text("None")
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+        } else {
+          VStack(alignment: .leading, spacing: 4) {
+            ForEach(day.assignments.prefix(3)) { assignment in
+              GlanceOnCallLine(assignment: assignment, coverAction: coverAction)
+            }
           }
         }
-      } else {
-        EmptyDashboardRow(title: "No on-call coverage scheduled")
       }
+      .padding(10)
+      .frame(maxWidth: .infinity, minHeight: 72, alignment: .topLeading)
+      .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.tealSoft)
+
+      VStack(alignment: .leading, spacing: 6) {
+        Text("Off")
+          .font(.caption2.weight(.semibold))
+          .foregroundStyle(.secondary)
+
+        if day.off.isEmpty {
+          Text("None")
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+        } else {
+          FlowLine(items: Array(day.off.prefix(8)))
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+      }
+      .padding(10)
+      .frame(maxWidth: .infinity, minHeight: 72, alignment: .topLeading)
+      .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.scrub)
     }
-    .padding(14)
-    .liquidGlassCard(cornerRadius: 18, tint: ClinicalPalette.tealSoft)
   }
 }
 
@@ -150,24 +202,19 @@ private struct GlanceOnCallLine: View {
     Button {
       coverAction?(assignment)
     } label: {
-      HStack(spacing: 10) {
-        Image(systemName: assignment.systemImage)
-          .font(.body)
-          .foregroundStyle(ClinicalPalette.teal)
-          .frame(width: 22)
+      HStack(spacing: 6) {
+        Text(assignment.locationShort)
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(ClinicalPalette.ink)
+          .lineLimit(1)
 
-        VStack(alignment: .leading, spacing: 2) {
-          Text(assignment.locationShort)
-            .font(.subheadline.weight(.semibold))
-        }
-
-        Spacer()
+        Spacer(minLength: 2)
 
         CoverageInitialsView(assignment: assignment)
 
         if assignment.rotationId != nil {
           Image(systemName: "chevron.right")
-            .font(.caption2.weight(.bold))
+            .font(.system(size: 9, weight: .bold))
             .foregroundStyle(.tertiary)
         }
       }
@@ -183,19 +230,19 @@ private struct CoverageInitialsView: View {
 
   var body: some View {
     if assignment.isCovered {
-      HStack(spacing: 5) {
+      HStack(spacing: 3) {
         StruckInitialsText(
           text: assignment.originalInitials,
-          font: .system(.body, design: .monospaced).weight(.semibold)
+          font: .system(.caption, design: .monospaced).weight(.semibold)
         )
 
         Text(assignment.coveringInitials ?? assignment.surgeon)
-          .font(.system(.body, design: .monospaced).weight(.semibold))
+          .font(.system(.caption, design: .monospaced).weight(.semibold))
           .foregroundStyle(.primary)
       }
     } else {
       Text(assignment.surgeon)
-        .font(.system(.body, design: .monospaced).weight(.semibold))
+        .font(.system(.caption, design: .monospaced).weight(.semibold))
         .foregroundStyle(.primary)
     }
   }
@@ -205,19 +252,44 @@ struct FlowLine: View {
   let items: [String]
 
   var body: some View {
-    HStack(spacing: 5) {
-      ForEach(items, id: \.self) { item in
-        Text(item)
-          .font(.caption2.weight(.semibold))
-          .padding(.horizontal, 8)
-          .padding(.vertical, 4)
-          .background(ClinicalPalette.porcelainChip.opacity(0.94), in: Capsule())
-          .overlay {
-            Capsule()
-              .stroke(ClinicalPalette.scrubInk.opacity(0.26), lineWidth: 0.75)
+    // Wrap-friendly flow using flexible layout
+    FlexibleInitialsWrap(items: items)
+  }
+}
+
+private struct FlexibleInitialsWrap: View {
+  let items: [String]
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      ForEach(chunked(items, size: 4), id: \.self) { row in
+        HStack(spacing: 4) {
+          ForEach(row, id: \.self) { item in
+            Text(item)
+              .font(.caption2.weight(.semibold))
+              .padding(.horizontal, 6)
+              .padding(.vertical, 3)
+              .background(ClinicalPalette.porcelainChip.opacity(0.94), in: Capsule())
+              .overlay {
+                Capsule()
+                  .stroke(ClinicalPalette.scrubInk.opacity(0.26), lineWidth: 0.75)
+              }
+              .foregroundStyle(ClinicalPalette.scrubInk)
           }
-          .foregroundStyle(ClinicalPalette.scrubInk)
+        }
       }
     }
+  }
+
+  private func chunked(_ values: [String], size: Int) -> [[String]] {
+    guard size > 0 else { return [values] }
+    var rows: [[String]] = []
+    var index = 0
+    while index < values.count {
+      let end = min(index + size, values.count)
+      rows.append(Array(values[index..<end]))
+      index = end
+    }
+    return rows
   }
 }

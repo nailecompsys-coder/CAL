@@ -69,7 +69,7 @@ def admin_logout():
 
 @router.get("/surgeon/logout")
 def surgeon_logout(next: str = ""):
-    dest = "/surgeon/register"
+    dest = "/admin/login"
     if next and next.startswith("/") and not next.startswith("//") and "://" not in next:
         dest = next
     resp = RedirectResponse(dest, status_code=303)

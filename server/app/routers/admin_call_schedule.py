@@ -56,6 +56,7 @@ def call_schedule_page(
         call_groups=data["call_groups"],
         locations=data["locations"],
         surgeon_is_visible=data["surgeon_is_visible"],
+        call_group_display_color=data["call_group_display_color"],
         today=data["today"],
     ))
 

@@ -3,18 +3,35 @@ import SwiftUI
 struct PatientScheduleView: View {
   @ObservedObject var store: NativeScheduleStore
   @Binding var selectedSection: CALNativeSection
-  @State private var selectedDate = Date()
+  @Binding var selectedDate: Date
 
-  private var groupedAppointments: [(Date, [String: [PatientAppointment]])] {
-    let byDay = Dictionary(grouping: store.patientAppointments) { appointment in
+  private var myAppointments: [PatientAppointment] {
+    let me = store.currentSurgeon
+    let myInitials = (me?.initials ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+    let myName = (me?.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    // Server already scopes to the logged-in surgeon; keep a client safety net.
+    return store.patientAppointments.filter { appointment in
+      if myInitials.isEmpty && myName.isEmpty { return true }
+      let initials = appointment.surgeonInitials.uppercased()
+      if !myInitials.isEmpty, initials == myInitials { return true }
+      let name = appointment.surgeonName.lowercased()
+      if !myName.isEmpty, name == myName || name.contains(myName) || myName.contains(name) {
+        return true
+      }
+      return false
+    }
+  }
+
+  private var appointmentsByDay: [(Date, [PatientAppointment])] {
+    let byDay = Dictionary(grouping: myAppointments) { appointment in
       Calendar.current.startOfDay(for: appointment.date)
     }
-
     return byDay.keys.sorted().map { day in
-      let bySurgeon = Dictionary(grouping: byDay[day] ?? []) { appointment in
-        appointment.surgeonName.isEmpty ? "Unassigned" : appointment.surgeonName
+      let rows = (byDay[day] ?? []).sorted { lhs, rhs in
+        if lhs.start != rhs.start { return lhs.start < rhs.start }
+        return lhs.patientName < rhs.patientName
       }
-      return (day, bySurgeon)
+      return (day, rows)
     }
   }
 
@@ -41,15 +58,15 @@ struct PatientScheduleView: View {
                 .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.amber)
             }
 
-            if store.isLoading && store.patientAppointments.isEmpty {
+            if store.isLoading && myAppointments.isEmpty {
               ProgressView("Loading Aprima schedule...")
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 30)
-            } else if groupedAppointments.isEmpty {
+            } else if appointmentsByDay.isEmpty {
               EmptyPatientScheduleCard()
             } else {
-              ForEach(groupedAppointments, id: \.0) { day, surgeonGroups in
-                PatientDayCard(day: day, surgeonGroups: surgeonGroups)
+              ForEach(appointmentsByDay, id: \.0) { day, appointments in
+                PatientDayCard(day: day, appointments: appointments)
               }
             }
           }
@@ -112,7 +129,7 @@ private struct PatientRangeHeader: View {
       }
 
       VStack(alignment: .leading, spacing: 2) {
-        Text("Aprima Schedule")
+        Text("My Patients")
           .font(.headline.weight(.semibold))
         Text("\(selectedDate.formatted(.dateTime.month(.abbreviated).day())) - \(endDate.formatted(.dateTime.month(.abbreviated).day().year()))")
           .font(.caption)
@@ -134,7 +151,7 @@ private struct PatientRangeHeader: View {
 
 private struct EmptyPatientScheduleCard: View {
   var body: some View {
-    Label("No Aprima appointments in this range", systemImage: "calendar.badge.checkmark")
+    Label("No patients scheduled in this range", systemImage: "calendar.badge.checkmark")
       .font(.subheadline)
       .foregroundStyle(.secondary)
       .padding(.horizontal, 12)
@@ -146,55 +163,30 @@ private struct EmptyPatientScheduleCard: View {
 
 private struct PatientDayCard: View {
   let day: Date
-  let surgeonGroups: [String: [PatientAppointment]]
+  let appointments: [PatientAppointment]
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      Text(day.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
-        .font(.subheadline.weight(.semibold))
-        .foregroundStyle(ClinicalPalette.ink)
+    VStack(alignment: .leading, spacing: 6) {
+      HStack {
+        Text(day.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+          .font(.subheadline.weight(.semibold))
+          .foregroundStyle(ClinicalPalette.ink)
+        Spacer()
+        Text("\(appointments.count)")
+          .font(.caption.weight(.bold))
+          .foregroundStyle(.white)
+          .frame(minWidth: 24, minHeight: 22)
+          .padding(.horizontal, 6)
+          .background(ClinicalPalette.teal, in: Capsule())
+      }
 
-      ForEach(surgeonGroups.keys.sorted(), id: \.self) { surgeon in
-        if let appointments = surgeonGroups[surgeon] {
-          PatientSurgeonBlock(surgeon: surgeon, appointments: appointments)
-        }
+      ForEach(appointments) { appointment in
+        PatientAppointmentRow(appointment: appointment)
       }
     }
     .padding(.horizontal, 12)
     .padding(.vertical, 10)
     .liquidGlassCard(cornerRadius: 16, tint: ClinicalPalette.cardStrong)
-  }
-}
-
-private struct PatientSurgeonBlock: View {
-  let surgeon: String
-  let appointments: [PatientAppointment]
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      HStack(spacing: 7) {
-        Text(appointments.first?.surgeonInitials ?? "")
-          .font(.caption.weight(.bold))
-          .foregroundStyle(.white)
-          .frame(width: 34, height: 22)
-          .background(Capsule().fill(ClinicalPalette.teal))
-
-        Text(surgeon)
-          .font(.footnote.weight(.semibold))
-          .foregroundStyle(ClinicalPalette.ink)
-
-        Spacer()
-
-        Text("\(appointments.count)")
-          .font(.caption.weight(.semibold))
-          .foregroundStyle(ClinicalPalette.muted)
-      }
-
-      ForEach(appointments.sorted { ($0.start, $0.patientName) < ($1.start, $1.patientName) }) { appointment in
-        PatientAppointmentRow(appointment: appointment)
-      }
-    }
-    .padding(.top, 2)
   }
 }
 
@@ -232,9 +224,8 @@ private struct PatientAppointmentRow: View {
   private var detailLine: String {
     [
       appointment.appointmentType,
-      appointment.status,
-      appointment.reason,
-      appointment.locationLine
+      appointment.serviceSite.isEmpty ? appointment.locationLine : appointment.serviceSite,
+      appointment.reason
     ]
       .filter { !$0.isEmpty }
       .joined(separator: " · ")

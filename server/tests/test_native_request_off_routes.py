@@ -174,7 +174,14 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
         try:
             approved = self._seed_surgeon(db, "Lucy", "Woodley", "lucy@example.com", 1)
             requester = self._seed_surgeon(db, "Jorge", "Florin", "jorge@example.com", 2)
-            group = ClinicGroup(name="Lake Mary", abbreviation="LM", max_approved_off_per_day=1, is_active=True)
+            group = ClinicGroup(
+                name="Lake Mary",
+                abbreviation="LM",
+                group_type="people",
+                enforce_day_off_limit=True,
+                max_approved_off_per_day=1,
+                is_active=True,
+            )
             db.add(group)
             db.flush()
             db.add_all([

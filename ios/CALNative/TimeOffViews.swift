@@ -4,19 +4,52 @@ struct TimeOffHomeView: View {
   @ObservedObject var store: NativeScheduleStore
   @Binding var selectedSection: CALNativeSection
   @State private var showingRequestSheet = false
+  @State private var showingMonthMenu = false
   @State private var selectedMonth = Calendar.current.dateInterval(of: .month, for: Date())?.start ?? Date()
 
   private var months: [Date] {
     let calendar = Calendar.current
     let firstMonth = calendar.dateInterval(of: .month, for: Date())?.start ?? Date()
-    return (0..<12).compactMap { calendar.date(byAdding: .month, value: $0, to: firstMonth) }
+    return (-1..<12).compactMap { calendar.date(byAdding: .month, value: $0, to: firstMonth) }
   }
 
-  private var selectedMonthDays: [ScheduleDay] {
+  private var monthRequests: [TimeOffRequest] {
     let calendar = Calendar.current
-    return store.days
-      .filter { calendar.isDate($0.date, equalTo: selectedMonth, toGranularity: .month) }
-      .sorted { $0.date < $1.date }
+    guard let interval = calendar.dateInterval(of: .month, for: selectedMonth) else { return [] }
+    let monthStart = NativeDayResponse.dateFormatter.string(from: interval.start)
+    let lastDay = calendar.date(byAdding: .day, value: -1, to: interval.end) ?? interval.start
+    let monthEnd = NativeDayResponse.dateFormatter.string(from: lastDay)
+
+    return store.timeOffRequests
+      .filter { request in
+        // Overlaps selected month: start <= monthEnd && end >= monthStart
+        request.startDate <= monthEnd && request.endDate >= monthStart
+      }
+      .sorted { lhs, rhs in
+        if lhs.startDate != rhs.startDate { return lhs.startDate < rhs.startDate }
+        return lhs.id < rhs.id
+      }
+  }
+
+  private var monthLabel: String {
+    selectedMonth.formatted(.dateTime.month(.abbreviated).year())
+  }
+
+  private var ganttMonthDays: [ScheduleDay] {
+    let calendar = Calendar.current
+    guard let interval = calendar.dateInterval(of: .month, for: selectedMonth) else { return [] }
+    var result: [ScheduleDay] = []
+    var cursor = interval.start
+    while cursor < interval.end {
+      result.append(store.day(for: cursor) ?? ScheduleDay.empty(for: cursor))
+      guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+      cursor = next
+    }
+    return result
+  }
+
+  private var ganttModel: TimeOffGanttModel {
+    TimeOffGanttModel.build(month: selectedMonth, days: ganttMonthDays, surgeons: store.surgeons)
   }
 
   var body: some View {
@@ -26,54 +59,62 @@ struct TimeOffHomeView: View {
 
         ScrollView {
           VStack(alignment: .leading, spacing: 8) {
-            Button {
-              showingRequestSheet = true
-            } label: {
-              HStack(spacing: 10) {
-                Image(systemName: "plus.circle.fill")
-                  .font(.body)
-                  .foregroundStyle(ClinicalPalette.teal)
-
-                VStack(alignment: .leading, spacing: 2) {
-                  Text("Request Time Off")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.primary)
-                  Text("Pick a range, then set full or half days.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                  .font(.caption2.weight(.semibold))
-                  .foregroundStyle(.tertiary)
+            HStack(spacing: 8) {
+              Button {
+                showingRequestSheet = true
+              } label: {
+                Label("Request Time Off", systemImage: "plus.circle.fill")
+                  .font(.subheadline.weight(.semibold))
+                  .frame(maxWidth: .infinity)
+                  .padding(.vertical, 10)
               }
-              .padding(.horizontal, 12)
-              .padding(.vertical, 10)
-              .frame(maxWidth: .infinity, alignment: .leading)
-              .liquidGlassCard(cornerRadius: 16, tint: ClinicalPalette.cardStrong)
+              .buttonStyle(.borderedProminent)
+              .tint(ClinicalPalette.teal)
             }
-            .buttonStyle(.plain)
 
-            DashboardSection(title: "Requests") {
-              if store.timeOffRequests.isEmpty {
-                Text(store.sessionToken == nil ? "Sign in to see requests." : "No requests in this range.")
-                  .font(.caption)
+            VStack(alignment: .leading, spacing: 8) {
+              Text("WHO'S OUT")
+                .font(.caption.weight(.black))
+                .foregroundStyle(.secondary)
+
+              ScheduleDateStepper(
+                title: selectedMonth.formatted(.dateTime.month(.wide).year()),
+                subtitle: "Practice coverage",
+                previousAction: { shiftMonth(-1) },
+                nextAction: { shiftMonth(1) },
+                onTitleTap: { showingMonthMenu = true }
+              )
+
+              TimeOffGanttView(model: ganttModel, selectedMonth: selectedMonth)
+
+              VStack(alignment: .leading, spacing: 6) {
+                Text("MY REQUESTS · \(monthLabel.uppercased())")
+                  .font(.caption.weight(.black))
                   .foregroundStyle(.secondary)
-              } else {
-                ForEach(store.timeOffRequests) { request in
-                  TimeOffRequestRow(request: request)
+
+                if monthRequests.isEmpty {
+                  Text(store.sessionToken == nil ? "Sign in to see requests." : "No requests in \(monthLabel).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 4)
+                } else {
+                  ForEach(monthRequests) { request in
+                    TimeOffRequestRow(request: request)
+                  }
                 }
               }
+              .padding(.top, 4)
             }
-
-            TimeOffInfoBanner()
-
-            MonthPillPicker(months: months, selectedMonth: $selectedMonth)
-
-            DashboardSection(title: selectedMonth.formatted(.dateTime.month(.wide).year())) {
-              MonthTimeOffList(days: selectedMonthDays)
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.tealSoft)
+            .confirmationDialog("Select month", isPresented: $showingMonthMenu, titleVisibility: .visible) {
+              ForEach(months, id: \.self) { month in
+                Button(month.formatted(.dateTime.month(.wide).year())) {
+                  selectedMonth = month
+                }
+              }
+              Button("Cancel", role: .cancel) {}
             }
           }
           .padding(.horizontal, 16)
@@ -103,7 +144,18 @@ struct TimeOffHomeView: View {
         let firstMonth = Calendar.current.dateInterval(of: .month, for: Date())?.start ?? Date()
         await store.loadLookahead(containing: firstMonth, daysAhead: 365)
       }
+      .onChange(of: selectedMonth) { _ in
+        Task {
+          await store.loadLookahead(containing: selectedMonth, daysAhead: 62)
+        }
+      }
     }
+  }
+
+  private func shiftMonth(_ delta: Int) {
+    let calendar = Calendar.current
+    guard let next = calendar.date(byAdding: .month, value: delta, to: selectedMonth) else { return }
+    selectedMonth = calendar.dateInterval(of: .month, for: next)?.start ?? next
   }
 }
 
@@ -111,24 +163,25 @@ private struct TimeOffRequestRow: View {
   let request: TimeOffRequest
 
   var body: some View {
-    HStack(spacing: 10) {
+    HStack(spacing: 8) {
       StatusDot(status: request.status)
 
-      VStack(alignment: .leading, spacing: 3) {
-        Text("\(request.surgeonInitials) \(request.dateRange)")
-          .font(.subheadline.weight(.semibold))
-        Text(request.reason.isEmpty ? "Time off" : request.reason)
-          .font(.caption2)
-          .foregroundStyle(.secondary)
-      }
+      Text(request.dateRange)
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(ClinicalPalette.ink)
+        .frame(width: 78, alignment: .leading)
 
-      Spacer()
+      Text(request.reason.isEmpty ? "Time off" : request.reason)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
+
+      Spacer(minLength: 4)
 
       Text(request.status.capitalized)
-        .font(.caption2.weight(.semibold))
+        .font(.caption2.weight(.bold))
         .foregroundStyle(statusColor(request.status))
     }
-    .padding(.vertical, 1)
   }
 
   private func statusColor(_ status: String) -> Color {
@@ -149,7 +202,7 @@ private struct StatusDot: View {
   var body: some View {
     Circle()
       .fill(color)
-      .frame(width: 10, height: 10)
+      .frame(width: 8, height: 8)
   }
 
   private var color: Color {
@@ -163,3 +216,4 @@ private struct StatusDot: View {
     }
   }
 }
+

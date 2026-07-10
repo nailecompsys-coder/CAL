@@ -7,31 +7,13 @@ struct CompactRangeHeader: View {
   let nextAction: () -> Void
 
   var body: some View {
-    HStack {
-      VStack(alignment: .leading, spacing: 2) {
-        Text(title)
-          .font(.subheadline.weight(.semibold))
-        Text(subtitle)
-          .font(.caption2)
-          .foregroundStyle(.secondary)
-      }
-
-      Spacer()
-
-      HStack(spacing: 10) {
-        Button(action: previousAction) {
-          Image(systemName: "chevron.left")
-        }
-
-        Button(action: nextAction) {
-          Image(systemName: "chevron.right")
-        }
-      }
-      .font(.subheadline.weight(.semibold))
-    }
-    .padding(.horizontal, 12)
-    .padding(.vertical, 9)
-    .liquidGlassCard(cornerRadius: 16, tint: ClinicalPalette.cardStrong)
+    ScheduleDateStepper(
+      title: title,
+      subtitle: subtitle,
+      previousAction: previousAction,
+      nextAction: nextAction,
+      onTitleTap: nil
+    )
   }
 }
 
@@ -41,8 +23,19 @@ struct CompactWeekDayCard: View {
   @Binding var scope: ScheduleScope
   let coverAction: (ScheduleAssignment) -> Void
 
+  private var clinicSummary: String {
+    let parts = day.mySchedule.prefix(3).map { item in
+      let label = item.title
+      if item.period.uppercased() == "AM" || item.period.uppercased() == "PM" {
+        return "\(item.period.uppercased()) \(label)"
+      }
+      return label
+    }
+    return parts.joined(separator: " · ")
+  }
+
   var body: some View {
-    HStack(alignment: .top, spacing: 10) {
+    HStack(alignment: .center, spacing: 10) {
       VStack(spacing: 1) {
         Text(day.date.formatted(.dateTime.weekday(.abbreviated)))
           .font(.caption2.weight(.bold))
@@ -52,34 +45,54 @@ struct CompactWeekDayCard: View {
           .foregroundStyle(Calendar.current.isDateInToday(day.date) ? ClinicalPalette.teal : ClinicalPalette.ink)
       }
       .frame(width: 34)
-      .contentShape(Rectangle())
-      .onTapGesture {
-        openDay()
-      }
 
-      VStack(alignment: .leading, spacing: 6) {
-        ScheduleAssignmentActionLine(
-          prefix: "ON",
-          assignments: Array(day.assignments.prefix(3)),
-          tint: ClinicalPalette.teal,
-          action: coverAction
-        )
+      VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 8) {
+          ScheduleAssignmentActionLine(
+            prefix: "ON",
+            assignments: Array(day.assignments.prefix(3)),
+            tint: ClinicalPalette.teal,
+            action: coverAction
+          )
+
+          if !day.meetings.isEmpty {
+            Image(systemName: "person.2.fill")
+              .font(.system(size: 10, weight: .semibold))
+              .foregroundStyle(ClinicalPalette.lavender)
+          }
+        }
 
         ScheduleStatusLine(
           prefix: "OFF",
-          value: day.off.prefix(4).joined(separator: " / "),
-          tint: ClinicalPalette.teal
+          value: day.off.prefix(4).joined(separator: " "),
+          tint: ClinicalPalette.scrubInk
         )
+
+        if !clinicSummary.isEmpty {
+          ScheduleStatusLine(
+            prefix: "OR",
+            value: clinicSummary,
+            tint: ClinicalPalette.teal
+          )
+        }
       }
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
     .padding(.horizontal, 12)
-    .padding(.vertical, 9)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .liquidGlassCard(cornerRadius: 16, tint: Calendar.current.isDateInToday(day.date) ? ClinicalPalette.tealSoft : ClinicalPalette.card)
+    .padding(.vertical, 8)
+    .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+    .contentShape(Rectangle())
+    .onTapGesture {
+      openDay()
+    }
+    .liquidGlassCard(
+      cornerRadius: 14,
+      tint: Calendar.current.isDateInToday(day.date) ? ClinicalPalette.tealSoft : ClinicalPalette.card
+    )
   }
 
   private func openDay() {
-    withAnimation(.snappy(duration: 0.22)) {
+    withAnimation(.easeInOut(duration: 0.2)) {
       selectedDate = day.date
       scope = .day
     }
@@ -97,10 +110,10 @@ private struct ScheduleAssignmentActionLine: View {
       Text(prefix)
         .font(.caption2.weight(.bold))
         .foregroundStyle(tint)
-        .frame(width: 28, alignment: .leading)
+        .frame(width: 26, alignment: .leading)
 
       if assignments.isEmpty {
-        Text("None")
+        Text("—")
           .font(.caption.weight(.medium))
           .foregroundStyle(.secondary)
       } else {
@@ -159,10 +172,10 @@ private struct ScheduleStatusLine: View {
       Text(prefix)
         .font(.caption2.weight(.bold))
         .foregroundStyle(tint)
-        .frame(width: 28, alignment: .leading)
+        .frame(width: 26, alignment: .leading)
 
       if value.isEmpty {
-        Text("None")
+        Text("—")
           .font(.caption.weight(.medium))
           .foregroundStyle(.secondary)
       } else {

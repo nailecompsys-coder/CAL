@@ -42,3 +42,12 @@ def create_admin_token(admin_id: int) -> str:
 def create_surgeon_session_token(device_id: int) -> str:
     expire = datetime.now(timezone.utc) + timedelta(days=SURGEON_TOKEN_EXPIRE_DAYS)
     return jwt.encode({"sub": str(device_id), "exp": expire, "type": "surgeon"}, SECRET_KEY, algorithm=ALGORITHM)
+
+
+def create_native_scheduler_token(admin_id: int) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(days=30)
+    return jwt.encode(
+        {"sub": str(admin_id), "exp": expire, "type": "native_scheduler", "mobile_scope": "scheduler"},
+        SECRET_KEY,
+        algorithm=ALGORITHM,
+    )

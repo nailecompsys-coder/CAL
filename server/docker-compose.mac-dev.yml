@@ -34,6 +34,8 @@ services:
     env_file: ../.env.mac-dev
     environment:
       DATABASE_URL: postgresql://${CAL_DB_USER:-cal_user}:${CAL_DB_PASSWORD:-cal_local_dev_change_me}@cal_db:5432/${CAL_DB_NAME:-surgical_cal}
+      CAL_LOCAL_DEV_SCHEDULER_OTP: "654321"
+      CAL_LOCAL_DEV_SURGEON_OTP: "654321"
     depends_on:
       cal_db:
         condition: service_healthy

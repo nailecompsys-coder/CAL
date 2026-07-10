@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from .models import CallCoverage, CallRotation, Surgeon
 from .native_support import serialize_call_assignment
+from .or_block_service import log_schedule_change
 from .push import send_native_push_to_surgeon
 from .surgeon_visibility import surgeon_is_visible
 
@@ -50,6 +51,15 @@ def assign_native_call_coverage(
     db.add(coverage)
     db.commit()
     db.refresh(coverage)
+    log_schedule_change(
+        db,
+        event_type="call_coverage_updated",
+        surgeon_id=covering.id,
+        event_date=rotation.date,
+        title="Call coverage updated",
+        body=f"{covering.initials} covering {rotation.call_group.name if rotation.call_group else 'call'} on {rotation.date.strftime('%b %-d')}",
+    )
+    db.commit()
 
     if rotation.surgeon_id:
         send_native_push_to_surgeon(
@@ -78,6 +88,14 @@ def cancel_native_call_coverage(db: Session, requesting_surgeon: Surgeon, covera
 
     coverage.status = "canceled"
     coverage.canceled_at = _utc_now()
+    log_schedule_change(
+        db,
+        event_type="call_coverage_canceled",
+        surgeon_id=coverage.covering_surgeon_id,
+        event_date=coverage.rotation.date if coverage.rotation else None,
+        title="Call coverage canceled",
+        body="Coverage swap canceled",
+    )
     db.commit()
 
     rotation = _call_rotation_for_response(db, coverage.call_rotation_id)

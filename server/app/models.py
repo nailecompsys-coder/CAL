@@ -29,10 +29,28 @@ class AdminUser(Base):
         return name or self.username
 
 
+class AdminOtpChallenge(Base):
+    __tablename__ = "admin_otp_challenges"
+    id = Column(Integer, primary_key=True)
+    admin_user_id = Column(Integer, ForeignKey("admin_users.id"), nullable=False)
+    token_hash = Column(String(255), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime)
+    created_at = Column(DateTime, server_default=func.now())
+
+    admin_user = relationship("AdminUser")
+
+
 class SiteSettings(Base):
     __tablename__ = "site_settings"
     id = Column(Integer, primary_key=True)           # always row 1
     practice_name = Column(String(128), default="Mid Florida Surgical")
+    practice_address = Column(String(255))
+    practice_city = Column(String(64))
+    practice_state = Column(String(32))
+    practice_zip = Column(String(16))
+    practice_phone = Column(String(32))
+    practice_email = Column(String(255))
     logo_filename = Column(String(255))              # e.g. "logo.png" stored in static/uploads/
     show_or_patient_procedure_form = Column(Boolean, default=False, server_default="false")
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
@@ -92,6 +110,7 @@ class Surgeon(Base):
     day_items = relationship("SurgeonDayItem", back_populates="surgeon", cascade="all, delete-orphan")
     clinic_group_memberships = relationship("ClinicGroupMember", back_populates="surgeon", cascade="all, delete-orphan")
     surgical_blocks = relationship("SurgicalBlock", back_populates="surgeon", cascade="all, delete-orphan")
+    or_block_instances = relationship("ORBlockInstance", foreign_keys="ORBlockInstance.assigned_surgeon_id", back_populates="assigned_surgeon")
 
     def _strip_dr(self, name: str) -> str:
         """Remove leading 'Dr.' or 'Dr ' for display; do not store prefix in DB."""
@@ -384,6 +403,7 @@ class SurgicalCase(Base):
     patient_phone = Column(String(32))
     procedure = Column(Text, nullable=False)
     location_id = Column(Integer, ForeignKey("locations.id"))
+    or_block_instance_id = Column(Integer, ForeignKey("or_block_instances.id"))
     room_text = Column(String(64))
     status = Column(String(16), default="scheduled", server_default="scheduled")  # scheduled | confirmed | completed | cancelled
     notes = Column(Text)  # scheduler notes
@@ -393,29 +413,51 @@ class SurgicalCase(Base):
 
     surgeon = relationship("Surgeon", back_populates="surgical_cases")
     location = relationship("Location")
+    or_block_instance = relationship("ORBlockInstance", back_populates="cases")
 
 
 class ClinicGroup(Base):
+    """Flexible groups for day-off capacity, sorting, and scheduling rules.
+
+    group_type:
+      - people: assign physicians and/or staff
+      - locations: assign OR/clinic locations
+    """
     __tablename__ = "clinic_groups"
     id = Column(Integer, primary_key=True)
     name = Column(String(128), nullable=False, unique=True)
     abbreviation = Column(String(12), nullable=False)
+    group_type = Column(String(16), default="people", server_default="people", nullable=False)  # people | locations
+    enforce_day_off_limit = Column(Boolean, default=False, server_default="false", nullable=False)
     max_approved_off_per_day = Column(Integer, default=1, server_default="1", nullable=False)
     is_active = Column(Boolean, default=True, server_default="true", nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 
     members = relationship("ClinicGroupMember", back_populates="clinic_group", cascade="all, delete-orphan")
+    locations = relationship("ClinicGroupLocation", back_populates="clinic_group", cascade="all, delete-orphan")
 
 
 class ClinicGroupMember(Base):
     __tablename__ = "clinic_group_members"
     __table_args__ = (UniqueConstraint("clinic_group_id", "surgeon_id"),)
     id = Column(Integer, primary_key=True)
-    clinic_group_id = Column(Integer, ForeignKey("clinic_groups.id"), nullable=False)
-    surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=False)
+    clinic_group_id = Column(Integer, ForeignKey("clinic_groups.id", ondelete="CASCADE"), nullable=False)
+    surgeon_id = Column(Integer, ForeignKey("surgeons.id", ondelete="CASCADE"), nullable=False)
 
     clinic_group = relationship("ClinicGroup", back_populates="members")
     surgeon = relationship("Surgeon", back_populates="clinic_group_memberships")
+
+
+class ClinicGroupLocation(Base):
+    """Many-to-many: a clinic group can include OR/clinic locations for rules/sorting."""
+    __tablename__ = "clinic_group_locations"
+    __table_args__ = (UniqueConstraint("clinic_group_id", "location_id"),)
+    id = Column(Integer, primary_key=True)
+    clinic_group_id = Column(Integer, ForeignKey("clinic_groups.id", ondelete="CASCADE"), nullable=False)
+    location_id = Column(Integer, ForeignKey("locations.id", ondelete="CASCADE"), nullable=False)
+
+    clinic_group = relationship("ClinicGroup", back_populates="locations")
+    location = relationship("Location")
 
 
 class SurgicalBlock(Base):
@@ -434,6 +476,113 @@ class SurgicalBlock(Base):
 
     surgeon = relationship("Surgeon", back_populates="surgical_blocks")
     location = relationship("Location")
+
+
+class ORBlockSeries(Base):
+    """Recurring or one-time OR capacity definition; concrete inventory lives on ORBlockInstance."""
+    __tablename__ = "or_block_series"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(128), nullable=False)
+    recurrence = Column(String(16), default="weekly", server_default="weekly")  # weekly | once
+    weekday = Column(Integer)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    session = Column(String(16), default="am", server_default="am")  # am | pm | both | custom
+    start_time = Column(Time, nullable=False)
+    end_time = Column(Time, nullable=False)
+    owner_type = Column(String(16), default="practice", server_default="practice")  # practice | surgeon
+    owner_surgeon_id = Column(Integer, ForeignKey("surgeons.id"))
+    release_policy_days = Column(Integer, default=3, server_default="3")
+    is_active = Column(Boolean, default=True, server_default="true", nullable=False)
+    notes = Column(Text)
+    created_by_admin_id = Column(Integer, ForeignKey("admin_users.id"))
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+    owner_surgeon = relationship("Surgeon", foreign_keys=[owner_surgeon_id])
+    instances = relationship("ORBlockInstance", back_populates="series", cascade="all, delete-orphan")
+
+
+class ORBlockInstance(Base):
+    """Dated OR capacity for one location/time block."""
+    __tablename__ = "or_block_instances"
+    id = Column(Integer, primary_key=True)
+    series_id = Column(Integer, ForeignKey("or_block_series.id"))
+    location_id = Column(Integer, ForeignKey("locations.id"), nullable=False)
+    date = Column(Date, nullable=False)
+    session = Column(String(16), default="am", server_default="am")
+    start_time = Column(Time, nullable=False)
+    end_time = Column(Time, nullable=False)
+    status = Column(String(24), default="open", server_default="open")  # open | assigned
+    assigned_surgeon_id = Column(Integer, ForeignKey("surgeons.id"))
+    assigned_by_admin_id = Column(Integer, ForeignKey("admin_users.id"))
+    assigned_at = Column(DateTime)
+    assigned_start_time = Column(Time)
+    assigned_case_count = Column(Integer)
+    assignment_note = Column(Text)
+    release_deadline = Column(DateTime)
+    released_at = Column(DateTime)
+    released_by_admin_id = Column(Integer, ForeignKey("admin_users.id"))
+    release_reason = Column(Text)
+    advent_report_status = Column(String(24), default="not_sent", server_default="not_sent")  # not_sent | sent | changed_after_sent
+    notes = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+    series = relationship("ORBlockSeries", back_populates="instances")
+    location = relationship("Location")
+    assigned_surgeon = relationship("Surgeon", foreign_keys=[assigned_surgeon_id], back_populates="or_block_instances")
+    assignments = relationship("ORBlockAssignment", back_populates="block_instance", cascade="all, delete-orphan")
+    cases = relationship("SurgicalCase", back_populates="or_block_instance")
+    audit_events = relationship("ORBlockAuditEvent", back_populates="block_instance", cascade="all, delete-orphan")
+
+
+class ORBlockAssignment(Base):
+    """Surgeon placement inside a dated OR block capacity row."""
+    __tablename__ = "or_block_assignments"
+    id = Column(Integer, primary_key=True)
+    block_instance_id = Column(Integer, ForeignKey("or_block_instances.id"), nullable=False)
+    surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=False)
+    assigned_by_admin_id = Column(Integer, ForeignKey("admin_users.id"))
+    start_time = Column(Time, nullable=False)
+    case_count = Column(Integer, default=1, server_default="1")
+    note = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+    block_instance = relationship("ORBlockInstance", back_populates="assignments")
+    surgeon = relationship("Surgeon")
+    assigned_by_admin = relationship("AdminUser")
+
+
+class ORBlockAuditEvent(Base):
+    __tablename__ = "or_block_audit_events"
+    id = Column(Integer, primary_key=True)
+    block_instance_id = Column(Integer, ForeignKey("or_block_instances.id"), nullable=False)
+    admin_user_id = Column(Integer, ForeignKey("admin_users.id"))
+    event_type = Column(String(32), nullable=False)
+    detail = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+
+    block_instance = relationship("ORBlockInstance", back_populates="audit_events")
+    admin_user = relationship("AdminUser")
+
+
+class ScheduleChangeEvent(Base):
+    """Non-PHI audit stream used for scheduler availability digests."""
+    __tablename__ = "schedule_change_events"
+    id = Column(Integer, primary_key=True)
+    event_type = Column(String(64), nullable=False)
+    surgeon_id = Column(Integer, ForeignKey("surgeons.id"))
+    admin_user_id = Column(Integer, ForeignKey("admin_users.id"))
+    date = Column(Date)
+    title = Column(String(255), nullable=False)
+    body = Column(Text)
+    payload = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+
+    surgeon = relationship("Surgeon")
+    admin_user = relationship("AdminUser")
 
 
 class PushSubscription(Base):

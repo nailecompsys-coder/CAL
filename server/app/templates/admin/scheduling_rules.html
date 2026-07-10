@@ -1,0 +1,81 @@
+{% extends "base_admin.html" %}
+{% block title %}Scheduling Rules{% endblock %}
+
+{% block content %}
+<header class="portal-header px-5 py-3 sticky top-0 z-10 flex-shrink-0">
+  <div>
+    <h1 class="font-bold">Settings</h1>
+    <p class="text-xs text-slate-500">Conflict checks and buffers</p>
+  </div>
+</header>
+
+{% if request.query_params.get('msg') == 'rules_saved' %}
+<div class="mx-5 mt-4 status-approved border rounded-xl px-4 py-3 text-sm font-semibold">
+  <i class="fa-solid fa-circle-check mr-2"></i>Scheduling rules saved.
+</div>
+{% endif %}
+
+<div class="settings-shell">
+  {% include "admin/_settings_nav.html" %}
+  <div class="settings-main">
+  <form method="post" action="/admin/settings/scheduling-rules" class="clinical-panel overflow-hidden">
+    {% if all_rules is defined and all_rules %}
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-slate-200 bg-slate-50 text-left">
+            <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide w-20">On</th>
+            <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Rule</th>
+            <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Category</th>
+            <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Config</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          {% for rule in all_rules %}
+          {% set rc = rule_config.get(rule.rule_id) or {} %}
+          {% set enabled = rc.get('enabled', true) %}
+          {% set cfg = rc.get('config', rule.default_config) or {} %}
+          <tr class="align-top hover:bg-slate-50/70">
+            <td class="px-4 py-3">
+              <input type="checkbox" name="rule_{{ rule.rule_id }}_enabled" value="1" {% if enabled %}checked{% endif %}
+                class="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+            </td>
+            <td class="px-4 py-3">
+              <div class="font-semibold text-slate-800">{{ rule.name }}</div>
+              <div class="text-xs text-slate-500 mt-1 max-w-xl">{{ rule.description }}</div>
+            </td>
+            <td class="px-4 py-3 text-xs uppercase tracking-wide text-slate-500 whitespace-nowrap">{{ rule.category }}</td>
+            <td class="px-4 py-3">
+              {% if rule.config_schema %}
+              <div class="flex flex-wrap gap-3">
+                {% for item in rule.config_schema %}
+                {% set key = item.key %}
+                {% set val = cfg.get(key, rule.default_config.get(key, '')) %}
+                <label class="flex items-center gap-2">
+                  <span class="text-xs font-medium text-slate-600">{{ item.label }}</span>
+                  <input type="number" name="rule_{{ rule.rule_id }}_{{ key }}" value="{{ val }}"
+                    min="0" step="1" class="w-20 px-2 py-1.5 rounded border border-slate-200 text-sm" />
+                </label>
+                {% endfor %}
+              </div>
+              {% else %}
+              <span class="text-xs text-slate-400">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="px-4 py-4 border-t border-slate-100">
+      <button type="submit" class="bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700">
+        Save scheduling rules
+      </button>
+    </div>
+    {% else %}
+    <div class="p-8 text-sm text-slate-500">No rules loaded. Restart the app to seed rule config.</div>
+    {% endif %}
+  </form>
+  </div>
+</div>
+{% endblock %}

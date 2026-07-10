@@ -4,60 +4,281 @@
 {% block content %}
 <header class="portal-header px-5 py-3 sticky top-0 z-10 flex-shrink-0 flex items-center justify-between">
   <div>
-    <h1 class="font-bold">Clinic Groups</h1>
-    <p class="text-xs text-slate-500">Time-off capacity guardrails for Winter Garden and Lake Mary</p>
+    <h1 class="font-bold">Settings</h1>
+    <p class="text-xs text-slate-500">Create groups for doctors/staff or OR/clinic locations — for day-off limits, sorting, and scheduling rules</p>
   </div>
 </header>
 
 {% if request.query_params.get('msg') == 'saved' %}
 <div class="mx-5 mt-4 status-approved border rounded-xl px-4 py-3 text-sm font-semibold">
-  <i class="fa-solid fa-circle-check mr-2"></i>Clinic group rules saved.
+  <i class="fa-solid fa-circle-check mr-2"></i>Clinic group saved.
+</div>
+{% elif request.query_params.get('msg') == 'created' %}
+<div class="mx-5 mt-4 status-approved border rounded-xl px-4 py-3 text-sm font-semibold">
+  <i class="fa-solid fa-circle-check mr-2"></i>Clinic group created.
+</div>
+{% elif request.query_params.get('msg') == 'deleted' %}
+<div class="mx-5 mt-4 status-approved border rounded-xl px-4 py-3 text-sm font-semibold">
+  <i class="fa-solid fa-circle-check mr-2"></i>Clinic group deleted.
+</div>
+{% elif request.query_params.get('msg') == 'duplicate' %}
+<div class="mx-5 mt-4 status-pending border rounded-xl px-4 py-3 text-sm font-semibold">
+  <i class="fa-solid fa-triangle-exclamation mr-2"></i>A group with that name already exists.
 </div>
 {% endif %}
 
-<div class="p-5 grid gap-4 lg:grid-cols-2">
-  {% for group in groups %}
-  <form method="post" action="/admin/clinic-groups/{{ group.id }}/update" class="clinical-panel p-5 space-y-4">
-    <div class="flex items-start justify-between gap-3">
-      <div>
-        <h2 class="font-extrabold text-slate-800">{{ group.name }}</h2>
-        <p class="text-xs text-slate-500">Approved physicians off per day: {{ group.max_approved_off_per_day }}</p>
-      </div>
-      <label class="flex items-center gap-2 text-xs font-semibold text-slate-500">
-        <input type="checkbox" name="is_active" class="rounded" {% if group.is_active %}checked{% endif %}> Active
-      </label>
+<div class="settings-shell">
+  {% include "admin/_settings_nav.html" %}
+  <div class="settings-main">
+<div class="p-5 space-y-5">
+  <!-- Create new group -->
+  <form method="post" action="/admin/clinic-groups/create" class="clinical-panel p-5 space-y-4" id="create-group-form">
+    <div>
+      <h2 class="font-extrabold text-slate-800">Add group</h2>
+      <p class="text-xs text-slate-500 mt-0.5">Name + abbreviation, then assign people or locations. Day-off capacity is optional.</p>
     </div>
-    <div class="grid grid-cols-3 gap-3">
-      <div class="col-span-2">
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div class="md:col-span-2">
         <label class="block text-xs font-semibold text-slate-500 mb-1">Name</label>
-        <input name="name" value="{{ group.name }}" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        <input name="name" required placeholder="e.g. Winter Garden" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
       </div>
       <div>
         <label class="block text-xs font-semibold text-slate-500 mb-1">Abbrev</label>
-        <input name="abbreviation" value="{{ group.abbreviation }}" maxlength="12" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm uppercase" />
+        <input name="abbreviation" required maxlength="12" placeholder="WG" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm uppercase" />
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-500 mb-1">Group type</label>
+        <select name="group_type" id="create-group-type" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm">
+          <option value="people">Doctors &amp; staff</option>
+          <option value="locations">OR / Clinic locations</option>
+        </select>
       </div>
     </div>
-    <div>
-      <label class="block text-xs font-semibold text-slate-500 mb-1">Max approved physicians off per day</label>
-      <input type="number" name="max_approved_off_per_day" min="1" max="10" value="{{ group.max_approved_off_per_day }}" class="w-28 px-3 py-2 rounded-lg border border-slate-200 text-sm" />
-    </div>
-    <div>
-      <label class="block text-xs font-semibold text-slate-500 mb-2">Assigned surgeons</label>
-      <div class="grid grid-cols-2 gap-2 max-h-72 overflow-y-auto pr-1">
-        {% for surgeon in surgeons %}
-        <label class="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 bg-white">
-          <input type="checkbox" name="surgeon_ids" value="{{ surgeon.id }}" class="rounded"
-            {% if surgeon.id in memberships.get(group.id, []) %}checked{% endif %}>
-          <span class="w-7 h-7 rounded-full staff-avatar flex items-center justify-center text-xs font-bold">{{ surgeon.initials }}</span>
-          <span class="truncate">{{ surgeon.full_name }}</span>
+
+    <label class="flex items-center gap-2 text-xs font-semibold text-slate-500">
+      <input type="checkbox" name="is_active" class="rounded" checked> Active
+    </label>
+
+    <div class="create-people-section space-y-3">
+      <div class="flex flex-wrap items-end gap-4">
+        <label class="flex items-center gap-2 text-sm font-semibold text-slate-700">
+          <input type="checkbox" name="enforce_day_off_limit" id="create-enforce-off" class="rounded">
+          Limit approved off per day
         </label>
-        {% endfor %}
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Max approved off / day</label>
+          <input type="number" name="max_approved_off_per_day" id="create-max-off" min="1" max="20" value="1"
+            class="w-28 px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-slate-500 mb-2">Assign doctors &amp; staff</label>
+        <div class="grid grid-cols-2 lg:grid-cols-3 gap-2 max-h-56 overflow-y-auto pr-1">
+          {% for surgeon in surgeons %}
+          <label class="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 bg-white">
+            <input type="checkbox" name="surgeon_ids" value="{{ surgeon.id }}" class="rounded">
+            <span class="w-7 h-7 rounded-full staff-avatar flex items-center justify-center text-xs font-bold">{{ surgeon.initials }}</span>
+            <span class="truncate">{{ surgeon.full_name }}{% if surgeon.staff_type == 'staff' %} <span class="text-slate-400 text-xs">staff</span>{% endif %}</span>
+          </label>
+          {% endfor %}
+        </div>
       </div>
     </div>
+
+    <div class="create-locations-section space-y-3 hidden">
+      <div>
+        <label class="block text-xs font-semibold text-slate-500 mb-2">Assign OR / clinic locations</label>
+        <div class="grid grid-cols-2 lg:grid-cols-3 gap-2 max-h-56 overflow-y-auto pr-1">
+          {% for loc in locations %}
+          <label class="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 bg-white">
+            <input type="checkbox" name="location_ids" value="{{ loc.id }}" class="rounded create-loc-check" disabled>
+            <span class="truncate">{{ loc.name }} <span class="text-slate-400 text-xs">({{ loc.location_type or 'clinic' }})</span></span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
     <button class="bg-blue-600 text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-blue-700">
-      Save {{ group.abbreviation }}
+      Create group
     </button>
   </form>
-  {% endfor %}
+
+  <!-- Existing groups -->
+  <div class="grid gap-4 lg:grid-cols-2">
+    {% for group in groups %}
+    <div class="clinical-panel p-5 space-y-4">
+      <form method="post" action="/admin/clinic-groups/{{ group.id }}/update" class="space-y-4 group-edit-form"
+        data-group-type="{{ group.group_type or 'people' }}">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <h2 class="font-extrabold text-slate-800">{{ group.name }}
+              <span class="text-slate-400 font-semibold text-sm">({{ group.abbreviation }})</span>
+            </h2>
+            <p class="text-xs text-slate-500">
+              {% if (group.group_type or 'people') == 'locations' %}
+                Location group
+              {% else %}
+                People group
+                {% if group.enforce_day_off_limit %}
+                  · max {{ group.max_approved_off_per_day }} approved off / day
+                {% else %}
+                  · no day-off limit
+                {% endif %}
+              {% endif %}
+            </p>
+          </div>
+          <label class="flex items-center gap-2 text-xs font-semibold text-slate-500">
+            <input type="checkbox" name="is_active" class="rounded" {% if group.is_active %}checked{% endif %}> Active
+          </label>
+        </div>
+
+        <div class="grid grid-cols-3 gap-3">
+          <div class="col-span-2">
+            <label class="block text-xs font-semibold text-slate-500 mb-1">Name</label>
+            <input name="name" value="{{ group.name }}" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 mb-1">Abbrev</label>
+            <input name="abbreviation" value="{{ group.abbreviation }}" maxlength="12" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm uppercase" />
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Group type</label>
+          <select name="group_type" class="group-type-select w-full px-3 py-2 rounded-lg border border-slate-200 text-sm">
+            <option value="people" {% if (group.group_type or 'people') == 'people' %}selected{% endif %}>Doctors &amp; staff</option>
+            <option value="locations" {% if group.group_type == 'locations' %}selected{% endif %}>OR / Clinic locations</option>
+          </select>
+        </div>
+
+        <div class="people-section space-y-3 {% if group.group_type == 'locations' %}hidden{% endif %}">
+          <div class="flex flex-wrap items-end gap-4">
+            <label class="flex items-center gap-2 text-sm font-semibold text-slate-700">
+              <input type="checkbox" name="enforce_day_off_limit" class="enforce-off-check rounded"
+                {% if group.enforce_day_off_limit %}checked{% endif %}>
+              Limit approved off per day
+            </label>
+            <div>
+              <label class="block text-xs font-semibold text-slate-500 mb-1">Max approved off / day</label>
+              <input type="number" name="max_approved_off_per_day" min="1" max="20"
+                value="{{ group.max_approved_off_per_day }}"
+                class="max-off-input w-28 px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 mb-2">Assigned doctors &amp; staff</label>
+            <div class="grid grid-cols-2 gap-2 max-h-72 overflow-y-auto pr-1">
+              {% for surgeon in surgeons %}
+              <label class="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 bg-white">
+                <input type="checkbox" name="surgeon_ids" value="{{ surgeon.id }}" class="rounded people-member-check"
+                  {% if surgeon.id in memberships.get(group.id, []) %}checked{% endif %}
+                  {% if group.group_type == 'locations' %}disabled{% endif %}>
+                <span class="w-7 h-7 rounded-full staff-avatar flex items-center justify-center text-xs font-bold">{{ surgeon.initials }}</span>
+                <span class="truncate">{{ surgeon.full_name }}{% if surgeon.staff_type == 'staff' %} <span class="text-slate-400 text-xs">staff</span>{% endif %}</span>
+              </label>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+
+        <div class="locations-section space-y-3 {% if (group.group_type or 'people') != 'locations' %}hidden{% endif %}">
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 mb-2">Assigned OR / clinic locations</label>
+            <div class="grid grid-cols-2 gap-2 max-h-72 overflow-y-auto pr-1">
+              {% for loc in locations %}
+              <label class="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 bg-white">
+                <input type="checkbox" name="location_ids" value="{{ loc.id }}" class="rounded location-member-check"
+                  {% if loc.id in location_memberships.get(group.id, []) %}checked{% endif %}
+                  {% if (group.group_type or 'people') != 'locations' %}disabled{% endif %}>
+                <span class="truncate">{{ loc.name }} <span class="text-slate-400 text-xs">({{ loc.location_type or 'clinic' }})</span></span>
+              </label>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-3">
+          <button class="bg-blue-600 text-white text-sm font-bold px-4 py-2 rounded-xl hover:bg-blue-700">
+            Save {{ group.abbreviation }}
+          </button>
+        </div>
+      </form>
+      <form method="post" action="/admin/clinic-groups/{{ group.id }}/delete"
+        onsubmit="return confirm('Delete group {{ group.name }}?');">
+        <button type="submit" class="text-sm font-semibold text-rose-500 hover:text-rose-700">
+          Delete
+        </button>
+      </form>
+    </div>
+    {% else %}
+    <div class="clinical-panel p-8 text-center text-slate-500 text-sm lg:col-span-2">
+      No clinic groups yet. Create one above for doctors/staff or OR/clinic locations.
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<script>
+(function () {
+  function syncCreateForm() {
+    var type = document.getElementById('create-group-type');
+    if (!type) return;
+    var isPeople = type.value === 'people';
+    var peopleSec = document.querySelector('.create-people-section');
+    var locSec = document.querySelector('.create-locations-section');
+    if (peopleSec) peopleSec.classList.toggle('hidden', !isPeople);
+    if (locSec) locSec.classList.toggle('hidden', isPeople);
+
+    document.querySelectorAll('.create-loc-check').forEach(function (el) {
+      el.disabled = isPeople;
+    });
+    document.querySelectorAll('.create-people-section input[name="surgeon_ids"]').forEach(function (el) {
+      el.disabled = !isPeople;
+    });
+    var enforce = document.getElementById('create-enforce-off');
+    var maxOff = document.getElementById('create-max-off');
+    if (enforce) enforce.disabled = !isPeople;
+    if (maxOff) maxOff.disabled = !isPeople;
+  }
+
+  function syncEditForm(form) {
+    var typeSelect = form.querySelector('.group-type-select');
+    if (!typeSelect) return;
+    var isPeople = typeSelect.value === 'people';
+    var peopleSec = form.querySelector('.people-section');
+    var locSec = form.querySelector('.locations-section');
+    if (peopleSec) peopleSec.classList.toggle('hidden', !isPeople);
+    if (locSec) locSec.classList.toggle('hidden', isPeople);
+
+    form.querySelectorAll('.people-member-check').forEach(function (el) {
+      el.disabled = !isPeople;
+    });
+    form.querySelectorAll('.location-member-check').forEach(function (el) {
+      el.disabled = isPeople;
+    });
+
+    var enforce = form.querySelector('.enforce-off-check');
+    var maxOff = form.querySelector('.max-off-input');
+    if (enforce) enforce.disabled = !isPeople;
+    if (maxOff) maxOff.disabled = !isPeople;
+  }
+
+  var createType = document.getElementById('create-group-type');
+  if (createType) createType.addEventListener('change', syncCreateForm);
+  var createEnforce = document.getElementById('create-enforce-off');
+  if (createEnforce) createEnforce.addEventListener('change', syncCreateForm);
+  syncCreateForm();
+
+  document.querySelectorAll('.group-edit-form').forEach(function (form) {
+    var typeSelect = form.querySelector('.group-type-select');
+    var enforce = form.querySelector('.enforce-off-check');
+    if (typeSelect) typeSelect.addEventListener('change', function () { syncEditForm(form); });
+    if (enforce) enforce.addEventListener('change', function () { syncEditForm(form); });
+    syncEditForm(form);
+  });
+})();
+</script>
+  </div>
 </div>
 {% endblock %}

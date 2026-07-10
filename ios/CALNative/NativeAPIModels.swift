@@ -60,11 +60,10 @@ struct NativeDayResponse: Decodable {
 
   var scheduleDay: ScheduleDay {
     let parsedDate = Self.dateFormatter.date(from: date) ?? Date()
-    let scheduleItems = (items ?? [])
-      .compactMap { $0.doctorScheduleItem(dateKey: date) }
-    let meetingItems = (items ?? [])
-      .compactMap { $0.meetingItem(dateKey: date) }
-    let personal = (items ?? [])
+    let allItems = items ?? []
+    let scheduleItems = allItems.compactMap { $0.doctorScheduleItem(dateKey: date) }
+    let meetingItems = allItems.compactMap { $0.meetingItem(dateKey: date) }
+    let personal = allItems
       .filter { $0.type == "personal" }
       .map(\.personalDisplayTitle)
 
@@ -76,7 +75,11 @@ struct NativeDayResponse: Decodable {
       requestedOff: (requestedOffSurgeons ?? []).map(\.initials),
       mySchedule: scheduleItems,
       meetings: meetingItems,
-      personalItems: personal
+      personalItems: personal,
+      hasMyApprovedOff: allItems.contains { $0.type == "dayoff" },
+      hasClinicOr: allItems.contains { $0.type == "clinic" || $0.type == "surgery" },
+      hasBlockTime: allItems.contains { $0.type == "block_or" },
+      hasMeeting: allItems.contains { $0.type == "meeting" }
     )
   }
 
@@ -136,7 +139,8 @@ struct NativeScheduleItemResponse: Decodable {
         guard let value, !value.isEmpty else { return nil }
         return value
       }.joined(separator: " · "),
-      timeRange: timeRange
+      timeRange: timeRange,
+      kind: type
     )
   }
 
@@ -150,7 +154,8 @@ struct NativeScheduleItemResponse: Decodable {
         guard let value, !value.isEmpty else { return nil }
         return value
       }.joined(separator: " · "),
-      timeRange: timeRange
+      timeRange: timeRange,
+      kind: "meeting"
     )
   }
 
@@ -166,12 +171,19 @@ struct NativeScheduleItemResponse: Decodable {
       return title.isEmpty ? "Clinic" : title
     case "surgery":
       return title.isEmpty ? "Hospital" : title
+    case "block_or":
+      return title.isEmpty ? "Block OR" : title
     default:
       return title
     }
   }
 
   private var periodLabel: String {
+    // Timed clinic-day rows (e.g. Surgery 1 / CBO) keep AM/PM from start time.
+    // Session-based clinic rows already carry AM/PM/FULL in subtitle.
+    if type == "clinic", let subtitle, ["AM", "PM", "FULL"].contains(subtitle.uppercased()) {
+      return subtitle.uppercased()
+    }
     guard let start else { return "DAY" }
     return start < "12:00" ? "AM" : "PM"
   }

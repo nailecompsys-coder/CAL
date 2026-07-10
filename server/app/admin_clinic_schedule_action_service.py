@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from .conflicts import check_conflicts
 from .models import ClinicSchedule, Location, Surgeon
+from .or_block_service import log_schedule_change
 from .push import send_push_to_surgeon
 
 
@@ -65,6 +66,15 @@ def assign_clinic(
     if not surgeon:
         return []
     if assignment_type == "off":
+        log_schedule_change(
+            db,
+            event_type="clinic_schedule_updated",
+            surgeon_id=surgeon_id,
+            event_date=schedule_date,
+            title="Clinic/OR schedule updated",
+            body=f"{surgeon.initials}: OFF",
+        )
+        db.commit()
         send_push_to_surgeon(
             surgeon_id,
             "Schedule Updated",
@@ -74,6 +84,15 @@ def assign_clinic(
         return []
     if not loc:
         return []
+    log_schedule_change(
+        db,
+        event_type="clinic_schedule_updated",
+        surgeon_id=surgeon_id,
+        event_date=schedule_date,
+        title="Clinic/OR schedule updated",
+        body=f"{surgeon.initials}: {loc.abbreviation or loc.name} {session.upper()}",
+    )
+    db.commit()
     send_push_to_surgeon(
         surgeon_id,
         "Clinic Schedule Updated",

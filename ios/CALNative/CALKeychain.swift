@@ -3,6 +3,7 @@ import Security
 
 enum CALKeychain {
   private static let tokenKey = "cal_native_session_token"
+  private static let roleKey = "cal_native_session_role"
   private static let primaryService = "app:no-auth"
   private static let fallbackService = "app"
 
@@ -10,18 +11,29 @@ enum CALKeychain {
     read(service: primaryService) ?? read(service: fallbackService)
   }
 
-  static func saveSessionToken(_ token: String) throws {
-    try save(token, service: primaryService)
+  static func readSessionRole() -> NativeSessionRole {
+    guard let value = read(key: roleKey, service: primaryService),
+          let role = NativeSessionRole(rawValue: value) else {
+      return .surgeon
+    }
+    return role
+  }
+
+  static func saveSessionToken(_ token: String, role: NativeSessionRole = .surgeon) throws {
+    try save(token, key: tokenKey, service: primaryService)
+    try save(role.rawValue, key: roleKey, service: primaryService)
   }
 
   static func deleteSessionToken() {
-    delete(service: primaryService)
-    delete(service: fallbackService)
+    delete(key: tokenKey, service: primaryService)
+    delete(key: tokenKey, service: fallbackService)
+    delete(key: roleKey, service: primaryService)
+    delete(key: roleKey, service: fallbackService)
   }
 
-  private static func save(_ token: String, service: String) throws {
-    let keyData = Data(tokenKey.utf8)
-    let valueData = Data(token.utf8)
+  private static func save(_ value: String, key: String, service: String) throws {
+    let keyData = Data(key.utf8)
+    let valueData = Data(value.utf8)
     let query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: service,
@@ -49,8 +61,8 @@ enum CALKeychain {
     }
   }
 
-  private static func delete(service: String) {
-    let keyData = Data(tokenKey.utf8)
+  private static func delete(key: String, service: String) {
+    let keyData = Data(key.utf8)
     let query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: service,
@@ -61,7 +73,11 @@ enum CALKeychain {
   }
 
   private static func read(service: String) -> String? {
-    let keyData = Data(tokenKey.utf8)
+    read(key: tokenKey, service: service)
+  }
+
+  private static func read(key: String, service: String) -> String? {
+    let keyData = Data(key.utf8)
     let query: [String: Any] = [
       kSecClass as String: kSecClassGenericPassword,
       kSecAttrService as String: service,

@@ -1,7 +1,7 @@
 """Admin surgeon-management routes."""
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from ..admin_surgeon_service import (
@@ -18,21 +18,14 @@ from ..auth import (
     get_current_admin,
 )
 from ..database import get_db
-from ..jinja_env import templates
-from ..models import Surgeon
-from ..surgeon_visibility import visible_surgeons
-from .admin import _base, _next_physician_sort_order, _sort_surgeons_physicians_first
+from .admin import _next_physician_sort_order
 
 router = APIRouter(prefix="/admin")
 
 
-@router.get("/surgeons", response_class=HTMLResponse)
+@router.get("/surgeons")
 def surgeons_page(request: Request, db: Session = Depends(get_db), admin=Depends(get_current_admin)):
-    surgeons = db.query(Surgeon).order_by(Surgeon.last_name).all()
-    surgeons = visible_surgeons(surgeons)
-    surgeons = _sort_surgeons_physicians_first(surgeons)
-    return templates.TemplateResponse("admin/surgeons.html", _base(request, admin, db=db, surgeons=surgeons))
-
+    return RedirectResponse("/admin/settings/people?filter=mobile", status_code=303)
 
 @router.post("/surgeons/add")
 def add_surgeon(
@@ -58,7 +51,7 @@ def add_surgeon(
         lambda: _next_physician_sort_order(db),
     )
     add_surgeon_service(db, fields)
-    return RedirectResponse("/admin/surgeons?msg=added", status_code=303)
+    return RedirectResponse("/admin/settings/people?filter=mobile&msg=added", status_code=303)
 
 
 @router.post("/surgeons/{surgeon_id}/edit")
@@ -85,26 +78,26 @@ def edit_surgeon(
         lambda: _next_physician_sort_order(db),
     )
     update_surgeon_service(db, surgeon_id, fields)
-    return RedirectResponse("/admin/surgeons?msg=updated", status_code=303)
+    return RedirectResponse("/admin/settings/people?filter=mobile&msg=updated", status_code=303)
 
 
 @router.post("/surgeons/{surgeon_id}/delete")
 def delete_surgeon(surgeon_id: int, db: Session = Depends(get_db), admin=Depends(get_current_admin)):
     if not delete_surgeon_service(db, surgeon_id):
-        return RedirectResponse("/admin/surgeons?msg=not_found", status_code=303)
-    return RedirectResponse("/admin/surgeons?msg=deleted", status_code=303)
+        return RedirectResponse("/admin/settings/people?filter=mobile&msg=not_found", status_code=303)
+    return RedirectResponse("/admin/settings/people?filter=mobile&msg=deleted", status_code=303)
 
 
 @router.post("/surgeons/{surgeon_id}/toggle")
 def toggle_surgeon(surgeon_id: int, db: Session = Depends(get_db), admin=Depends(get_current_admin)):
     toggle_surgeon_service(db, surgeon_id)
-    return RedirectResponse("/admin/surgeons", status_code=303)
+    return RedirectResponse("/admin/settings/people?filter=mobile", status_code=303)
 
 
 @router.post("/surgeons/{surgeon_id}/devices/{device_id}/revoke")
 def revoke_device(surgeon_id: int, device_id: int, db: Session = Depends(get_db), admin=Depends(get_current_admin)):
     revoke_device_service(db, surgeon_id, device_id)
-    return RedirectResponse("/admin/surgeons", status_code=303)
+    return RedirectResponse("/admin/settings/people?filter=mobile", status_code=303)
 
 
 @router.post("/surgeons/{surgeon_id}/preview-mobile")

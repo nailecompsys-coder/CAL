@@ -2,15 +2,28 @@
 {% block title %}Meetings{% endblock %}
 
 {% block content %}
-<header class="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 flex-shrink-0">
-  <div>
+<header class="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 flex-shrink-0 gap-4">
+  <div class="min-w-0">
     <h1 class="text-xl font-bold text-slate-800">Meetings</h1>
-    <p class="text-sm text-slate-500">{{ meetings|length }} upcoming</p>
+    <p class="text-sm text-slate-500">{{ month_count }} this month · CAL + Aprima</p>
   </div>
-  <button onclick="document.getElementById('create-modal').classList.remove('hidden')"
-    class="bg-blue-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2">
-    <i class="fa-solid fa-plus"></i> Schedule Meeting
-  </button>
+  <div class="flex items-center gap-2 flex-shrink-0">
+    <button onclick="document.getElementById('create-modal').classList.remove('hidden')"
+      class="bg-slate-100 text-slate-600 text-sm px-3 py-2 rounded-lg hover:bg-slate-200 flex items-center gap-1.5">
+      <i class="fa-solid fa-plus"></i> Schedule
+    </button>
+    <a href="/admin/meetings?month_offset={{ month_offset - 1 }}"
+       class="w-9 h-9 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 flex items-center justify-center">
+      <i class="fa-solid fa-chevron-left text-xs"></i>
+    </a>
+    <span class="text-sm font-extrabold text-slate-800 min-w-[9rem] text-center px-3 py-2 rounded-lg border border-slate-200 bg-slate-50">{{ month_label }}</span>
+    <a href="/admin/meetings?month_offset=0"
+       class="bg-blue-600 text-white text-sm px-3 py-2 rounded-lg hover:bg-blue-700">Today</a>
+    <a href="/admin/meetings?month_offset={{ month_offset + 1 }}"
+       class="w-9 h-9 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 flex items-center justify-center">
+      <i class="fa-solid fa-chevron-right text-xs"></i>
+    </a>
+  </div>
 </header>
 
 {% if request.query_params.get('warn') %}
@@ -19,73 +32,109 @@
   <div><strong>Scheduling conflict:</strong> {{ request.query_params.get('warn') }}</div>
 </div>
 {% endif %}
+{% if aprima_warning %}
+<div class="mx-6 mt-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-amber-800 text-sm">
+  <i class="fa-solid fa-triangle-exclamation mr-1"></i>{{ aprima_warning }}
+</div>
+{% endif %}
 
-<div class="p-6 space-y-3">
-  {% set current_month = namespace(val='') %}
-  {% for m in meetings %}
-  {% set month = m.date.strftime('%B %Y') %}
-  {% if month != current_month.val %}
-  {% set current_month.val = month %}
-  <div class="flex items-center gap-3 {% if not loop.first %}mt-6{% endif %} mb-2">
-    <h2 class="font-bold text-slate-600 text-sm">{{ month }}</h2>
-    <div class="flex-1 h-px bg-slate-200"></div>
+<div class="p-6 overflow-x-auto">
+  <div class="flex flex-wrap items-center gap-3 mb-3 text-[11px] font-semibold text-slate-500">
+    <span class="inline-flex items-center gap-1.5">
+      <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold shadow-sm block-gradient" style="--block-c: var(--meeting-cal); color:#1e293b">CAL</span>
+      Scheduled in CAL
+    </span>
+    <span class="inline-flex items-center gap-1.5">
+      <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold shadow-sm block-gradient" style="--block-c: var(--meeting-aprima); color:#1e293b">APR</span>
+      From Aprima
+    </span>
   </div>
-  {% endif %}
-  <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
-    <div class="flex items-stretch">
-      <div class="w-1 bg-slate-500 flex-shrink-0"></div>
-      <div class="flex-1 px-5 py-4">
-        <div class="flex items-start justify-between gap-4">
-          <div class="flex-1">
-            {% if m.recurrence_rule %}<div class="mb-1"><span class="bg-slate-100 text-slate-600 text-xs font-semibold px-2 py-0.5 rounded-full">{{ m.recurrence_rule | title }}</span></div>{% endif %}
-            <h3 class="font-bold text-slate-800">{{ m.title }}</h3>
-            <div class="flex items-center gap-4 mt-1.5 text-sm text-slate-500 flex-wrap">
-              <span><i class="fa-solid fa-calendar mr-1.5"></i>{{ m.date.strftime('%a, %b %-d') }}{% if m.start_time %} · {{ m.start_time.strftime('%-I:%M %p') }}{% if m.end_time %} – {{ m.end_time.strftime('%-I:%M %p') }}{% endif %}{% endif %}</span>
-              {% if m.location_text %}<span><i class="fa-solid fa-location-dot mr-1.5"></i>{{ m.location_text }}</span>{% endif %}
+
+  {% set total_cells = pad_start + schedule_days|length %}
+  {% set pad_end = (7 - (total_cells % 7)) % 7 %}
+
+  <table class="w-full border-collapse min-w-[720px]">
+    <thead>
+      <tr>
+        {% for wd in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'] %}
+        <th class="px-2 py-3 bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wide">{{ wd }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+      {% for _ in range(pad_start) %}
+        <td class="px-2 py-2 border border-slate-200 bg-slate-50/60 align-top h-[7.5rem]"></td>
+      {% endfor %}
+      {% for day in schedule_days %}
+        {% if (pad_start + loop.index0) % 7 == 0 and not loop.first %}</tr><tr>{% endif %}
+        {% set day_key = day.isoformat() %}
+        {% set day_events = events_by_day.get(day_key, []) %}
+        {% set is_today = day == today %}
+        <td class="px-2 py-2 border border-slate-200 align-top {% if is_today %}bg-blue-50/30{% else %}bg-white{% endif %}
+          cursor-pointer hover:bg-slate-50 group/cell"
+          onclick="openCreateForDate('{{ day_key }}')">
+          <div class="min-h-[88px] space-y-1">
+            <div class="text-[11px] font-extrabold {% if is_today %}text-blue-600{% elif day.weekday() >= 5 %}text-slate-400{% else %}text-slate-700{% endif %}">
+              {{ day.strftime('%-d') }}{% if is_today %} <span class="font-normal text-blue-500">·today</span>{% endif %}
             </div>
-            <div class="flex items-center gap-1.5 mt-2.5 flex-wrap">
-              {% for a in m.attendees %}
-              <div class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold bg-[#F4F6F9] text-[#4A6080] border border-slate-200/90">
-                {{ a.surgeon.initials }}
-              </div>
-              {% else %}
-              <span class="text-xs text-slate-400 italic">All surgeons</span>
-              {% endfor %}
-            </div>
-            {% if m.notes %}<p class="text-xs text-slate-400 mt-1.5">{{ m.notes }}</p>{% endif %}
-          </div>
-          <div class="flex items-center gap-2 flex-shrink-0">
-            <button
-              type="button"
-              class="w-8 h-8 bg-slate-100 text-slate-500 rounded-lg hover:bg-blue-100 hover:text-blue-700 flex items-center justify-center"
-              onclick="openEditModal(this)"
-              data-meeting-id="{{ m.id }}"
-              data-title="{{ m.title }}"
-              data-date="{{ m.date.isoformat() }}"
-              data-start-time="{{ m.start_time.strftime('%H:%M') if m.start_time else '' }}"
-              data-end-time="{{ m.end_time.strftime('%H:%M') if m.end_time else '' }}"
-              data-location-text="{{ m.location_text or '' }}"
-              data-recurrence-rule="{{ m.recurrence_rule or 'none' }}"
-              data-notes="{{ m.notes or '' }}"
-              data-attendee-ids="{% for a in m.attendees %}{{ a.surgeon_id }}{% if not loop.last %},{% endif %}{% endfor %}">
-              <i class="fa-solid fa-pen text-xs"></i>
+            {% for event in day_events[:4] %}
+            {% set event_key = event.source ~ '-' ~ event.id ~ '-' ~ event.dateIso ~ '-' ~ loop.index0 %}
+            <button type="button"
+              class="w-full text-left inline-flex flex-col gap-0 text-xs font-medium px-2 py-0.5 rounded-md leading-tight block-gradient shadow-sm hover:opacity-90"
+              style="--block-c: {% if event.source == 'aprima' %}var(--meeting-aprima){% else %}var(--meeting-cal){% endif %}; color:#1e293b"
+              data-event-key="{{ event_key }}"
+              onclick="event.stopPropagation(); openMeetingDetailKey(this.dataset.eventKey)">
+              <span class="flex items-center gap-1 min-w-0">
+                {% if event.startLabel %}<span class="text-[9px] font-bold tabular-nums opacity-80 flex-shrink-0">{{ event.startLabel }}</span>{% endif %}
+                <span class="truncate font-bold">{{ event.title }}</span>
+              </span>
+              {% if event.attendees %}
+              <span class="text-[9px] opacity-70 truncate">{{ event.attendees|join(' · ') }}</span>
+              {% endif %}
             </button>
-            <form method="post" action="/admin/meetings/{{ m.id }}/delete" onsubmit="return confirm('Delete this meeting?')">
-              <button class="w-8 h-8 bg-slate-100 text-slate-500 rounded-lg hover:bg-rose-100 hover:text-rose-600 flex items-center justify-center flex-shrink-0">
-                <i class="fa-solid fa-trash text-xs"></i>
-              </button>
-            </form>
+            {% endfor %}
+            {% if day_events|length > 4 %}
+            <button type="button"
+              class="w-full text-[10px] font-bold text-slate-400 hover:text-slate-600"
+              data-day="{{ day_key }}"
+              data-label="{{ day.strftime('%a, %b %-d') }}"
+              onclick="event.stopPropagation(); openDayOverflow(this.dataset.day, this.dataset.label)">
+              +{{ day_events|length - 4 }} more
+            </button>
+            {% elif not day_events %}
+            <div class="text-slate-300 text-xs text-center py-2 group-hover/cell:text-slate-400">
+              <i class="fa-solid fa-plus"></i>
+            </div>
+            {% else %}
+            <div class="text-slate-300 text-[10px] text-center group-hover/cell:text-slate-400">
+              <i class="fa-solid fa-plus text-[8px]"></i> add
+            </div>
+            {% endif %}
           </div>
-        </div>
+        </td>
+      {% endfor %}
+      {% for _ in range(pad_end) %}
+        <td class="px-2 py-2 border border-slate-200 bg-slate-50/60 align-top"></td>
+      {% endfor %}
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Day overflow / detail -->
+<div id="detail-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden" onclick="if (event.target === this) closeDetailModal()">
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-5 max-h-[85vh] overflow-y-auto">
+    <div class="flex items-center justify-between mb-4 gap-3">
+      <div class="min-w-0">
+        <p id="detail-eyebrow" class="text-[11px] font-bold uppercase tracking-wide text-slate-400"></p>
+        <h3 id="detail-title" class="font-bold text-slate-800 text-lg truncate"></h3>
       </div>
+      <button type="button" onclick="closeDetailModal()" class="text-slate-400 hover:text-slate-600 flex-shrink-0"><i class="fa-solid fa-xmark text-lg"></i></button>
     </div>
+    <div id="detail-body" class="space-y-3 text-sm text-slate-600"></div>
+    <div id="detail-actions" class="flex gap-2 mt-5 hidden"></div>
   </div>
-  {% else %}
-  <div class="text-center py-12 text-slate-400">
-    <i class="fa-solid fa-calendar-xmark text-4xl mb-3 block"></i>
-    No upcoming meetings
-  </div>
-  {% endfor %}
 </div>
 
 <!-- Create Meeting Modal -->
@@ -100,7 +149,7 @@
         <input type="text" name="title" required class="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="e.g. M&M Conference" /></div>
       <div class="grid grid-cols-2 gap-3">
         <div><label class="block text-xs font-medium text-slate-600 mb-1">Date</label>
-          <input type="date" name="meeting_date" required class="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
+          <input type="date" name="meeting_date" id="create-date" required class="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
         <div><label class="block text-xs font-medium text-slate-600 mb-1">Location</label>
           <input type="text" name="location_text" class="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Conference Room A" /></div>
       </div>
@@ -191,29 +240,151 @@
 
 {% block scripts %}
 <script>
+const MEETING_EVENTS = {{ events_by_day|tojson }};
+const MEETING_EVENT_INDEX = {};
+Object.keys(MEETING_EVENTS || {}).forEach(function(dayKey) {
+  (MEETING_EVENTS[dayKey] || []).forEach(function(event, index) {
+    const key = event.source + '-' + event.id + '-' + event.dateIso + '-' + index;
+    MEETING_EVENT_INDEX[key] = event;
+  });
+});
+
+function openCreateForDate(isoDate) {
+  const input = document.getElementById('create-date');
+  if (input) input.value = isoDate || '';
+  document.getElementById('create-modal').classList.remove('hidden');
+}
+
+function closeDetailModal() {
+  document.getElementById('detail-modal').classList.add('hidden');
+}
+
 function closeEditModal() {
   document.getElementById('edit-modal').classList.add('hidden');
 }
 
-function openEditModal(button) {
-  const ids = (button.dataset.attendeeIds || '')
-    .split(',')
-    .map(v => v.trim())
-    .filter(Boolean);
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
 
-  document.getElementById('edit-form').action = '/admin/meetings/' + button.dataset.meetingId + '/edit';
-  document.getElementById('edit-title').value = button.dataset.title || '';
-  document.getElementById('edit-date').value = button.dataset.date || '';
-  document.getElementById('edit-start-time').value = button.dataset.startTime || '';
-  document.getElementById('edit-end-time').value = button.dataset.endTime || '';
-  document.getElementById('edit-location-text').value = button.dataset.locationText || '';
-  document.getElementById('edit-recurrence-rule').value = button.dataset.recurrenceRule || 'none';
-  document.getElementById('edit-notes').value = button.dataset.notes || '';
+function formatTimeRange(event) {
+  if (!event.start && !event.end) return 'All day / time TBD';
+  if (event.start && event.end) return event.start + ' – ' + event.end;
+  return event.start || event.end;
+}
 
+function openMeetingDetailKey(key) {
+  const event = MEETING_EVENT_INDEX[key];
+  if (event) openMeetingDetail(event);
+}
+
+function openMeetingDetail(event) {
+  const eyebrow = document.getElementById('detail-eyebrow');
+  const title = document.getElementById('detail-title');
+  const body = document.getElementById('detail-body');
+  const actions = document.getElementById('detail-actions');
+
+  eyebrow.textContent = event.source === 'aprima' ? 'Aprima · read-only' : 'Scheduled in CAL';
+  title.textContent = event.title || 'Meeting';
+
+  const rows = [
+    ['When', formatTimeRange(event)],
+    ['Location', event.location || '—'],
+    ['Who', (event.attendees && event.attendees.length) ? event.attendees.join(', ') : (event.source === 'cal' ? 'All surgeons' : '—')],
+  ];
+  if (event.room) rows.push(['Room', event.room]);
+  if (event.surgeonName) rows.push(['Surgeon', event.surgeonName]);
+  if (event.recurrence) rows.push(['Recurrence', event.recurrence]);
+  if (event.notes) rows.push(['Notes', event.notes]);
+
+  body.innerHTML = rows.map(function(row) {
+    return '<div class="flex gap-3"><span class="w-20 flex-shrink-0 text-xs font-bold uppercase tracking-wide text-slate-400">' +
+      escapeHtml(row[0]) + '</span><span class="min-w-0 break-words">' + escapeHtml(row[1]) + '</span></div>';
+  }).join('');
+
+  if (event.source === 'cal') {
+    actions.classList.remove('hidden');
+    actions.innerHTML = '';
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700';
+    editBtn.textContent = 'Edit';
+    editBtn.addEventListener('click', function() { editFromDetail(event); });
+    const form = document.createElement('form');
+    form.method = 'post';
+    form.action = '/admin/meetings/' + event.id + '/delete';
+    form.className = 'flex-1';
+    form.addEventListener('submit', function(e) {
+      if (!confirm('Delete this meeting?')) e.preventDefault();
+    });
+    const delBtn = document.createElement('button');
+    delBtn.className = 'w-full bg-rose-50 text-rose-700 py-2.5 rounded-lg text-sm font-medium hover:bg-rose-100';
+    delBtn.textContent = 'Delete';
+    form.appendChild(delBtn);
+    actions.appendChild(editBtn);
+    actions.appendChild(form);
+  } else {
+    actions.classList.add('hidden');
+    actions.innerHTML = '';
+  }
+
+  document.getElementById('detail-modal').classList.remove('hidden');
+}
+
+function openDayOverflow(isoDate, label) {
+  const events = MEETING_EVENTS[isoDate] || [];
+  const eyebrow = document.getElementById('detail-eyebrow');
+  const title = document.getElementById('detail-title');
+  const body = document.getElementById('detail-body');
+  const actions = document.getElementById('detail-actions');
+  eyebrow.textContent = label;
+  title.textContent = events.length + ' meetings';
+  body.innerHTML = '';
+  events.forEach(function(event) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'w-full text-left rounded-xl border border-slate-200 px-3 py-2.5 hover:bg-slate-50';
+    const badge = event.source === 'aprima'
+      ? '<span class="text-[10px] font-bold text-teal-700 bg-teal-50 border border-teal-100 px-1.5 py-0.5 rounded">Aprima</span>'
+      : '<span class="text-[10px] font-bold text-slate-600 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">CAL</span>';
+    btn.innerHTML = '<div class="flex items-center gap-2 mb-1">' + badge +
+      (event.startLabel ? '<span class="text-xs font-bold text-slate-500">' + escapeHtml(event.startLabel) + '</span>' : '') +
+      '</div><div class="font-semibold text-slate-800">' + escapeHtml(event.title) + '</div>';
+    btn.addEventListener('click', function() { openMeetingDetail(event); });
+    body.appendChild(btn);
+  });
+  actions.classList.remove('hidden');
+  actions.innerHTML = '';
+  const scheduleBtn = document.createElement('button');
+  scheduleBtn.type = 'button';
+  scheduleBtn.className = 'flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium';
+  scheduleBtn.textContent = 'Schedule on this day';
+  scheduleBtn.addEventListener('click', function() {
+    closeDetailModal();
+    openCreateForDate(isoDate);
+  });
+  actions.appendChild(scheduleBtn);
+  document.getElementById('detail-modal').classList.remove('hidden');
+}
+
+function editFromDetail(event) {
+  closeDetailModal();
+  document.getElementById('edit-form').action = '/admin/meetings/' + event.id + '/edit';
+  document.getElementById('edit-title').value = event.title || '';
+  document.getElementById('edit-date').value = event.dateIso || '';
+  document.getElementById('edit-start-time').value = event.start || '';
+  document.getElementById('edit-end-time').value = event.end || '';
+  document.getElementById('edit-location-text').value = event.location || '';
+  document.getElementById('edit-recurrence-rule').value = event.recurrence || 'none';
+  document.getElementById('edit-notes').value = event.notes || '';
+  const ids = (event.attendeeIds || []).map(String);
   document.querySelectorAll('.edit-attendee').forEach(function(input) {
     input.checked = ids.includes(input.value);
   });
-
   document.getElementById('edit-modal').classList.remove('hidden');
 }
 </script>

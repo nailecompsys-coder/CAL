@@ -3,6 +3,7 @@ import SwiftUI
 struct CALNativeTabShell: View {
   @ObservedObject var store: NativeScheduleStore
   @State private var selectedSection: CALNativeSection = .schedule
+  @State private var sharedFocusDate = Date()
   @State private var showingAlerts = false
 
   private var latestUnreadAlert: NativeScheduleAlert? {
@@ -14,11 +15,19 @@ struct CALNativeTabShell: View {
       Group {
         switch selectedSection {
         case .schedule:
-          ScheduleHomeView(store: store, selectedSection: $selectedSection)
+          ScheduleHomeView(
+            store: store,
+            selectedSection: $selectedSection,
+            selectedDate: $sharedFocusDate
+          )
         case .timeOff:
           TimeOffHomeView(store: store, selectedSection: $selectedSection)
         case .patients:
-          PatientScheduleView(store: store, selectedSection: $selectedSection)
+          PatientScheduleView(
+            store: store,
+            selectedSection: $selectedSection,
+            selectedDate: $sharedFocusDate
+          )
         }
       }
 

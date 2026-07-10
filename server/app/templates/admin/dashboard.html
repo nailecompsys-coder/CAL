@@ -45,22 +45,22 @@
   <!-- ── Stat band (4 equal bento cells) ─────────────────────────── -->
   <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
 
-    <!-- On-Call Today — dark accent cell -->
-    <div class="bento-card clinical-stat clinical-stat--primary p-4 flex flex-col gap-2.5" style="--i:0">
+    <!-- On-Call Today -->
+    <div class="bento-card clinical-stat p-4 flex flex-col gap-2.5" style="--i:0">
       <div class="flex items-center justify-between">
-        <p class="text-[11px] font-extrabold uppercase tracking-widest text-white/70">On-Call Today</p>
+        <p class="text-[11px] font-extrabold uppercase tracking-widest text-slate-400">On-Call Today</p>
         <span class="relative flex h-2.5 w-2.5">
           <span class="breathe-dot absolute inline-flex h-full w-full rounded-full {% if on_call_today %}bg-emerald-400{% else %}bg-rose-400{% endif %}"></span>
           <span class="relative inline-flex rounded-full h-2.5 w-2.5 {% if on_call_today %}bg-emerald-400{% else %}bg-rose-400{% endif %}"></span>
         </span>
       </div>
-      <p class="text-4xl font-extrabold text-white leading-none tabular-nums">{{ on_call_today|length }}</p>
+      <p class="text-4xl font-extrabold text-slate-800 leading-none tabular-nums">{{ on_call_today|length }}</p>
       {% if on_call_today %}
-      <p class="text-xs text-emerald-400 font-medium flex items-center gap-1.5">
+      <p class="text-xs text-emerald-600 font-medium flex items-center gap-1.5">
         <i class="fa-solid fa-circle-check"></i> Coverage assigned
       </p>
       {% else %}
-      <p class="text-xs text-rose-400 font-medium flex items-center gap-1.5">
+      <p class="text-xs text-rose-500 font-medium flex items-center gap-1.5">
         <i class="fa-solid fa-triangle-exclamation"></i> No one assigned
       </p>
       {% endif %}
@@ -141,6 +141,69 @@
     </div>
   </div>
   {% endif %}
+
+  <!-- ── Surgical One / main office patients (Mon–Fri) ─────────────── -->
+  <div class="bento-card clinical-panel overflow-hidden" style="--i:4">
+    <div class="px-5 py-3 border-b border-slate-100 flex items-center justify-between gap-3">
+      <div class="flex items-center gap-2.5 min-w-0">
+        <div class="w-7 h-7 rounded-xl bg-teal-600 flex items-center justify-center flex-shrink-0">
+          <i class="fa-solid fa-user-injured text-white text-xs"></i>
+        </div>
+        <div class="min-w-0">
+          <h2 class="font-bold text-slate-800">Surgery One · Office Patients</h2>
+          <p class="text-xs text-slate-500 truncate">
+            {{ surgical_one_week.weekStart.strftime('%b %-d') }} – {{ surgical_one_week.weekEnd.strftime('%b %-d') }}
+            · {{ surgical_one_week.total }} patients
+          </p>
+        </div>
+      </div>
+      {% if surgical_one_week.warning %}
+      <span class="text-[11px] font-semibold text-amber-700 bg-amber-50 border border-amber-100 px-2 py-1 rounded-full flex-shrink-0">Aprima offline</span>
+      {% endif %}
+    </div>
+
+    <div class="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+      {% for day in surgical_one_week.days %}
+      <details class="group rounded-2xl border {% if day.isToday %}border-teal-300 bg-teal-50/70{% else %}border-slate-200 bg-white/70{% endif %} overflow-hidden">
+        <summary class="list-none cursor-pointer px-3.5 py-3 select-none">
+          <div class="flex items-center justify-between gap-2">
+            <div>
+              <p class="text-[10px] font-extrabold uppercase tracking-widest {% if day.isToday %}text-teal-700{% else %}text-slate-400{% endif %}">{{ day.weekday }}</p>
+              <p class="text-lg font-extrabold text-slate-800 leading-tight">{{ day.date.strftime('%-d') }}</p>
+            </div>
+            <span class="min-w-[2rem] h-8 px-2 rounded-full flex items-center justify-center text-sm font-extrabold {% if day.count %}bg-teal-600 text-white{% else %}bg-slate-100 text-slate-400{% endif %}">{{ day.count }}</span>
+          </div>
+          <p class="mt-2 text-[11px] font-semibold {% if day.count %}text-teal-700{% else %}text-slate-400{% endif %}">
+            {% if day.count %}{{ day.count }} patient{{ 's' if day.count != 1 else '' }}{% else %}No patients{% endif %}
+          </p>
+          {% if day.count %}
+          <p class="mt-1 text-[11px] text-slate-600 truncate" title="{{ day.clinicLabel }}">{{ day.clinicLabel }}</p>
+          <p class="text-[11px] font-bold text-slate-700 truncate" title="{{ day.surgeonLabel }}">{{ day.surgeonLabel }}</p>
+          {% endif %}
+        </summary>
+        <div class="border-t border-slate-100/80 px-3 py-2 max-h-56 overflow-y-auto space-y-1.5 bg-white/80">
+          {% for appt in day.appointments %}
+          <div class="rounded-xl border border-slate-100 px-2.5 py-2">
+            <p class="text-xs font-bold text-slate-800 truncate">{{ appt.start }} · {{ appt.patientName }}</p>
+            <p class="text-[11px] text-slate-500 truncate">
+              {{ appt.surgeonInitials or appt.surgeonName }}{% if appt.appointmentType %} · {{ appt.appointmentType }}{% endif %}{% if appt.room %} · Rm {{ appt.room }}{% endif %}
+            </p>
+          </div>
+          {% else %}
+          <p class="text-xs text-slate-400 py-2 text-center">Nothing scheduled</p>
+          {% endfor %}
+        </div>
+      </details>
+      {% endfor %}
+    </div>
+    {% if surgical_one_week.warning %}
+    <div class="px-5 pb-4">
+      <p class="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+        <i class="fa-solid fa-triangle-exclamation mr-1"></i>{{ surgical_one_week.warning }}
+      </p>
+    </div>
+    {% endif %}
+  </div>
 
   <!-- ── Main content row ──────────────────────────────────────────── -->
   <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">

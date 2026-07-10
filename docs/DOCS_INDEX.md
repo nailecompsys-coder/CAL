@@ -30,6 +30,18 @@ Do not create new long-lived docs in retired folders under `/Users/donnaile/dev/
 | `restructure-phase-12-release-readiness.md` | Release lane proof from the final top-level Git root |
 | `cal-native-stack-guardrails.md` | Native lane and release guardrails |
 | `cal-native-parity-ledger.md` | Platform parity ledger |
+| `CAL_AGENT_GUARDRAILS.md` | Anti-drift / anti-hallucination rules for all agents |
+| `SCHEDULER_AND_ANDROID_EXECUTION_PLAN.md` | Scheduler portal/mobile + Android-iOS parity build plan |
+| `BLOCK_OR_SCHEDULER_AUDIT.md` | Block OR logic/screen audit — intent vs Codex code, bugs, continue path |
+| `MOBILE_BLOCK_OR_CREATE_PLAN.md` | Scheduler mobile create open blocks — **plan only, hold for Don verify** |
+| `LOCAL_DEV_REAL_DATA.md` | Load real dump into Mac-dev; portal + DEBUG sim share localhost dataset |
+
+## Agent Build Plans
+
+| Document | Purpose |
+|---|---|
+| `ai/CURSOR_GROK_BUILD_FROM_CODEX.md` | Cursor/Grok build plan continuing from the Codex restructure — read order, lanes, phases, gates |
+| `ai/CURSOR_CONTEXT.md` | Agent bootstrap context (contract docs, high-value files) |
 
 ## Operations / Production Docs
 

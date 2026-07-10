@@ -1,0 +1,87 @@
+{% extends "base_admin.html" %}
+{% block title %}Access & Devices{% endblock %}
+
+{% block content %}
+<header class="portal-header px-5 py-3 sticky top-0 z-10 flex-shrink-0 flex items-center justify-between">
+  <div>
+    <h1 class="font-bold">Settings</h1>
+    <p class="text-xs text-slate-500">Mobile devices and OTP sign-in troubleshooting</p>
+  </div>
+  <a href="/admin/otp-audit?limit=100" class="text-xs font-semibold text-blue-600 hover:text-blue-800">Raw JSON</a>
+</header>
+
+<div class="settings-shell">
+  {% include "admin/_settings_nav.html" %}
+  <div class="settings-main space-y-5">
+    <section class="clinical-panel overflow-hidden">
+      <div class="px-4 py-3 border-b border-slate-100">
+        <h2 class="font-extrabold text-slate-800">Mobile devices</h2>
+        <p class="text-xs text-slate-500 mt-0.5">Registered after a successful OTP verify. Preview mobile from People → Clinical.</p>
+      </div>
+      {% if registered_devices %}
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-slate-200 bg-slate-50 text-left">
+              <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Physician / Staff</th>
+              <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Device</th>
+              <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Last seen</th>
+              <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Status</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            {% for d in registered_devices %}
+            <tr>
+              <td class="px-4 py-3 font-medium text-slate-800">{{ d.surgeon.full_name }}{% if d.surgeon.suffix %} {{ d.surgeon.suffix }}{% endif %}</td>
+              <td class="px-4 py-3 text-slate-600">{{ d.device_name|device_name(d.user_agent) }}</td>
+              <td class="px-4 py-3 text-slate-600">{% if d.last_seen %}{{ d.last_seen.strftime('%b %d, %Y %H:%M') }}{% else %}—{% endif %}</td>
+              <td class="px-4 py-3">{% if d.is_active %}<span class="text-emerald-600 text-xs font-medium">Active</span>{% else %}<span class="text-slate-400 text-xs">Inactive</span>{% endif %}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="p-8 text-sm text-slate-500">No devices registered yet.</div>
+      {% endif %}
+    </section>
+
+    <section class="clinical-panel overflow-hidden">
+      <div class="px-4 py-3 border-b border-slate-100">
+        <h2 class="font-extrabold text-slate-800">OTP sign-in audit</h2>
+        <p class="text-xs text-slate-500 mt-0.5">Use when someone says they did not get a 6-digit code.</p>
+      </div>
+      {% if otp_audit_logs %}
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="border-b border-slate-200 bg-slate-50 text-left">
+              <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">When</th>
+              <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Entered</th>
+              <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Matched</th>
+              <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Action</th>
+              <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Result</th>
+              <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Sent by</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            {% for row in otp_audit_logs %}
+            <tr class="align-top">
+              <td class="px-4 py-3 text-slate-600 whitespace-nowrap">{{ row.created_at|eastern_time }}</td>
+              <td class="px-4 py-3 font-medium text-slate-800">{{ row.submitted_email }}</td>
+              <td class="px-4 py-3 text-slate-700">{% if row.surgeon %}{{ row.surgeon.full_name }}{% else %}—{% endif %}</td>
+              <td class="px-4 py-3 text-xs">{{ row.action }}</td>
+              <td class="px-4 py-3 text-xs">{{ row.result }}</td>
+              <td class="px-4 py-3 text-slate-600">{{ row.delivery_channel or '—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="p-8 text-sm text-slate-500">No OTP activity yet.</div>
+      {% endif %}
+    </section>
+  </div>
+</div>
+{% endblock %}

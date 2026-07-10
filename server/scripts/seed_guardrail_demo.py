@@ -99,11 +99,20 @@ def location(db, name, abbreviation, loc_type="hospital") -> Location:
 def clinic_group(db, name, abbreviation, max_off) -> ClinicGroup:
     row = db.query(ClinicGroup).filter(ClinicGroup.name == name).first()
     if not row:
-        row = ClinicGroup(name=name, abbreviation=abbreviation, max_approved_off_per_day=max_off, is_active=True)
+        row = ClinicGroup(
+            name=name,
+            abbreviation=abbreviation,
+            group_type="people",
+            enforce_day_off_limit=True,
+            max_approved_off_per_day=max_off,
+            is_active=True,
+        )
         db.add(row)
         db.flush()
     else:
         row.abbreviation = abbreviation
+        row.group_type = "people"
+        row.enforce_day_off_limit = True
         row.max_approved_off_per_day = max_off
         row.is_active = True
     return row

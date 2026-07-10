@@ -44,10 +44,10 @@ def native_patient_schedule(
     end: str,
     auth=Depends(get_current_surgeon),
 ):
-    _, _ = auth
+    surgeon, _ = auth
     start_date, end_date = parse_iso_date_range(start, end)
     try:
-        return native_patient_schedule_service(start_date, end_date)
+        return native_patient_schedule_service(start_date, end_date, surgeon=surgeon)
     except AprimaScheduleUnavailable as exc:
         return {
             "range": {"start": start_date.isoformat(), "end": end_date.isoformat()},

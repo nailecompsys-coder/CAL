@@ -13,9 +13,21 @@ async def save_practice_settings(
     logo,
     uploads_dir: str | PathLike[str],
     show_or_patient_procedure_form: bool = False,
+    practice_address: str = "",
+    practice_city: str = "",
+    practice_state: str = "",
+    practice_zip: str = "",
+    practice_phone: str = "",
+    practice_email: str = "",
 ) -> str:
     if practice_name.strip():
         page_settings.practice_name = practice_name.strip()
+    page_settings.practice_address = (practice_address or "").strip() or None
+    page_settings.practice_city = (practice_city or "").strip() or None
+    page_settings.practice_state = (practice_state or "").strip().upper()[:32] or None
+    page_settings.practice_zip = (practice_zip or "").strip() or None
+    page_settings.practice_phone = (practice_phone or "").strip() or None
+    page_settings.practice_email = (practice_email or "").strip() or None
     page_settings.show_or_patient_procedure_form = show_or_patient_procedure_form
     if logo and logo.filename:
         ext = os.path.splitext(logo.filename)[1].lower()

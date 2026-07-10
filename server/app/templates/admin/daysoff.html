@@ -2,18 +2,31 @@
 {% block title %}Days Off{% endblock %}
 
 {% block content %}
-<header class="portal-header px-5 py-3 sticky top-0 z-10 flex-shrink-0 flex items-center justify-between">
-  <div>
-    <h1 class="font-bold">Days Off</h1>
-    <p class="text-xs text-slate-500">
+<header class="bg-white border-b border-slate-200 px-6 py-4 sticky top-0 z-10 flex-shrink-0 flex items-center justify-between gap-4">
+  <div class="min-w-0">
+    <h1 class="text-xl font-bold text-slate-800">Days Off</h1>
+    <p class="text-sm text-slate-500">
       {{ pending|length }} pending
-      {%- if selected_surgeon_id %} · filtered by {{ surgeons | selectattr('id', 'equalto', selected_surgeon_id) | map(attribute='full_name') | first }}{% endif %}
+      {%- if selected_surgeon_id %} · filtered{% endif %}
+      · Who’s out {{ month_label }}
     </p>
   </div>
-  <button onclick="document.getElementById('add-dayoff-modal').classList.remove('hidden')"
-    class="bg-blue-600 text-white text-xs font-bold px-3 py-2 rounded-xl hover:bg-blue-700 flex items-center gap-2">
-    <i class="fa-solid fa-plus"></i> Add Day Off
-  </button>
+  <div class="flex items-center gap-2 flex-shrink-0">
+    <button onclick="document.getElementById('add-dayoff-modal').classList.remove('hidden')"
+      class="bg-slate-100 text-slate-600 text-sm px-3 py-2 rounded-lg hover:bg-slate-200 flex items-center gap-1.5">
+      <i class="fa-solid fa-plus"></i> Add
+    </button>
+    <a href="/admin/daysoff?month_offset={{ month_offset - 1 }}{% if selected_surgeon_id %}&surgeon_id={{ selected_surgeon_id }}{% endif %}"
+       class="w-9 h-9 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 flex items-center justify-center">
+      <i class="fa-solid fa-chevron-left text-xs"></i>
+    </a>
+    <a href="/admin/daysoff?month_offset=0{% if selected_surgeon_id %}&surgeon_id={{ selected_surgeon_id }}{% endif %}"
+       class="bg-blue-600 text-white text-sm px-3 py-2 rounded-lg hover:bg-blue-700">Today</a>
+    <a href="/admin/daysoff?month_offset={{ month_offset + 1 }}{% if selected_surgeon_id %}&surgeon_id={{ selected_surgeon_id }}{% endif %}"
+       class="w-9 h-9 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 flex items-center justify-center">
+      <i class="fa-solid fa-chevron-right text-xs"></i>
+    </a>
+  </div>
 </header>
 
 {% if request.query_params.get('warn') %}
@@ -29,14 +42,14 @@
 {% endif %}
 
 {# ── Surgeon filter chips ──────────────────────────────────────────────── #}
-<div class="px-5 pt-4 pb-2 flex items-center gap-2 flex-wrap">
-  <a href="/admin/daysoff"
+<div class="px-6 pt-4 pb-2 flex items-center gap-2 flex-wrap">
+  <a href="/admin/daysoff?month_offset={{ month_offset }}"
      class="text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors
             {% if not selected_surgeon_id %}bg-blue-600 text-white border-transparent{% else %}bg-white text-slate-500 border-slate-200 hover:border-slate-400{% endif %}">
     All
   </a>
   {% for s in surgeons %}
-  <a href="/admin/daysoff?surgeon_id={{ s.id }}"
+  <a href="/admin/daysoff?month_offset={{ month_offset }}&surgeon_id={{ s.id }}"
      class="text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors
             {% if selected_surgeon_id == s.id %}bg-blue-600 text-white border-transparent{% else %}bg-white text-slate-500 border-slate-200 hover:border-slate-400{% endif %}">
     {{ s.initials }}
@@ -150,66 +163,112 @@
   </div>
   {% endif %}
 
-  {# ── Month sections ───────────────────────────────────────────────────── #}
-  {% if months %}
-  <div class="space-y-5">
-    {% for section in months %}
-    <div>
-      {# Hard month break header #}
-      <div class="flex items-center gap-3 mb-2">
-        <h2 class="text-xs font-bold text-slate-500 uppercase tracking-widest whitespace-nowrap">{{ section.label }}</h2>
-        <div class="flex-1 h-px bg-slate-200"></div>
-        <span class="text-xs text-slate-400">{{ section.records|length }}</span>
-      </div>
+  {# ── Who’s out Gantt (month) ──────────────────────────────────────────── #}
+  <div>
+    <div class="flex items-center gap-3 mb-3 flex-wrap">
+      <h2 class="font-extrabold text-slate-700 text-xs uppercase tracking-wide">Who’s out · {{ month_label }}</h2>
+      <div class="flex-1 h-px bg-slate-200 min-w-[40px]"></div>
+      <span class="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+        <span class="inline-flex px-2 py-0.5 rounded-md shadow-sm block-gradient" style="--block-c: var(--dayoff-approved); color:#1e293b">Approved</span>
+        <span class="inline-flex px-2 py-0.5 rounded-md shadow-sm block-gradient" style="--block-c: var(--dayoff-pending); color:#1e293b">Pending</span>
+      </span>
+    </div>
 
-      {# Compact record rows #}
-      <div class="clinical-glass divide-y divide-slate-100 overflow-hidden">
-        {% for d in section.records %}
-        <div class="px-4 py-2.5 flex items-center gap-3">
-          {# Initials avatar #}
-          <div class="w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs flex-shrink-0 staff-avatar">{{ d.surgeon.initials }}</div>
-          {# Name + dates + reason #}
-          <div class="flex-1 min-w-0 flex items-center gap-3 flex-wrap">
-            <span class="text-sm font-medium text-slate-700 w-28 flex-shrink-0 truncate">{{ d.surgeon.full_name }}</span>
-            <span class="text-xs text-slate-500 w-24 flex-shrink-0">
-              {{ d.start_date.strftime('%b %-d') }}{% if d.start_date != d.end_date %}–{{ d.end_date.strftime('%-d') if d.start_date.month == d.end_date.month else d.end_date.strftime('%b %-d') }}{% endif %}
-            </span>
-            <span class="text-xs text-slate-400 truncate">{{ d.reason or '—' }}{% if d.notes %} · {{ d.notes }}{% endif %}</span>
+    {% set is_current_month = (month_start.year == today.year and month_start.month == today.month) %}
+    {% set gantt_visible = coverage_rows | selectattr('hasBars') | list %}
+    <style>
+      /* Fluid day columns: fill wide monitors; scroll when below min cell width */
+      #dayoff-gantt-track {
+        --dayoff-days: {{ days_in_month }};
+        --dayoff-min-col: 22px;
+        width: 100%;
+        min-width: calc(var(--dayoff-days) * var(--dayoff-min-col));
+      }
+      #dayoff-gantt-track .dayoff-day-grid {
+        display: grid;
+        grid-template-columns: repeat(var(--dayoff-days), minmax(var(--dayoff-min-col), 1fr));
+      }
+      #dayoff-today-line {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: calc(({{ today.day if is_current_month else 1 }} - 0.5) / var(--dayoff-days) * 100%);
+        width: 2px;
+        transform: translateX(-50%);
+        background: var(--cal-teal, #0d9488);
+        box-shadow: 0 0 0 1px rgba(13, 148, 136, 0.15);
+        z-index: 5;
+        pointer-events: none;
+      }
+    </style>
+    <div class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+      {% if not gantt_visible %}
+      <div class="px-4 py-8 text-center text-sm text-slate-400">No requested or approved time off this month.</div>
+      {% else %}
+      <div class="flex items-stretch">
+        {# Sticky surgeon names — never scrolls sideways #}
+        <div class="w-36 flex-shrink-0 border-r border-slate-300 bg-slate-50 z-[2]">
+          <div class="h-9 px-3 flex items-center text-[10px] font-semibold uppercase tracking-wide text-slate-500 border-b border-slate-300">
+            Surgeon
           </div>
-          {# Status badge #}
-          {% if d.status == 'approved' %}
-          <span class="text-[10px] font-bold px-2 py-0.5 rounded-full status-approved flex-shrink-0">
-            <i class="fa-solid fa-circle-check mr-0.5"></i>Approved
-          </span>
-          {% elif d.status == 'denied' %}
-          <span class="text-[10px] font-bold px-2 py-0.5 rounded-full status-denied flex-shrink-0">
-            <i class="fa-solid fa-xmark mr-0.5"></i>Denied
-          </span>
-          {% endif %}
-          {# Actions #}
-          <div class="flex gap-1 flex-shrink-0">
-            <button onclick="openEditModal({{ d.id }}, '{{ d.surgeon.full_name }}', '{{ d.start_date.isoformat() }}', '{{ d.end_date.isoformat() }}', '{{ d.reason or '' }}', '{{ d.notes or '' }}')"
-              class="w-7 h-7 bg-slate-100 text-slate-400 rounded-xl hover:bg-clinical-tealSoft/50 hover:text-blue-600 flex items-center justify-center" title="Edit">
-              <i class="fa-solid fa-pen" style="font-size:10px;"></i>
-            </button>
-            <form method="post" action="/admin/daysoff/{{ d.id }}/delete"
-              onsubmit="return confirm('Remove this day off?')">
-              <button class="w-7 h-7 bg-slate-100 text-slate-400 rounded-xl hover:bg-rose-100 hover:text-rose-600 flex items-center justify-center" title="Delete">
-                <i class="fa-solid fa-trash" style="font-size:10px;"></i>
+          {% for row in gantt_visible %}
+          <div class="px-3 border-b border-slate-300 flex items-center gap-2"
+               style="min-height: {{ row.laneCount * 1.75 + 0.5 }}rem;">
+            <div class="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 staff-avatar">{{ row.surgeon.initials }}</div>
+            <span class="text-xs font-semibold text-slate-800 truncate">{{ row.surgeon.last_name }}</span>
+          </div>
+          {% endfor %}
+        </div>
+
+        {# Day grid fills remaining width; scrolls only when columns would go below min width #}
+        <div class="flex-1 min-w-0 overflow-x-auto" id="dayoff-gantt-scroll">
+          <div class="relative" id="dayoff-gantt-track">
+            {% if is_current_month %}
+            <div id="dayoff-today-line" title="Today · {{ today.isoformat() }}"></div>
+            {% endif %}
+
+            <div class="dayoff-day-grid border-b border-slate-300 bg-slate-50">
+              {% for n in day_numbers %}
+              {% set cell_date = month_start.replace(day=n) %}
+              <div id="gantt-day-{{ n }}"
+                   class="text-center text-[10px] font-semibold h-9 leading-9 border-r border-slate-200 last:border-r-0
+                   {% if cell_date == today %}text-teal-700 font-extrabold bg-teal-50{% elif cell_date.weekday() >= 5 %}text-slate-300{% else %}text-slate-500{% endif %}">
+                {{ n }}
+              </div>
+              {% endfor %}
+            </div>
+
+            {% for row in gantt_visible %}
+            <div class="relative border-b border-slate-300 hover:bg-slate-50/40"
+                 style="min-height: {{ row.laneCount * 1.75 + 0.5 }}rem;">
+              <div class="absolute inset-0 dayoff-day-grid pointer-events-none">
+                {% for n in day_numbers %}
+                {% set cell_date = month_start.replace(day=n) %}
+                <div class="border-r border-slate-200 last:border-r-0
+                  {% if cell_date == today %}bg-teal-50/80{% elif cell_date.weekday() >= 5 %}bg-slate-50/90{% endif %}"></div>
+                {% endfor %}
+              </div>
+              {% for bar in row.bars %}
+              <button type="button"
+                class="absolute left-0 rounded-md shadow-sm block-gradient border border-black/5 text-left px-1.5 overflow-hidden hover:opacity-90 z-[1]"
+                style="top: {{ 0.25 + (bar.lane|default(0)) * 1.65 }}rem; height: 1.4rem; left: calc({{ bar.leftPct }}% + 1px); width: calc({{ bar.widthPct }}% - 2px); --block-c: {% if bar.status == 'pending' %}var(--dayoff-pending){% else %}var(--dayoff-approved){% endif %}; color:#1e293b;"
+                title="{{ row.surgeon.full_name }} · {{ bar.startIso }} → {{ bar.endIso }}{% if bar.reason %} · {{ bar.reason }}{% endif %}"
+                onclick="openEditModal({{ bar.id }}, {{ row.surgeon.full_name|tojson }}, '{{ bar.startIso }}', '{{ bar.endIso }}', {{ (bar.reason or '')|tojson }}, {{ (bar.notes or '')|tojson }})">
+                <span class="text-[10px] font-bold truncate block leading-[1.4rem]">
+                  {% if bar.spanDays > 1 %}{{ bar.labelStart }}–{{ bar.labelEnd }}{% else %}{{ bar.labelStart }}{% endif %}
+                  {% if bar.reason %} · {{ bar.reason }}{% endif %}
+                </span>
               </button>
-            </form>
+              {% endfor %}
+            </div>
+            {% endfor %}
           </div>
         </div>
-        {% else %}
-        <div class="px-4 py-3 text-xs text-slate-400 text-center italic">No records</div>
-        {% endfor %}
       </div>
+      {% endif %}
     </div>
-    {% endfor %}
+    <p class="text-[11px] text-slate-400 mt-2">Tap a bar to edit. Pending stays amber until approved above. Teal vertical line marks today.</p>
   </div>
-  {% elif not pending %}
-  <p class="text-sm text-slate-400 text-center py-8">No day-off records found.</p>
-  {% endif %}
 
 </div>
 
@@ -405,6 +464,32 @@ function clearSelection() {
   const selectAll = document.getElementById('select-all-cb');
   if (selectAll) selectAll.checked = false;
   updateBulkBar();
+}
+
+function centerDayoffGanttOnToday() {
+  const scroll = document.getElementById('dayoff-gantt-scroll');
+  const todayEl = document.getElementById('gantt-day-{{ today.day }}');
+  if (!scroll || !todayEl) return;
+  // Only nudge when the track is wider than the viewport (small screens).
+  if (scroll.scrollWidth <= scroll.clientWidth + 2) {
+    scroll.scrollLeft = 0;
+    return;
+  }
+  const left = todayEl.offsetLeft - (scroll.clientWidth / 2) + (todayEl.offsetWidth / 2);
+  scroll.scrollLeft = Math.max(0, left);
+}
+
+function scheduleCenterDayoffGantt() {
+  centerDayoffGanttOnToday();
+  window.setTimeout(centerDayoffGanttOnToday, 50);
+}
+
+window.addEventListener('resize', centerDayoffGanttOnToday);
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', scheduleCenterDayoffGantt);
+} else {
+  scheduleCenterDayoffGantt();
 }
 </script>
 {% endblock %}

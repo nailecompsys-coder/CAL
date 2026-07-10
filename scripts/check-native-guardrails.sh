@@ -68,11 +68,11 @@ require_clean_and_pushed() {
 app_changes="$(repo_changes "$ROOT")"
 check_artifacts "CAL repo" "$app_changes"
 
-backend_native_pattern='^server/(app/native_|app/routers/native_api\.py|app/routers/surgeon_day_items\.py|app/routers/surgeon_otp\.py|app/routers/api_push\.py|app/push\.py|app/sms_service\.py)'
+backend_native_pattern='^server/(app/native_|app/routers/native_api\.py|app/routers/native_scheduler_api\.py|app/routers/surgeon_day_items\.py|app/routers/surgeon_otp\.py|app/routers/api_push\.py|app/push\.py|app/sms_service\.py)'
 native_contract_test_pattern='^server/tests/(test_native_|test_surgeon_otp_|test_push_)'
 imported_native_source_pattern='^(ios/|android/|legacy-react-native/)'
 imported_native_metadata_pattern='^(ios/CALNative\.xcodeproj/project\.pbxproj|ios/CALNative/Info\.plist|android/.*gradle.*|android/gradle/|legacy-react-native/app\.json|legacy-react-native/eas\.json|legacy-react-native/package(-lock)?\.json)'
-repo_native_doc_pattern='^docs/(cal-native-(parity-ledger|stack-guardrails)\.md|restructure-phase-[0-9]+.*\.md)$'
+repo_native_doc_pattern='^docs/(cal-native-(parity-ledger|stack-guardrails)\.md|CAL_AGENT_GUARDRAILS\.md|SCHEDULER_AND_ANDROID_EXECUTION_PLAN\.md|restructure-phase-[0-9]+.*\.md)$'
 forbidden_ios_support_files=(
   "ios/Podfile"
   "ios/Podfile.lock"
@@ -109,6 +109,35 @@ fi
 
 if matches_any "$app_changes" "$imported_native_metadata_pattern" && ! matches_any "$app_changes" "$repo_native_doc_pattern"; then
   add_failure "Imported native build metadata changed without a parity ledger, guardrail, or restructure doc update."
+fi
+
+android_mock_pattern='Chris Johnson|ScreenPlaceholder|TodayDashboard'
+if [[ -f "$ROOT/android/app/src/main/java/com/midfloridasurgical/calcompose/MainActivity.kt" ]]; then
+  if grep -Eq "$android_mock_pattern" "$ROOT/android/app/src/main/java/com/midfloridasurgical/calcompose/MainActivity.kt"; then
+    if [[ "$STRICT_RELEASE" == "1" ]]; then
+      add_failure "Android Compose still contains mock UI (hardcoded data, ScreenPlaceholder, or wrong tab structure). Release blocked until android/ mirrors ios/CALNative/ per docs/SCHEDULER_AND_ANDROID_EXECUTION_PLAN.md."
+    elif matches_any "$app_changes" '^android/'; then
+      echo "WARN: android/ still contains mock UI markers. Target: mirror ios/CALNative/ exactly (see docs/SCHEDULER_AND_ANDROID_EXECUTION_PLAN.md)." >&2
+    fi
+  fi
+fi
+
+if matches_any "$app_changes" '^server/app/routers/(native_scheduler_api|admin_block_or)\.py|^server/app/or_block_service\.py' && ! matches_any "$app_changes" '^server/tests/(test_native_scheduler_contract|test_or_block_service)\.py$|^docs/cal-native-parity-ledger\.md$'; then
+  add_failure "Scheduler/Block OR backend changed without test_native_scheduler_contract.py, test_or_block_service.py, or parity ledger update."
+fi
+
+# Swift color NO-PASS: Asset Catalog / ClinicalPalette only (see .cursor/rules/swift-color-standard.mdc)
+# Ignore comment-only mentions; match real constructors.
+swift_color_hits="$(
+  grep -RInE \
+    'Color\(\s*red\s*:|Color\(\s*white\s*:|Color\(\s*hue\s*:|UIColor\(\s*red\s*:|UIColor\(hex|Color\(uiColor:\s*UIColor' \
+    "$ROOT/ios" --include='*.swift' 2>/dev/null \
+    | grep -vE '^\S+:[0-9]+:\s*//' \
+    || true
+)"
+if [[ -n "$swift_color_hits" ]]; then
+  add_failure "Swift hardcoded colors are forbidden. Use ClinicalPalette / Images.xcassets colorsets only (.cursor/rules/swift-color-standard.mdc).
+$swift_color_hits"
 fi
 
 if [[ "$STRICT_RELEASE" == "1" ]]; then

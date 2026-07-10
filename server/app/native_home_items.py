@@ -11,12 +11,15 @@ from .models import (
     CallRotation,
     ClinicSchedule,
     DayOff,
+    ORBlockAssignment,
+    ORBlockInstance,
     Surgeon,
     SurgeonDayItem,
     SurgicalCase,
 )
 from .native_home_serializers import (
     availability_payload,
+    block_or_item_payload,
     call_item_payload,
     clinic_item_payload,
     day_off_item_payload,
@@ -130,6 +133,41 @@ def append_surgical_items(db: Session, surgeon: Surgeon, start_date: date, end_d
         by_date[row.date.isoformat()]["items"].append(surgical_item_payload(row))
 
 
+def append_block_or_items(db: Session, surgeon: Surgeon, start_date: date, end_date: date, by_date: dict, day_off_rows: list[DayOff]) -> None:
+    rows = db.query(ORBlockAssignment).join(ORBlockInstance).options(
+        joinedload(ORBlockAssignment.block_instance).joinedload(ORBlockInstance.location),
+        joinedload(ORBlockAssignment.surgeon),
+    ).filter(
+        ORBlockAssignment.surgeon_id == surgeon.id,
+        ORBlockInstance.date >= start_date,
+        ORBlockInstance.date <= end_date,
+        ORBlockInstance.status == "assigned",
+    ).order_by(ORBlockInstance.date, ORBlockInstance.location_id, ORBlockAssignment.start_time, ORBlockAssignment.id).all()
+    grouped: dict[int, list[ORBlockAssignment]] = {}
+    for row in rows:
+        grouped.setdefault(row.block_instance_id, []).append(row)
+    for assignments in grouped.values():
+        block = assignments[0].block_instance
+        start_t = fmt_time(min(row.start_time for row in assignments)) or fmt_time(block.start_time)
+        if blocked_by_day_off(day_off_rows, block.date, start_t, fmt_time(block.end_time)):
+            continue
+        by_date[block.date.isoformat()]["items"].append(block_or_item_payload(block, assignments))
+
+    legacy_rows = db.query(ORBlockInstance).options(joinedload(ORBlockInstance.location)).filter(
+        ORBlockInstance.assigned_surgeon_id == surgeon.id,
+        ORBlockInstance.date >= start_date,
+        ORBlockInstance.date <= end_date,
+        ORBlockInstance.status == "assigned",
+    ).order_by(ORBlockInstance.date, ORBlockInstance.assigned_start_time, ORBlockInstance.start_time, ORBlockInstance.id).all()
+    for row in legacy_rows:
+        if row.assignments:
+            continue
+        start_t = fmt_time(row.assigned_start_time) or fmt_time(row.start_time)
+        if blocked_by_day_off(day_off_rows, row.date, start_t, fmt_time(row.end_time)):
+            continue
+        by_date[row.date.isoformat()]["items"].append(block_or_item_payload(row, []))
+
+
 def append_personal_items(db: Session, surgeon: Surgeon, start_date: date, end_date: date, by_date: dict) -> None:
     for row in db.query(SurgeonDayItem).filter(
         SurgeonDayItem.surgeon_id == surgeon.id,
@@ -165,7 +203,7 @@ def requests(db: Session, surgeon: Surgeon, today: date) -> list[dict]:
         for row in db.query(DayOff).filter(
             DayOff.surgeon_id == surgeon.id,
             DayOff.end_date >= today - timedelta(days=30),
-        ).order_by(DayOff.start_date.desc(), DayOff.id.desc()).limit(50).all()
+        ).order_by(DayOff.start_date.asc(), DayOff.id.asc()).limit(50).all()
     ]
 
 

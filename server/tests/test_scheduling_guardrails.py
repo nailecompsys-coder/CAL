@@ -42,7 +42,14 @@ class SchedulingGuardrailsTest(unittest.TestCase):
         db = self.Session()
         try:
             request_day = date.today() + timedelta(days=14)
-            group = ClinicGroup(name="Winter Garden", abbreviation="WG", max_approved_off_per_day=2, is_active=True)
+            group = ClinicGroup(
+                name="Winter Garden",
+                abbreviation="WG",
+                group_type="people",
+                enforce_day_off_limit=True,
+                max_approved_off_per_day=2,
+                is_active=True,
+            )
             first = self._surgeon(db, "Chris", "Johnson", 1)
             second = self._surgeon(db, "Alex", "Schroeder", 2)
             requester = self._surgeon(db, "Lucy", "Woodley", 3)
@@ -60,8 +67,36 @@ class SchedulingGuardrailsTest(unittest.TestCase):
             findings = clinic_group_day_off_findings(db, requester, request_day, request_day)
 
             self.assertEqual(len(findings), 1)
-            self.assertIn("Winter Garden allows 2", findings[0].message)
+            self.assertIn("Winter Garden allows 2 approved members", findings[0].message)
             self.assertIn("Shannon will review", findings[0].surgeon_message)
+        finally:
+            db.close()
+
+    def test_clinic_group_skips_capacity_when_limit_disabled(self):
+        db = self.Session()
+        try:
+            request_day = date.today() + timedelta(days=14)
+            group = ClinicGroup(
+                name="Rules Only",
+                abbreviation="RO",
+                group_type="people",
+                enforce_day_off_limit=False,
+                max_approved_off_per_day=1,
+                is_active=True,
+            )
+            first = self._surgeon(db, "Chris", "Johnson", 1)
+            requester = self._surgeon(db, "Lucy", "Woodley", 2)
+            db.add(group)
+            db.flush()
+            db.add_all([
+                ClinicGroupMember(clinic_group_id=group.id, surgeon_id=first.id),
+                ClinicGroupMember(clinic_group_id=group.id, surgeon_id=requester.id),
+                DayOff(surgeon_id=first.id, start_date=request_day, end_date=request_day, status="approved"),
+            ])
+            db.commit()
+
+            findings = clinic_group_day_off_findings(db, requester, request_day, request_day)
+            self.assertEqual(findings, [])
         finally:
             db.close()
 

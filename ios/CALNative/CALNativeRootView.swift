@@ -10,6 +10,8 @@ struct CALNativeRootView: View {
           .frame(maxWidth: .infinity, maxHeight: .infinity)
       } else if store.sessionToken == nil {
         NativeAuthView(store: store)
+      } else if store.sessionRole == .scheduler {
+        NativeSchedulerShell(store: store)
       } else {
         CALNativeTabShell(store: store)
       }
@@ -23,8 +25,8 @@ struct CALNativeRootView: View {
 struct ScheduleHomeView: View {
   @ObservedObject var store: NativeScheduleStore
   @Binding var selectedSection: CALNativeSection
+  @Binding var selectedDate: Date
   @State private var scope: ScheduleScope = .day
-  @State private var selectedDate = Date()
   @State private var showingDatePicker = false
   @State private var coveringAssignment: ScheduleAssignment?
 
@@ -38,6 +40,47 @@ struct ScheduleHomeView: View {
 
   private var visibleMonth: [MonthCell] {
     store.month(containing: selectedDate)
+  }
+
+  private var stepperTitle: String {
+    let calendar = Calendar.current
+    switch scope {
+    case .day:
+      if calendar.isDateInToday(selectedDate) {
+        return "Today · \(selectedDate.formatted(.dateTime.month(.abbreviated).day()))"
+      }
+      return selectedDate.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
+    case .week:
+      let start = visibleWeek.first?.date ?? selectedDate
+      let end = visibleWeek.last?.date ?? selectedDate
+      return "\(start.formatted(.dateTime.month(.abbreviated).day())) – \(end.formatted(.dateTime.month(.abbreviated).day()))"
+    case .month:
+      return selectedDate.formatted(.dateTime.month(.wide).year())
+    }
+  }
+
+  private var stepperSubtitle: String? {
+    switch scope {
+    case .day:
+      return selectedDate.formatted(.dateTime.year())
+    case .week:
+      return "Week"
+    case .month:
+      return "Month"
+    }
+  }
+
+  private var isOnTodayRange: Bool {
+    let calendar = Calendar.current
+    let today = Date()
+    switch scope {
+    case .day:
+      return calendar.isDateInToday(selectedDate)
+    case .week:
+      return visibleWeek.contains { calendar.isDateInToday($0.date) }
+    case .month:
+      return calendar.isDate(selectedDate, equalTo: today, toGranularity: .month)
+    }
   }
 
   var body: some View {
@@ -54,109 +97,112 @@ struct ScheduleHomeView: View {
           .pickerStyle(.segmented)
           .padding(.horizontal, 16)
           .padding(.top, 8)
-          .padding(.bottom, 10)
+          .padding(.bottom, 8)
           .background(.ultraThinMaterial)
 
-          if scope == .day {
-            DayScheduleDashboard(
-              day: selectedDay,
-              days: store.days,
-              statusMessage: store.warningMessage,
-              previousAction: { shiftSelection(by: -1) },
-              nextAction: { shiftSelection(by: 1) },
-              coverAction: { assignment in
-                coveringAssignment = assignment
-              }
-            )
-            .transition(.opacity.combined(with: .move(edge: .trailing)))
-          } else {
-            ScrollView {
-              VStack(alignment: .leading, spacing: 8) {
-                if let statusMessage = store.warningMessage {
-                  Label(statusMessage, systemImage: store.sessionToken == nil ? "lock" : "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.amber)
+          ScheduleDateStepper(
+            title: stepperTitle,
+            subtitle: stepperSubtitle,
+            previousAction: { stepBackward() },
+            nextAction: { stepForward() },
+            onTitleTap: { showingDatePicker = true },
+            todayAction: { jumpToToday() },
+            showsTodayButton: !isOnTodayRange
+          )
+          .padding(.horizontal, 16)
+          .padding(.bottom, 8)
+
+          Group {
+            if scope == .day {
+              DayScheduleDashboard(
+                day: selectedDay,
+                days: store.days,
+                statusMessage: store.warningMessage,
+                coverAction: { assignment in
+                  coveringAssignment = assignment
+                },
+                openPatientsAction: {
+                  selectedSection = .patients
                 }
-
-                switch scope {
-                case .day:
-                  EmptyView()
-                case .week:
-                  CompactRangeHeader(
-                    title: "Week",
-                    subtitle: "\(visibleWeek.first?.date.formatted(.dateTime.month(.abbreviated).day()) ?? "") - \(visibleWeek.last?.date.formatted(.dateTime.month(.abbreviated).day().year()) ?? "")",
-                    previousAction: { shiftSelection(by: -7) },
-                    nextAction: { shiftSelection(by: 7) }
-                  )
-
-                  VStack(spacing: 7) {
-                    ForEach(visibleWeek) { day in
-                      CompactWeekDayCard(
-                        day: day,
-                        selectedDate: $selectedDate,
-                        scope: $scope,
-                        coverAction: { assignment in
-                          coveringAssignment = assignment
-                        }
-                      )
-                    }
+              )
+              .transition(.opacity)
+            } else {
+              ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                  if let statusMessage = store.warningMessage {
+                    Label(statusMessage, systemImage: store.sessionToken == nil ? "lock" : "exclamationmark.triangle")
+                      .font(.caption)
+                      .foregroundStyle(.secondary)
+                      .padding(.horizontal, 12)
+                      .padding(.vertical, 8)
+                      .frame(maxWidth: .infinity, alignment: .leading)
+                      .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.amber)
                   }
-                case .month:
-                  CompactRangeHeader(
-                    title: selectedDate.formatted(.dateTime.month(.wide).year()),
-                    subtitle: "Month scan",
-                    previousAction: { shiftSelection(byMonths: -1) },
-                    nextAction: { shiftSelection(byMonths: 1) }
-                  )
 
-                  MonthGridView(
-                    cells: visibleMonth,
-                    selectedDate: $selectedDate,
-                    scope: $scope,
-                    coverAction: { assignment in
-                      coveringAssignment = assignment
+                  switch scope {
+                  case .day:
+                    EmptyView()
+                  case .week:
+                    VStack(spacing: 7) {
+                      ForEach(visibleWeek) { day in
+                        CompactWeekDayCard(
+                          day: day,
+                          selectedDate: $selectedDate,
+                          scope: $scope,
+                          coverAction: { assignment in
+                            coveringAssignment = assignment
+                          }
+                        )
+                      }
                     }
-                  )
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 10)
+                  case .month:
+                    MonthGridView(
+                      cells: visibleMonth,
+                      selectedDate: $selectedDate,
+                      scope: $scope,
+                      coverAction: { assignment in
+                        coveringAssignment = assignment
+                      }
+                    )
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 8)
                     .liquidGlassCard(cornerRadius: 16, tint: ClinicalPalette.cardStrong)
+
+                    MonthSelectedDayAgenda(
+                      day: selectedDay,
+                      openDayAction: {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                          scope = .day
+                        }
+                      },
+                      coverAction: { assignment in
+                        coveringAssignment = assignment
+                      },
+                      openPatientsAction: {
+                        selectedSection = .patients
+                      }
+                    )
+                    .padding(.top, 4)
+                  }
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 18)
               }
-              .padding(.horizontal, 16)
-              .padding(.top, 8)
-              .padding(.bottom, 18)
+              .refreshable {
+                await loadCurrentScope()
+              }
             }
           }
         }
       }
-      .navigationTitle("Schedule")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
-        ToolbarItem(placement: .navigationBarLeading) {
-          Button {
-            withAnimation(.snappy(duration: 0.2)) {
-              selectedDate = Date()
-            }
-          } label: {
-            Text("Today")
-          }
-        }
-
         ToolbarItem(placement: .principal) {
           CALNativeTitleMenu(selectedSection: $selectedSection, store: store)
         }
 
-        ToolbarItemGroup(placement: .navigationBarTrailing) {
-          Button {
-            showingDatePicker = true
-          } label: {
-            Image(systemName: "calendar.badge.clock")
-          }
-
+        ToolbarItem(placement: .navigationBarTrailing) {
           Button {
             Task {
               await loadCurrentScope()
@@ -179,7 +225,7 @@ struct ScheduleHomeView: View {
                   showingDatePicker = false
                 }
               }
-          }
+            }
         }
       }
       .sheet(item: $coveringAssignment) { assignment in
@@ -225,15 +271,43 @@ struct ScheduleHomeView: View {
     }
   }
 
+  private func stepBackward() {
+    switch scope {
+    case .day:
+      shiftSelection(by: -1)
+    case .week:
+      shiftSelection(by: -7)
+    case .month:
+      shiftSelection(byMonths: -1)
+    }
+  }
+
+  private func stepForward() {
+    switch scope {
+    case .day:
+      shiftSelection(by: 1)
+    case .week:
+      shiftSelection(by: 7)
+    case .month:
+      shiftSelection(byMonths: 1)
+    }
+  }
+
   private func shiftSelection(by days: Int) {
-    withAnimation(.snappy(duration: 0.2)) {
+    withAnimation(.easeInOut(duration: 0.2)) {
       selectedDate = Calendar.current.date(byAdding: .day, value: days, to: selectedDate) ?? selectedDate
     }
   }
 
   private func shiftSelection(byMonths months: Int) {
-    withAnimation(.snappy(duration: 0.2)) {
+    withAnimation(.easeInOut(duration: 0.2)) {
       selectedDate = Calendar.current.date(byAdding: .month, value: months, to: selectedDate) ?? selectedDate
+    }
+  }
+
+  private func jumpToToday() {
+    withAnimation(.easeInOut(duration: 0.2)) {
+      selectedDate = Date()
     }
   }
 
@@ -245,5 +319,4 @@ struct ScheduleHomeView: View {
       await store.load(containing: targetDate, scope: scope)
     }
   }
-
 }

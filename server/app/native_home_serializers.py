@@ -38,7 +38,54 @@ def day_off_item_payload(row, item_date: date, segment: dict, is_full: bool) -> 
     }
 
 
+_CLINIC_ROTATION_TITLE_MARKERS = (
+    "surgery 1",
+    "surgery one",
+    "surgical 1",
+    "surgical one",
+)
+_CLINIC_ROTATION_LOCATIONS = {
+    "cbo",
+    "surgery one",
+    "surgery 1",
+    "surgical one",
+    "surgical 1",
+}
+
+
+def is_clinic_rotation_text(*, title: str = "", location: str = "", reason: str = "") -> bool:
+    """True when labeling describes Surgery One / clinic rotation time, not a real meeting."""
+    title_l = (title or "").strip().lower()
+    location_l = (location or "").strip().lower()
+    reason_l = (reason or "").strip().lower()
+    blob = f"{title_l} {reason_l}".strip()
+    if not blob and not location_l:
+        return False
+    if "cancel" in title_l or "cancel" in reason_l:
+        return False
+    if "clinic" in title_l or "clinic" in reason_l:
+        return True
+    if location_l in _CLINIC_ROTATION_LOCATIONS:
+        return True
+    return any(marker in blob for marker in _CLINIC_ROTATION_TITLE_MARKERS)
+
+
+def is_clinic_day_meeting(meeting) -> bool:
+    """True when a CAL Meeting row is really a clinic-day assignment (e.g. Surgery 1 / CBO).
+
+    Practice staff often enter recurring clinic days in the Meetings table. Those should
+    render under My Schedule / clinic schedule, not the Meetings list.
+    """
+    return is_clinic_rotation_text(
+        title=getattr(meeting, "title", None) or "",
+        location=getattr(meeting, "location_text", None) or "",
+        reason=getattr(meeting, "notes", None) or "",
+    )
+
+
 def meeting_item_payload(meeting) -> dict:
+    if is_clinic_day_meeting(meeting):
+        return clinic_day_meeting_item_payload(meeting)
     return {
         "id": f"mtg-{meeting.id}",
         "type": "meeting",
@@ -47,6 +94,32 @@ def meeting_item_payload(meeting) -> dict:
         "start": fmt_time(meeting.start_time),
         "end": fmt_time(meeting.end_time),
         "notes": meeting.notes or "",
+    }
+
+
+def clinic_day_meeting_item_payload(meeting) -> dict:
+    """Serialize a clinic-day Meeting as a clinic schedule item for My Schedule."""
+    import re
+
+    title = (meeting.title or "").strip() or "Clinic"
+    # Drop leading surgeon initials ("CJ Surgery 1 Clinic" -> "Surgery 1 Clinic")
+    title = re.sub(r"^[A-Z]{1,4}\s+", "", title).strip() or title
+    location = (meeting.location_text or "").strip()
+    if location and location.lower() not in title.lower():
+        display = f"{location} · {title}"
+    else:
+        display = title
+    return {
+        "id": f"clinic-mtg-{meeting.id}",
+        "rawId": meeting.id,
+        "type": "clinic",
+        "title": display,
+        "subtitle": "CLINIC",
+        "start": fmt_time(meeting.start_time),
+        "end": fmt_time(meeting.end_time),
+        "location": location,
+        "notes": meeting.notes or "",
+        "color": "#0ea5e9",
     }
 
 
@@ -79,6 +152,31 @@ def surgical_item_payload(row) -> dict:
         "notes": row.notes or "",
         "surgeonNotes": row.surgeon_notes or "",
         "color": (row.location.color if row.location else None) or "#e0f2fe",
+    }
+
+
+def block_or_item_payload(row, assignments=None) -> dict:
+    location = row.location.abbreviation if row.location and row.location.abbreviation else (row.location.name if row.location else "OR")
+    assignments = assignments or []
+    if assignments:
+        start = fmt_time(min(assignment.start_time for assignment in assignments)) or fmt_time(row.start_time) or "07:00"
+        cases = sum(assignment.case_count or 0 for assignment in assignments)
+        notes = "; ".join(filter(None, [assignment.note for assignment in assignments]))
+    else:
+        start = fmt_time(row.assigned_start_time) or fmt_time(row.start_time) or "07:00"
+        cases = row.assigned_case_count or 0
+        notes = row.assignment_note or row.notes or ""
+    return {
+        "id": f"block-or-{row.id}",
+        "rawId": row.id,
+        "type": "block_or",
+        "title": f"{location} - {start} - {cases} Case{'s' if cases != 1 else ''}",
+        "subtitle": "Block OR",
+        "start": start,
+        "end": fmt_time(row.end_time),
+        "location": location,
+        "notes": notes,
+        "color": (row.location.color if row.location else None) or "#d9f99d",
     }
 
 

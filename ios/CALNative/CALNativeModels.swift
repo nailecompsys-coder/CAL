@@ -8,6 +8,16 @@ enum ScheduleScope: String, CaseIterable, Identifiable {
   var id: String { rawValue }
 }
 
+enum NativeSessionRole: String {
+  case surgeon
+  case scheduler
+}
+
+struct NativeVerifiedSession {
+  let token: String
+  let role: NativeSessionRole
+}
+
 struct ScheduleAssignment: Identifiable {
   let id: String
   let rotationId: Int?
@@ -84,6 +94,11 @@ struct DoctorScheduleItem: Identifiable {
   let title: String
   let subtitle: String
   let timeRange: String
+  /// Native item type: clinic, surgery, block_or, meeting, …
+  let kind: String
+
+  var isBlockOr: Bool { kind == "block_or" }
+  var isClinicOrSurgery: Bool { kind == "clinic" || kind == "surgery" }
 }
 
 struct ScheduleDay: Identifiable {
@@ -95,6 +110,11 @@ struct ScheduleDay: Identifiable {
   let mySchedule: [DoctorScheduleItem]
   let meetings: [DoctorScheduleItem]
   let personalItems: [String]
+  /// Logged-in surgeon's approved Day Off (from home `dayoff` items).
+  let hasMyApprovedOff: Bool
+  let hasClinicOr: Bool
+  let hasBlockTime: Bool
+  let hasMeeting: Bool
 
   var summary: String {
     if assignments.isEmpty {
@@ -112,7 +132,11 @@ struct ScheduleDay: Identifiable {
       requestedOff: [],
       mySchedule: [],
       meetings: [],
-      personalItems: []
+      personalItems: [],
+      hasMyApprovedOff: false,
+      hasClinicOr: false,
+      hasBlockTime: false,
+      hasMeeting: false
     )
   }
 }
@@ -247,6 +271,10 @@ struct MonthCell: Identifiable {
   let callInitials: [String]
   let offInitials: [String]
   let schedulePeriods: [String]
+  let hasMyApprovedOff: Bool
+  let hasClinicOr: Bool
+  let hasBlockTime: Bool
+  let hasMeeting: Bool
 
   var callSummary: String {
     summarized(callInitials, limit: 2)
@@ -276,7 +304,11 @@ struct MonthCell: Identifiable {
       assignments: [],
       callInitials: [],
       offInitials: [],
-      schedulePeriods: []
+      schedulePeriods: [],
+      hasMyApprovedOff: false,
+      hasClinicOr: false,
+      hasBlockTime: false,
+      hasMeeting: false
     )
   }
 }

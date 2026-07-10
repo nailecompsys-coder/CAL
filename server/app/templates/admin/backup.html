@@ -1,0 +1,148 @@
+{% extends "base_admin.html" %}
+{% block title %}Backup{% endblock %}
+
+{% block content %}
+<header class="portal-header px-5 py-3 sticky top-0 z-10 flex-shrink-0">
+  <div>
+    <h1 class="font-bold">Settings</h1>
+    <p class="text-xs text-slate-500">Backup &amp; restore · Wasabi S3</p>
+  </div>
+</header>
+
+{% set msg = request.query_params.get('msg') %}
+{% if msg == 'backup_started' %}
+<div class="mx-5 mt-4 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-blue-700 text-sm"><i class="fa-solid fa-spinner mr-2"></i>Backup started. Refresh this page to see the result.</div>
+{% elif msg == 'backup_running' %}
+<div class="mx-5 mt-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-amber-800 text-sm"><i class="fa-solid fa-clock mr-2"></i>A backup is already running.</div>
+{% elif msg == 'backup_ok' %}
+<div class="mx-5 mt-4 status-approved border rounded-xl px-4 py-3 text-sm font-semibold"><i class="fa-solid fa-circle-check mr-2"></i>Backup {% if request.query_params.get('ts') %}{{ request.query_params.get('ts') }}{% endif %} completed.</div>
+{% elif msg == 'backup_upload_failed' %}
+<div class="mx-5 mt-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-amber-800 text-sm"><i class="fa-solid fa-triangle-exclamation mr-2"></i>Backup created but Wasabi upload failed.</div>
+{% elif msg == 'backup_failed' %}
+<div class="mx-5 mt-4 border border-rose-200 bg-rose-50 rounded-xl px-4 py-3 text-sm text-rose-700"><i class="fa-solid fa-triangle-exclamation mr-2"></i>Backup failed: {{ request.query_params.get('err', '') }}</div>
+{% elif msg == 'restore_ok' %}
+<div class="mx-5 mt-4 status-approved border rounded-xl px-4 py-3 text-sm font-semibold"><i class="fa-solid fa-circle-check mr-2"></i>Database restored successfully.</div>
+{% elif msg == 'restore_bad_password' %}
+<div class="mx-5 mt-4 border border-rose-200 bg-rose-50 rounded-xl px-4 py-3 text-sm text-rose-700"><i class="fa-solid fa-triangle-exclamation mr-2"></i>Invalid password. Restore cancelled.</div>
+{% elif msg == 'restore_failed' %}
+<div class="mx-5 mt-4 border border-rose-200 bg-rose-50 rounded-xl px-4 py-3 text-sm text-rose-700"><i class="fa-solid fa-triangle-exclamation mr-2"></i>Restore failed: {{ request.query_params.get('err', '') }}</div>
+{% endif %}
+
+<div class="settings-shell">
+  {% include "admin/_settings_nav.html" %}
+  <div class="settings-main space-y-5">
+  {% if not wasabi_configured %}
+  <div class="clinical-panel p-5 bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+    Wasabi not configured. Add <code class="bg-amber-100 px-1 rounded">WASABI_BUCKET</code>, <code class="bg-amber-100 px-1 rounded">WASABI_KEY_ID</code>, <code class="bg-amber-100 px-1 rounded">WASABI_SECRET</code> to <code class="bg-amber-100 px-1 rounded">.env</code> and restart.
+  </div>
+  {% else %}
+  {% set backup_state = backup_job.get('state', 'idle') if backup_job else 'idle' %}
+  {% if backup_state != 'idle' %}
+  <div class="{% if backup_state == 'succeeded' %}bg-emerald-50 border-emerald-200 text-emerald-800{% elif backup_state == 'running' %}bg-blue-50 border-blue-200 text-blue-800{% else %}bg-rose-50 border-rose-200 text-rose-800{% endif %} border rounded-xl px-4 py-3 text-sm">
+    <div class="font-semibold">
+      {% if backup_state == 'running' %}Backup running
+      {% elif backup_state == 'succeeded' %}Last backup succeeded
+      {% elif backup_state == 'upload_failed' %}Last backup upload failed
+      {% else %}Last backup failed{% endif %}
+    </div>
+    <div class="text-xs mt-1 opacity-80">
+      {{ backup_job.get('message', '') }}
+      {% if backup_job.get('timestamp') %} · {{ backup_job.get('timestamp') }}{% endif %}
+      {% if backup_job.get('db_size_bytes') %} · {{ backup_job.get('db_size_bytes')|bytes }}{% endif %}
+      {% if backup_job.get('error') %} · {{ backup_job.get('error') }}{% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="clinical-panel p-5 flex flex-wrap items-center gap-3">
+    <form method="post" action="/admin/settings/backup/run">
+      <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-60" {% if backup_state == 'running' %}disabled{% endif %}>
+        <i class="fa-solid fa-cloud-arrow-up mr-2"></i>{% if backup_state == 'running' %}Backup running{% else %}Run backup now{% endif %}
+      </button>
+    </form>
+    <span class="text-xs text-slate-500">Background dump → compress → Wasabi.</span>
+  </div>
+
+  <div class="clinical-panel overflow-hidden">
+    <div class="px-4 py-3 border-b border-slate-100">
+      <h2 class="font-extrabold text-slate-800">Wasabi backups</h2>
+    </div>
+    {% if backups %}
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-slate-200 bg-slate-50 text-left">
+            <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Timestamp</th>
+            <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Size</th>
+            <th class="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wide">Restore</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          {% for b in backups %}
+          {% set db_file = b.files|selectattr('name', 'equalto', 'db.sql.gz')|list|first %}
+          {% if db_file %}
+          <tr class="hover:bg-slate-50/70">
+            <td class="px-4 py-3 font-medium text-slate-800">{{ b.timestamp }}</td>
+            <td class="px-4 py-3 text-slate-600">{{ b.total_bytes|bytes }}</td>
+            <td class="px-4 py-3 text-right">
+              <button type="button" onclick="openRestoreModal('{{ db_file.key|e }}', '{{ b.timestamp|e }}')"
+                class="text-rose-600 hover:text-rose-800 text-xs font-medium">Restore</button>
+            </td>
+          </tr>
+          {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="p-8 text-sm text-slate-500">No backups yet.</div>
+    {% endif %}
+  </div>
+  {% endif %}
+  </div>
+</div>
+
+<div id="restore-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden">
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="font-bold text-slate-800">Restore database</h3>
+      <button type="button" onclick="document.getElementById('restore-modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <p class="text-sm text-slate-600 mb-2">Overwrite current database with backup <strong id="restore-modal-timestamp"></strong>.</p>
+    <p class="text-xs text-slate-500 mb-4">Re-enter password and type <strong>RESTORE</strong>.</p>
+    <form method="post" action="/admin/settings/backup/restore" id="restore-form" class="space-y-4">
+      <input type="hidden" name="wasabi_key" id="restore-wasabi-key" value="" />
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Your password</label>
+        <input type="password" name="password" required autocomplete="current-password"
+          class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Type RESTORE</label>
+        <input type="text" name="confirm" required placeholder="RESTORE"
+          class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+      </div>
+      <div class="flex gap-2">
+        <button type="submit" id="restore-submit" class="flex-1 bg-rose-600 text-white py-2.5 rounded-lg text-sm font-medium disabled:opacity-50" disabled>Restore</button>
+        <button type="button" onclick="document.getElementById('restore-modal').classList.add('hidden')" class="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-lg text-sm font-medium">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function openRestoreModal(wasabiKey, timestamp) {
+  document.getElementById('restore-wasabi-key').value = wasabiKey;
+  document.getElementById('restore-modal-timestamp').textContent = timestamp;
+  document.getElementById('restore-form').reset();
+  document.getElementById('restore-wasabi-key').value = wasabiKey;
+  document.getElementById('restore-submit').disabled = true;
+  document.getElementById('restore-modal').classList.remove('hidden');
+  document.getElementById('restore-form').querySelector('input[name="confirm"]').oninput = function() {
+    document.getElementById('restore-submit').disabled = this.value !== 'RESTORE';
+  };
+}
+</script>
+{% endblock %}

@@ -4,9 +4,8 @@ struct DayScheduleDashboard: View {
   let day: ScheduleDay
   let days: [ScheduleDay]
   let statusMessage: String?
-  let previousAction: () -> Void
-  let nextAction: () -> Void
   let coverAction: (ScheduleAssignment) -> Void
+  var openPatientsAction: (() -> Void)?
 
   private var orderedDays: [ScheduleDay] {
     var byId = Dictionary(uniqueKeysWithValues: days.map { ($0.id, $0) })
@@ -58,33 +57,19 @@ struct DayScheduleDashboard: View {
             .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.amber)
         }
 
-        DayNavigationHeader(
-          date: day.date,
-          previousAction: previousAction,
-          nextAction: nextAction
-        )
-
         ScheduleDailyGlanceCard(day: day, coverAction: coverAction)
 
-        DashboardSection(title: "Off", tint: ClinicalPalette.scrub) {
-          if day.off.isEmpty {
-            EmptyDashboardRow(title: "No one off")
-          } else {
-            FlowLine(items: day.off)
-          }
-        }
-
-        DashboardSection(title: "My Schedule", tint: ClinicalPalette.cardStrong) {
+        DashboardSection(title: "Clinic / OR Schedule", tint: ClinicalPalette.cardStrong) {
           if day.mySchedule.isEmpty {
             EmptyDashboardRow(title: "No clinic or hospital schedule")
           } else {
             ForEach(day.mySchedule) { item in
-              MyScheduleRow(item: item)
+              MyScheduleRow(item: item, openPatientsAction: openPatientsAction)
             }
           }
         }
 
-        DashboardSection(title: "Meetings", tint: ClinicalPalette.lavender) {
+        DashboardSection(title: "Meetings", tint: ClinicalPalette.meeting) {
           AgendaPreviewRows(
             todayContent: day.meetings.isEmpty ? nil : day.meetings.map(Self.meetingSummary).joined(separator: ", "),
             emptyTodayText: "none",
@@ -94,7 +79,7 @@ struct DayScheduleDashboard: View {
           )
         }
 
-        DashboardSection(title: "Personal Items", tint: ClinicalPalette.mint) {
+        DashboardSection(title: "Personal", tint: ClinicalPalette.mint) {
           AgendaPreviewRows(
             todayContent: day.personalItems.isEmpty ? nil : day.personalItems.joined(separator: ", "),
             emptyTodayText: "none",
@@ -105,7 +90,7 @@ struct DayScheduleDashboard: View {
         }
       }
       .padding(.horizontal, 16)
-      .padding(.top, 8)
+      .padding(.top, 4)
       .padding(.bottom, 18)
     }
   }
@@ -168,39 +153,5 @@ private struct AgendaPreviewRow: View {
         .font(.caption2.weight(.semibold))
         .foregroundStyle(ClinicalPalette.teal)
     }
-  }
-}
-
-private struct DayNavigationHeader: View {
-  let date: Date
-  let previousAction: () -> Void
-  let nextAction: () -> Void
-
-  var body: some View {
-    HStack {
-      VStack(alignment: .leading, spacing: 2) {
-        Text(Calendar.current.isDateInToday(date) ? "Today" : date.formatted(.dateTime.weekday(.wide)))
-          .font(.subheadline.weight(.semibold))
-        Text(date.formatted(.dateTime.month(.abbreviated).day().year()))
-          .font(.caption2)
-          .foregroundStyle(.secondary)
-      }
-
-      Spacer()
-
-      HStack(spacing: 10) {
-        Button(action: previousAction) {
-          Image(systemName: "chevron.left")
-        }
-
-        Button(action: nextAction) {
-          Image(systemName: "chevron.right")
-        }
-      }
-      .font(.subheadline.weight(.semibold))
-    }
-    .padding(.horizontal, 12)
-    .padding(.vertical, 9)
-    .liquidGlassCard(cornerRadius: 16, tint: ClinicalPalette.cardStrong)
   }
 }

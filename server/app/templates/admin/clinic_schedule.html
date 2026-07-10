@@ -102,6 +102,48 @@
       </tr>
     </thead>
     <tbody>
+      <tr class="bg-teal-50/30">
+        <td class="px-4 py-3 border border-slate-200 bg-white align-top">
+          <div class="flex items-center gap-2">
+            <div class="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-black flex-shrink-0 shadow-sm bg-teal-100 text-teal-800">OB</div>
+            <div>
+              <span class="text-sm font-bold text-slate-800">Open Block</span>
+              <p class="text-[10px] text-slate-400 leading-tight">Practice OR time</p>
+            </div>
+          </div>
+        </td>
+        {% for day in week_days %}
+        {% set day_slots = open_or_day_slots.get(day, []) %}
+        <td class="px-1.5 py-1.5 border border-slate-200 align-top bg-teal-50/20 min-w-[200px]">
+          <div class="grid grid-cols-3 gap-1 auto-rows-fr">
+            {% for slot in day_slots[:6] %}
+            {% if slot.blockId %}
+            <a href="/admin/block-or?week_offset={{ week_offset }}&block_id={{ slot.blockId }}"
+               class="flex flex-col justify-center items-center aspect-[5/4] min-h-[48px] px-1 py-1 rounded-md text-center leading-tight shadow-sm block-gradient border border-black/5 hover:ring-2 hover:ring-blue-300 transition"
+               style="--block-c: {{ slot.locationColor }}; color:#1e293b"
+               title="{{ slot.pillTitle }} — edit block">
+              <span class="text-[10px] font-bold truncate w-full">{{ slot.locationAbbreviation }} {{ slot.timeLabel }}</span>
+              <span class="text-[9px] font-semibold opacity-80">{{ slot.caseCount }} case{{ '' if slot.caseCount == 1 else 's' }}</span>
+            </a>
+            {% else %}
+            <a href="/admin/block-or?week_offset={{ week_offset }}"
+               class="flex flex-col justify-center items-center aspect-[5/4] min-h-[48px] px-1 py-1 rounded-md text-center leading-tight border border-dashed border-slate-200 bg-white/80 text-slate-400 hover:border-teal-300 hover:text-teal-600 transition"
+               title="{{ slot.locationAbbreviation }} — no block · open Block OR">
+              <span class="text-[10px] font-bold truncate w-full">{{ slot.locationAbbreviation }}</span>
+              <span class="text-[9px]">—</span>
+            </a>
+            {% endif %}
+            {% endfor %}
+            {# Always fill a 3×2 board (6 equal cells) #}
+            {% for i in range(6) %}
+            {% if i >= (day_slots|length) %}
+            <div class="aspect-[5/4] min-h-[48px] rounded-md border border-dashed border-slate-100 bg-white/40" aria-hidden="true"></div>
+            {% endif %}
+            {% endfor %}
+          </div>
+        </td>
+        {% endfor %}
+      </tr>
       {% for surgeon in surgeons %}
       <tr class="group {% if selected_surgeon_id == surgeon.id %}copy-preview-row{% endif %}">
         <!-- Surgeon name column -->
@@ -120,25 +162,29 @@
         {% set pm_entries = day_entries|selectattr('session', 'equalto', 'pm')|list %}
         {% set full_entries = day_entries|rejectattr('session', 'equalto', 'am')|rejectattr('session', 'equalto', 'pm')|list %}
         {% set day_surgeries = surgical_map.get(surgeon.id, {}).get(day, []) %}
+        {% set day_block_assignments = assigned_or_blocks.get(surgeon.id, {}).get(day, []) %}
+        {% set am_blocks = day_block_assignments|selectattr('session', 'equalto', 'am')|list %}
+        {% set pm_blocks = day_block_assignments|selectattr('session', 'equalto', 'pm')|list %}
         {% set day_has_hospital_clinic = (day_entries|selectattr('assignment_type', 'equalto', 'assigned')|map(attribute='location')|selectattr('location_type', 'equalto', 'hospital')|list|length > 0) %}
         {# Show separate "Hospital" pill only when there are surgical cases AND no hospital location pill (avoid duplicate) #}
         {% set day_has_hospital = settings.show_or_patient_procedure_form and day_surgeries|length > 0 and not day_has_hospital_clinic %}
-        <td class="px-2 py-2 border border-slate-200 align-top
+        <td class="px-1.5 py-1.5 border border-slate-200 align-top
           {% if is_today %}bg-blue-50/30{% else %}bg-white{% endif %}
           {% if selected_surgeon_id == surgeon.id and day_entries %}ring-2 ring-inset ring-teal-300 bg-teal-50/30{% endif %}
           cursor-pointer hover:bg-slate-50 group/cell"
           onclick='openAssignModal({"surgeonId": {{ surgeon.id }}, "date": {{ day.isoformat()|tojson }}, "surgeonName": {{ surgeon.full_name|tojson }}, "dateLabel": {{ day.strftime("%a, %b %-d")|tojson }}})'>
 
-          <div class="min-h-[88px] space-y-1">
+          <div class="min-h-[52px] space-y-0.5">
             {% for slot in [
-              {'label': 'AM', 'entries': am_entries, 'empty': 'min-h-[18px]'},
-              {'label': 'PM', 'entries': pm_entries, 'empty': 'min-h-[18px]'},
-              {'label': 'Full', 'entries': full_entries, 'empty': 'min-h-[22px]'}
+              {'label': 'AM', 'entries': am_entries, 'blocks': am_blocks},
+              {'label': 'PM', 'entries': pm_entries, 'blocks': pm_blocks},
+              {'label': 'Full', 'entries': full_entries, 'blocks': []}
             ] %}
-            <div class="{{ slot.empty }}">
+            {% if slot.entries or slot.blocks %}
+            <div class="min-h-[18px] space-y-0.5">
               {% for entry in slot.entries %}
               {% set entry_location_choice = '__off__' if entry.assignment_type == 'off' else entry.location_id|string %}
-              <div class="flex items-start gap-1 group/entry">
+              <div class="flex items-center gap-1 group/entry">
                 <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-md leading-tight flex-1 truncate cursor-pointer hover:opacity-90 {% if entry.assignment_type == 'off' %}bg-slate-200 text-slate-700 shadow-sm{% else %}block-gradient shadow-sm{% endif %}"
                   style="{% if entry.assignment_type == 'assigned' %}--block-c: {{ entry.location.color or '#0ea5e9' }};color:#1e293b{% endif %}"
                   title="{% if entry.assignment_type == 'off' %}OFF{% else %}{{ entry.location.name }} — {{ entry.session }}{% endif %}{% if entry.notes %} · {{ entry.notes }}{% endif %}"
@@ -156,29 +202,58 @@
                   <input type="hidden" name="schedule_id" value="{{ entry.id }}" />
                   <input type="hidden" name="week_offset" value="{{ week_offset }}" />
                   <input type="hidden" name="selected_surgeon_id" value="{{ selected_surgeon_value }}" />
-                  <button class="opacity-0 group-hover/entry:opacity-100 w-4 h-4 bg-rose-100 text-rose-500 rounded flex items-center justify-center hover:bg-rose-200 flex-shrink-0 mt-0.5" title="Remove">
+                  <button class="opacity-0 group-hover/entry:opacity-100 w-4 h-4 bg-rose-100 text-rose-500 rounded flex items-center justify-center hover:bg-rose-200 flex-shrink-0" title="Remove">
                     <i class="fa-solid fa-xmark text-[8px]"></i>
                   </button>
                 </form>
               </div>
               {% endfor %}
+
+              {% for block in slot.blocks %}
+              <div class="relative">
+                <button type="button"
+                  class="inline-flex items-center gap-1 w-full text-xs font-medium px-2 py-0.5 rounded-md leading-tight truncate cursor-pointer hover:opacity-90 block-gradient shadow-sm text-left"
+                  style="--block-c: {{ block.locationColor or '#A7F3D0' }};color:#1e293b"
+                  title="{{ block.location }} · {{ block.assignedStart }} · {{ block.caseCount }} case{{ '' if block.caseCount == 1 else 's' }} — click for detail"
+                  onclick="event.stopPropagation(); toggleBlockCaseDetails('block-cases-{{ block.detailId }}')">
+                  <i class="fa-solid fa-hospital text-[8px] opacity-90"></i>
+                  {% if block.session == 'am' %}<i class="fa-solid fa-sun text-[8px] opacity-80"></i>
+                  {% elif block.session == 'pm' %}<i class="fa-solid fa-moon text-[8px] opacity-80"></i>
+                  {% endif %}
+                  <span class="truncate">{{ block.pillLabel }}</span>
+                </button>
+                <div id="block-cases-{{ block.detailId }}" class="hidden absolute left-0 right-0 top-full z-20 mt-0.5 rounded-md border border-emerald-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 shadow-lg" onclick="event.stopPropagation()">
+                  <div class="font-bold text-emerald-800 mb-1">{{ block.locationAbbreviation or block.location }} Block OR · {{ block.session|upper }}</div>
+                  <div class="flex justify-between gap-2"><span>Earliest</span><strong>{{ block.assignedStart }}</strong></div>
+                  <div class="flex justify-between gap-2 mb-1"><span>Cases</span><strong>{{ block.caseCount }}</strong></div>
+                  {% for seg in block.segments %}
+                  <div class="flex justify-between gap-2 text-slate-600 border-t border-slate-100 pt-0.5 mt-0.5">
+                    <span>{{ seg.start }}</span>
+                    <strong>{{ seg.caseCount }} case{{ '' if seg.caseCount == 1 else 's' }}</strong>
+                  </div>
+                  {% if seg.note %}<div class="text-slate-400 pl-0.5">{{ seg.note }}</div>{% endif %}
+                  {% endfor %}
+                </div>
+              </div>
+              {% endfor %}
             </div>
+            {% endif %}
             {% endfor %}
 
             {% if day_has_hospital %}
             <div class="flex items-center gap-1" onclick="event.stopPropagation(); event.preventDefault(); openHospitalTimeline({{ surgeon.id }}, '{{ day.isoformat() }}', '{{ surgeon.full_name|e }}', '{{ day.strftime('%a, %b %-d') }}', 0);">
-              <span class="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-sky-100 text-sky-800 cursor-pointer hover:bg-sky-200 touch-manipulation">
+              <span class="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-md bg-sky-100 text-sky-800 cursor-pointer hover:bg-sky-200 touch-manipulation">
                 <i class="fa-solid fa-hospital text-[10px]"></i> Hospital {% if day_surgeries|length > 1 %}({{ day_surgeries|length }}){% endif %}
               </span>
             </div>
             {% endif %}
 
-            {% if not day_entries and not day_has_hospital %}
-            <div class="text-slate-300 text-xs text-center py-2 group-hover/cell:text-slate-400">
+            {% if not day_entries and not day_has_hospital and not day_block_assignments %}
+            <div class="text-slate-300 text-xs text-center py-1 group-hover/cell:text-slate-400">
               <i class="fa-solid fa-plus"></i>
             </div>
-            {% elif day_entries or day_has_hospital %}
-            <div class="text-slate-300 text-[10px] text-center group-hover/cell:text-slate-400">
+            {% elif day_entries or day_has_hospital or day_block_assignments %}
+            <div class="text-slate-300 text-[10px] text-center leading-tight group-hover/cell:text-slate-400">
               <i class="fa-solid fa-plus text-[8px]"></i> add
             </div>
             {% endif %}
@@ -467,6 +542,15 @@ var WEEK_OFFSET = {{ week_offset }};
 var COPY_SELECTED_LABEL = {{ ('all visible surgeons' if not selected_surgeon_id else (surgeons[0].full_name if surgeons else 'selected surgeon')) | tojson }};
 var COPY_SOURCE_COUNT = {{ copy_source_count }};
 var SCHEDULE_SCROLL_KEY = 'clinic-schedule-scroll:' + window.location.pathname + '?week_offset=' + WEEK_OFFSET;
+
+function toggleBlockCaseDetails(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  document.querySelectorAll('[id^="block-cases-"]').forEach(function(other) {
+    if (other.id !== id) other.classList.add('hidden');
+  });
+  el.classList.toggle('hidden');
+}
 
 document.querySelectorAll('.js-preserve-scroll').forEach(function(form) {
   form.addEventListener('submit', function() {

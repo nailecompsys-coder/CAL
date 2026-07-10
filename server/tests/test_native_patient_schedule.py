@@ -58,7 +58,7 @@ class NativePatientScheduleRouteTest(unittest.TestCase):
                 )
 
             self.assertEqual(response, expected)
-            service.assert_called_once_with(date(2026, 6, 12), date(2026, 6, 18))
+            service.assert_called_once_with(date(2026, 6, 12), date(2026, 6, 18), surgeon=surgeon)
         finally:
             db.close()
 

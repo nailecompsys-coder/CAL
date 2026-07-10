@@ -17,11 +17,12 @@ from . import migrate_scheduling_guardrails
 from . import migrate_site_settings_tools
 from .routers import (
     admin_otp_audit,
+    admin_block_or,
     admin, admin_call_groups, admin_call_schedule, admin_clinic_schedule, admin_daysoff,
     admin_clinic_groups, admin_locations, admin_meetings, admin_metrics, admin_scheduler_availability, admin_settings, admin_surgeons,
     admin_surgical_blocks,
     admin_schedule_templates, admin_surgical_schedule, api, api_calendar, api_push, auth,
-    native_api, surgeon, surgeon_availability, surgeon_call_schedule, surgeon_day_items, surgeon_otp,
+    native_api, native_scheduler_api, surgeon, surgeon_availability, surgeon_call_schedule, surgeon_day_items, surgeon_otp,
     surgeon_request_off, surgeon_schedule, surgeon_surgical_cases,
 )
 from . import migrate_call_groups
@@ -96,6 +97,7 @@ app.include_router(admin_locations.router)
 app.include_router(admin_meetings.router)
 app.include_router(admin_metrics.router)
 app.include_router(admin_scheduler_availability.router)
+app.include_router(admin_block_or.router)
 app.include_router(admin_surgical_blocks.router)
 app.include_router(admin_settings.router)
 app.include_router(admin_surgical_schedule.router)
@@ -111,6 +113,7 @@ app.include_router(api.router)
 app.include_router(api_calendar.router)
 app.include_router(api_push.router)
 app.include_router(native_api.router)
+app.include_router(native_scheduler_api.router)
 
 @app.get("/", response_class=HTMLResponse)
 def root(request: Request):

@@ -1,0 +1,453 @@
+{% extends "base_admin.html" %}
+{% block title %}People{% endblock %}
+
+{% block content %}
+{% set _tab = request.query_params.get('tab') %}
+{% set filter = request.query_params.get('filter') or ({'clinical': 'mobile', 'portal': 'portal'}.get(_tab, 'all')) %}
+{% set active_admins = admin_users | selectattr('is_active') | list %}
+
+<header class="portal-header px-5 py-3 sticky top-0 z-10 flex-shrink-0 flex items-center justify-between gap-3">
+  <div class="min-w-0">
+    <h1 class="font-bold">People</h1>
+    <p class="text-xs text-slate-500">Who they are, what they do, how they sign in, and whether they’re active</p>
+  </div>
+  <button type="button" onclick="openAddChooser()"
+    class="bg-blue-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl hover:bg-blue-700 flex items-center gap-2 flex-shrink-0">
+    <i class="fa-solid fa-plus"></i> Add person
+  </button>
+</header>
+
+{% set msg = request.query_params.get('msg') %}
+{% if msg in ['added','updated','user_added','user_edited','password_updated','user_updated','user_deleted','deleted'] %}
+<div class="mx-5 mt-4 status-approved border rounded-xl px-4 py-3 text-sm font-semibold"><i class="fa-solid fa-circle-check mr-2"></i>Saved.</div>
+{% elif msg %}
+<div class="mx-5 mt-4 border border-amber-200 bg-amber-50 rounded-xl px-4 py-3 text-sm text-amber-800">{{ msg }}</div>
+{% endif %}
+
+<div class="settings-shell">
+  {% include "admin/_settings_nav.html" %}
+  <div class="settings-main space-y-4">
+
+    <div class="flex flex-wrap items-center gap-2">
+      <a href="/admin/settings/people?filter=all"
+         class="text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors
+                {% if filter == 'all' %}bg-slate-800 text-white border-transparent{% else %}bg-white text-slate-500 border-slate-200 hover:border-slate-400{% endif %}">
+        All
+      </a>
+      <a href="/admin/settings/people?filter=mobile"
+         class="text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors
+                {% if filter == 'mobile' %}bg-emerald-600 text-white border-transparent{% else %}bg-white text-slate-500 border-slate-200 hover:border-slate-400{% endif %}">
+        Mobile
+      </a>
+      <a href="/admin/settings/people?filter=portal"
+         class="text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors
+                {% if filter == 'portal' %}bg-blue-600 text-white border-transparent{% else %}bg-white text-slate-500 border-slate-200 hover:border-slate-400{% endif %}">
+        Portal
+      </a>
+      <span class="text-[11px] text-slate-400 ml-auto">Devices &amp; OTP audit live under Security → Access &amp; Devices</span>
+    </div>
+
+    <div class="clinical-panel overflow-hidden">
+      <div class="divide-y divide-slate-100">
+        {% if filter != 'portal' %}
+        {% for s in surgeons %}
+        <div class="px-4 py-3.5 flex items-center gap-4 {% if not s.is_active %}opacity-45{% endif %} hover:bg-slate-50/70 transition-colors">
+          <div class="w-11 h-11 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 shadow-sm staff-avatar">{{ s.initials }}</div>
+
+          <div class="min-w-0 flex-1 grid grid-cols-1 lg:grid-cols-12 gap-2 lg:gap-3 items-center">
+            <div class="lg:col-span-3 min-w-0">
+              <p class="font-semibold text-slate-800 text-sm truncate">
+                {{ s.full_name }}{% if s.suffix %} <span class="text-[10px] font-bold text-slate-500">{{ s.suffix }}</span>{% endif %}
+              </p>
+              <p class="text-[11px] text-slate-400 truncate">
+                {% if (s.staff_type or 'physician') == 'physician' %}Physician{% else %}Support staff{% endif %}
+                {% if (s.staff_type or 'physician') == 'physician' and s.sort_order %} · Rank {{ s.sort_order }}{% endif %}
+              </p>
+            </div>
+
+            <div class="lg:col-span-3 min-w-0">
+              <p class="text-sm text-slate-700 truncate">{{ s.email or '—' }}</p>
+              <p class="text-[11px] text-slate-400 truncate">{{ s.phone|phone }}</p>
+            </div>
+
+            <div class="lg:col-span-2 flex flex-wrap gap-1.5">
+              <span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-100">Mobile</span>
+              <span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-50 text-slate-600 border border-slate-200">OTP</span>
+            </div>
+
+            <div class="lg:col-span-2">
+              <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Role</p>
+              <p class="text-sm text-slate-800">{% if (s.staff_type or 'physician') == 'physician' %}Surgeon{% else %}Clinical staff{% endif %}</p>
+            </div>
+
+            <div class="lg:col-span-2 flex items-center justify-between lg:justify-end gap-3">
+              {% if s.is_active %}
+              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full status-approved">Active</span>
+              {% else %}
+              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">Inactive</span>
+              {% endif %}
+              <div class="flex items-center gap-1">
+                <button type="button"
+                  onclick="openEditClinical({{ s.id }}, {{ s.first_name|tojson }}, {{ s.last_name|tojson }}, {{ (s.suffix or '')|tojson }}, {{ (s.email or '')|tojson }}, {{ (s.phone or '')|tojson }}, {{ (s.staff_type or 'physician')|tojson }}, {{ (s.sort_order or 0)|tojson }})"
+                  class="text-xs font-semibold text-blue-600 hover:text-blue-800 px-2 py-1 rounded-lg hover:bg-blue-50">Edit</button>
+                {% if s.is_active %}
+                <form method="post" action="/admin/surgeons/{{ s.id }}/preview-mobile" target="_blank" class="inline">
+                  <button type="submit" title="Preview mobile" class="text-xs font-semibold text-slate-500 hover:text-slate-800 px-2 py-1 rounded-lg hover:bg-slate-100">Preview</button>
+                </form>
+                {% endif %}
+                <form method="post" action="/admin/surgeons/{{ s.id }}/toggle" class="inline">
+                  <button type="submit"
+                    class="text-xs font-semibold px-2 py-1 rounded-lg {% if s.is_active %}text-slate-500 hover:text-rose-700 hover:bg-rose-50{% else %}text-emerald-700 hover:bg-emerald-50{% endif %}">
+                    {% if s.is_active %}Deactivate{% else %}Activate{% endif %}
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+        {% endif %}
+
+        {% if filter != 'mobile' %}
+        {% for u in admin_users %}
+        <div class="px-4 py-3.5 flex items-center gap-4 {% if not u.is_active %}opacity-45{% endif %} hover:bg-slate-50/70 transition-colors">
+          <div class="w-11 h-11 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 bg-blue-50 text-blue-700 border border-blue-100">
+            {{ (u.first_name or u.username)[0]|upper }}{{ (u.last_name or '')[0]|upper if u.last_name else '' }}
+          </div>
+
+          <div class="min-w-0 flex-1 grid grid-cols-1 lg:grid-cols-12 gap-2 lg:gap-3 items-center">
+            <div class="lg:col-span-3 min-w-0">
+              <p class="font-semibold text-slate-800 text-sm truncate">{{ u.full_name }}</p>
+              <p class="text-[11px] text-slate-400 truncate">@{{ u.username }}</p>
+            </div>
+
+            <div class="lg:col-span-3 min-w-0">
+              <p class="text-sm text-slate-700 truncate">{{ u.email }}</p>
+              <p class="text-[11px] text-slate-400 truncate">{{ u.phone|phone }}</p>
+            </div>
+
+            <div class="lg:col-span-2 flex flex-wrap gap-1.5">
+              <span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-100">Portal</span>
+              {% if u.role == 'scheduler' %}
+              <span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-100">Scheduler</span>
+              {% elif u.role == 'superadmin' %}
+              <span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-violet-50 text-violet-800 border border-violet-100">Superadmin</span>
+              {% else %}
+              <span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-50 text-slate-700 border border-slate-200">Admin</span>
+              {% endif %}
+            </div>
+
+            <div class="lg:col-span-2">
+              <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Security</p>
+              <p class="text-sm text-slate-800 capitalize">{{ u.role }}</p>
+              <p class="text-[10px] text-slate-400 truncate">
+                {% if u.notify_day_off_requests %}Requests{% endif %}
+                {% if u.notify_schedule_changes %}{% if u.notify_day_off_requests %} · {% endif %}Schedule{% endif %}
+                {% if u.sms_fallback_enabled %}{% if u.notify_day_off_requests or u.notify_schedule_changes %} · {% endif %}SMS{% endif %}
+                {% if not (u.notify_day_off_requests or u.notify_schedule_changes or u.sms_fallback_enabled) %}No alerts{% endif %}
+              </p>
+            </div>
+
+            <div class="lg:col-span-2 flex items-center justify-between lg:justify-end gap-3">
+              {% if u.is_active %}
+              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full status-approved">Active</span>
+              {% else %}
+              <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">Inactive</span>
+              {% endif %}
+              <div class="flex items-center gap-1">
+                <button type="button" class="edit-admin-user text-xs font-semibold text-blue-600 hover:text-blue-800 px-2 py-1 rounded-lg hover:bg-blue-50"
+                  data-user-id="{{ u.id }}"
+                  data-username="{{ u.username|e }}"
+                  data-first-name="{{ (u.first_name or '')|e }}"
+                  data-last-name="{{ (u.last_name or '')|e }}"
+                  data-email="{{ u.email|e }}"
+                  data-phone="{{ (u.phone or '')|e }}"
+                  data-role="{{ u.role }}"
+                  data-notify-day-off="{{ '1' if u.notify_day_off_requests else '0' }}"
+                  data-notify-schedule="{{ '1' if u.notify_schedule_changes else '0' }}"
+                  data-sms-fallback="{{ '1' if u.sms_fallback_enabled else '0' }}">Edit</button>
+                <button type="button" onclick="openPasswordModal({{ u.id }}, {{ u.username|tojson }})"
+                  class="text-xs font-semibold text-slate-500 hover:text-slate-800 px-2 py-1 rounded-lg hover:bg-slate-100">Password</button>
+                <form method="post" action="/admin/settings/people/users/{{ u.id }}/toggle" class="inline">
+                  <button type="submit"
+                    class="text-xs font-semibold px-2 py-1 rounded-lg {% if u.is_active %}text-slate-500 hover:text-rose-700 hover:bg-rose-50{% else %}text-emerald-700 hover:bg-emerald-50{% endif %}"
+                    {% if u.is_active and active_admins|length <= 1 %}disabled title="Cannot deactivate the last active portal user"{% endif %}>
+                    {% if u.is_active %}Deactivate{% else %}Activate{% endif %}
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── Add chooser ─────────────────────────────────────────────────────────── #}
+<div id="add-chooser" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden">
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="font-bold text-slate-800 text-lg">Add person</h3>
+      <button type="button" onclick="document.getElementById('add-chooser').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+    </div>
+    <p class="text-sm text-slate-500 mb-4">Choose how they use CAL.</p>
+    <div class="grid gap-3">
+      <button type="button" onclick="openAddClinical()"
+        class="text-left rounded-2xl border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/40 px-4 py-4 transition-colors">
+        <p class="font-bold text-slate-800 text-sm">Mobile clinical user</p>
+        <p class="text-xs text-slate-500 mt-1">Surgeon or staff — signs in with email/phone OTP on iPhone</p>
+      </button>
+      <button type="button" onclick="openAddPortal()"
+        class="text-left rounded-2xl border border-slate-200 hover:border-blue-300 hover:bg-blue-50/40 px-4 py-4 transition-colors">
+        <p class="font-bold text-slate-800 text-sm">Portal user</p>
+        <p class="text-xs text-slate-500 mt-1">Admin or scheduler — username + password on the desktop portal</p>
+      </button>
+    </div>
+  </div>
+</div>
+
+{# ── Add clinical ────────────────────────────────────────────────────────── #}
+<div id="add-clinical-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden">
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6 max-h-[90vh] overflow-y-auto">
+    <div class="flex items-center justify-between mb-5">
+      <h3 class="font-bold text-slate-800 text-lg">Add mobile user</h3>
+      <button type="button" onclick="document.getElementById('add-clinical-modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+    </div>
+    <form method="post" action="/admin/surgeons/add" class="space-y-4">
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="block text-xs font-medium text-slate-600 mb-1">First name *</label>
+          <input type="text" name="first_name" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
+        <div><label class="block text-xs font-medium text-slate-600 mb-1">Last name *</label>
+          <input type="text" name="last_name" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
+      </div>
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Who / position</label>
+        <select name="staff_type" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+          <option value="physician" selected>Physician (surgeon)</option>
+          <option value="staff">Support staff (PA, NP, APRN…)</option>
+        </select>
+      </div>
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Credentials</label>
+        <select name="suffix" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+          <option value="">— None —</option>
+          <option value="MD">MD</option><option value="DO">DO</option><option value="MD, FACS">MD, FACS</option>
+          <option value="PA-C">PA-C</option><option value="NP">NP</option><option value="APRN">APRN</option>
+        </select>
+      </div>
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Email (OTP)</label>
+        <input type="email" name="email" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Phone (OTP)</label>
+        <input type="tel" name="phone" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="(407) 555-0100" /></div>
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Practice rank</label>
+        <input type="number" name="sort_order" min="0" step="10" value="0" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
+      <div class="flex gap-2 pt-1">
+        <button type="submit" class="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">Add</button>
+        <button type="button" onclick="document.getElementById('add-clinical-modal').classList.add('hidden')" class="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-lg text-sm font-medium">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# ── Add portal ──────────────────────────────────────────────────────────── #}
+<div id="add-portal-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden">
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6 max-h-[90vh] overflow-y-auto">
+    <div class="flex items-center justify-between mb-5">
+      <h3 class="font-bold text-slate-800 text-lg">Add portal user</h3>
+      <button type="button" onclick="document.getElementById('add-portal-modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+    </div>
+    <form method="post" action="/admin/settings/people/users/add" class="space-y-4">
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Username *</label>
+        <input type="text" name="username" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="block text-xs font-medium text-slate-600 mb-1">First</label>
+          <input type="text" name="first_name" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
+        <div><label class="block text-xs font-medium text-slate-600 mb-1">Last</label>
+          <input type="text" name="last_name" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
+      </div>
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Email *</label>
+        <input type="email" name="email" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Phone</label>
+        <input type="tel" name="phone" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Password *</label>
+        <input type="password" name="password" required minlength="8" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Security level</label>
+        <select name="role" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+          <option value="admin">Admin — full portal</option>
+          <option value="scheduler">Scheduler — Block OR / availability</option>
+        </select>
+      </div>
+      <div class="grid gap-2 text-xs text-slate-600">
+        <label class="flex items-center gap-2"><input type="checkbox" name="notify_day_off_requests" value="1" checked> Day-off request alerts</label>
+        <label class="flex items-center gap-2"><input type="checkbox" name="notify_schedule_changes" value="1" checked> Schedule change alerts</label>
+        <label class="flex items-center gap-2"><input type="checkbox" name="sms_fallback_enabled" value="1"> SMS fallback</label>
+      </div>
+      <div class="flex gap-2 pt-1">
+        <button type="submit" class="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">Add</button>
+        <button type="button" onclick="document.getElementById('add-portal-modal').classList.add('hidden')" class="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-lg text-sm font-medium">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# ── Edit clinical ───────────────────────────────────────────────────────── #}
+<div id="edit-clinical-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden">
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6 max-h-[90vh] overflow-y-auto">
+    <div class="flex items-center justify-between mb-5">
+      <h3 class="font-bold text-slate-800 text-lg">Edit mobile user</h3>
+      <button type="button" onclick="document.getElementById('edit-clinical-modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+    </div>
+    <form id="edit-clinical-form" method="post" action="" class="space-y-4">
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="block text-xs font-medium text-slate-600 mb-1">First name *</label>
+          <input id="edit-c-first" type="text" name="first_name" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
+        <div><label class="block text-xs font-medium text-slate-600 mb-1">Last name *</label>
+          <input id="edit-c-last" type="text" name="last_name" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
+      </div>
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Who / position</label>
+        <select id="edit-c-staff-type" name="staff_type" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+          <option value="physician">Physician (surgeon)</option>
+          <option value="staff">Support staff</option>
+        </select>
+      </div>
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Credentials</label>
+        <select id="edit-c-suffix" name="suffix" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+          <option value="">— None —</option>
+          <option value="MD">MD</option><option value="DO">DO</option><option value="MD, FACS">MD, FACS</option>
+          <option value="PA-C">PA-C</option><option value="NP">NP</option><option value="APRN">APRN</option>
+        </select>
+      </div>
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Email (OTP)</label>
+        <input id="edit-c-email" type="email" name="email" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Phone (OTP)</label>
+        <input id="edit-c-phone" type="tel" name="phone" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Practice rank</label>
+        <input id="edit-c-sort" type="number" name="sort_order" min="0" step="10" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
+      <div class="flex gap-2 pt-1">
+        <button type="submit" class="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">Save</button>
+        <button type="button" onclick="document.getElementById('edit-clinical-modal').classList.add('hidden')" class="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-lg text-sm font-medium">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# ── Edit portal ─────────────────────────────────────────────────────────── #}
+<div id="edit-user-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden">
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6 max-h-[90vh] overflow-y-auto">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="font-bold text-slate-800">Edit portal user</h3>
+      <button type="button" onclick="document.getElementById('edit-user-modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <form method="post" id="edit-user-form" action="" class="space-y-4">
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Username</label>
+        <input type="text" name="username" id="edit-user-username" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="block text-xs font-medium text-slate-600 mb-1">First</label>
+          <input type="text" name="first_name" id="edit-user-first-name" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
+        <div><label class="block text-xs font-medium text-slate-600 mb-1">Last</label>
+          <input type="text" name="last_name" id="edit-user-last-name" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
+      </div>
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Email</label>
+        <input type="email" name="email" id="edit-user-email" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Phone</label>
+        <input type="tel" name="phone" id="edit-user-phone" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">New password <span class="text-slate-400">(optional)</span></label>
+        <input type="password" name="new_password" id="edit-user-password" minlength="8" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
+      <div><label class="block text-xs font-medium text-slate-600 mb-1">Security level</label>
+        <select name="role" id="edit-user-role" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+          <option value="admin">Admin — full portal</option>
+          <option value="scheduler">Scheduler — Block OR / availability</option>
+        </select>
+      </div>
+      <div class="grid gap-2 text-xs text-slate-600">
+        <label class="flex items-center gap-2"><input type="checkbox" name="notify_day_off_requests" id="edit-user-notify-day-off" value="1"> Day-off requests</label>
+        <label class="flex items-center gap-2"><input type="checkbox" name="notify_schedule_changes" id="edit-user-notify-schedule" value="1"> Schedule changes</label>
+        <label class="flex items-center gap-2"><input type="checkbox" name="sms_fallback_enabled" id="edit-user-sms-fallback" value="1"> SMS fallback</label>
+      </div>
+      <div class="flex gap-2">
+        <button type="submit" class="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium">Save</button>
+        <button type="button" onclick="document.getElementById('edit-user-modal').classList.add('hidden')" class="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-lg text-sm font-medium">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="password-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden">
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="font-bold text-slate-800">Set password</h3>
+      <button type="button" onclick="document.getElementById('password-modal').classList.add('hidden')" class="text-slate-400"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <p class="text-sm text-slate-600 mb-4">New password for <strong id="password-modal-username"></strong></p>
+    <form method="post" id="password-form" action="" class="space-y-4">
+      <input type="password" name="new_password" required minlength="8" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+      <div class="flex gap-2">
+        <button type="submit" class="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium">Update</button>
+        <button type="button" onclick="document.getElementById('password-modal').classList.add('hidden')" class="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-lg text-sm font-medium">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function hideAllPeopleModals() {
+  ['add-chooser','add-clinical-modal','add-portal-modal','edit-clinical-modal','edit-user-modal','password-modal'].forEach(function(id) {
+    document.getElementById(id)?.classList.add('hidden');
+  });
+}
+function openAddChooser() {
+  hideAllPeopleModals();
+  document.getElementById('add-chooser').classList.remove('hidden');
+}
+function openAddClinical() {
+  hideAllPeopleModals();
+  document.getElementById('add-clinical-modal').classList.remove('hidden');
+}
+function openAddPortal() {
+  hideAllPeopleModals();
+  document.getElementById('add-portal-modal').classList.remove('hidden');
+}
+function openEditClinical(id, first, last, suffix, email, phone, staffType, sortOrder) {
+  document.getElementById('edit-clinical-form').action = '/admin/surgeons/' + id + '/edit';
+  document.getElementById('edit-c-first').value = first || '';
+  document.getElementById('edit-c-last').value = last || '';
+  document.getElementById('edit-c-suffix').value = suffix || '';
+  document.getElementById('edit-c-email').value = email || '';
+  document.getElementById('edit-c-phone').value = phone || '';
+  document.getElementById('edit-c-staff-type').value = staffType || 'physician';
+  document.getElementById('edit-c-sort').value = sortOrder || 0;
+  document.getElementById('edit-clinical-modal').classList.remove('hidden');
+}
+document.querySelectorAll('.edit-admin-user').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    document.getElementById('edit-user-form').action = '/admin/settings/people/users/' + this.dataset.userId + '/edit';
+    document.getElementById('edit-user-username').value = this.dataset.username || '';
+    document.getElementById('edit-user-first-name').value = this.dataset.firstName || '';
+    document.getElementById('edit-user-last-name').value = this.dataset.lastName || '';
+    document.getElementById('edit-user-email').value = this.dataset.email || '';
+    document.getElementById('edit-user-phone').value = this.dataset.phone || '';
+    document.getElementById('edit-user-role').value = this.dataset.role === 'scheduler' ? 'scheduler' : 'admin';
+    document.getElementById('edit-user-notify-day-off').checked = this.dataset.notifyDayOff !== '0';
+    document.getElementById('edit-user-notify-schedule').checked = this.dataset.notifySchedule !== '0';
+    document.getElementById('edit-user-sms-fallback').checked = this.dataset.smsFallback === '1';
+    document.getElementById('edit-user-password').value = '';
+    document.getElementById('edit-user-modal').classList.remove('hidden');
+  });
+});
+function openPasswordModal(userId, username) {
+  document.getElementById('password-modal-username').textContent = username;
+  document.getElementById('password-form').action = '/admin/settings/people/users/' + userId + '/set-password';
+  document.getElementById('password-modal').classList.remove('hidden');
+}
+['add-chooser','add-clinical-modal','add-portal-modal','edit-clinical-modal','edit-user-modal','password-modal'].forEach(function(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener('click', function(e) {
+    if (e.target === el) el.classList.add('hidden');
+  });
+});
+</script>
+{% endblock %}

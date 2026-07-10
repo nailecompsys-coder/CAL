@@ -1,6 +1,6 @@
 # CAL Native Stack Guardrails
 
-Last updated: 2026-07-07
+Last updated: 2026-07-09
 
 ## Decision
 
@@ -20,10 +20,16 @@ SwiftUI is the production iOS app. Jetpack Compose is the target Android app. Ex
 - No native client may invent workflow behavior that is not backed by a documented backend endpoint and a backend contract test.
 - Any native source change must update `docs/cal-native-parity-ledger.md` in the same commit unless it is a pure comment or formatting-only change.
 - Any backend endpoint used by native clients must have a contract test under `server/tests/test_native_*.py` or a directly related auth/push test.
+- Scheduler mobile APIs must live under `/api/native/scheduler/*`, use scheduler/admin identity, and keep PHI out of payloads unless a future explicit permission and audit path is approved.
+- Block OR is mobile-first for surgeon placement. The portal may create/review open capacity, but active surgeon placement must use scheduler native endpoints and must write only non-PHI schedule slots.
+- Epic controls hospital block release, cancellation, give-back, and case details. CAL must not reintroduce those controls as active Block OR workflows without an explicit product decision and ledger update.
+- Scheduler digest emails must be generated from `schedule_change_events` plus open Block OR rows and must not include patient names, DOB, MRN, phone, procedure PHI, or private surgeon notes.
 - React Native iOS builds are experimental only and must not be sent to TestFlight.
 - The imported `ios/` production lane must not contain `Podfile`, `.xcode.env`, Expo support files, React Native bundle phases, or CocoaPods build settings.
 - The `legacy-react-native/` bridge must remain Android-only. It must not define Expo iOS config, iOS EAS profiles, or TestFlight scripts.
 - Android must match the SwiftUI screen and workflow unless the parity ledger marks a temporary approved gap.
+- **Android Compose UI spec is `ios/CALNative/`** — not `legacy-react-native/`. Same 3-section title menu (Schedule, Time Off, Patients). No Today, Messages, or Profile tabs. No hardcoded mock data or `ScreenPlaceholder` in release builds.
+- Scheduler Block OR on Android must mirror `NativeSchedulerViews.swift` when scheduler parity is in scope.
 - Build artifacts, dependency folders, local Expo state, Xcode archives, IPAs, APKs, and DerivedData must not be staged or tracked.
 
 ## Required Preflight Commands

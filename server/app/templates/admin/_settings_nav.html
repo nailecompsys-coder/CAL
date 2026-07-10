@@ -1,0 +1,42 @@
+{# Settings secondary navigation — include inside settings pages #}
+{% set path = request.url.path %}
+{% set people_active = path.startswith('/admin/settings/people') or path.startswith('/admin/surgeons') or path.startswith('/admin/users') %}
+{% set practice_active = path in ['/admin/settings', '/admin/settings/practice', '/admin/branding'] %}
+{% set locations_active = path.startswith('/admin/settings/locations') or path.startswith('/admin/locations') %}
+{% set groups_active = path.startswith('/admin/settings/clinic-groups') or path.startswith('/admin/clinic-groups') %}
+{% set rules_active = path.startswith('/admin/settings/scheduling-rules') or path.startswith('/admin/scheduling-rules') %}
+{% set access_active = path.startswith('/admin/settings/access') or path.startswith('/admin/mobile-devices') or path.startswith('/admin/otp-sign-in') %}
+{% set notes_active = path.startswith('/admin/settings/notifications') or path.startswith('/admin/notifications') %}
+{% set backup_active = path.startswith('/admin/settings/backup') or path.startswith('/admin/backup') %}
+
+<aside class="settings-rail w-full lg:w-56 flex-shrink-0">
+  <p class="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 px-3 mb-2">Configuration</p>
+  <nav class="space-y-0.5">
+    <a href="/admin/settings/practice" class="settings-rail-link {% if practice_active %}active{% endif %}">
+      <i class="fa-solid fa-building"></i> Practice
+    </a>
+    <a href="/admin/settings/people" class="settings-rail-link {% if people_active %}active{% endif %}">
+      <i class="fa-solid fa-users"></i> People
+    </a>
+    <a href="/admin/settings/locations" class="settings-rail-link {% if locations_active %}active{% endif %}">
+      <i class="fa-solid fa-location-dot"></i> Locations
+    </a>
+    <a href="/admin/settings/clinic-groups" class="settings-rail-link {% if groups_active %}active{% endif %}">
+      <i class="fa-solid fa-layer-group"></i> Clinic Groups
+    </a>
+    <a href="/admin/settings/scheduling-rules" class="settings-rail-link {% if rules_active %}active{% endif %}">
+      <i class="fa-solid fa-scale-balanced"></i> Scheduling Rules
+    </a>
+
+    <p class="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 px-3 mt-4 mb-2">Security</p>
+    <a href="/admin/settings/access" class="settings-rail-link {% if access_active %}active{% endif %}">
+      <i class="fa-solid fa-shield-halved"></i> Access &amp; Devices
+    </a>
+    <a href="/admin/settings/notifications" class="settings-rail-link {% if notes_active %}active{% endif %}">
+      <i class="fa-solid fa-bell"></i> Notifications
+    </a>
+    <a href="/admin/settings/backup" class="settings-rail-link {% if backup_active %}active{% endif %}">
+      <i class="fa-solid fa-cloud-arrow-up"></i> Backup
+    </a>
+  </nav>
+</aside>

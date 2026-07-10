@@ -18,6 +18,21 @@ struct NativeCALClient {
     return result.message ?? ""
   }
 
+  func requestSchedulerOtp(email: String) async throws -> String? {
+    var request = URLRequest(url: baseURL.appendingPathComponent("/api/native/scheduler/otp/request"))
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.httpBody = try JSONEncoder().encode(OtpRequestPayload(email: email))
+
+    let response = try await perform(request)
+    let result = try JSONDecoder().decode(OtpRequestResponse.self, from: response)
+    guard result.scheduler == true else { return nil }
+    if let devCode = result.devCode, !devCode.isEmpty {
+      return "Local scheduler code: \(devCode)"
+    }
+    return result.message ?? "Check your email or iPhone for the CAL scheduler code."
+  }
+
   func verifyOtp(email: String, code: String) async throws -> String {
     var request = URLRequest(url: baseURL.appendingPathComponent("/api/surgeon/otp/verify"))
     request.httpMethod = "POST"
@@ -27,6 +42,109 @@ struct NativeCALClient {
     let response = try await perform(request)
     let result = try JSONDecoder().decode(OtpVerifyResponse.self, from: response)
     return result.token
+  }
+
+  func verifySchedulerOtp(email: String, code: String) async throws -> String {
+    var request = URLRequest(url: baseURL.appendingPathComponent("/api/native/scheduler/otp/verify"))
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.httpBody = try JSONEncoder().encode(OtpVerifyPayload(email: email, code: code))
+
+    let response = try await perform(request)
+    let result = try JSONDecoder().decode(SchedulerOtpVerifyResponse.self, from: response)
+    return result.token
+  }
+
+  func fetchSchedulerHome(token: String, start: Date, end: Date) async throws -> NativeSchedulerHomeResponse {
+    var components = URLComponents(url: baseURL.appendingPathComponent("/api/native/scheduler/home"), resolvingAgainstBaseURL: false)!
+    components.queryItems = [
+      URLQueryItem(name: "start", value: isoDate(start)),
+      URLQueryItem(name: "end", value: isoDate(end))
+    ]
+    guard let url = components.url else { throw NativeCALError.invalidURL }
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+    let data = try await perform(request)
+    return try JSONDecoder().decode(NativeSchedulerHomeResponse.self, from: data)
+  }
+
+  func fetchSchedulerBlock(token: String, blockId: Int) async throws -> NativeSchedulerBlockDetailResponse {
+    let url = baseURL.appendingPathComponent("/api/native/scheduler/blocks/\(blockId)")
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+    let data = try await perform(request)
+    return try JSONDecoder().decode(NativeSchedulerBlockDetailResponse.self, from: data)
+  }
+
+  func assignSchedulerBlock(token: String, blockId: Int, surgeonId: Int, startTime: String, caseCount: Int, note: String) async throws -> NativeSchedulerAssignResponse {
+    let url = baseURL.appendingPathComponent("/api/native/scheduler/blocks/\(blockId)/assign")
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.httpBody = try JSONEncoder().encode(NativeSchedulerAssignPayload(
+      surgeonId: surgeonId,
+      startTime: startTime,
+      caseCount: caseCount,
+      note: note
+    ))
+
+    let data = try await perform(request)
+    return try JSONDecoder().decode(NativeSchedulerAssignResponse.self, from: data)
+  }
+
+  func updateSchedulerAssignment(
+    token: String,
+    blockId: Int,
+    assignmentId: Int,
+    surgeonId: Int,
+    startTime: String,
+    caseCount: Int,
+    note: String
+  ) async throws -> NativeSchedulerAssignResponse {
+    let url = baseURL.appendingPathComponent("/api/native/scheduler/blocks/\(blockId)/assignments/\(assignmentId)/update")
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.httpBody = try JSONEncoder().encode(NativeSchedulerAssignPayload(
+      surgeonId: surgeonId,
+      startTime: startTime,
+      caseCount: caseCount,
+      note: note
+    ))
+
+    let data = try await perform(request)
+    return try JSONDecoder().decode(NativeSchedulerAssignResponse.self, from: data)
+  }
+
+  func clearSchedulerBlock(token: String, blockId: Int) async throws -> NativeSchedulerAssignResponse {
+    let url = baseURL.appendingPathComponent("/api/native/scheduler/blocks/\(blockId)/clear")
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+    let data = try await perform(request)
+    return try JSONDecoder().decode(NativeSchedulerAssignResponse.self, from: data)
+  }
+
+  func removeSchedulerAssignment(token: String, blockId: Int, assignmentId: Int) async throws -> NativeSchedulerAssignResponse {
+    let url = baseURL.appendingPathComponent("/api/native/scheduler/blocks/\(blockId)/assignments/\(assignmentId)/remove")
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+    let data = try await perform(request)
+    return try JSONDecoder().decode(NativeSchedulerAssignResponse.self, from: data)
   }
 
   func fetchHome(token: String, start: Date, end: Date) async throws -> NativeHomeResponse {

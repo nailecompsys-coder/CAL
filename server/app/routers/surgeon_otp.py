@@ -1,5 +1,6 @@
 """Native surgeon OTP login routes."""
 import hashlib
+import os
 import random
 import re
 from datetime import datetime, timedelta, timezone
@@ -28,6 +29,12 @@ def _generate_otp() -> str:
 
 def _hash_otp(code: str) -> str:
     return hashlib.sha256(code.encode()).hexdigest()
+
+
+def _local_dev_surgeon_otp() -> str | None:
+    """Fixed OTP for Mac-dev / simulator only. Never set in production."""
+    value = os.environ.get("CAL_LOCAL_DEV_SURGEON_OTP", "").strip()
+    return value if value.isdigit() and len(value) == 6 else None
 
 
 class OtpRequestBody(BaseModel):
@@ -130,6 +137,24 @@ def _invalidate_existing_otp_codes(db: Session, surgeon_id: int) -> None:
         MagicLink.used_at.is_(None),
         MagicLink.token_hash.like("%:otp"),
     ).delete(synchronize_session=False)
+
+
+def _store_otp_magic_link(db: Session, surgeon_id: int, code: str, expires_at: datetime) -> MagicLink:
+    """Insert or replace the OTP challenge.
+
+    token_hash is globally unique. Local fixed OTP (CAL_LOCAL_DEV_SURGEON_OTP) always
+    hashes to the same value, so a prior used row must be removed before insert.
+    """
+    token_hash = _hash_otp(code) + ":otp"
+    _invalidate_existing_otp_codes(db, surgeon_id)
+    db.query(MagicLink).filter(MagicLink.token_hash == token_hash).delete(synchronize_session=False)
+    link = MagicLink(
+        surgeon_id=surgeon_id,
+        token_hash=token_hash,
+        expires_at=expires_at,
+    )
+    db.add(link)
+    return link
 
 
 def _create_native_session_device(surgeon_id: int, user_agent: str, now: datetime) -> SurgeonDevice:
@@ -239,9 +264,13 @@ def otp_request(body: OtpRequestBody, request: Request, db: Session = Depends(ge
     delivery_channel = "sms+email" if admin_preview_phone or (surgeon.phone and not admin_preview) else "email"
     delivery_success = False
     failure_reasons = []
-    code = _generate_otp()
+    local_dev_code = _local_dev_surgeon_otp()
+    code = local_dev_code or _generate_otp()
 
-    if admin_preview_phone and admin_preview:
+    if local_dev_code:
+        delivery_channel = "local_dev"
+        delivery_success = True
+    elif admin_preview_phone and admin_preview:
         sms_success, sms_code, sms_failure = generate_sms_otp(
             phone=admin_preview_phone,
             userid=_textbelt_admin_otp_userid(admin_preview),
@@ -272,18 +301,19 @@ def otp_request(body: OtpRequestBody, request: Request, db: Session = Depends(ge
             failure_reasons.append("SMS provider failed to send code.")
         delivery_success = sms_success
 
-    _invalidate_existing_otp_codes(db, surgeon.id)
-    db.add(MagicLink(
-        surgeon_id=surgeon.id,
-        token_hash=_hash_otp(code) + ":otp",
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=OTP_EXPIRE_MINUTES),
-    ))
+    _store_otp_magic_link(
+        db,
+        surgeon.id,
+        code,
+        datetime.now(timezone.utc) + timedelta(minutes=OTP_EXPIRE_MINUTES),
+    )
     db.commit()
 
-    email_success, email_failure = _send_otp_email(surgeon, code, to_email=admin_preview.email if admin_preview else None)
-    if email_failure:
-        failure_reasons.append(email_failure)
-    delivery_success = delivery_success or email_success
+    if not local_dev_code:
+        email_success, email_failure = _send_otp_email(surgeon, code, to_email=admin_preview.email if admin_preview else None)
+        if email_failure:
+            failure_reasons.append(email_failure)
+        delivery_success = delivery_success or email_success
     failure_reason = " ".join(failure_reasons) if failure_reasons and not delivery_success else None
 
     _audit_otp(
@@ -298,6 +328,12 @@ def otp_request(body: OtpRequestBody, request: Request, db: Session = Depends(ge
         failure_reason=failure_reason,
     )
     db.commit()
+    if local_dev_code:
+        return {
+            "ok": True,
+            "message": f"Local surgeon code: {local_dev_code}",
+            "devCode": local_dev_code,
+        }
     return {"ok": True, "message": "If that email or phone is registered, a code was sent."}
 
 
@@ -321,6 +357,7 @@ def otp_verify(body: OtpVerifyBody, request: Request, db: Session = Depends(get_
         raise HTTPException(status_code=401, detail="Invalid code")
 
     code = body.code.strip()
+    local_dev_code = _local_dev_surgeon_otp()
     token_hash = _hash_otp(code) + ":otp"
     now = datetime.now(timezone.utc)
 
@@ -330,6 +367,16 @@ def otp_verify(body: OtpVerifyBody, request: Request, db: Session = Depends(get_
         MagicLink.used_at.is_(None),
         MagicLink.expires_at > now,
     ).first()
+
+    if not link and local_dev_code and code == local_dev_code:
+        # Fixed local OTP reuses one token_hash; replace any prior used row.
+        link = _store_otp_magic_link(
+            db,
+            surgeon.id,
+            code,
+            now + timedelta(minutes=OTP_EXPIRE_MINUTES),
+        )
+        db.flush()
 
     if not link:
         _audit_otp(

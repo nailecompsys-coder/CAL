@@ -42,7 +42,11 @@ struct NativeScheduleProjection {
         assignments: day.assignments,
         callInitials: day.assignments.map(\.surgeon),
         offInitials: day.off,
-        schedulePeriods: day.mySchedule.map(\.period)
+        schedulePeriods: day.mySchedule.map(\.period),
+        hasMyApprovedOff: day.hasMyApprovedOff,
+        hasClinicOr: day.hasClinicOr,
+        hasBlockTime: day.hasBlockTime,
+        hasMeeting: day.hasMeeting
       )
     }
   }

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, joinedload
 from .conflicts import check_conflicts_structured
 from .models import (
     ClinicGroup,
+    ClinicGroupLocation,
     ClinicGroupMember,
     DayOff,
     Location,
@@ -74,6 +75,7 @@ def surgeon_clinic_groups(db: Session, surgeon_id: int) -> list[ClinicGroup]:
         .filter(
             ClinicGroupMember.surgeon_id == surgeon_id,
             ClinicGroup.is_active == True,  # noqa: E712
+            ClinicGroup.group_type == "people",
         )
         .order_by(ClinicGroup.name)
         .all()
@@ -87,11 +89,15 @@ def clinic_group_day_off_findings(
     end_date: date,
     exclude_dayoff_id: int | None = None,
 ) -> list[DayOffFinding]:
-    if not surgeon or (surgeon.staff_type or "physician") != "physician":
+    if not surgeon:
         return []
 
     findings: list[DayOffFinding] = []
-    groups = surgeon_clinic_groups(db, surgeon.id)
+    groups = [
+        group
+        for group in surgeon_clinic_groups(db, surgeon.id)
+        if group.enforce_day_off_limit
+    ]
     current = start_date
     while current <= end_date:
         for group in groups:
@@ -101,7 +107,6 @@ def clinic_group_day_off_findings(
                 .join(ClinicGroupMember, ClinicGroupMember.surgeon_id == Surgeon.id)
                 .filter(
                     ClinicGroupMember.clinic_group_id == group.id,
-                    Surgeon.staff_type == "physician",
                     Surgeon.is_active == True,  # noqa: E712
                     DayOff.status == "approved",
                     DayOff.start_date <= current,
@@ -110,8 +115,13 @@ def clinic_group_day_off_findings(
             )
             if exclude_dayoff_id is not None:
                 approved = approved.filter(DayOff.id != exclude_dayoff_id)
-            approved_rows = [row for row in approved.options(joinedload(DayOff.surgeon)).all() if surgeon_is_visible(row.surgeon)]
-            if len(approved_rows) < int(group.max_approved_off_per_day or 1):
+            approved_rows = [
+                row
+                for row in approved.options(joinedload(DayOff.surgeon)).all()
+                if surgeon_is_visible(row.surgeon)
+            ]
+            limit = max(1, int(group.max_approved_off_per_day or 1))
+            if len(approved_rows) < limit:
                 continue
             initials = sorted({row.surgeon.initials for row in approved_rows if row.surgeon})
             initials_text = ", ".join(initials)
@@ -125,8 +135,8 @@ def clinic_group_day_off_findings(
                 approved_initials=initials,
                 surgeon_message=f"{group.name} already has {initials_text} approved off on {day_label}. Shannon will review.",
                 message=(
-                    f"Clinic group capacity: {group.name} allows {group.max_approved_off_per_day} approved physician"
-                    f"{'' if group.max_approved_off_per_day == 1 else 's'} off per day. "
+                    f"Clinic group capacity: {group.name} allows {limit} approved member"
+                    f"{'' if limit == 1 else 's'} off per day. "
                     f"{day_label} already has {initials_text} approved off."
                 ),
             ))
@@ -171,6 +181,13 @@ def memberships_by_group(db: Session) -> dict[int, set[int]]:
     return out
 
 
+def locations_by_group(db: Session) -> dict[int, set[int]]:
+    out: dict[int, set[int]] = {}
+    for row in db.query(ClinicGroupLocation).all():
+        out.setdefault(row.clinic_group_id, set()).add(row.location_id)
+    return out
+
+
 def replace_clinic_group_members(db: Session, group_id: int, surgeon_ids: list[int]) -> None:
     db.query(ClinicGroupMember).filter(ClinicGroupMember.clinic_group_id == group_id).delete()
     seen = set()
@@ -179,6 +196,17 @@ def replace_clinic_group_members(db: Session, group_id: int, surgeon_ids: list[i
             continue
         seen.add(surgeon_id)
         db.add(ClinicGroupMember(clinic_group_id=group_id, surgeon_id=surgeon_id))
+    db.commit()
+
+
+def replace_clinic_group_locations(db: Session, group_id: int, location_ids: list[int]) -> None:
+    db.query(ClinicGroupLocation).filter(ClinicGroupLocation.clinic_group_id == group_id).delete()
+    seen = set()
+    for location_id in location_ids:
+        if location_id in seen:
+            continue
+        seen.add(location_id)
+        db.add(ClinicGroupLocation(clinic_group_id=group_id, location_id=location_id))
     db.commit()
 
 

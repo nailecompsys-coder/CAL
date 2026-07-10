@@ -6,15 +6,29 @@
   <title>{% block title %}Mid Florida Surgical{% endblock %} — Admin</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/tailwind.css" />
+  <link rel="stylesheet" href="/static/css/tailwind.css?v={{ app_version|default('dev')|urlencode }}" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
   {% block head %}{% endblock %}
   <style>
     body { font-family: -apple-system, 'DM Sans', BlinkMacSystemFont, sans-serif; }
-    .sidebar-link { display:flex;align-items:center;gap:.75rem;padding:.625rem 1rem;border-radius:.5rem;color:rgba(200,222,255,.70);font-size:.875rem;font-weight:500;text-decoration:none;transition:background .15s; }
-    .sidebar-link:hover { background:rgba(255,255,255,.10);color:#fff; }
-    .sidebar-link.active { background:#0066CC;color:#fff; }
-    .sidebar-link .badge { margin-left:auto;background:#FF9500;color:#fff;font-size:.65rem;border-radius:9999px;padding:0 5px;line-height:1.4; }
+    .sidebar-link { display:flex;align-items:center;gap:.75rem;padding:.625rem 1rem;border-radius:.95rem;color:#6b7a8d;font-size:.875rem;font-weight:600;text-decoration:none;transition:background .15s,color .15s; }
+    .sidebar-link:hover { background:rgba(214,235,255,.45);color:#1c2430; }
+    .sidebar-link.active { background:linear-gradient(145deg,rgba(214,235,255,.95),rgba(235,228,255,.78));color:#0055d4; }
+    .sidebar-link .badge { margin-left:auto;background:#ff9f0a;color:#fff;font-size:.65rem;border-radius:9999px;padding:0 5px;line-height:1.4; }
+    .settings-shell { display:flex; flex-direction:column; gap:1.25rem; padding:1.25rem; }
+    @media (min-width: 1024px) {
+      .settings-shell { flex-direction:row; align-items:flex-start; }
+    }
+    .settings-rail-link {
+      display:flex; align-items:center; gap:.65rem;
+      padding:.55rem .75rem; border-radius:.65rem;
+      color:#475569; font-size:.875rem; font-weight:600; text-decoration:none;
+    }
+    .settings-rail-link i { width:1rem; text-align:center; color:#94a3b8; }
+    .settings-rail-link:hover { background:rgba(0,102,204,.06); color:#0f172a; }
+    .settings-rail-link.active { background:rgba(0,102,204,.12); color:#0066CC; }
+    .settings-rail-link.active i { color:#0066CC; }
+    .settings-main { flex:1; min-width:0; }
     /* Gradient avatars/blocks — use --avatar-c or --block-c (hex) for a soft gradient */
     .avatar-gradient { background: linear-gradient(145deg, var(--avatar-c) 0%, color-mix(in srgb, var(--avatar-c) 55%, white) 100%) !important; }
     /* Staff / surgeon initials — neutral; facility blocks keep location colors */
@@ -25,6 +39,13 @@
     }
     .block-gradient { background: linear-gradient(145deg, var(--block-c) 0%, color-mix(in srgb, var(--block-c) 65%, white) 100%) !important; }
     .dot-gradient { background: linear-gradient(145deg, var(--dot-c) 0%, color-mix(in srgb, var(--dot-c) 60%, white) 100%) !important; }
+    /* Meetings calendar — soft pastels (not facility OR blues/pinks) */
+    :root {
+      --meeting-cal: #DCC9F5;      /* soft lilac */
+      --meeting-aprima: #F8D5C2;  /* soft apricot */
+      --dayoff-approved: #A8D8C8;  /* soft mint */
+      --dayoff-pending: #F5D78E;   /* soft amber */
+    }
     /* Status pills — subtle gradients */
     .status-approved { background: linear-gradient(145deg, #86efac 0%, #bbf7d0 100%); color: #166534; }
     .status-pending { background: linear-gradient(145deg, #fde047 0%, #fef08a 100%); color: #854d0e; }
@@ -54,7 +75,7 @@
         {% endif %}
         <div class="min-w-0">
           <p class="text-clinical-ink font-extrabold text-sm leading-tight truncate">{% if settings %}{{ settings.practice_name }}{% else %}Mid Florida Surgical{% endif %}</p>
-          <p class="text-clinical-muted text-xs font-semibold">Command Center</p>
+          <p class="text-clinical-muted text-xs font-semibold">CAL Central</p>
         </div>
         <button onclick="closeSidebar()" class="ml-auto text-clinical-muted hover:text-clinical-ink lg:hidden flex-shrink-0">
           <i class="fa-solid fa-xmark text-lg"></i>
@@ -72,15 +93,7 @@
         <i class="fa-solid fa-calendar-days" style="width:1rem;text-align:center"></i> Calendar
       </a>
 
-      <div class="nav-section-label">People</div>
-      <a href="/admin/surgeons" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/surgeons' %}active{% endif %}">
-        <i class="fa-solid fa-user-doctor" style="width:1rem;text-align:center"></i> Physicians
-      </a>
-      <a href="/admin/locations" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/locations' %}active{% endif %}">
-        <i class="fa-solid fa-location-dot" style="width:1rem;text-align:center"></i> Locations
-      </a>
-
-      <div class="nav-section-label">Scheduling</div>
+      <div class="nav-section-label">Schedule</div>
       <a href="/admin/clinic-schedule" onclick="closeSidebar()" class="sidebar-link {% if '/clinic-schedule' in request.url.path %}active{% endif %}">
         <i class="fa-solid fa-calendar-check" style="width:1rem;text-align:center"></i> Clinics / OR
       </a>
@@ -91,33 +104,35 @@
         <i class="fa-solid fa-umbrella-beach" style="width:1rem;text-align:center"></i> Time Off
         {% if pending_count and pending_count > 0 %}<span class="badge">{{ pending_count }}</span>{% endif %}
       </a>
-
-      <div class="nav-section-label">Operations</div>
       <a href="/admin/meetings" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/meetings' %}active{% endif %}">
         <i class="fa-solid fa-users-rectangle" style="width:1rem;text-align:center"></i> Meetings
       </a>
-      <a href="/admin/metrics" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/metrics' %}active{% endif %}">
-        <i class="fa-solid fa-chart-line" style="width:1rem;text-align:center"></i> Metrics
+
+      <div class="nav-section-label">Tools</div>
+      <a href="/admin/block-or" onclick="closeSidebar()" class="sidebar-link {% if '/block-or' in request.url.path %}active{% endif %}">
+        <i class="fa-solid fa-hospital-user" style="width:1rem;text-align:center"></i> Block OR
       </a>
-      <a href="/admin/clinic-groups" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/clinic-groups' %}active{% endif %}">
-        <i class="fa-solid fa-layer-group" style="width:1rem;text-align:center"></i> Clinic Groups
-      </a>
-      {% endif %}
-      <div class="nav-section-label">Scheduler</div>
-      <a href="/admin/scheduler-availability" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/scheduler-availability' %}active{% endif %}">
-        <i class="fa-solid fa-user-clock" style="width:1rem;text-align:center"></i> Scheduler View
-      </a>
-      {% if admin.role != 'scheduler' %}
-      <a href="/admin/surgical-blocks" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/surgical-blocks' %}active{% endif %}">
-        <i class="fa-solid fa-hospital-user" style="width:1rem;text-align:center"></i> Surgical Blocks
+      <a href="/admin/scheduler-availability" onclick="closeSidebar()" class="sidebar-link {% if '/scheduler-availability' in request.url.path %}active{% endif %}">
+        <i class="fa-solid fa-user-clock" style="width:1rem;text-align:center"></i> Availability
       </a>
       <a href="/admin/schedule-templates" onclick="closeSidebar()" class="sidebar-link {% if '/schedule-templates' in request.url.path %}active{% endif %}">
         <i class="fa-solid fa-table-cells" style="width:1rem;text-align:center"></i> Templates
       </a>
+      <a href="/admin/metrics" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/metrics' %}active{% endif %}">
+        <i class="fa-solid fa-chart-line" style="width:1rem;text-align:center"></i> Metrics
+      </a>
 
-      <div class="nav-section-label">System</div>
-      <a href="/admin/settings" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/settings' %}active{% endif %}">
+      <div class="nav-section-label">Admin</div>
+      <a href="/admin/settings/practice" onclick="closeSidebar()" class="sidebar-link {% if '/admin/settings' in request.url.path or request.url.path in ['/admin/surgeons','/admin/users','/admin/locations','/admin/clinic-groups','/admin/scheduling-rules','/admin/branding','/admin/backup','/admin/notifications','/admin/mobile-devices','/admin/otp-sign-in'] %}active{% endif %}">
         <i class="fa-solid fa-gear" style="width:1rem;text-align:center"></i> Settings
+      </a>
+      {% else %}
+      <div class="nav-section-label">Scheduler</div>
+      <a href="/admin/block-or" onclick="closeSidebar()" class="sidebar-link {% if '/block-or' in request.url.path %}active{% endif %}">
+        <i class="fa-solid fa-hospital-user" style="width:1rem;text-align:center"></i> Block OR
+      </a>
+      <a href="/admin/scheduler-availability" onclick="closeSidebar()" class="sidebar-link {% if '/scheduler-availability' in request.url.path %}active{% endif %}">
+        <i class="fa-solid fa-user-clock" style="width:1rem;text-align:center"></i> Availability
       </a>
       {% endif %}
     </nav>

@@ -5,7 +5,7 @@ from datetime import date, timedelta
 
 from sqlalchemy.orm import Session, joinedload
 
-from .models import CallCoverage, CallGroup, CallRotation, DayOff, Location, Surgeon
+from .models import CallCoverage, CallGroup, CallGroupLocation, CallRotation, DayOff, Location, Surgeon
 from .surgeon_visibility import surgeon_is_visible
 
 
@@ -69,6 +69,28 @@ def day_off_by_date(db: Session, schedule_days: list[date], surgeon_sort_key) ->
     return by_date
 
 
+def call_group_display_color(call_group: CallGroup) -> str:
+    """Use the group's linked facility color (WG-OR / AL-OR), not hardcoded pastels."""
+    locations = [
+        link.location
+        for link in (call_group.locations or [])
+        if link.location and link.location.is_active
+    ]
+    if not locations:
+        return "#cbd5e1"
+    hospitals = [loc for loc in locations if (loc.location_type or "") == "hospital"]
+    preferred = hospitals or locations
+    # Prefer primary OR abbreviations when present (WG-OR, AL-OR).
+    for abbr in ("WG-OR", "AL-OR"):
+        for loc in preferred:
+            if (loc.abbreviation or "").upper() == abbr and loc.color:
+                return loc.color
+    for loc in preferred:
+        if loc.color:
+            return loc.color
+    return "#cbd5e1"
+
+
 def call_group_rows(db: Session, call_groups: list[CallGroup], schedule_days: list[date]) -> list[tuple[CallGroup, dict]]:
     rotations = (
         db.query(CallRotation)
@@ -112,12 +134,18 @@ def call_group_rows(db: Session, call_groups: list[CallGroup], schedule_days: li
 def page_data(db: Session, month_offset: int, surgeon_sort_key) -> dict:
     month_data = month_schedule_days(month_offset)
     schedule_days = month_data["schedule_days"]
-    call_groups = db.query(CallGroup).order_by(CallGroup.sort_order, CallGroup.name, CallGroup.id).all()
+    call_groups = (
+        db.query(CallGroup)
+        .options(joinedload(CallGroup.locations).joinedload(CallGroupLocation.location))
+        .order_by(CallGroup.sort_order, CallGroup.name, CallGroup.id)
+        .all()
+    )
     return {
         **month_data,
         "group_rows": call_group_rows(db, call_groups, schedule_days),
         "day_off_by_date": day_off_by_date(db, schedule_days, surgeon_sort_key),
         "call_groups": call_groups,
+        "call_group_display_color": call_group_display_color,
         "locations": db.query(Location).filter(Location.is_active == True).order_by(Location.name).all(),  # noqa: E712
         "surgeon_is_visible": surgeon_is_visible,
     }

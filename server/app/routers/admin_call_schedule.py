@@ -130,3 +130,45 @@ def clear_rotation(
     call_group_id_value = parse_call_group_id(call_group_id)
     clear_rotation_service(db, assignment_date, call_group_id_value)
     return RedirectResponse(f"/admin/call-schedule?{_call_schedule_qs(month_offset)}", status_code=303)
+
+
+@router.post("/call-schedule/cover")
+def assign_coverage(
+    rotation_id: int = Form(...),
+    covering_surgeon_id: int = Form(...),
+    notes: str = Form(""),
+    month_offset: int = Form(0),
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    from ..native_call_coverage_service import assign_admin_call_coverage
+    from fastapi import HTTPException
+
+    try:
+        warnings = assign_admin_call_coverage(db, rotation_id, covering_surgeon_id, notes=notes)
+    except HTTPException as exc:
+        return _warn_redirect(
+            f"/admin/call-schedule?{_call_schedule_qs(month_offset)}",
+            [str(exc.detail)],
+        )
+    return _warn_redirect(f"/admin/call-schedule?{_call_schedule_qs(month_offset)}", warnings)
+
+
+@router.post("/call-schedule/cover/clear")
+def clear_coverage(
+    coverage_id: int = Form(...),
+    month_offset: int = Form(0),
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    from ..native_call_coverage_service import cancel_admin_call_coverage
+    from fastapi import HTTPException
+
+    try:
+        cancel_admin_call_coverage(db, coverage_id)
+    except HTTPException as exc:
+        return _warn_redirect(
+            f"/admin/call-schedule?{_call_schedule_qs(month_offset)}",
+            [str(exc.detail)],
+        )
+    return RedirectResponse(f"/admin/call-schedule?{_call_schedule_qs(month_offset)}", status_code=303)

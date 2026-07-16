@@ -222,12 +222,14 @@ struct NativeCallAssignmentResponse: Decodable {
   let coveringInitials: String?
   let coveringSurgeonId: Int?
   let isCovered: Bool?
+  let coverageId: Int?
 
   func scheduleAssignment(dateKey: String) -> ScheduleAssignment {
     let displayedInitials = coveringInitials ?? initials ?? surgeonInitials(from: surgeon)
     return ScheduleAssignment(
       id: "\(dateKey)-\(rotationId)",
       rotationId: rotationId,
+      coverageId: coverageId,
       location: group,
       locationShort: shortGroupName(group),
       surgeon: displayedInitials,

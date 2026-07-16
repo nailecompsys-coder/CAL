@@ -469,7 +469,10 @@ private struct SchedulerAssignSheet: View {
   }
 
   private var canSave: Bool {
-    guard selectedCandidate != nil, !isLoading, !isSaving else { return false }
+    guard let candidate = selectedCandidate, !isLoading, !isSaving else { return false }
+    if !candidate.isClear && note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      return false
+    }
     return hasDirtyChanges
   }
 
@@ -552,8 +555,16 @@ private struct SchedulerAssignSheet: View {
                 Stepper("\(caseCount) case\(caseCount == 1 ? "" : "s")", value: $caseCount, in: 1...20)
                   .font(.subheadline.weight(.semibold))
               }
-              TextField("Note (optional)", text: $note)
+              TextField(
+                selectedCandidate?.isClear == false ? "Override note (required)" : "Note (optional)",
+                text: $note
+              )
                 .textFieldStyle(.roundedBorder)
+              if let candidate = selectedCandidate, !candidate.isClear {
+                Text(candidate.warnings.first ?? candidate.availability)
+                  .font(.caption2.weight(.semibold))
+                  .foregroundStyle(ClinicalPalette.amber)
+              }
               if mode == .editing, let editing = editingAssignment {
                 Text("Editing \(editing.surgeonInitials) at \(editing.start)")
                   .font(.caption2.weight(.semibold))

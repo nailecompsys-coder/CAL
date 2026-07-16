@@ -560,6 +560,18 @@ def block_assignment_warnings(
             "OVERLAP_OR_BLOCK": "Overlaps another OR block assignment",
         }.get(conflict.rule_id, "Schedule warning")
         warnings.append(scheduler_safe_warning(f"{label}: {conflict.message}"))
+
+    from .models import SurgeonDayItem
+    personal_items = db.query(SurgeonDayItem).filter(
+        SurgeonDayItem.surgeon_id == surgeon_id,
+        SurgeonDayItem.date == block.date,
+    ).all()
+    for item in personal_items:
+        item_start = item.start_time or time(0, 0)
+        item_end = item.end_time or time(23, 59)
+        if item_start < end and item_end > start:
+            title = (item.title or "Personal time").strip()
+            warnings.append(scheduler_safe_warning(f"Overlaps personal item: {title}"))
     assigned_blocks = db.query(ORBlockAssignment, ORBlockInstance).join(
         ORBlockInstance,
         ORBlockAssignment.block_instance_id == ORBlockInstance.id,
@@ -650,13 +662,18 @@ def assign_block(
     if duplicate:
         raise ValueError("That surgeon is already assigned at this start time")
     warnings = block_assignment_warnings(db, block, surgeon_id, assigned_start, block.end_time)
+    note = (assignment_note or "").strip() or None
+    if warnings and not note:
+        raise ValueError(
+            "Add a note to override schedule warnings: " + "; ".join(warnings[:3])
+        )
     assignment = ORBlockAssignment(
         block_instance_id=block.id,
         surgeon_id=surgeon_id,
         assigned_by_admin_id=admin_id,
         start_time=assigned_start,
         case_count=max(1, int(case_count or 1)),
-        note=(assignment_note or "").strip() or None,
+        note=note,
     )
     db.add(assignment)
     if not block.assigned_surgeon_id:
@@ -741,11 +758,16 @@ def update_block_assignment(
 
     previous_surgeon_id = assignment.surgeon_id
     warnings = block_assignment_warnings(db, block, surgeon_id, assigned_start, block.end_time)
+    note = (assignment_note or "").strip() or None
+    if warnings and not note:
+        raise ValueError(
+            "Add a note to override schedule warnings: " + "; ".join(warnings[:3])
+        )
     assignment.surgeon_id = surgeon_id
     assignment.assigned_by_admin_id = admin_id
     assignment.start_time = assigned_start
     assignment.case_count = max(1, int(case_count if case_count is not None else assignment.case_count or 1))
-    assignment.note = (assignment_note or "").strip() or None
+    assignment.note = note
     _sync_legacy_assignment_fields(db, block)
     db.flush()
     db.refresh(assignment)

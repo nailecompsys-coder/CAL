@@ -253,6 +253,20 @@ struct ScheduleHomeView: View {
               }
             }
           },
+          clearCoverageAction: {
+            Task {
+              do {
+                try await store.cancelCallCoverage(
+                  assignment: assignment,
+                  selectedDate: selectedDate,
+                  scope: scope
+                )
+                coveringAssignment = nil
+              } catch {
+                store.setWarningMessage(error.localizedDescription)
+              }
+            }
+          },
           cancelAction: {
             coveringAssignment = nil
           }

@@ -227,6 +227,8 @@ def scheduler_assign_block(
         )
     except ValueError as exc:
         message = str(exc)
+        if "Add a note" in message:
+            raise HTTPException(422, message)
         raise HTTPException(409 if "already assigned" in message else 404, message)
     return {"ok": True, "block": serialize_block_instance(block), "warnings": warnings}
 
@@ -258,6 +260,8 @@ def scheduler_update_block_assignment(
         )
     except ValueError as exc:
         message = str(exc)
+        if "Add a note" in message:
+            raise HTTPException(422, message)
         raise HTTPException(409 if "already assigned" in message else 404, message)
     return {"ok": True, "block": serialize_block_instance(block), "warnings": warnings}
 

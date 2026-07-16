@@ -47,4 +47,21 @@ struct NativeScheduleActions {
       coveringSurgeonId: coveringSurgeon.id
     )
   }
+
+  func cancelCallCoverage(
+    token: String,
+    assignment: ScheduleAssignment
+  ) async throws {
+    guard !token.isEmpty else {
+      throw NativeCALError.missingSession
+    }
+    guard let coverageId = assignment.coverageId else {
+      throw NativeCALError.requestRejected("This coverage row is not linked and cannot be cleared.")
+    }
+
+    _ = try await client.cancelCallCoverage(
+      token: token,
+      coverageId: coverageId
+    )
+  }
 }

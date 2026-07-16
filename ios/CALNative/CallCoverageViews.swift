@@ -22,6 +22,7 @@ struct CallCoverageSheet: View {
   let surgeons: [NativeSurgeon]
   let isSaving: Bool
   let saveAction: (NativeSurgeon) -> Void
+  let clearCoverageAction: (() -> Void)?
   let cancelAction: () -> Void
 
   @State private var selectedSurgeonId: Int?
@@ -119,7 +120,7 @@ struct CallCoverageSheet: View {
               if isSaving {
                 ProgressView()
               } else {
-                Text("Save Coverage")
+                Text(assignment.isCovered ? "Update Coverage" : "Save Coverage")
                   .font(ClinicalTypography.rowTitle)
               }
               Spacer()
@@ -132,6 +133,21 @@ struct CallCoverageSheet: View {
             .foregroundStyle(.white)
           }
           .disabled(selectedSurgeon == nil || isSaving)
+
+          if assignment.isCovered, assignment.coverageId != nil, let clearCoverageAction {
+            Button(action: clearCoverageAction) {
+              HStack {
+                Spacer()
+                Text("Clear Coverage")
+                  .font(ClinicalTypography.rowTitle)
+                Spacer()
+              }
+              .padding(.vertical, 12)
+              .background(ClinicalPalette.amber.opacity(0.9), in: RoundedRectangle(cornerRadius: 14))
+              .foregroundStyle(.white)
+            }
+            .disabled(isSaving)
+          }
         }
         .padding(16)
         .calReadableColumn(ClinicalLayout.contentColumn)

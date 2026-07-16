@@ -97,6 +97,24 @@
                   <span class="font-bold">NO call</span>
                 {% endif %}
               </span>
+              {% if rot.surgeon_id %}
+              <button type="button"
+                onclick="openCover({{ rot.id }}, '{{ group.name|e }}', '{{ day.isoformat() }}', {{ rot.surgeon_id }}, '{% if rot.surgeon %}{{ rot.surgeon.staff_type }}{% else %}physician{% endif %}')"
+                class="opacity-0 group-hover/entry:opacity-100 w-4 h-4 bg-teal-100 text-teal-700 rounded flex items-center justify-center hover:bg-teal-200"
+                title="Set coverage">
+                <i class="fa-solid fa-user-group text-[8px]"></i>
+              </button>
+              {% endif %}
+              {% set cov = rot.active_coverage %}
+              {% if cov %}
+              <form method="post" action="/admin/call-schedule/cover/clear" onclick="event.stopPropagation()">
+                <input type="hidden" name="coverage_id" value="{{ cov.id }}" />
+                <input type="hidden" name="month_offset" value="{{ month_offset }}" />
+                <button class="opacity-0 group-hover/entry:opacity-100 w-4 h-4 bg-amber-100 text-amber-700 rounded flex items-center justify-center hover:bg-amber-200" title="Clear coverage">
+                  <i class="fa-solid fa-rotate-left text-[8px]"></i>
+                </button>
+              </form>
+              {% endif %}
               <form method="post" action="/admin/call-schedule/clear" onclick="event.stopPropagation()">
                 <input type="hidden" name="rotation_date" value="{{ day.isoformat() }}" />
                 <input type="hidden" name="call_group_id" value="{{ group.id }}" />
@@ -175,6 +193,41 @@
     </form>
   </div>
 </div>
+
+<div id="cover-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden">
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="font-bold text-slate-800">Set Coverage</h3>
+      <button onclick="document.getElementById('cover-modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <form method="post" action="/admin/call-schedule/cover" class="space-y-4">
+      <input type="hidden" name="rotation_id" id="cover-rotation-id" />
+      <input type="hidden" name="month_offset" value="{{ month_offset }}" />
+      <p id="cover-label" class="text-sm text-slate-700 font-medium"></p>
+      <div>
+        <label class="block text-xs font-medium text-slate-500 mb-2">Covering surgeon</label>
+        <div class="space-y-1 max-h-64 overflow-y-auto" id="cover-surgeon-list">
+          {% for s in surgeons %}
+          <label data-staff-type="{{ s.staff_type }}" data-surgeon-id="{{ s.id }}"
+                 class="cover-option flex items-center gap-3 px-3 py-2 rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 has-[:checked]:border-teal-500 has-[:checked]:bg-teal-50">
+            <input type="radio" name="covering_surgeon_id" value="{{ s.id }}" class="sr-only" required />
+            <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 staff-avatar">{{ s.initials }}</div>
+            <p class="text-sm font-medium text-slate-800">{{ s.full_name }}{% if s.suffix %} {{ s.suffix }}{% endif %}</p>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-slate-500 mb-1">Note (optional)</label>
+        <input type="text" name="notes" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" placeholder="Phone request from …" />
+      </div>
+      <div class="flex gap-2 pt-1">
+        <button type="submit" class="flex-1 bg-teal-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-teal-700">Save coverage</button>
+        <button type="button" onclick="document.getElementById('cover-modal').classList.add('hidden')" class="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-lg text-sm font-medium">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -187,7 +240,24 @@ function openAssign(date, groupId, groupName) {
     d.toLocaleDateString('en-US', {weekday:'long', month:'long', day:'numeric'}) + ' — ' + groupName;
   document.getElementById('assign-modal').classList.remove('hidden');
 }
+function openCover(rotationId, groupName, date, originalId, staffType) {
+  document.getElementById('cover-rotation-id').value = rotationId;
+  const d = new Date(date + 'T12:00:00');
+  document.getElementById('cover-label').textContent =
+    d.toLocaleDateString('en-US', {weekday:'long', month:'long', day:'numeric'}) + ' — ' + groupName;
+  document.querySelectorAll('.cover-option').forEach(function(el) {
+    const sameType = el.getAttribute('data-staff-type') === staffType;
+    const isOriginal = String(el.getAttribute('data-surgeon-id')) === String(originalId);
+    el.style.display = (sameType && !isOriginal) ? '' : 'none';
+    const radio = el.querySelector('input[type=radio]');
+    if (radio) radio.checked = false;
+  });
+  document.getElementById('cover-modal').classList.remove('hidden');
+}
 document.getElementById('assign-modal').addEventListener('click', function(e) {
+  if (e.target === this) this.classList.add('hidden');
+});
+document.getElementById('cover-modal').addEventListener('click', function(e) {
   if (e.target === this) this.classList.add('hidden');
 });
 </script>

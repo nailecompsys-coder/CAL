@@ -108,7 +108,7 @@ def clinic_group_day_off_findings(
                 .filter(
                     ClinicGroupMember.clinic_group_id == group.id,
                     Surgeon.is_active == True,  # noqa: E712
-                    DayOff.status == "approved",
+                    DayOff.status.in_(("approved", "pending")),
                     DayOff.start_date <= current,
                     DayOff.end_date >= current,
                 )
@@ -126,6 +126,11 @@ def clinic_group_day_off_findings(
             initials = sorted({row.surgeon.initials for row in approved_rows if row.surgeon})
             initials_text = ", ".join(initials)
             day_label = current.strftime("%b %-d")
+            pending_n = sum(1 for row in approved_rows if row.status == "pending")
+            approved_n = len(approved_rows) - pending_n
+            detail = f"{approved_n} approved"
+            if pending_n:
+                detail += f", {pending_n} pending"
             findings.append(DayOffFinding(
                 severity="warning",
                 kind="clinic_group_capacity",
@@ -133,11 +138,13 @@ def clinic_group_day_off_findings(
                 clinic_group_id=group.id,
                 clinic_group_name=group.name,
                 approved_initials=initials,
-                surgeon_message=f"{group.name} already has {initials_text} approved off on {day_label}. Shannon will review.",
+                surgeon_message=(
+                    f"{group.name} already has {initials_text} off/pending on {day_label}. Shannon will review."
+                ),
                 message=(
-                    f"Clinic group capacity: {group.name} allows {limit} approved member"
-                    f"{'' if limit == 1 else 's'} off per day. "
-                    f"{day_label} already has {initials_text} approved off."
+                    f"Clinic group capacity: {group.name} allows {limit} member"
+                    f"{'' if limit == 1 else 's'} off per day (approved + pending). "
+                    f"{day_label} already has {detail}: {initials_text}."
                 ),
             ))
         current += timedelta(days=1)

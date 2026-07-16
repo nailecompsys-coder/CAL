@@ -242,6 +242,18 @@ struct NativeCALClient {
     return result.assignment
   }
 
+  func cancelCallCoverage(token: String, coverageId: Int) async throws -> NativeCallAssignmentResponse {
+    let url = baseURL.appendingPathComponent("/api/native/call-coverage/\(coverageId)/cancel")
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.setValue(token, forHTTPHeaderField: "X-CAL-Device-Token")
+    let data = try await perform(request)
+    let result = try JSONDecoder().decode(NativeCallCoverageResponse.self, from: data)
+    return result.assignment
+  }
+
   func markAlertsRead(token: String) async throws {
     let url = baseURL.appendingPathComponent("/api/native/alerts/read")
     var request = URLRequest(url: url)

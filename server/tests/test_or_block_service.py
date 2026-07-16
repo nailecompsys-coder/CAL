@@ -261,7 +261,10 @@ class ORBlockServiceTest(unittest.TestCase):
             surgeon = self._surgeon(db, "Chris", "Johnson")
             hospital = self._location(db, "Advent Winter Garden", "WG")
             clinic = self._location(db, "Winter Garden Clinic", "WGC", "clinic")
-            block_day = date(2026, 7, 8)
+            # Must be today-forward — rules engine clips past windows to empty.
+            block_day = date.today() + timedelta(days=21)
+            while block_day.weekday() != 2:  # Wednesday
+                block_day += timedelta(days=1)
             block_id = create_or_blocks(db, BlockORCreateInput(
                 name="Open AM Block",
                 start_date=block_day,
@@ -292,7 +295,7 @@ class ORBlockServiceTest(unittest.TestCase):
             warnings = block_assignment_warnings(db, block, surgeon.id)
 
             self.assertTrue(any("Overlaps clinic schedule" in row for row in warnings))
-            self.assertTrue(any("Overlaps approved day off" in row for row in warnings))
+            self.assertTrue(any("Overlaps day off" in row for row in warnings))
             self.assertTrue(any("Overlaps another surgical case" in row for row in warnings))
             self.assertNotIn("Hidden Patient", " ".join(warnings))
         finally:
@@ -585,6 +588,53 @@ class ORBlockServiceTest(unittest.TestCase):
             self.assertNotIn("patient_dob", serialized)
             self.assertNotIn("patient_phone", serialized)
             self.assertNotIn("Private procedure", serialized)
+        finally:
+            db.close()
+
+    def test_assign_with_warnings_requires_override_note(self):
+        db = self.Session()
+        try:
+            surgeon = self._surgeon(db, "Chris", "Johnson")
+            winter_garden = self._location(db, "Advent Winter Garden", "WG")
+            altamonte = self._location(db, "Advent Altamonte", "AL")
+            block_day = date.today() + timedelta(days=21)
+            while block_day.weekday() != 2:
+                block_day += timedelta(days=1)
+            existing = ORBlockInstance(
+                location_id=winter_garden.id,
+                date=block_day,
+                session="am",
+                start_time=time(7, 0),
+                end_time=time(12, 0),
+                status="assigned",
+                assigned_surgeon_id=surgeon.id,
+                assigned_start_time=time(7, 0),
+                assigned_case_count=1,
+            )
+            open_block = ORBlockInstance(
+                location_id=altamonte.id,
+                date=block_day,
+                session="am",
+                start_time=time(7, 0),
+                end_time=time(12, 0),
+                status="open",
+            )
+            db.add_all([existing, open_block])
+            db.commit()
+
+            with self.assertRaises(ValueError) as ctx:
+                assign_block(db, open_block.id, surgeon.id)
+            self.assertIn("Add a note to override", str(ctx.exception))
+
+            assigned, warnings = assign_block(
+                db,
+                open_block.id,
+                surgeon.id,
+                assignment_note="Spoke with Chris — OK to double",
+            )
+            self.assertEqual(assigned.status, "assigned")
+            self.assertTrue(any("Already assigned Block OR" in row for row in warnings))
+            self.assertEqual(assigned.assignment_note, "Spoke with Chris — OK to double")
         finally:
             db.close()
 

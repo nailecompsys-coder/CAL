@@ -21,6 +21,7 @@ struct NativeVerifiedSession {
 struct ScheduleAssignment: Identifiable {
   let id: String
   let rotationId: Int?
+  let coverageId: Int?
   let location: String
   let locationShort: String
   let surgeon: String

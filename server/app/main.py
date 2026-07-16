@@ -22,8 +22,8 @@ from .routers import (
     admin_clinic_groups, admin_locations, admin_meetings, admin_metrics, admin_scheduler_availability, admin_settings, admin_surgeons,
     admin_surgical_blocks,
     admin_schedule_templates, admin_surgical_schedule, api, api_calendar, api_push, auth,
-    native_api, native_scheduler_api, surgeon, surgeon_availability, surgeon_call_schedule, surgeon_day_items, surgeon_otp,
-    surgeon_request_off, surgeon_schedule, surgeon_surgical_cases,
+    native_api, native_scheduler_api, surgeon_day_items, surgeon_otp,
+    surgeon_pwa_retired, surgeon_surgical_cases,
 )
 from . import migrate_call_groups
 
@@ -101,13 +101,9 @@ app.include_router(admin_block_or.router)
 app.include_router(admin_surgical_blocks.router)
 app.include_router(admin_settings.router)
 app.include_router(admin_surgical_schedule.router)
-app.include_router(surgeon.router)
-app.include_router(surgeon_schedule.router)
-app.include_router(surgeon_call_schedule.router)
-app.include_router(surgeon_availability.router)
+app.include_router(surgeon_pwa_retired.router)
 app.include_router(surgeon_day_items.router)
 app.include_router(surgeon_surgical_cases.router)
-app.include_router(surgeon_request_off.router)
 app.include_router(surgeon_otp.router, prefix="/api/surgeon")
 app.include_router(api.router)
 app.include_router(api_calendar.router)
@@ -120,12 +116,6 @@ def root(request: Request):
     # Admin first so staff with a desktop preview cookie still land in the portal.
     if request.cookies.get("admin_token"):
         return RedirectResponse("/admin/dashboard")
-    user_agent = request.headers.get("user-agent", "")
-    is_desktop_browser = any(marker in user_agent for marker in ("Macintosh", "Windows", "Linux x86_64"))
-    if is_desktop_browser:
-        return RedirectResponse("/admin/login")
-    if request.cookies.get("surgeon_token") or request.cookies.get("surgeon_token_preview"):
-        return RedirectResponse("/surgeon/schedule")
     return RedirectResponse("/admin/login")
 
 

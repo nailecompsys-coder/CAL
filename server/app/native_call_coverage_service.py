@@ -105,6 +105,96 @@ def assign_native_call_coverage(
     return result
 
 
+def assign_admin_call_coverage(
+    db: Session,
+    rotation_id: int,
+    covering_surgeon_id: int,
+    notes: str = "",
+) -> list[str]:
+    """Desk/portal coverage assign — same rules as native; returns warning strings."""
+    rotation = _call_rotation_for_response(db, rotation_id)
+    if not rotation:
+        raise HTTPException(404, "Call assignment not found")
+    if rotation.date < practice_today():
+        raise HTTPException(400, "Call coverage can only be set for today or later.")
+    if not rotation.surgeon_id:
+        raise HTTPException(400, "Cannot cover a NO-call day. Assign a primary surgeon first.")
+
+    covering = db.get(Surgeon, covering_surgeon_id)
+    if not surgeon_is_visible(covering):
+        raise HTTPException(400, "Covering surgeon is not active")
+
+    original = rotation.surgeon
+    if covering.staff_type != (original.staff_type if original else "physician"):
+        role = "surgeon" if (original and original.staff_type == "physician") else "PA/staff"
+        raise HTTPException(400, f"Coverage must be assigned to another {role}.")
+
+    existing = db.query(CallCoverage).filter(
+        CallCoverage.call_rotation_id == rotation.id,
+        CallCoverage.status == "active",
+    ).first()
+    if existing:
+        existing.status = "canceled"
+        existing.canceled_at = _utc_now()
+
+    warnings = _coverage_swap_warnings(db, rotation, covering)
+    coverage = CallCoverage(
+        call_rotation_id=rotation.id,
+        original_surgeon_id=rotation.surgeon_id,
+        covering_surgeon_id=covering.id,
+        requested_by_surgeon_id=rotation.surgeon_id,
+        notes=(notes.strip() or "Assigned by portal")[:500],
+        status="active",
+    )
+    db.add(coverage)
+    db.commit()
+    log_schedule_change(
+        db,
+        event_type="call_coverage_updated",
+        surgeon_id=covering.id,
+        event_date=rotation.date,
+        title="Call coverage updated",
+        body=f"{covering.initials} covering {rotation.call_group.name if rotation.call_group else 'call'} on {rotation.date.strftime('%b %-d')} (portal)",
+        payload={"warnings": warnings, "source": "portal"} if warnings else {"source": "portal"},
+    )
+    db.commit()
+
+    if rotation.surgeon_id:
+        send_native_push_to_surgeon(
+            rotation.surgeon_id,
+            "On-call coverage updated",
+            f"{covering.initials} is covering {rotation.date.strftime('%b %-d')}",
+            db,
+            {"type": "call_coverage", "rotationId": rotation.id},
+        )
+    send_native_push_to_surgeon(
+        covering.id,
+        "On-call coverage assigned",
+        f"You are covering {rotation.call_group.name if rotation.call_group else 'call'} on {rotation.date.strftime('%b %-d')}",
+        db,
+        {"type": "call_coverage", "rotationId": rotation.id},
+    )
+    return warnings
+
+
+def cancel_admin_call_coverage(db: Session, coverage_id: int) -> None:
+    coverage = db.get(CallCoverage, coverage_id)
+    if not coverage or coverage.status != "active":
+        raise HTTPException(404, "Coverage not found")
+    coverage.status = "canceled"
+    coverage.canceled_at = _utc_now()
+    log_schedule_change(
+        db,
+        event_type="call_coverage_canceled",
+        surgeon_id=coverage.covering_surgeon_id,
+        event_date=coverage.rotation.date if coverage.rotation else None,
+        title="Call coverage canceled",
+        body="Coverage swap canceled (portal)",
+        payload={"source": "portal"},
+    )
+    db.commit()
+
+
 def cancel_native_call_coverage(db: Session, requesting_surgeon: Surgeon, coverage_id: int) -> dict:
     coverage = db.get(CallCoverage, coverage_id)
     if not coverage or coverage.status != "active":

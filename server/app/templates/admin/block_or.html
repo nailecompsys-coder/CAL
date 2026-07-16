@@ -20,7 +20,15 @@
   {% if msg.startswith('created:') %}
   Block OR created: {{ msg.split(':', 1)[1] }} block instance{{ '' if msg.split(':', 1)[1] == '1' else 's' }}.
   {% elif msg == 'updated' %}
-  Block OR updated.
+  Block OR capacity updated.
+  {% elif msg == 'assigned' %}
+  Surgeon placed on Block OR.
+  {% elif msg == 'assignment-updated' %}
+  Block OR assignment updated.
+  {% elif msg == 'assignment-removed' %}
+  Surgeon removed from Block OR.
+  {% elif msg == 'cleared' %}
+  Block OR assignments cleared.
   {% elif msg == 'deleted' %}
   Block OR removed.
   {% else %}
@@ -42,81 +50,162 @@
       <h2 class="font-extrabold text-slate-800">Read-only Block OR</h2>
       <p class="text-sm text-slate-500">
         Schedulers can view open blocks here. Create and edit capacity on an admin account;
-        assign surgeons from the mobile Blocks tab.
+        assign surgeons from the portal Block OR panel (admin) or the mobile Blocks tab.
       </p>
       <a href="/admin/scheduler-availability" class="inline-flex text-sm font-semibold text-blue-600 hover:text-blue-800">
         Open Availability view →
       </a>
     </div>
     {% elif selected_block %}
-    <form method="post" action="/admin/block-or/{{ selected_block.id }}/edit" class="clinical-panel p-5 space-y-4 border-2 border-blue-200">
-      <input type="hidden" name="week_offset" value="{{ week_offset }}" />
-      <div class="flex items-start justify-between gap-2">
-        <div>
-          <h2 class="font-extrabold text-slate-800">Edit block</h2>
-          <p class="text-xs text-slate-500 mt-1">
-            {{ selected_block.date.strftime('%a %b %-d, %Y') }}
-            · {{ selected_block.location.abbreviation if selected_block.location else 'OR' }}
-          </p>
+    <div class="space-y-4">
+      <form method="post" action="/admin/block-or/{{ selected_block.id }}/assign" class="clinical-panel p-5 space-y-4 border-2 border-teal-200">
+        <input type="hidden" name="week_offset" value="{{ week_offset }}" />
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <h2 class="font-extrabold text-slate-800">Assign surgeon</h2>
+            <p class="text-xs text-slate-500 mt-1">
+              {{ selected_block.date.strftime('%a %b %-d, %Y') }}
+              · {{ selected_block.location.abbreviation if selected_block.location else 'OR' }}
+              · {{ selected_block.start_time.strftime('%H:%M') }}-{{ selected_block.end_time.strftime('%H:%M') }}
+            </p>
+          </div>
+          <a href="/admin/block-or?week_offset={{ week_offset }}" class="text-xs font-semibold text-slate-500 hover:text-slate-700">Close</a>
         </div>
-        <a href="/admin/block-or?week_offset={{ week_offset }}" class="text-xs font-semibold text-slate-500 hover:text-slate-700">Close</a>
-      </div>
 
-      {% if selected_block.status == 'assigned' or selected_block.assignments %}
-      <div class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-        Assigned in mobile. You can still adjust times/facility if the assignment start stays inside the window. To remove this block, clear the assignment first.
-      </div>
-      {% endif %}
-
-      <div>
-        <label class="block text-xs font-semibold text-slate-500 mb-1">Facility</label>
-        <select name="location_id" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
-          {% for location in locations %}
-          <option value="{{ location.id }}" {% if selected_block.location_id == location.id %}selected{% endif %}>
-            {{ location.abbreviation or location.name }} — {{ location.name }}
-          </option>
+        {% if assignments %}
+        <div class="space-y-2">
+          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide">On this block</div>
+          {% for row in assignments %}
+          <div class="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+            <div class="min-w-0">
+              <div class="font-semibold text-slate-800 truncate">
+                {{ row.surgeon.initials if row.surgeon else '—' }}
+                <span class="font-normal text-slate-500">
+                  · {{ (row.start_time or selected_block.start_time).strftime('%H:%M') }}
+                  · {{ row.case_count or 1 }} case{{ '' if (row.case_count or 1) == 1 else 's' }}
+                </span>
+              </div>
+              {% if row.note %}
+              <div class="text-xs text-slate-500 truncate">{{ row.note }}</div>
+              {% endif %}
+            </div>
+            <button form="remove-assignment-{{ row.id }}" type="submit"
+              class="text-xs font-semibold text-rose-600 hover:text-rose-800 flex-shrink-0"
+              onclick="return confirm('Remove this surgeon from the block?');">
+              Remove
+            </button>
+          </div>
           {% endfor %}
-        </select>
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-500 mb-1">Session</label>
-        <select name="session" id="edit-session" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
-          <option value="am" {% if selected_block.session == 'am' %}selected{% endif %}>AM 07:00-12:00</option>
-          <option value="pm" {% if selected_block.session == 'pm' %}selected{% endif %}>PM 12:00-17:00</option>
-          <option value="both" {% if selected_block.session == 'both' %}selected{% endif %}>Both 07:00-17:00</option>
-          <option value="custom" {% if selected_block.session == 'custom' %}selected{% endif %}>Custom</option>
-        </select>
-      </div>
-      <div class="grid grid-cols-2 gap-3">
+          {% if assignments|length > 0 %}
+          <button form="clear-block-{{ selected_block.id }}" type="submit"
+            class="w-full text-xs font-semibold text-amber-700 hover:text-amber-900 py-1.5"
+            onclick="return confirm('Clear all surgeons from this block?');">
+            Clear all assignments
+          </button>
+          {% endif %}
+        </div>
+        {% endif %}
+
         <div>
-          <label class="block text-xs font-semibold text-slate-500 mb-1">Start time</label>
-          <input type="time" name="start_time" id="edit-start" value="{{ selected_block.start_time.strftime('%H:%M') }}" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Surgeon</label>
+          <select name="surgeon_id" id="assign-surgeon" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+            <option value="">Select surgeon…</option>
+            {% for row in candidates %}
+            <option value="{{ row.surgeon.id }}"
+              data-status="{{ row.status }}"
+              data-availability="{{ row.availability }}"
+              data-warnings="{{ row.warnings|join(' | ') }}">
+              {{ row.surgeon.initials }} — {{ row.surgeon.full_name }}
+              {% if row.status != 'clear' %} ({{ row.availability }}){% endif %}
+            </option>
+            {% endfor %}
+          </select>
+          <p id="assign-warning" class="hidden mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"></p>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 mb-1">Start time</label>
+            <input type="time" name="start_time" value="{{ selected_block.start_time.strftime('%H:%M') }}" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 mb-1">Cases</label>
+            <input type="number" name="case_count" value="1" min="1" max="20" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+          </div>
         </div>
         <div>
-          <label class="block text-xs font-semibold text-slate-500 mb-1">End time</label>
-          <input type="time" name="end_time" id="edit-end" value="{{ selected_block.end_time.strftime('%H:%M') }}" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Assignment note</label>
+          <input name="assignment_note" id="assign-note" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Required when surgeon shows Not Available" />
+          <p class="text-[11px] text-slate-400 mt-1">If availability is not clear, a note is required to override.</p>
         </div>
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-500 mb-1">Notes</label>
-        <input name="notes" value="{{ selected_block.notes or '' }}" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Internal scheduling note" />
-      </div>
-      <button class="w-full bg-blue-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-blue-700">Save changes</button>
-    </form>
-    <form method="post" action="/admin/block-or/{{ selected_block.id }}/delete" class="clinical-panel p-4"
-      onsubmit="return confirm('Remove this Block OR for {{ selected_block.date.strftime('%b %-d') }} at {{ selected_block.location.abbreviation if selected_block.location else 'OR' }}?');">
-      <input type="hidden" name="week_offset" value="{{ week_offset }}" />
-      <button type="submit" class="w-full text-sm font-semibold text-rose-600 hover:text-rose-800 py-2">
-        <i class="fa-solid fa-trash mr-1"></i> Remove this block
-      </button>
-      <p class="text-[11px] text-slate-400 mt-1 text-center">Removes this facility/day only. Does not delete the whole series.</p>
-    </form>
+        <button class="w-full bg-teal-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-teal-700">Place on block</button>
+      </form>
+
+      {% for row in assignments %}
+      <form id="remove-assignment-{{ row.id }}" method="post" action="/admin/block-or/{{ selected_block.id }}/assignments/{{ row.id }}/remove" class="hidden">
+        <input type="hidden" name="week_offset" value="{{ week_offset }}" />
+      </form>
+      {% endfor %}
+      <form id="clear-block-{{ selected_block.id }}" method="post" action="/admin/block-or/{{ selected_block.id }}/clear" class="hidden">
+        <input type="hidden" name="week_offset" value="{{ week_offset }}" />
+      </form>
+
+      <form method="post" action="/admin/block-or/{{ selected_block.id }}/edit" class="clinical-panel p-5 space-y-4 border-2 border-blue-200">
+        <input type="hidden" name="week_offset" value="{{ week_offset }}" />
+        <div>
+          <h2 class="font-extrabold text-slate-800">Edit block capacity</h2>
+          <p class="text-xs text-slate-500 mt-1">Adjust facility/times. Assignments stay if start remains inside the window.</p>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Facility</label>
+          <select name="location_id" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+            {% for location in locations %}
+            <option value="{{ location.id }}" {% if selected_block.location_id == location.id %}selected{% endif %}>
+              {{ location.abbreviation or location.name }} — {{ location.name }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Session</label>
+          <select name="session" id="edit-session" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+            <option value="am" {% if selected_block.session == 'am' %}selected{% endif %}>AM 07:00-12:00</option>
+            <option value="pm" {% if selected_block.session == 'pm' %}selected{% endif %}>PM 12:00-17:00</option>
+            <option value="both" {% if selected_block.session == 'both' %}selected{% endif %}>Both 07:00-17:00</option>
+            <option value="custom" {% if selected_block.session == 'custom' %}selected{% endif %}>Custom</option>
+          </select>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 mb-1">Start time</label>
+            <input type="time" name="start_time" id="edit-start" value="{{ selected_block.start_time.strftime('%H:%M') }}" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 mb-1">End time</label>
+            <input type="time" name="end_time" id="edit-end" value="{{ selected_block.end_time.strftime('%H:%M') }}" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Notes</label>
+          <input name="notes" value="{{ selected_block.notes or '' }}" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Internal scheduling note" />
+        </div>
+        <button class="w-full bg-blue-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-blue-700">Save capacity</button>
+      </form>
+      <form method="post" action="/admin/block-or/{{ selected_block.id }}/delete" class="clinical-panel p-4"
+        onsubmit="return confirm('Remove this Block OR for {{ selected_block.date.strftime('%b %-d') }} at {{ selected_block.location.abbreviation if selected_block.location else 'OR' }}?');">
+        <input type="hidden" name="week_offset" value="{{ week_offset }}" />
+        <button type="submit" class="w-full text-sm font-semibold text-rose-600 hover:text-rose-800 py-2">
+          <i class="fa-solid fa-trash mr-1"></i> Remove this block
+        </button>
+        <p class="text-[11px] text-slate-400 mt-1 text-center">Removes this facility/day only. Does not delete the whole series.</p>
+      </form>
+    </div>
     {% else %}
     <form method="post" action="/admin/block-or/create" class="clinical-panel p-5 space-y-4">
       <input type="hidden" name="week_offset" value="{{ week_offset }}" />
       <div>
         <h2 class="font-extrabold text-slate-800">Create open block</h2>
-        <p class="text-xs text-slate-500 mt-1">Click a block on the grid to edit times or remove a facility.</p>
+        <p class="text-xs text-slate-500 mt-1">Click a block on the grid to assign surgeons or edit capacity.</p>
       </div>
       <div>
         <label class="block text-xs font-semibold text-slate-500 mb-1">Name</label>
@@ -189,7 +278,7 @@
   <section class="clinical-panel overflow-hidden">
     <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
       <h2 class="font-extrabold text-slate-800">OR week</h2>
-      <span class="text-xs text-slate-400">{% if admin.role == 'scheduler' %}View only{% else %}Click a block to edit{% endif %}</span>
+      <span class="text-xs text-slate-400">{% if admin.role == 'scheduler' %}View only{% else %}Click a block to assign or edit{% endif %}</span>
     </div>
     <div class="overflow-x-auto">
       <table class="w-full min-w-[980px] border-collapse text-sm">
@@ -275,18 +364,40 @@
   var session = document.getElementById('edit-session');
   var start = document.getElementById('edit-start');
   var end = document.getElementById('edit-end');
-  if (!session || !start || !end) return;
-  var defaults = {
-    am: ['07:00', '12:00'],
-    pm: ['12:00', '17:00'],
-    both: ['07:00', '17:00']
-  };
-  session.addEventListener('change', function () {
-    var pair = defaults[session.value];
-    if (!pair) return;
-    start.value = pair[0];
-    end.value = pair[1];
-  });
+  if (session && start && end) {
+    var defaults = {
+      am: ['07:00', '12:00'],
+      pm: ['12:00', '17:00'],
+      both: ['07:00', '17:00']
+    };
+    session.addEventListener('change', function () {
+      var pair = defaults[session.value];
+      if (!pair) return;
+      start.value = pair[0];
+      end.value = pair[1];
+    });
+  }
+
+  var surgeonSelect = document.getElementById('assign-surgeon');
+  var warningEl = document.getElementById('assign-warning');
+  var noteEl = document.getElementById('assign-note');
+  if (surgeonSelect && warningEl) {
+    function syncAssignWarning() {
+      var opt = surgeonSelect.options[surgeonSelect.selectedIndex];
+      if (!opt || !opt.value || opt.dataset.status === 'clear') {
+        warningEl.classList.add('hidden');
+        warningEl.textContent = '';
+        if (noteEl) noteEl.required = false;
+        return;
+      }
+      var text = opt.dataset.warnings || opt.dataset.availability || 'Schedule warning';
+      warningEl.textContent = text;
+      warningEl.classList.remove('hidden');
+      if (noteEl) noteEl.required = true;
+    }
+    surgeonSelect.addEventListener('change', syncAssignWarning);
+    syncAssignWarning();
+  }
 })();
 </script>
 {% endblock %}

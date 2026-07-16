@@ -272,6 +272,18 @@ final class NativeScheduleStore: ObservableObject {
     await load(containing: selectedDate, scope: scope)
   }
 
+  func cancelCallCoverage(assignment: ScheduleAssignment, selectedDate: Date, scope: ScheduleScope) async throws {
+    guard let token = sessionToken, !token.isEmpty else {
+      throw NativeCALError.missingSession
+    }
+
+    try await actions.cancelCallCoverage(
+      token: token,
+      assignment: assignment
+    )
+    await load(containing: selectedDate, scope: scope)
+  }
+
   func setWarningMessage(_ message: String) {
     loadState = .warning(message)
   }

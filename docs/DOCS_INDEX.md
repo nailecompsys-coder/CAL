@@ -35,6 +35,7 @@ Do not create new long-lived docs in retired folders under `/Users/donnaile/dev/
 | `BLOCK_OR_SCHEDULER_AUDIT.md` | Block OR logic/screen audit — intent vs Codex code, bugs, continue path |
 | `MOBILE_BLOCK_OR_CREATE_PLAN.md` | Scheduler mobile create open blocks — **plan only, hold for Don verify** |
 | `LOCAL_DEV_REAL_DATA.md` | Load real dump into Mac-dev; portal + DEBUG sim share localhost dataset |
+| `PARTNER_TRUE_COST_BREAKDOWN.md` | CAL + RVU + Snap true-cost / buy-in or payback package (Don / IT Store) |
 
 ## Agent Build Plans
 

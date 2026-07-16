@@ -102,21 +102,23 @@ make deploy-cal
 
 ### Root `/`
 
-- Cookie `surgeon_token` → redirect `/surgeon/schedule`.
-- Else cookie `admin_token` → redirect `/admin/dashboard`.
+- Cookie `admin_token` → redirect `/admin/dashboard`.
 - Else → redirect `/admin/login`.
+- Surgeon PWA is retired; surgeons use iOS/Android native apps (OTP via `/api/surgeon/otp/*`).
 
 ### Admin
 
 - **Login:** `GET/POST /admin/login`. Cookie `admin_token` (JWT, 12h). Logout: `GET /admin/logout` (delete cookie).
 - **Dependency:** `get_current_admin` (auth.py) — requires valid `admin_token` cookie else redirect to `/admin/login`.
+- **Block OR:** `/admin/block-or` — create capacity; assign/update/remove/clear surgeons via same `or_block_service` as mobile. Override note required when availability warnings exist. Scheduler portal role is capacity view-only.
+- **Call coverage:** `/admin/call-schedule` cover + clear uses shared coverage service with native.
 
-### Surgeon (mobile)
+### Surgeon (native apps)
 
-- **No password.** Surgeons sign in with a six-digit OTP code sent by email or SMS. Successful verification registers the device and sets the `surgeon_token` cookie (JWT, 1 year).
-- **Logout:** `GET /surgeon/logout` → delete cookie, redirect `/surgeon/register`. Surgeon UI has “Log out” in top-right (base_surgeon.html).
-- **Dependency:** `get_current_surgeon` returns `(Surgeon, SurgeonDevice)`.
-
+- **No password.** Surgeons sign in with a six-digit OTP code sent by email or SMS (`/api/surgeon/otp/*`). Native apps store device JWT.
+- **Retired PWA:** `GET /surgeon/schedule` (and other surgeon HTML pages) show “Use the CAL app”; OTP + `/api/native/*` remain.
+- **Logout:** `GET /surgeon/logout` clears cookie (legacy).
+- **Dependency:** `get_current_surgeon` returns `(Surgeon, SurgeonDevice)` for remaining surgeon API routes.
 ---
 
 ## 4. Project layout

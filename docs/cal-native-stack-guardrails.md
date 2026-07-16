@@ -21,7 +21,7 @@ SwiftUI is the production iOS app. Jetpack Compose is the target Android app. Ex
 - Any native source change must update `docs/cal-native-parity-ledger.md` in the same commit unless it is a pure comment or formatting-only change.
 - Any backend endpoint used by native clients must have a contract test under `server/tests/test_native_*.py` or a directly related auth/push test.
 - Scheduler mobile APIs must live under `/api/native/scheduler/*`, use scheduler/admin identity, and keep PHI out of payloads unless a future explicit permission and audit path is approved.
-- Block OR is mobile-first for surgeon placement. The portal may create/review open capacity, but active surgeon placement must use scheduler native endpoints and must write only non-PHI schedule slots.
+- Block OR placement is shared SSOT: portal admins and mobile scheduler OTP both call `or_block_service` (assign/update/remove/clear). Scheduler portal role remains capacity view-only.
 - Epic controls hospital block release, cancellation, give-back, and case details. CAL must not reintroduce those controls as active Block OR workflows without an explicit product decision and ledger update.
 - Scheduler digest emails must be generated from `schedule_change_events` plus open Block OR rows and must not include patient names, DOB, MRN, phone, procedure PHI, or private surgeon notes.
 - React Native iOS builds are experimental only and must not be sent to TestFlight.

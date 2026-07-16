@@ -94,6 +94,7 @@ When documents conflict, follow this order:
 - Ollama or Atlas AI stack in CAL repo
 - Android scheduler (not built)
 - Portal surgeon assignment for Block OR (mobile-only by design)
++ ~~Portal surgeon assignment for Block OR~~ — **superseded**: portal admin can assign/clear via same `or_block_service` as mobile (Phase 1 portal parity)
 - Personal item CRUD in iOS (display-only from `/api/native/home` today)
 
 ### Every native/API change must include

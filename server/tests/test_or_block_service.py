@@ -1,6 +1,7 @@
 import os
 import unittest
 from datetime import date, time, timedelta
+from unittest.mock import patch
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SECRET_KEY", "test-secret")
@@ -319,14 +320,15 @@ class ORBlockServiceTest(unittest.TestCase):
                 end_time=time(17, 0),
                 recurrence="once",
             ))
-            assigned, _ = assign_block(
-                db,
-                result["instance_ids"][0],
-                surgeon.id,
-                assigned_start_time=time(13, 0),
-                case_count=3,
-                assignment_note="Epic case stack",
-            )
+            with patch("app.or_block_service.send_push_to_surgeon") as push:
+                assigned, _ = assign_block(
+                    db,
+                    result["instance_ids"][0],
+                    surgeon.id,
+                    assigned_start_time=time(13, 0),
+                    case_count=3,
+                    assignment_note="Epic case stack",
+                )
 
             self.assertEqual(assigned.status, "assigned")
             self.assertEqual(assigned.assigned_surgeon_id, surgeon.id)
@@ -337,6 +339,41 @@ class ORBlockServiceTest(unittest.TestCase):
             self.assertEqual(statuses[result["instance_ids"][0]], "assigned")
             self.assertEqual(statuses[result["instance_ids"][1]], "open")
             self.assertEqual(db.query(ScheduleChangeEvent).filter(ScheduleChangeEvent.event_type == "block_or_assigned").count(), 1)
+            push.assert_called_once()
+            args, kwargs = push.call_args
+            self.assertEqual(args[0], surgeon.id)
+            self.assertEqual(args[1], "Block OR updated")
+            self.assertIn("WG", args[2])
+            self.assertEqual((kwargs.get("data") or {}).get("kind"), "block_or")
+        finally:
+            db.close()
+
+    def test_clear_notifies_all_assigned_surgeons(self):
+        db = self.Session()
+        try:
+            chris = self._surgeon(db, "Chris", "Johnson")
+            jorge = self._surgeon(db, "Jorge", "Florin")
+            hospital = self._location(db, "Advent Winter Garden", "WG")
+            block_day = date(2026, 7, 8)
+            block_id = create_or_blocks(db, BlockORCreateInput(
+                name="Open AM Block",
+                start_date=block_day,
+                end_date=block_day,
+                weekdays=[block_day.weekday()],
+                location_ids=[hospital.id],
+                session="am",
+                start_time=time(7, 0),
+                end_time=time(12, 0),
+                recurrence="once",
+            ))["instance_ids"][0]
+            with patch("app.or_block_service.send_push_to_surgeon"):
+                assign_block(db, block_id, chris.id, assigned_start_time=time(7, 0), case_count=1)
+                assign_block(db, block_id, jorge.id, assigned_start_time=time(10, 0), case_count=2)
+            with patch("app.or_block_service.send_push_to_surgeon") as push:
+                clear_block_assignment(db, block_id)
+            notified = {call.args[0] for call in push.call_args_list}
+            self.assertEqual(notified, {chris.id, jorge.id})
+            self.assertTrue(all(call.args[1] == "Block OR removed" for call in push.call_args_list))
         finally:
             db.close()
 

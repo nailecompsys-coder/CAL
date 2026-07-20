@@ -27,7 +27,7 @@ from .models import (
     Surgeon,
     SurgicalCase,
 )
-from .push import send_native_push_to_surgeon
+from .push import send_push_to_surgeon
 from .email_service import send_email
 from .scheduling_guardrails_service import scheduler_safe_warning
 from .surgeon_visibility import surgeon_is_visible
@@ -634,6 +634,31 @@ def _availability_summary(block: ORBlockInstance, warnings: list[str]) -> str:
     return "Not Available"
 
 
+def _notify_block_or_surgeon(
+    db: Session,
+    surgeon_id: int | None,
+    *,
+    title: str,
+    body: str,
+    block: ORBlockInstance,
+) -> None:
+    """Immediate doctor notify: in-app alert + web push + native push."""
+    if not surgeon_id:
+        return
+    send_push_to_surgeon(
+        surgeon_id,
+        title,
+        body,
+        db,
+        data={
+            "kind": "block_or",
+            "type": "block_or",
+            "blockId": block.id,
+            "date": block.date.isoformat() if block.date else None,
+        },
+    )
+
+
 def assign_block(
     db: Session,
     block_id: int,
@@ -707,12 +732,12 @@ def assign_block(
     db.commit()
     db.refresh(block)
     db.expire(block, ["assignments"])
-    send_native_push_to_surgeon(
-        surgeon_id,
-        "Block OR updated",
-        label,
+    _notify_block_or_surgeon(
         db,
-        {"kind": "block_or", "blockId": block.id, "date": block.date.isoformat()},
+        surgeon_id,
+        title="Block OR updated",
+        body=label,
+        block=block,
     )
     return block, warnings
 
@@ -793,17 +818,21 @@ def update_block_assignment(
     db.commit()
     db.refresh(block)
     db.expire(block, ["assignments"])
-    notify_ids = {previous_surgeon_id, surgeon_id}
-    for notify_id in notify_ids:
-        if not notify_id:
-            continue
-        send_native_push_to_surgeon(
-            notify_id,
-            "Block OR updated",
-            label,
+    if previous_surgeon_id and previous_surgeon_id != surgeon_id:
+        _notify_block_or_surgeon(
             db,
-            {"kind": "block_or", "blockId": block.id, "date": block.date.isoformat()},
+            previous_surgeon_id,
+            title="Block OR removed",
+            body=label,
+            block=block,
         )
+    _notify_block_or_surgeon(
+        db,
+        surgeon_id,
+        title="Block OR updated",
+        body=label,
+        block=block,
+    )
     return block, warnings
 
 
@@ -876,20 +905,39 @@ def remove_block_assignment(
     db.refresh(block)
     db.expire(block, ["assignments"])
     if previous_surgeon_id:
-        send_native_push_to_surgeon(
-            previous_surgeon_id,
-            "Block OR removed",
-            previous_label,
+        _notify_block_or_surgeon(
             db,
-            {"kind": "block_or", "blockId": block.id, "date": block.date.isoformat()},
+            previous_surgeon_id,
+            title="Block OR removed",
+            body=previous_label,
+            block=block,
         )
     return block
 
 
 def clear_block_assignment(db: Session, block_id: int, admin_id: int | None = None) -> ORBlockInstance:
-    block = db.get(ORBlockInstance, block_id)
+    block = (
+        db.query(ORBlockInstance)
+        .options(joinedload(ORBlockInstance.assignments))
+        .filter(ORBlockInstance.id == block_id)
+        .first()
+    )
     if not block:
         raise ValueError("Block not found")
+    # Capture every assigned surgeon before rows are deleted.
+    notify_targets: list[tuple[int, str]] = []
+    for assignment in list(block.assignments or []):
+        if assignment.surgeon_id:
+            notify_targets.append(
+                (assignment.surgeon_id, _assignment_payload(block, assignment)["label"])
+            )
+    if not notify_targets and block.assigned_surgeon_id:
+        notify_targets.append(
+            (
+                block.assigned_surgeon_id,
+                serialize_block_instance(block)["assignmentLabel"] or "Block OR assignment removed",
+            )
+        )
     previous_surgeon_id = block.assigned_surgeon_id
     previous_label = serialize_block_instance(block)["assignmentLabel"]
     for assignment in list(block.assignments or []):
@@ -909,13 +957,17 @@ def clear_block_assignment(db: Session, block_id: int, admin_id: int | None = No
     db.commit()
     db.refresh(block)
     db.expire(block, ["assignments"])
-    if previous_surgeon_id:
-        send_native_push_to_surgeon(
-            previous_surgeon_id,
-            "Block OR removed",
-            previous_label or "Block OR assignment removed",
+    seen: set[int] = set()
+    for surgeon_id, label in notify_targets:
+        if surgeon_id in seen:
+            continue
+        seen.add(surgeon_id)
+        _notify_block_or_surgeon(
             db,
-            {"kind": "block_or", "blockId": block.id, "date": block.date.isoformat()},
+            surgeon_id,
+            title="Block OR removed",
+            body=label or "Block OR assignment removed",
+            block=block,
         )
     return block
 

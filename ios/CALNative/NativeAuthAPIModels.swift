@@ -13,11 +13,24 @@ struct OtpRequestResponse: Decodable {
   let message: String?
   let sent: Bool?
   let scheduler: Bool?
+  let roles: [String]?
   let devCode: String?
 }
 
 struct OtpVerifyResponse: Decodable {
   let token: String
+}
+
+struct NativeUnifiedOtpVerifyResponse: Decodable {
+  let token: String
+  let role: String
+  let roles: [String]
+  let tokens: NativeUnifiedOtpTokens
+}
+
+struct NativeUnifiedOtpTokens: Decodable {
+  let surgeon: String?
+  let scheduler: String?
 }
 
 struct SchedulerOtpVerifyResponse: Decodable {

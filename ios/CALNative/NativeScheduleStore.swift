@@ -19,12 +19,17 @@ final class NativeScheduleStore: ObservableObject {
   @Published private(set) var loadState: NativeLoadState = .idle
   @Published private(set) var sessionToken: String?
   @Published private(set) var sessionRole: NativeSessionRole = .surgeon
+  @Published private(set) var availableRoles: [NativeSessionRole] = [.surgeon]
   @Published private(set) var schedulerBlocks: [NativeSchedulerBlock] = []
   @Published private(set) var schedulerChanges: [NativeSchedulerChange] = []
   @Published private(set) var selectedSchedulerDetail: NativeSchedulerBlockDetailResponse?
   @Published private(set) var hasBootstrapped = false
   @Published private(set) var authBusy = false
   @Published private(set) var authMessage: String?
+
+  var canSwitchModes: Bool {
+    availableRoles.contains(.surgeon) && availableRoles.contains(.scheduler)
+  }
 
   private let client = NativeCALClient()
   private let actions = NativeScheduleActions()
@@ -64,8 +69,12 @@ final class NativeScheduleStore: ObservableObject {
     if let email = Self.debugLoginEmail() {
       session.clearToken()
       sessionToken = nil
-      sessionRole = Self.debugLoginRole()
-      await verifyOtp(email: email, code: "654321", role: Self.debugLoginRole())
+      availableRoles = [.surgeon]
+      sessionRole = .surgeon
+      await verifyOtp(email: email, code: "654321")
+      if let preferred = Self.debugPreferredRole(), preferred != sessionRole, availableRoles.contains(preferred) {
+        await switchSessionRole(to: preferred)
+      }
       return
     }
     #endif
@@ -97,11 +106,12 @@ final class NativeScheduleStore: ObservableObject {
     return email.isEmpty ? nil : email
   }
 
-  private static func debugLoginRole() -> NativeSessionRole {
+  /// Optional DEBUG preference after unified login (`CAL_LOGIN_ROLE` / `--cal-role=`).
+  private static func debugPreferredRole() -> NativeSessionRole? {
     let raw = ProcessInfo.processInfo.environment["CAL_LOGIN_ROLE"]
       ?? ProcessInfo.processInfo.environment["SIMCTL_CHILD_CAL_LOGIN_ROLE"]
       ?? CommandLine.arguments.first(where: { $0.hasPrefix("--cal-role=") }).map { String($0.dropFirst("--cal-role=".count)) }
-      ?? "surgeon"
+    guard let raw else { return nil }
     let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     return value == "scheduler" ? .scheduler : .surgeon
   }
@@ -178,7 +188,7 @@ final class NativeScheduleStore: ObservableObject {
     }
   }
 
-  func requestOtp(email: String, role: NativeSessionRole = .surgeon) async -> Bool {
+  func requestOtp(email: String) async -> Bool {
     let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !normalizedEmail.isEmpty else { return false }
 
@@ -187,12 +197,8 @@ final class NativeScheduleStore: ObservableObject {
     defer { authBusy = false }
 
     do {
-      let message = try await session.requestOtp(email: normalizedEmail, role: role)
-      authMessage = message.isEmpty
-        ? (role == .scheduler
-          ? "Check your email for the CAL scheduler code."
-          : "Check your email for the CAL access code.")
-        : message
+      let message = try await session.requestOtp(email: normalizedEmail)
+      authMessage = message.isEmpty ? "Check your email or iPhone for the CAL access code." : message
       return true
     } catch {
       authMessage = error.localizedDescription
@@ -200,7 +206,7 @@ final class NativeScheduleStore: ObservableObject {
     }
   }
 
-  func verifyOtp(email: String, code: String, role: NativeSessionRole = .surgeon) async {
+  func verifyOtp(email: String, code: String) async {
     let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
     let normalizedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !normalizedEmail.isEmpty, !normalizedCode.isEmpty else { return }
@@ -210,9 +216,8 @@ final class NativeScheduleStore: ObservableObject {
     defer { authBusy = false }
 
     do {
-      let verified = try await session.verifyOtp(email: normalizedEmail, code: normalizedCode, role: role)
-      sessionToken = verified.token
-      sessionRole = verified.role
+      let verified = try await session.verifyOtp(email: normalizedEmail, code: normalizedCode)
+      applyVerifiedSession(verified)
       authMessage = nil
       if verified.role == .scheduler {
         await loadScheduler(containing: Date())
@@ -221,6 +226,30 @@ final class NativeScheduleStore: ObservableObject {
       }
     } catch {
       authMessage = error.localizedDescription
+    }
+  }
+
+  func switchSessionRole(to role: NativeSessionRole) async {
+    guard availableRoles.contains(role), role != sessionRole else { return }
+    do {
+      let token = try session.switchRole(role)
+      sessionToken = token
+      sessionRole = role
+      authMessage = nil
+      if role == .scheduler {
+        days = []
+        timeOffRequests = []
+        patientAppointments = []
+        await loadScheduler(containing: Date())
+      } else {
+        schedulerBlocks = []
+        schedulerChanges = []
+        selectedSchedulerDetail = nil
+        await loadLookahead(containing: Date(), daysAhead: 30)
+      }
+    } catch {
+      authMessage = error.localizedDescription
+      loadState = .warning(error.localizedDescription)
     }
   }
 
@@ -234,6 +263,7 @@ final class NativeScheduleStore: ObservableObject {
     schedulerChanges = []
     selectedSchedulerDetail = nil
     sessionRole = .surgeon
+    availableRoles = [.surgeon]
     alerts = NativeAlertSummary(unreadCount: 0, recent: [])
     currentSurgeon = nil
     surgeons = []
@@ -252,12 +282,19 @@ final class NativeScheduleStore: ObservableObject {
     schedulerChanges = []
     selectedSchedulerDetail = nil
     sessionRole = .surgeon
+    availableRoles = [.surgeon]
     alerts = NativeAlertSummary(unreadCount: 0, recent: [])
     currentSurgeon = nil
     surgeons = []
     loadState = .idle
     authMessage = "For security, please sign in again."
     hasBootstrapped = true
+  }
+
+  private func applyVerifiedSession(_ verified: NativeVerifiedSession) {
+    sessionToken = verified.token
+    sessionRole = verified.role
+    availableRoles = verified.availableRoles
   }
 
   func submitTimeOffRequest(startDate: Date, endDate: Date, reason: String, notes: String, segments: [RequestSegment]) async throws -> [String] {
@@ -338,6 +375,7 @@ final class NativeScheduleStore: ObservableObject {
       try await biometric.unlockSavedSession()
       sessionToken = session.storedToken()
       sessionRole = session.storedRole()
+      availableRoles = session.storedAvailableRoles()
       authMessage = nil
       return sessionToken != nil
     } catch {

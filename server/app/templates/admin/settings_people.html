@@ -283,6 +283,7 @@
         <select name="role" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
           <option value="admin">Admin — full portal</option>
           <option value="scheduler">Scheduler — Block OR / availability</option>
+          <option value="superadmin">Superadmin — full portal + elevated</option>
         </select>
       </div>
       <div class="grid gap-2 text-xs text-slate-600">
@@ -365,6 +366,7 @@
         <select name="role" id="edit-user-role" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
           <option value="admin">Admin — full portal</option>
           <option value="scheduler">Scheduler — Block OR / availability</option>
+          <option value="superadmin">Superadmin — full portal + elevated</option>
         </select>
       </div>
       <div class="grid gap-2 text-xs text-slate-600">
@@ -450,7 +452,9 @@ document.querySelectorAll('.edit-admin-user').forEach(function(btn) {
     document.getElementById('edit-user-last-name').value = this.dataset.lastName || '';
     document.getElementById('edit-user-email').value = this.dataset.email || '';
     document.getElementById('edit-user-phone').value = this.dataset.phone || '';
-    document.getElementById('edit-user-role').value = this.dataset.role === 'scheduler' ? 'scheduler' : 'admin';
+    var role = (this.dataset.role || 'admin').toLowerCase();
+    document.getElementById('edit-user-role').value =
+      (role === 'scheduler' || role === 'superadmin' || role === 'admin') ? role : 'admin';
     document.getElementById('edit-user-notify-day-off').checked = this.dataset.notifyDayOff !== '0';
     document.getElementById('edit-user-notify-schedule').checked = this.dataset.notifySchedule !== '0';
     document.getElementById('edit-user-sms-fallback').checked = this.dataset.smsFallback === '1';

@@ -37,8 +37,14 @@ def save_rule_config(db: Session, form) -> None:
     db.commit()
 
 
+_ALLOWED_PORTAL_ROLES = frozenset({"admin", "scheduler", "superadmin"})
+
+
 def _normalize_role(role: str) -> str:
-    return "scheduler" if role == "scheduler" else "admin"
+    value = (role or "").strip().lower()
+    if value in _ALLOWED_PORTAL_ROLES:
+        return value
+    return "admin"
 
 
 def add_admin_user(

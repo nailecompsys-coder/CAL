@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-20
 
-iOS test build target: `1.0.1 (16)` from the SwiftUI `ios/` lane.
+iOS test build target: `1.0.1 (17)` from the SwiftUI `ios/` lane.
 
 Production decision: SwiftUI is the production iOS app. Expo/React Native is the temporary Android bridge. Jetpack Compose is the target Android app (real API auth/home/schedule/time-off/patients/coverage wired; UI polish still behind iOS). Surgeon web PWA is retired (`/surgeon/*` HTML → use-app page).
 
@@ -20,7 +20,7 @@ Current tracked lane imports:
 
 | Workflow | Backend Endpoint / Contract | iOS SwiftUI | Android Expo Temporary | Android Compose Target | Production Allowed | Notes |
 |---|---|---|---|---|---|---|
-| Auth / OTP | `POST /api/surgeon/otp/request`, `POST /api/surgeon/otp/verify` | Production with saved-session Face ID unlock | Temporary Android bridge | Debug lane (OTP + session; no biometrics yet) | iOS + Expo Android | First login remains CAL-specific SMS/email OTP; repeat iPhone opens silently try Face ID against the saved Keychain token, then fall back to OTP with no separate visible unlock button |
+| Auth / OTP | `POST /api/native/otp/request`, `POST /api/native/otp/verify` (unified; legacy `/api/surgeon/otp*` + `/api/native/scheduler/otp*` kept) | Production: no Surgeon\|Scheduler login toggle; dual identity (AdminUser + Surgeon) returns both tokens/`roles`; in-app Schedule \| Scheduler switch; Face ID unlock | Temporary Android bridge (still role-split paths) | Debug lane (OTP + session; no biometrics yet) | iOS + Expo Android | One email/phone → OTP → sign in. Dual accounts (e.g. Don) land in Schedule by default; title menu / Scheduler principal switches mode. Surgeon-only and scheduler-only unchanged. Local OTP env vars still apply. |
 | Today | `GET /api/native/home` | Production | Temporary Android bridge | Debug lane (basic) | iOS + Expo Android | At-a-glance view must match backend data |
 | Daily Schedule | `GET /api/native/home` | Production | Temporary Android bridge | Debug lane (functional; UI thinner than iOS) | iOS + Expo Android | Shared date stepper + Day\|Week\|Month chrome. Day: On Call \| Off half-width pills; Clinic/OR + Personal sections; Cover from On Call |
 | Week | `GET /api/native/home` | Production | Temporary Android bridge | Debug lane (functional; UI thinner than iOS) | iOS + Expo Android | Cliff-note rows (ON/OFF/Clinic·OR + meeting); tap opens Day. Shared date-range stepper |

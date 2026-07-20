@@ -7,51 +7,49 @@ struct NativeCALClient {
   private let baseURL = URL(string: "https://cal.midfloridasurgical.com")!
   #endif
 
-  func requestOtp(email: String) async throws -> String {
-    var request = URLRequest(url: baseURL.appendingPathComponent("/api/surgeon/otp/request"))
+  func requestUnifiedOtp(email: String) async throws -> String {
+    var request = URLRequest(url: baseURL.appendingPathComponent("/api/native/otp/request"))
     request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.httpBody = try JSONEncoder().encode(OtpRequestPayload(email: email))
 
     let response = try await perform(request)
     let result = try JSONDecoder().decode(OtpRequestResponse.self, from: response)
-    return result.message ?? ""
-  }
-
-  func requestSchedulerOtp(email: String) async throws -> String? {
-    var request = URLRequest(url: baseURL.appendingPathComponent("/api/native/scheduler/otp/request"))
-    request.httpMethod = "POST"
-    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    request.httpBody = try JSONEncoder().encode(OtpRequestPayload(email: email))
-
-    let response = try await perform(request)
-    let result = try JSONDecoder().decode(OtpRequestResponse.self, from: response)
-    guard result.scheduler == true else { return nil }
     if let devCode = result.devCode, !devCode.isEmpty {
-      return "Local scheduler code: \(devCode)"
+      return "Local access code: \(devCode)"
     }
-    return result.message ?? "Check your email or iPhone for the CAL scheduler code."
+    return result.message ?? "Check your email or iPhone for the CAL access code."
   }
 
-  func verifyOtp(email: String, code: String) async throws -> String {
-    var request = URLRequest(url: baseURL.appendingPathComponent("/api/surgeon/otp/verify"))
+  func verifyUnifiedOtp(email: String, code: String) async throws -> NativeUnifiedOtpVerifyResponse {
+    var request = URLRequest(url: baseURL.appendingPathComponent("/api/native/otp/verify"))
     request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.httpBody = try JSONEncoder().encode(OtpVerifyPayload(email: email, code: code))
 
     let response = try await perform(request)
-    let result = try JSONDecoder().decode(OtpVerifyResponse.self, from: response)
+    return try JSONDecoder().decode(NativeUnifiedOtpVerifyResponse.self, from: response)
+  }
+
+  /// Legacy surgeon OTP path (kept for older clients / DEBUG fallbacks).
+  func requestOtp(email: String) async throws -> String {
+    try await requestUnifiedOtp(email: email)
+  }
+
+  func requestSchedulerOtp(email: String) async throws -> String? {
+    try await requestUnifiedOtp(email: email)
+  }
+
+  func verifyOtp(email: String, code: String) async throws -> String {
+    let result = try await verifyUnifiedOtp(email: email, code: code)
     return result.token
   }
 
   func verifySchedulerOtp(email: String, code: String) async throws -> String {
-    var request = URLRequest(url: baseURL.appendingPathComponent("/api/native/scheduler/otp/verify"))
-    request.httpMethod = "POST"
-    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    request.httpBody = try JSONEncoder().encode(OtpVerifyPayload(email: email, code: code))
-
-    let response = try await perform(request)
-    let result = try JSONDecoder().decode(SchedulerOtpVerifyResponse.self, from: response)
+    let result = try await verifyUnifiedOtp(email: email, code: code)
+    if let scheduler = result.tokens.scheduler, !scheduler.isEmpty {
+      return scheduler
+    }
     return result.token
   }
 

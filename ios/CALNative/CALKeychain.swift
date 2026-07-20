@@ -4,6 +4,9 @@ import Security
 enum CALKeychain {
   private static let tokenKey = "cal_native_session_token"
   private static let roleKey = "cal_native_session_role"
+  private static let surgeonTokenKey = "cal_native_surgeon_token"
+  private static let schedulerTokenKey = "cal_native_scheduler_token"
+  private static let rolesKey = "cal_native_available_roles"
   private static let primaryService = "app:no-auth"
   private static let fallbackService = "app"
 
@@ -19,9 +22,47 @@ enum CALKeychain {
     return role
   }
 
+  static func readSurgeonToken() -> String? {
+    read(key: surgeonTokenKey, service: primaryService)
+  }
+
+  static func readSchedulerToken() -> String? {
+    read(key: schedulerTokenKey, service: primaryService)
+  }
+
+  static func readAvailableRoles() -> [NativeSessionRole] {
+    guard let raw = read(key: rolesKey, service: primaryService), !raw.isEmpty else {
+      return [readSessionRole()]
+    }
+    let roles = raw.split(separator: ",").compactMap { NativeSessionRole(rawValue: String($0)) }
+    return roles.isEmpty ? [readSessionRole()] : roles
+  }
+
   static func saveSessionToken(_ token: String, role: NativeSessionRole = .surgeon) throws {
     try save(token, key: tokenKey, service: primaryService)
     try save(role.rawValue, key: roleKey, service: primaryService)
+  }
+
+  static func saveDualSession(
+    activeToken: String,
+    activeRole: NativeSessionRole,
+    availableRoles: [NativeSessionRole],
+    surgeonToken: String?,
+    schedulerToken: String?
+  ) throws {
+    try saveSessionToken(activeToken, role: activeRole)
+    let rolesValue = availableRoles.map(\.rawValue).joined(separator: ",")
+    try save(rolesValue, key: rolesKey, service: primaryService)
+    if let surgeonToken, !surgeonToken.isEmpty {
+      try save(surgeonToken, key: surgeonTokenKey, service: primaryService)
+    } else {
+      delete(key: surgeonTokenKey, service: primaryService)
+    }
+    if let schedulerToken, !schedulerToken.isEmpty {
+      try save(schedulerToken, key: schedulerTokenKey, service: primaryService)
+    } else {
+      delete(key: schedulerTokenKey, service: primaryService)
+    }
   }
 
   static func deleteSessionToken() {
@@ -29,6 +70,9 @@ enum CALKeychain {
     delete(key: tokenKey, service: fallbackService)
     delete(key: roleKey, service: primaryService)
     delete(key: roleKey, service: fallbackService)
+    delete(key: surgeonTokenKey, service: primaryService)
+    delete(key: schedulerTokenKey, service: primaryService)
+    delete(key: rolesKey, service: primaryService)
   }
 
   private static func save(_ value: String, key: String, service: String) throws {

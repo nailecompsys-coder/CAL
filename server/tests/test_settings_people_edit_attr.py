@@ -40,6 +40,15 @@ class SettingsPeopleEditAttrTest(unittest.TestCase):
         self.assertIn("querySelectorAll('.edit-admin-user')", self.src)
         self.assertIn("/admin/settings/people/users/' + this.dataset.userId + '/edit'", self.src)
 
+    def test_portal_role_dropdown_includes_scheduler_and_superadmin(self):
+        self.assertIn('option value="scheduler"', self.src)
+        self.assertIn('option value="superadmin"', self.src)
+        self.assertIn('option value="admin"', self.src)
+        self.assertNotIn(
+            "this.dataset.role === 'scheduler' ? 'scheduler' : 'admin'",
+            self.src,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

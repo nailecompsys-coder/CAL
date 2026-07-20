@@ -196,6 +196,15 @@ struct CALNativeSectionMenu: View {
         }
       }
 
+      if store.canSwitchModes {
+        Divider()
+        Button {
+          Task { await store.switchSessionRole(to: .scheduler) }
+        } label: {
+          Label("Switch to Scheduler", systemImage: "calendar.badge.clock")
+        }
+      }
+
       Divider()
 
       Button(role: .destructive) {
@@ -220,6 +229,15 @@ struct CALNativeTitleMenu: View {
           selectedSection = section
         } label: {
           Label(section.rawValue, systemImage: section.systemImage)
+        }
+      }
+
+      if store.canSwitchModes {
+        Divider()
+        Button {
+          Task { await store.switchSessionRole(to: .scheduler) }
+        } label: {
+          Label("Switch to Scheduler", systemImage: "calendar.badge.clock")
         }
       }
 

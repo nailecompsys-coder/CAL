@@ -133,6 +133,33 @@ struct NativeSchedulerShell: View {
       .navigationTitle("Scheduler")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
+        ToolbarItem(placement: .principal) {
+          if store.canSwitchModes {
+            Menu {
+              Button {
+                Task { await store.switchSessionRole(to: .surgeon) }
+              } label: {
+                Label("Switch to Schedule", systemImage: "calendar")
+              }
+              Button(role: .destructive) {
+                store.logout()
+              } label: {
+                Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+              }
+            } label: {
+              HStack(spacing: 4) {
+                Text("Scheduler")
+                  .font(ClinicalTypography.headline)
+                Image(systemName: "chevron.down")
+                  .font(ClinicalTypography.badge)
+              }
+              .foregroundStyle(.primary)
+            }
+          } else {
+            Text("Scheduler")
+              .font(ClinicalTypography.headline)
+          }
+        }
         ToolbarItemGroup(placement: .navigationBarTrailing) {
           Button {
             showCreateBlock = true
@@ -151,12 +178,14 @@ struct NativeSchedulerShell: View {
             Image(systemName: "arrow.clockwise")
           }
           .accessibilityLabel("Refresh")
-          Button(role: .destructive) {
-            store.logout()
-          } label: {
-            Image(systemName: "rectangle.portrait.and.arrow.right")
+          if !store.canSwitchModes {
+            Button(role: .destructive) {
+              store.logout()
+            } label: {
+              Image(systemName: "rectangle.portrait.and.arrow.right")
+            }
+            .accessibilityLabel("Sign out")
           }
-          .accessibilityLabel("Sign out")
         }
       }
       .confirmationDialog("Jump", isPresented: $showJumpMenu, titleVisibility: .visible) {

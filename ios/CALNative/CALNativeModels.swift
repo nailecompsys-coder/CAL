@@ -16,6 +16,23 @@ enum NativeSessionRole: String {
 struct NativeVerifiedSession {
   let token: String
   let role: NativeSessionRole
+  let availableRoles: [NativeSessionRole]
+  let surgeonToken: String?
+  let schedulerToken: String?
+
+  init(
+    token: String,
+    role: NativeSessionRole,
+    availableRoles: [NativeSessionRole] = [],
+    surgeonToken: String? = nil,
+    schedulerToken: String? = nil
+  ) {
+    self.token = token
+    self.role = role
+    self.availableRoles = availableRoles.isEmpty ? [role] : availableRoles
+    self.surgeonToken = surgeonToken
+    self.schedulerToken = schedulerToken
+  }
 }
 
 struct ScheduleAssignment: Identifiable {

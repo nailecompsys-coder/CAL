@@ -124,38 +124,6 @@ class DayOffPendingBugsTest(unittest.TestCase):
         self.assertIsNotNone(still)
         self.assertEqual(still.status, "pending")
 
-    def test_stale_pending_notifications_cleared_after_approve(self):
-        dayoff = DayOff(
-            surgeon_id=self.surgeon.id,
-            start_date=date(2026, 9, 1),
-            end_date=date(2026, 9, 3),
-            status="pending",
-            reason="trip",
-        )
-        self.db.add(dayoff)
-        self.db.commit()
-        self.db.refresh(dayoff)
-
-        note = AdminNotification(
-            admin_user_id=self.admin.id,
-            title="Pending Request",
-            body="Jason Boardman requested Sep 1 to Sep 3.",
-            kind="day_off_request",
-            payload=json.dumps({"dayOffId": dayoff.id, "surgeonId": self.surgeon.id}),
-        )
-        self.db.add(note)
-        self.db.commit()
-
-        with unittest.mock.patch("app.admin_dayoff_service.store_dayoff_findings"), \
-             unittest.mock.patch("app.admin_dayoff_service.send_push_to_surgeon"), \
-             unittest.mock.patch("app.admin_dayoff_service.log_schedule_change"):
-            approve_dayoff(self.db, dayoff.id, self.admin.id)
-
-        self.db.refresh(dayoff)
-        self.db.refresh(note)
-        self.assertEqual(dayoff.status, "approved")
-        self.assertIsNotNone(note.read_at)
-
     def test_dashboard_hides_stale_dayoff_notifications(self):
         # Notification points at already-approved day off (Shannon handled it).
         dayoff = DayOff(
@@ -177,12 +145,42 @@ class DayOffPendingBugsTest(unittest.TestCase):
         )
         self.db.add(note)
         self.db.commit()
+        note_id = note.id
 
         cleared = reconcile_stale_dayoff_notifications(self.db, self.admin.id)
         self.assertEqual(cleared, 1)
+        self.assertIsNone(self.db.get(AdminNotification, note_id))
         rows = recent_admin_notifications(self.db, self.admin.id, limit=8)
-        unread = [r for r in rows if r.read_at is None and r.kind == "day_off_request"]
-        self.assertEqual(unread, [])
+        self.assertEqual([r for r in rows if r.kind == "day_off_request"], [])
+
+    def test_approve_removes_pending_notification_cards(self):
+        dayoff = DayOff(
+            surgeon_id=self.surgeon.id,
+            start_date=date(2026, 9, 1),
+            end_date=date(2026, 9, 3),
+            status="pending",
+            reason="trip",
+        )
+        self.db.add(dayoff)
+        self.db.commit()
+        self.db.refresh(dayoff)
+        note = AdminNotification(
+            admin_user_id=self.admin.id,
+            title="Pending Request",
+            body="Jason Boardman requested Sep 1 to Sep 3.",
+            kind="day_off_request",
+            payload=json.dumps({"dayOffId": dayoff.id, "surgeonId": self.surgeon.id}),
+        )
+        self.db.add(note)
+        self.db.commit()
+        note_id = note.id
+
+        with unittest.mock.patch("app.admin_dayoff_service.store_dayoff_findings"), \
+             unittest.mock.patch("app.admin_dayoff_service.send_push_to_surgeon"), \
+             unittest.mock.patch("app.admin_dayoff_service.log_schedule_change"):
+            approve_dayoff(self.db, dayoff.id, self.admin.id)
+
+        self.assertIsNone(self.db.get(AdminNotification, note_id))
 
 
 # late import for patch in approve test

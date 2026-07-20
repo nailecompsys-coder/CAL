@@ -230,38 +230,27 @@ def create_admin_notification(
 
 
 def clear_dayoff_request_notifications(db: Session, dayoff_id: int) -> int:
-    """Mark admin 'Pending Request' notifications read once Shannon acts on the day-off."""
+    """Remove admin 'Pending Request' notifications once Shannon acts on the day-off."""
     if not dayoff_id:
         return 0
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    token = f'"dayOffId": {int(dayoff_id)}'
-    token_alt = f'"dayOffId":{int(dayoff_id)}'
     rows = (
         db.query(AdminNotification)
-        .filter(
-            AdminNotification.kind == "day_off_request",
-            AdminNotification.read_at.is_(None),
-        )
+        .filter(AdminNotification.kind == "day_off_request")
         .all()
     )
-    cleared = 0
+    removed = 0
     for row in rows:
         payload = row.payload or ""
-        if token in payload or token_alt in payload or f'"dayOffId": {dayoff_id}' in payload:
-            row.read_at = now
-            cleared += 1
-            continue
-        # Also match string-encoded ids from some clients
         try:
             data = json.loads(payload) if payload else {}
         except (TypeError, ValueError):
             data = {}
         if str(data.get("dayOffId") or "") == str(dayoff_id):
-            row.read_at = now
-            cleared += 1
-    if cleared:
+            db.delete(row)
+            removed += 1
+    if removed:
         db.commit()
-    return cleared
+    return removed
 
 
 def notify_admins(

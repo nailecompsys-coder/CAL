@@ -38,42 +38,56 @@ def recent_otp_audit_logs(db: Session, limit: int = 50) -> list[SurgeonOtpAuditL
     )
 
 
-def reconcile_stale_dayoff_notifications(db: Session, admin_user_id: int | None = None) -> int:
-    """Mark day_off_request notifications read when the DayOff is no longer pending."""
-    from datetime import datetime, timezone
+def _dayoff_id_from_notification(row: AdminNotification) -> int | None:
     import json
 
+    try:
+        data = json.loads(row.payload or "{}")
+    except (TypeError, ValueError):
+        return None
+    raw = data.get("dayOffId")
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def reconcile_stale_dayoff_notifications(db: Session, admin_user_id: int | None = None) -> int:
+    """Remove day_off_request notifications once the DayOff is no longer pending.
+
+    Marking them read still left "Pending Request" cards on the dashboard.
+    Handled requests should disappear from the feed entirely.
+    """
     from .models import DayOff
 
-    q = db.query(AdminNotification).filter(
-        AdminNotification.kind == "day_off_request",
-        AdminNotification.read_at.is_(None),
-    )
+    q = db.query(AdminNotification).filter(AdminNotification.kind == "day_off_request")
     if admin_user_id is not None:
         q = q.filter(AdminNotification.admin_user_id == admin_user_id)
     rows = q.all()
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    cleared = 0
+    removed = 0
     for row in rows:
-        dayoff_id = None
-        try:
-            data = json.loads(row.payload or "{}")
-            dayoff_id = data.get("dayOffId")
-        except (TypeError, ValueError):
-            dayoff_id = None
+        dayoff_id = _dayoff_id_from_notification(row)
         if dayoff_id is None:
+            db.delete(row)
+            removed += 1
             continue
-        dayoff = db.get(DayOff, int(dayoff_id))
+        dayoff = db.get(DayOff, dayoff_id)
         if dayoff is None or (dayoff.status or "") != "pending":
-            row.read_at = now
-            cleared += 1
-    if cleared:
+            db.delete(row)
+            removed += 1
+    if removed:
         db.commit()
-    return cleared
+    return removed
 
 
 def recent_admin_notifications(db: Session, admin_user_id: int, limit: int = 20) -> list[AdminNotification]:
-    """FIFO: oldest entered first (top-left → right → down). Unread before read."""
+    """FIFO: oldest entered first (top-left → right → down). Unread before read.
+
+    Day-off request cards only appear while the underlying DayOff is still pending.
+    Duplicate notify spam (one row per admin fan-out) is collapsed to one card per dayOffId.
+    """
     reconcile_stale_dayoff_notifications(db, admin_user_id)
     rows = (
         db.query(AdminNotification)
@@ -83,10 +97,9 @@ def recent_admin_notifications(db: Session, admin_user_id: int, limit: int = 20)
             AdminNotification.created_at.asc().nullsfirst(),
             AdminNotification.id.asc(),
         )
-        .limit(max(limit * 3, limit))
+        .limit(max(limit * 5, limit))
         .all()
     )
-    # Belt-and-suspenders: never trust DB nulls / driver quirks for display order.
     rows = sorted(
         rows,
         key=lambda row: (
@@ -95,15 +108,43 @@ def recent_admin_notifications(db: Session, admin_user_id: int, limit: int = 20)
             row.id or 0,
         ),
     )
-    return rows[:limit]
+    seen_dayoff: set[int] = set()
+    visible: list[AdminNotification] = []
+    for row in rows:
+        if row.kind == "day_off_request":
+            dayoff_id = _dayoff_id_from_notification(row)
+            if dayoff_id is not None:
+                if dayoff_id in seen_dayoff:
+                    continue
+                seen_dayoff.add(dayoff_id)
+        visible.append(row)
+        if len(visible) >= limit:
+            break
+    return visible
 
 
 def unread_admin_notification_count(db: Session, admin_user_id: int) -> int:
     reconcile_stale_dayoff_notifications(db, admin_user_id)
-    return db.query(AdminNotification).filter(
-        AdminNotification.admin_user_id == admin_user_id,
-        AdminNotification.read_at.is_(None),
-    ).count()
+    # Count distinct pending day-off requests + other unread kinds.
+    rows = (
+        db.query(AdminNotification)
+        .filter(
+            AdminNotification.admin_user_id == admin_user_id,
+            AdminNotification.read_at.is_(None),
+        )
+        .all()
+    )
+    seen_dayoff: set[int] = set()
+    count = 0
+    for row in rows:
+        if row.kind == "day_off_request":
+            dayoff_id = _dayoff_id_from_notification(row)
+            if dayoff_id is not None:
+                if dayoff_id in seen_dayoff:
+                    continue
+                seen_dayoff.add(dayoff_id)
+        count += 1
+    return count
 
 
 def rules_engine_settings(db: Session) -> tuple[dict, list]:

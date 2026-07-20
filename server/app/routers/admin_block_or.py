@@ -123,8 +123,6 @@ def block_or_create(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    if admin.role == "scheduler":
-        return _redirect(week_offset, warn="Scheduler role is read-only for Block OR capacity.")
     try:
         default_start, default_end = session_default_times(session)
         payload = BlockORCreateInput(
@@ -157,8 +155,6 @@ def block_or_edit(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    if admin.role == "scheduler":
-        return _redirect(week_offset, warn="Scheduler role is read-only for Block OR.", block_id=block_id)
     try:
         default_start, default_end = session_default_times(session)
         update_or_block_instance(
@@ -187,8 +183,6 @@ def block_or_assign(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    if admin.role == "scheduler":
-        return _redirect(week_offset, warn="Scheduler role is read-only for Block OR assign.", block_id=block_id)
     block = db.get(ORBlockInstance, block_id)
     if not block:
         return _redirect(week_offset, warn="Block not found")
@@ -220,8 +214,6 @@ def block_or_update_assignment(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    if admin.role == "scheduler":
-        return _redirect(week_offset, warn="Scheduler role is read-only for Block OR assign.", block_id=block_id)
     block = db.get(ORBlockInstance, block_id)
     if not block:
         return _redirect(week_offset, warn="Block not found")
@@ -250,8 +242,6 @@ def block_or_remove_assignment(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    if admin.role == "scheduler":
-        return _redirect(week_offset, warn="Scheduler role is read-only for Block OR assign.", block_id=block_id)
     try:
         remove_block_assignment(db, block_id, assignment_id, admin_id=admin.id)
     except ValueError as exc:
@@ -266,8 +256,6 @@ def block_or_clear(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    if admin.role == "scheduler":
-        return _redirect(week_offset, warn="Scheduler role is read-only for Block OR assign.", block_id=block_id)
     try:
         clear_block_assignment(db, block_id, admin_id=admin.id)
     except ValueError as exc:
@@ -282,8 +270,6 @@ def block_or_delete(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    if admin.role == "scheduler":
-        return _redirect(week_offset, warn="Scheduler role is read-only for Block OR.", block_id=block_id)
     try:
         delete_or_block_instance(db, block_id, admin_id=admin.id)
     except ValueError as exc:

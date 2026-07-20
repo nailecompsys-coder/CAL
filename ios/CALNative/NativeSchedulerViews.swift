@@ -3,32 +3,80 @@ import SwiftUI
 struct NativeSchedulerShell: View {
   @ObservedObject var store: NativeScheduleStore
   @State private var selectedDate = Date()
+  @State private var scope: SchedulerBrowseScope = .week
   @State private var selectedBlock: NativeSchedulerBlock?
-  @State private var selectedTab: SchedulerTab = .blocks
+  @State private var showCreateBlock = false
+  @State private var showChanges = false
+  @State private var showJumpMenu = false
 
-  private enum SchedulerTab: String, CaseIterable, Identifiable {
-    case blocks = "Blocks"
-    case changes = "Changes"
-
-    var id: String { rawValue }
+  private enum SchedulerBrowseScope {
+    case week
+    case day
   }
 
-  private var blockGroups: [SchedulerBlockGroup] {
-    Dictionary(grouping: store.schedulerBlocks) { block in
-      "\(block.date)|\(block.locationId)|\(block.start)|\(block.end)"
-    }
-    .map { _, blocks in
-      SchedulerBlockGroup(blocks: blocks)
-    }
-    .sorted { lhs, rhs in
-      lhs.sortKey < rhs.sortKey
+  /// US work week for scheduler: Monday–Sunday (not locale Sunday–Saturday).
+  private var calendar: Calendar {
+    var cal = Calendar.current
+    cal.firstWeekday = 2 // Monday
+    return cal
+  }
+
+  private var weekStart: Date {
+    let interval = calendar.dateInterval(of: .weekOfYear, for: selectedDate)
+    return interval?.start ?? calendar.startOfDay(for: selectedDate)
+  }
+
+  private var weekEnd: Date {
+    calendar.date(byAdding: .day, value: 6, to: weekStart) ?? weekStart
+  }
+
+  private var weekDates: [Date] {
+    (0..<7).compactMap { offset in
+      calendar.date(byAdding: .day, value: offset, to: weekStart)
     }
   }
 
-  private var windowTitle: String {
-    let calendar = Calendar.current
-    let endDate = calendar.date(byAdding: .day, value: 56, to: selectedDate) ?? selectedDate
-    return "\(Self.shortDateFormatter.string(from: selectedDate)) - \(Self.shortDateFormatter.string(from: endDate))"
+  private var weekDaySummaries: [SchedulerWeekDaySummary] {
+    weekDates.map { date in
+      SchedulerWeekDaySummary(date: date, blocks: blocks(on: date))
+    }
+  }
+
+  private var dayBlockGroups: [SchedulerBlockGroup] {
+    groupedBlocks(blocks(on: selectedDate))
+  }
+
+  private var stepperTitle: String {
+    switch scope {
+    case .week:
+      return "\(weekStart.formatted(.dateTime.month(.abbreviated).day())) – \(weekEnd.formatted(.dateTime.month(.abbreviated).day()))"
+    case .day:
+      if calendar.isDateInToday(selectedDate) {
+        return "Today · \(selectedDate.formatted(.dateTime.month(.abbreviated).day()))"
+      }
+      return selectedDate.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
+    }
+  }
+
+  private var stepperSubtitle: String {
+    switch scope {
+    case .week: return "Week"
+    case .day: return selectedDate.formatted(.dateTime.year())
+    }
+  }
+
+  private var isOnCurrentRange: Bool {
+    let today = Date()
+    switch scope {
+    case .week:
+      return weekDates.contains { calendar.isDate($0, inSameDayAs: today) }
+    case .day:
+      return calendar.isDateInToday(selectedDate)
+    }
+  }
+
+  private var displayWarning: String? {
+    Self.friendlyWarning(store.warningMessage)
   }
 
   var body: some View {
@@ -36,60 +84,99 @@ struct NativeSchedulerShell: View {
       ZStack {
         ScheduleWaterBackground()
         VStack(spacing: 0) {
-          SchedulerDateControl(
-            selectedDate: $selectedDate,
-            windowTitle: windowTitle,
-            jump: jumpDate
+          ScheduleDateStepper(
+            title: stepperTitle,
+            subtitle: stepperSubtitle,
+            previousAction: { step(-1) },
+            nextAction: { step(1) },
+            onTitleTap: { showJumpMenu = true },
+            todayAction: { jumpToThisWeek() },
+            showsTodayButton: !isOnCurrentRange
           )
-          .calReadableColumn(ClinicalLayout.wideColumn)
-
-          Picker("Scheduler", selection: $selectedTab) {
-            ForEach(SchedulerTab.allCases) { tab in
-              Text(tab.rawValue).tag(tab)
-            }
-          }
-          .pickerStyle(.segmented)
           .padding(.horizontal, 16)
-          .padding(.vertical, 10)
-          .background(.ultraThinMaterial)
+          .padding(.top, 10)
+          .padding(.bottom, 8)
           .calReadableColumn(ClinicalLayout.wideColumn)
 
-          if selectedTab == .blocks {
-            SchedulerOpenBlocksView(
-              blockGroups: blockGroups,
-              statusMessage: store.warningMessage,
-              selectBlock: { block in
-                selectedBlock = block
-                Task { await store.loadSchedulerBlock(block) }
-              }
+          if scope == .week {
+            SchedulerWeekView(
+              days: weekDaySummaries,
+              statusMessage: displayWarning,
+              selectDay: { date in
+                withAnimation(.easeInOut(duration: 0.2)) {
+                  selectedDate = date
+                  scope = .day
+                }
+              },
+              addBlock: { showCreateBlock = true }
             )
             .calReadableColumn(ClinicalLayout.contentColumn)
           } else {
-            SchedulerChangesView(changes: store.schedulerChanges)
-              .calReadableColumn(ClinicalLayout.contentColumn)
+            SchedulerDayDetailView(
+              blockGroups: dayBlockGroups,
+              statusMessage: displayWarning,
+              backToWeek: {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                  scope = .week
+                }
+              },
+              selectBlock: { block in
+                selectedBlock = block
+                Task { await store.loadSchedulerBlock(block) }
+              },
+              addBlock: { showCreateBlock = true }
+            )
+            .calReadableColumn(ClinicalLayout.contentColumn)
           }
         }
       }
       .navigationTitle("Scheduler")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
-        ToolbarItem(placement: .navigationBarLeading) {
-          Button("Today") {
-            selectedDate = Date()
-            Task { await store.loadScheduler(containing: selectedDate) }
-          }
-        }
         ToolbarItemGroup(placement: .navigationBarTrailing) {
           Button {
-            Task { await store.loadScheduler(containing: selectedDate) }
+            showCreateBlock = true
+          } label: {
+            Label("Add block", systemImage: "plus")
+          }
+          Button {
+            showChanges = true
+          } label: {
+            Image(systemName: "clock.arrow.circlepath")
+          }
+          .accessibilityLabel("Recent changes")
+          Button {
+            Task { await store.loadScheduler(containing: weekStart) }
           } label: {
             Image(systemName: "arrow.clockwise")
           }
+          .accessibilityLabel("Refresh")
           Button(role: .destructive) {
             store.logout()
           } label: {
             Image(systemName: "rectangle.portrait.and.arrow.right")
           }
+          .accessibilityLabel("Sign out")
+        }
+      }
+      .confirmationDialog("Jump", isPresented: $showJumpMenu, titleVisibility: .visible) {
+        Button("This week") { jumpToThisWeek() }
+        Button("Next month") {
+          selectedDate = calendar.date(byAdding: .month, value: 1, to: selectedDate) ?? selectedDate
+          scope = .week
+        }
+        Button("Cancel", role: .cancel) {}
+      }
+      .sheet(isPresented: $showChanges) {
+        CalNavigation {
+          SchedulerChangesView(changes: store.schedulerChanges)
+            .navigationTitle("Recent")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+              ToolbarItem(placement: .cancellationAction) {
+                Button("Done") { showChanges = false }
+              }
+            }
         }
       }
       .sheet(item: $selectedBlock) { block in
@@ -107,7 +194,7 @@ struct NativeSchedulerShell: View {
                 note: note
               )
             } catch {
-              store.setWarningMessage(error.localizedDescription)
+              store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't update assignment.")
             }
           },
           updateAction: { assignmentId, surgeon, startTime, caseCount, note in
@@ -121,14 +208,14 @@ struct NativeSchedulerShell: View {
                 note: note
               )
             } catch {
-              store.setWarningMessage(error.localizedDescription)
+              store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't update assignment.")
             }
           },
           removeAssignmentAction: { assignmentId in
             do {
               try await store.removeSchedulerAssignment(blockId: block.id, assignmentId: assignmentId)
             } catch {
-              store.setWarningMessage(error.localizedDescription)
+              store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't remove assignment.")
             }
           },
           clearAction: {
@@ -136,29 +223,118 @@ struct NativeSchedulerShell: View {
               try await store.clearSchedulerBlock(blockId: block.id)
               selectedBlock = nil
             } catch {
-              store.setWarningMessage(error.localizedDescription)
+              store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't clear block.")
             }
+          },
+          updateBlockAction: { locationId, session, startTime, endTime, notes in
+            do {
+              try await store.updateSchedulerBlock(
+                blockId: block.id,
+                locationId: locationId,
+                session: session,
+                startTime: startTime,
+                endTime: endTime,
+                notes: notes
+              )
+            } catch {
+              store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't update capacity.")
+              throw error
+            }
+          },
+          deleteBlockAction: {
+            do {
+              let containing = NativeDayResponse.dateFormatter.date(from: block.date) ?? selectedDate
+              try await store.deleteSchedulerBlock(blockId: block.id, containing: containing)
+              selectedBlock = nil
+            } catch {
+              store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't cancel block.")
+              throw error
+            }
+          },
+          loadMeta: {
+            try await store.loadSchedulerMeta()
+          }
+        )
+      }
+      .sheet(isPresented: $showCreateBlock) {
+        SchedulerCreateBlockSheet(
+          initialDate: selectedDate,
+          loadMeta: { try await store.loadSchedulerMeta() },
+          createAction: { date, locationId, session, startTime, endTime, notes in
+            _ = try await store.createSchedulerBlock(
+              date: date,
+              locationId: locationId,
+              session: session,
+              startTime: startTime,
+              endTime: endTime,
+              notes: notes
+            )
+            // Stay on week (or day if already drilled in); do not auto-open Assign.
+            selectedDate = date
           }
         )
       }
     }
     .task {
-      await store.loadScheduler(containing: selectedDate)
+      await store.loadScheduler(containing: weekStart)
     }
     .onChange(of: selectedDate) { newValue in
       Task { await store.loadScheduler(containing: newValue) }
     }
   }
 
-  private func jumpDate(_ component: Calendar.Component, _ value: Int) {
-    selectedDate = Calendar.current.date(byAdding: component, value: value, to: selectedDate) ?? selectedDate
+  private func blocks(on date: Date) -> [NativeSchedulerBlock] {
+    let key = NativeDayResponse.dateFormatter.string(from: date)
+    return store.schedulerBlocks.filter { $0.date == key }
   }
 
-  private static let shortDateFormatter: DateFormatter = {
-    let formatter = DateFormatter()
-    formatter.dateFormat = "MMM d"
-    return formatter
-  }()
+  private func groupedBlocks(_ blocks: [NativeSchedulerBlock]) -> [SchedulerBlockGroup] {
+    Dictionary(grouping: blocks) { block in
+      "\(block.date)|\(block.locationId)|\(block.start)|\(block.end)"
+    }
+    .map { _, blocks in
+      SchedulerBlockGroup(blocks: blocks)
+    }
+    .sorted { lhs, rhs in
+      lhs.sortKey < rhs.sortKey
+    }
+  }
+
+  private func step(_ direction: Int) {
+    withAnimation(.easeInOut(duration: 0.2)) {
+      switch scope {
+      case .week:
+        selectedDate = calendar.date(byAdding: .day, value: 7 * direction, to: selectedDate) ?? selectedDate
+      case .day:
+        selectedDate = calendar.date(byAdding: .day, value: direction, to: selectedDate) ?? selectedDate
+      }
+    }
+  }
+
+  /// Land on the Monday–Sunday work week that contains today (never day-scope “Today”).
+  private func jumpToThisWeek() {
+    withAnimation(.easeInOut(duration: 0.2)) {
+      selectedDate = calendar.startOfDay(for: Date())
+      scope = .week
+    }
+  }
+
+  fileprivate static func friendlyWarning(_ message: String?) -> String? {
+    guard let message else { return nil }
+    let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+    let lower = trimmed.lowercased()
+    if lower == "not found" || lower == "404" || lower.hasSuffix(": not found") {
+      return nil
+    }
+    if lower.contains("not found") {
+      return "Couldn't load that item. Try refresh."
+    }
+    if lower.hasPrefix("scheduler sync failed") && lower.contains("not found") {
+      return "Couldn't sync Block OR. Try refresh."
+    }
+    return trimmed
+  }
 }
 
 private struct SchedulerBlockGroup: Identifiable {
@@ -190,118 +366,49 @@ private struct SchedulerBlockGroup: Identifiable {
   }
 }
 
-private struct SchedulerDayGroup: Identifiable {
+private struct SchedulerWeekDaySummary: Identifiable {
   let id: String
-  let title: String
-  let groups: [SchedulerBlockGroup]
+  let date: Date
+  let blocks: [NativeSchedulerBlock]
 
-  init(groups: [SchedulerBlockGroup]) {
-    self.groups = groups
-    self.id = groups.first?.date ?? UUID().uuidString
-    self.title = groups.first?.displayDate ?? ""
+  var openCount: Int { blocks.filter(\.isOpen).count }
+  var assignedCount: Int { blocks.count - openCount }
+
+  var hospitalBadges: [String] {
+    var seen = Set<String>()
+    var ordered: [String] = []
+    for block in blocks {
+      let label = block.displayLocation
+      if seen.insert(label).inserted {
+        ordered.append(label)
+      }
+    }
+    return ordered
+  }
+
+  init(date: Date, blocks: [NativeSchedulerBlock]) {
+    self.date = date
+    self.blocks = blocks.sorted { lhs, rhs in
+      if lhs.start != rhs.start { return lhs.start < rhs.start }
+      return lhs.displayLocation < rhs.displayLocation
+    }
+    self.id = NativeDayResponse.dateFormatter.string(from: date)
   }
 }
 
-private struct SchedulerDateControl: View {
-  @Binding var selectedDate: Date
-  let windowTitle: String
-  let jump: (Calendar.Component, Int) -> Void
-
-  var body: some View {
-    VStack(spacing: 8) {
-      HStack(spacing: 8) {
-        Button {
-          jump(.day, -7)
-        } label: {
-          Image(systemName: "chevron.left")
-        }
-        .buttonStyle(.bordered)
-
-        DatePicker("Start", selection: $selectedDate, displayedComponents: .date)
-          .datePickerStyle(.compact)
-          .labelsHidden()
-          .frame(maxWidth: .infinity)
-
-        Button {
-          jump(.day, 7)
-        } label: {
-          Image(systemName: "chevron.right")
-        }
-        .buttonStyle(.bordered)
-      }
-
-      jumpControls
-    }
-    .padding(.horizontal, 16)
-    .padding(.top, 10)
-    .padding(.bottom, 8)
-    .background(.ultraThinMaterial)
-  }
-
-  @ViewBuilder
-  private var jumpControls: some View {
-    if #available(iOS 16.0, *) {
-      ViewThatFits(in: .horizontal) {
-        jumpRow
-        VStack(alignment: .leading, spacing: 8) {
-          Text(windowTitle)
-            .font(ClinicalTypography.caption)
-            .foregroundStyle(.secondary)
-          HStack(spacing: 8) {
-            jumpButtons
-            Spacer(minLength: 0)
-          }
-        }
-      }
-    } else {
-      jumpRow
-    }
-  }
-
-  private var jumpRow: some View {
-    HStack(spacing: 8) {
-      Text(windowTitle)
-        .font(ClinicalTypography.caption)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
-        .minimumScaleFactor(0.85)
-      Spacer(minLength: 4)
-      jumpButtons
-    }
-  }
-
-  private var jumpButtons: some View {
-    HStack(spacing: 8) {
-      Button("+1 mo") {
-        jump(.month, 1)
-      }
-      .font(ClinicalTypography.caption)
-      .buttonStyle(.bordered)
-      Button("+6 wk") {
-        jump(.day, 42)
-      }
-      .font(ClinicalTypography.caption)
-      .buttonStyle(.borderedProminent)
-    }
-  }
-}
-
-private struct SchedulerOpenBlocksView: View {
-  let blockGroups: [SchedulerBlockGroup]
+private struct SchedulerWeekView: View {
+  let days: [SchedulerWeekDaySummary]
   let statusMessage: String?
-  let selectBlock: (NativeSchedulerBlock) -> Void
+  let selectDay: (Date) -> Void
+  let addBlock: () -> Void
 
-  private var dayGroups: [SchedulerDayGroup] {
-    Dictionary(grouping: blockGroups, by: \.date)
-      .map { _, groups in
-        SchedulerDayGroup(groups: groups.sorted { $0.sortKey < $1.sortKey })
-      }
-      .sorted { $0.id < $1.id }
+  private var weekIsEmpty: Bool {
+    days.allSatisfy { $0.blocks.isEmpty }
   }
 
   var body: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: 12) {
+      VStack(alignment: .leading, spacing: 10) {
         if let statusMessage {
           Label(statusMessage, systemImage: "exclamationmark.triangle")
             .font(.caption.weight(.semibold))
@@ -311,50 +418,214 @@ private struct SchedulerOpenBlocksView: View {
             .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.amber)
         }
 
-        SchedulerSectionTitle("Block OR")
-        ForEach(dayGroups) { day in
-          VStack(alignment: .leading, spacing: 8) {
-            Text(day.title)
-              .font(ClinicalTypography.rowTitleStrong)
-              .foregroundStyle(ClinicalPalette.ink)
-              .padding(.horizontal, 4)
-
-            ForEach(day.groups) { group in
-              VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                  Text(group.location)
-                    .font(ClinicalTypography.headlineStrong)
-                    .foregroundStyle(ClinicalPalette.teal)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                  Text("\(group.start)-\(group.end)")
-                    .font(ClinicalTypography.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-                  Spacer(minLength: 0)
-                }
-
-                ForEach(group.blocks) { block in
-                  Button {
-                    selectBlock(block)
-                  } label: {
-                    SchedulerBlockPill(block: block)
-                  }
-                  .buttonStyle(.plain)
-                }
+        if weekIsEmpty {
+          SchedulerEmptyState(
+            text: "No Block OR this week.",
+            addBlock: addBlock
+          )
+        } else {
+          VStack(spacing: 7) {
+            ForEach(days) { day in
+              Button {
+                selectDay(day.date)
+              } label: {
+                SchedulerWeekDayRow(day: day)
               }
-              .padding(12)
-              .liquidGlassCard(cornerRadius: 16, tint: ClinicalPalette.tealSoft)
+              .buttonStyle(.plain)
             }
           }
-        }
-        if blockGroups.isEmpty {
-          SchedulerEmptyRow(text: "No open Block OR time in this window.")
+
+          Button(action: addBlock) {
+            Label("Add block", systemImage: "plus.circle.fill")
+              .font(.subheadline.weight(.bold))
+              .frame(maxWidth: .infinity)
+              .padding(.vertical, 10)
+          }
+          .buttonStyle(.borderedProminent)
+          .tint(ClinicalPalette.teal)
+          .padding(.top, 4)
         }
       }
       .padding(16)
     }
+  }
+}
+
+private struct SchedulerWeekDayRow: View {
+  let day: SchedulerWeekDaySummary
+
+  private var isToday: Bool {
+    Calendar.current.isDateInToday(day.date)
+  }
+
+  var body: some View {
+    HStack(alignment: .center, spacing: 10) {
+      VStack(spacing: 1) {
+        Text(day.date.formatted(.dateTime.weekday(.abbreviated)))
+          .font(.caption2.weight(.bold))
+          .foregroundStyle(.secondary)
+        Text(day.date.formatted(.dateTime.day()))
+          .font(.subheadline.weight(.bold))
+          .foregroundStyle(isToday ? ClinicalPalette.teal : ClinicalPalette.ink)
+      }
+      .frame(width: 34)
+
+      VStack(alignment: .leading, spacing: 4) {
+        if day.blocks.isEmpty {
+          Text("No blocks")
+            .font(ClinicalTypography.caption)
+            .foregroundStyle(.secondary)
+        } else {
+          Text(summaryLine)
+            .font(ClinicalTypography.caption)
+            .foregroundStyle(ClinicalPalette.ink)
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
+
+          if !day.hospitalBadges.isEmpty {
+            HStack(spacing: 4) {
+              ForEach(day.hospitalBadges.prefix(4), id: \.self) { badge in
+                Text(badge)
+                  .font(ClinicalTypography.badge)
+                  .foregroundStyle(ClinicalPalette.teal)
+                  .padding(.horizontal, 6)
+                  .padding(.vertical, 2)
+                  .background(ClinicalPalette.teal.opacity(0.12), in: Capsule())
+              }
+              if day.hospitalBadges.count > 4 {
+                Text("+\(day.hospitalBadges.count - 4)")
+                  .font(ClinicalTypography.badge)
+                  .foregroundStyle(.secondary)
+              }
+            }
+          }
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+
+      Image(systemName: "chevron.right")
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 8)
+    .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
+    .contentShape(Rectangle())
+    .liquidGlassCard(
+      cornerRadius: 14,
+      tint: isToday ? ClinicalPalette.tealSoft : ClinicalPalette.card
+    )
+  }
+
+  private var summaryLine: String {
+    var parts: [String] = []
+    if day.openCount > 0 {
+      parts.append("\(day.openCount) open")
+    }
+    if day.assignedCount > 0 {
+      parts.append("\(day.assignedCount) assigned")
+    }
+    return parts.isEmpty ? "\(day.blocks.count) block\(day.blocks.count == 1 ? "" : "s")" : parts.joined(separator: " · ")
+  }
+}
+
+private struct SchedulerDayDetailView: View {
+  let blockGroups: [SchedulerBlockGroup]
+  let statusMessage: String?
+  let backToWeek: () -> Void
+  let selectBlock: (NativeSchedulerBlock) -> Void
+  let addBlock: () -> Void
+
+  var body: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 12) {
+        Button(action: backToWeek) {
+          Label("Week", systemImage: "chevron.left")
+            .font(ClinicalTypography.caption)
+            .foregroundStyle(ClinicalPalette.teal)
+        }
+        .buttonStyle(.plain)
+
+        if let statusMessage {
+          Label(statusMessage, systemImage: "exclamationmark.triangle")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.amber)
+        }
+
+        if blockGroups.isEmpty {
+          SchedulerEmptyState(
+            text: "No Block OR on this day.",
+            addBlock: addBlock
+          )
+        } else {
+          ForEach(blockGroups) { group in
+            VStack(alignment: .leading, spacing: 8) {
+              HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(group.location)
+                  .font(ClinicalTypography.headlineStrong)
+                  .foregroundStyle(ClinicalPalette.teal)
+                  .lineLimit(1)
+                  .minimumScaleFactor(0.8)
+                Text("\(group.start)-\(group.end)")
+                  .font(ClinicalTypography.caption)
+                  .foregroundStyle(.secondary)
+                  .lineLimit(1)
+                  .minimumScaleFactor(0.85)
+                Spacer(minLength: 0)
+              }
+
+              ForEach(group.blocks) { block in
+                Button {
+                  selectBlock(block)
+                } label: {
+                  SchedulerBlockPill(block: block)
+                }
+                .buttonStyle(.plain)
+              }
+            }
+            .padding(12)
+            .liquidGlassCard(cornerRadius: 16, tint: ClinicalPalette.tealSoft)
+          }
+
+          Button(action: addBlock) {
+            Label("Add block", systemImage: "plus.circle.fill")
+              .font(.subheadline.weight(.bold))
+              .frame(maxWidth: .infinity)
+              .padding(.vertical, 10)
+          }
+          .buttonStyle(.borderedProminent)
+          .tint(ClinicalPalette.teal)
+        }
+      }
+      .padding(16)
+    }
+  }
+}
+
+private struct SchedulerEmptyState: View {
+  let text: String
+  let addBlock: () -> Void
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      Text(text)
+        .font(ClinicalTypography.rowTitle)
+        .foregroundStyle(.secondary)
+      Button(action: addBlock) {
+        Label("Add block", systemImage: "plus.circle.fill")
+          .font(.subheadline.weight(.bold))
+          .frame(maxWidth: .infinity)
+          .padding(.vertical, 10)
+      }
+      .buttonStyle(.borderedProminent)
+      .tint(ClinicalPalette.teal)
+    }
+    .padding(14)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.cardStrong)
   }
 }
 
@@ -393,6 +664,9 @@ private struct SchedulerAssignSheet: View {
   let updateAction: (Int, NativeSchedulerCandidate, String, Int, String) async -> Void
   let removeAssignmentAction: (Int) async -> Void
   let clearAction: () async -> Void
+  let updateBlockAction: (Int, String, String, String, String) async throws -> Void
+  let deleteBlockAction: () async throws -> Void
+  let loadMeta: () async throws -> NativeSchedulerMetaResponse
   @Environment(\.dismiss) private var dismiss
   @State private var mode: SheetMode = .idle
   @State private var editingAssignmentId: Int?
@@ -403,6 +677,16 @@ private struct SchedulerAssignSheet: View {
   @State private var showUnavailable = false
   @State private var didSeedDefaults = false
   @State private var isSaving = false
+  @State private var hospitals: [NativeSchedulerHospital] = []
+  @State private var isLoadingHospitals = false
+  @State private var capacityLocationId: Int = 0
+  @State private var capacitySession: String = "am"
+  @State private var capacityStart: Date = Date()
+  @State private var capacityEnd: Date = Date()
+  @State private var capacityNotes: String = ""
+  @State private var capacitySeeded = false
+  @State private var showCancelConfirm = false
+  @State private var capacityError: String?
 
   private enum SheetMode {
     case idle
@@ -456,6 +740,14 @@ private struct SchedulerAssignSheet: View {
     }
   }
 
+  private var capacityDirty: Bool {
+    capacityLocationId != liveBlock.locationId
+      || capacitySession != liveBlock.session
+      || Self.hhmm(capacityStart) != liveBlock.start
+      || Self.hhmm(capacityEnd) != liveBlock.end
+      || capacityNotes != liveBlock.notes
+  }
+
   private var primaryButtonTitle: String {
     guard let candidate = selectedCandidate else { return "Select a surgeon" }
     switch mode {
@@ -494,6 +786,8 @@ private struct SchedulerAssignSheet: View {
               ProgressView()
             }
           }
+
+          capacitySection
 
           VStack(alignment: .leading, spacing: 8) {
             Text("ON THIS BLOCK")
@@ -658,6 +952,16 @@ private struct SchedulerAssignSheet: View {
             .buttonStyle(.bordered)
             .disabled(isLoading || isSaving)
           }
+
+          Button(role: .destructive) {
+            showCancelConfirm = true
+          } label: {
+            Text(assignedRows.isEmpty ? "Cancel this block" : "Cancel block (clear surgeons first)")
+              .font(.caption.weight(.bold))
+              .frame(maxWidth: .infinity)
+          }
+          .buttonStyle(.bordered)
+          .disabled(isLoading || isSaving || !assignedRows.isEmpty)
         }
         .padding(16)
       }
@@ -669,8 +973,33 @@ private struct SchedulerAssignSheet: View {
           Button("Done") { dismiss() }
         }
       }
+      .confirmationDialog(
+        "Cancel this Block OR capacity?",
+        isPresented: $showCancelConfirm,
+        titleVisibility: .visible
+      ) {
+        Button("Cancel block", role: .destructive) {
+          Task {
+            isSaving = true
+            defer { isSaving = false }
+            do {
+              try await deleteBlockAction()
+              dismiss()
+            } catch {
+              capacityError = error.localizedDescription
+            }
+          }
+        }
+        Button("Keep block", role: .cancel) {}
+      } message: {
+        Text("Removes this facility/day window only. Surgeons stay unassigned.")
+      }
       .onAppear {
         seedDefaultsIfNeeded()
+        seedCapacityIfNeeded()
+      }
+      .task {
+        await loadHospitalsIfNeeded()
       }
       .onChange(of: assignedRows.map(\.id)) { ids in
         if let editingAssignmentId, !ids.contains(editingAssignmentId) {
@@ -683,6 +1012,145 @@ private struct SchedulerAssignSheet: View {
       .onChange(of: detail?.candidates.count ?? 0) { _ in
         seedDefaultsIfNeeded()
       }
+      .onChange(of: liveBlock.id) { _ in
+        capacitySeeded = false
+        seedCapacityIfNeeded()
+      }
+      .onChange(of: "\(liveBlock.start)-\(liveBlock.end)-\(liveBlock.session)-\(liveBlock.locationId)") { _ in
+        capacitySeeded = false
+        seedCapacityIfNeeded()
+      }
+    }
+  }
+
+  private var capacitySection: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text("CAPACITY")
+        .font(ClinicalTypography.sectionLabel)
+        .foregroundStyle(.secondary)
+      if isLoadingHospitals {
+        HStack(spacing: 8) {
+          ProgressView()
+          Text("Loading hospitals…")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+      } else if hospitals.isEmpty {
+        VStack(alignment: .leading, spacing: 6) {
+          Text(capacityError ?? "No hospitals available. Add one in Manage locations.")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(capacityError == nil ? .secondary : ClinicalPalette.amber)
+          Button("Retry") {
+            Task { await loadHospitalsIfNeeded(force: true) }
+          }
+          .font(.caption.weight(.semibold))
+        }
+      } else {
+        Picker("Hospital", selection: $capacityLocationId) {
+          ForEach(hospitals) { hospital in
+            Text(hospital.displayName).tag(hospital.id)
+          }
+        }
+        .pickerStyle(.menu)
+      }
+      Picker("Session", selection: $capacitySession) {
+        Text("AM").tag("am")
+        Text("PM").tag("pm")
+        Text("Both").tag("both")
+        Text("Custom").tag("custom")
+      }
+      .pickerStyle(.segmented)
+      .onChange(of: capacitySession) { session in
+        applySessionDefaults(session)
+      }
+      HStack {
+        DatePicker("Start", selection: $capacityStart, displayedComponents: .hourAndMinute)
+          .labelsHidden()
+        Text("–")
+          .foregroundStyle(.secondary)
+        DatePicker("End", selection: $capacityEnd, displayedComponents: .hourAndMinute)
+          .labelsHidden()
+      }
+      TextField("Notes (optional)", text: $capacityNotes)
+        .textFieldStyle(.roundedBorder)
+      if let capacityError, !hospitals.isEmpty {
+        Text(capacityError)
+          .font(.caption2.weight(.semibold))
+          .foregroundStyle(ClinicalPalette.amber)
+      }
+      Button {
+        Task { await saveCapacity() }
+      } label: {
+        Text("Save capacity")
+          .font(.subheadline.weight(.bold))
+          .frame(maxWidth: .infinity)
+          .padding(.vertical, 8)
+      }
+      .buttonStyle(.borderedProminent)
+      .tint(ClinicalPalette.teal)
+      .disabled(!capacityDirty || isLoading || isSaving)
+    }
+    .padding(12)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.cardStrong)
+  }
+
+  private func loadHospitalsIfNeeded(force: Bool = false) async {
+    guard force || hospitals.isEmpty else { return }
+    isLoadingHospitals = true
+    capacityError = nil
+    defer { isLoadingHospitals = false }
+    do {
+      let meta = try await loadMeta()
+      hospitals = meta.hospitals
+      seedCapacityIfNeeded()
+    } catch {
+      capacityError = error.localizedDescription
+    }
+  }
+
+  private func seedCapacityIfNeeded() {
+    guard !capacitySeeded else { return }
+    capacitySeeded = true
+    capacityLocationId = liveBlock.locationId
+    capacitySession = liveBlock.session
+    capacityStart = Self.dateForTime(liveBlock.start)
+    capacityEnd = Self.dateForTime(liveBlock.end)
+    capacityNotes = liveBlock.notes
+  }
+
+  private func applySessionDefaults(_ session: String) {
+    switch session {
+    case "am":
+      capacityStart = Self.dateForTime("07:00")
+      capacityEnd = Self.dateForTime("12:00")
+    case "pm":
+      capacityStart = Self.dateForTime("12:00")
+      capacityEnd = Self.dateForTime("17:00")
+    case "both":
+      capacityStart = Self.dateForTime("07:00")
+      capacityEnd = Self.dateForTime("17:00")
+    default:
+      break
+    }
+  }
+
+  private func saveCapacity() async {
+    isSaving = true
+    capacityError = nil
+    defer { isSaving = false }
+    do {
+      try await updateBlockAction(
+        capacityLocationId,
+        capacitySession,
+        Self.hhmm(capacityStart),
+        Self.hhmm(capacityEnd),
+        capacityNotes
+      )
+      capacitySeeded = false
+      seedCapacityIfNeeded()
+    } catch {
+      capacityError = error.localizedDescription
     }
   }
 
@@ -900,6 +1368,178 @@ private struct CandidatePickRow: View {
   }
 }
 
+private struct SchedulerCreateBlockSheet: View {
+  let initialDate: Date
+  let loadMeta: () async throws -> NativeSchedulerMetaResponse
+  let createAction: (Date, Int, String, String?, String?, String) async throws -> Void
+  @Environment(\.dismiss) private var dismiss
+  @State private var date = Date()
+  @State private var hospitals: [NativeSchedulerHospital] = []
+  @State private var locationId: Int = 0
+  @State private var session = "am"
+  @State private var startTime = Date()
+  @State private var endTime = Date()
+  @State private var notes = ""
+  @State private var isSaving = false
+  @State private var isLoadingHospitals = true
+  @State private var hospitalsError: String?
+  @State private var errorMessage: String?
+  @State private var didLoad = false
+
+  private var canCreate: Bool {
+    locationId > 0 && !isSaving && !isLoadingHospitals && hospitalsError == nil && !hospitals.isEmpty
+  }
+
+  var body: some View {
+    CalNavigation {
+      Form {
+        Section("When") {
+          DatePicker("Date", selection: $date, displayedComponents: .date)
+        }
+        Section("Hospital") {
+          if isLoadingHospitals {
+            HStack {
+              ProgressView()
+              Text("Loading hospitals…")
+                .foregroundStyle(.secondary)
+            }
+          } else if let hospitalsError {
+            VStack(alignment: .leading, spacing: 8) {
+              Text(hospitalsError)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(ClinicalPalette.amber)
+              Button("Retry") {
+                Task { await reloadHospitals() }
+              }
+              .font(.caption.weight(.semibold))
+            }
+          } else if hospitals.isEmpty {
+            Text("No hospitals available. Add a hospital in Manage locations.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          } else {
+            Picker("Hospital", selection: $locationId) {
+              ForEach(hospitals) { hospital in
+                Text(hospital.displayName).tag(hospital.id)
+              }
+            }
+          }
+        }
+        Section("Session") {
+          Picker("Session", selection: $session) {
+            Text("AM").tag("am")
+            Text("PM").tag("pm")
+            Text("Both").tag("both")
+            Text("Custom").tag("custom")
+          }
+          .pickerStyle(.segmented)
+          .onChange(of: session) { value in
+            applySessionDefaults(value)
+          }
+          DatePicker("Start", selection: $startTime, displayedComponents: .hourAndMinute)
+          DatePicker("End", selection: $endTime, displayedComponents: .hourAndMinute)
+        }
+        Section("Notes") {
+          TextField("Optional", text: $notes)
+        }
+        if let errorMessage {
+          Section {
+            Text(errorMessage)
+              .font(.caption.weight(.semibold))
+              .foregroundStyle(ClinicalPalette.amber)
+          }
+        }
+      }
+      .navigationTitle("New Block OR")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button("Close") { dismiss() }
+            .disabled(isSaving)
+        }
+        ToolbarItem(placement: .confirmationAction) {
+          Button("Create") {
+            Task { await create() }
+          }
+          .disabled(!canCreate)
+        }
+      }
+      .task {
+        guard !didLoad else { return }
+        didLoad = true
+        date = Calendar.current.startOfDay(for: initialDate)
+        applySessionDefaults(session)
+        await reloadHospitals()
+      }
+    }
+  }
+
+  private func reloadHospitals() async {
+    isLoadingHospitals = true
+    hospitalsError = nil
+    defer { isLoadingHospitals = false }
+    do {
+      let meta = try await loadMeta()
+      hospitals = meta.hospitals
+      if locationId == 0, let first = hospitals.first {
+        locationId = first.id
+      }
+    } catch {
+      hospitalsError = error.localizedDescription
+    }
+  }
+
+  private func applySessionDefaults(_ value: String) {
+    switch value {
+    case "am":
+      startTime = Self.dateForTime("07:00")
+      endTime = Self.dateForTime("12:00")
+    case "pm":
+      startTime = Self.dateForTime("12:00")
+      endTime = Self.dateForTime("17:00")
+    case "both":
+      startTime = Self.dateForTime("07:00")
+      endTime = Self.dateForTime("17:00")
+    default:
+      break
+    }
+  }
+
+  private func create() async {
+    guard canCreate else { return }
+    isSaving = true
+    errorMessage = nil
+    defer { isSaving = false }
+    do {
+      try await createAction(
+        date,
+        locationId,
+        session,
+        Self.hhmm(startTime),
+        Self.hhmm(endTime),
+        notes
+      )
+      dismiss()
+    } catch {
+      errorMessage = error.localizedDescription
+    }
+  }
+
+  private static func hhmm(_ date: Date) -> String {
+    let formatter = DateFormatter()
+    formatter.dateFormat = "HH:mm"
+    return formatter.string(from: date)
+  }
+
+  private static func dateForTime(_ value: String) -> Date {
+    let parts = value.split(separator: ":").compactMap { Int($0) }
+    var components = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+    components.hour = parts.count > 0 ? parts[0] : 7
+    components.minute = parts.count > 1 ? parts[1] : 0
+    return Calendar.current.date(from: components) ?? Date()
+  }
+}
+
 private struct SchedulerChangesView: View {
   let changes: [NativeSchedulerChange]
 
@@ -931,20 +1571,6 @@ private struct SchedulerChangesView: View {
       }
     }
     .background(ScheduleWaterBackground())
-  }
-}
-
-private struct SchedulerSectionTitle: View {
-  let text: String
-
-  init(_ text: String) {
-    self.text = text
-  }
-
-  var body: some View {
-    Text(text.uppercased())
-      .font(ClinicalTypography.sectionLabel)
-      .foregroundStyle(.secondary)
   }
 }
 

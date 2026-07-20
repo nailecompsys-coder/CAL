@@ -147,6 +147,77 @@ struct NativeCALClient {
     return try JSONDecoder().decode(NativeSchedulerAssignResponse.self, from: data)
   }
 
+  func fetchSchedulerMeta(token: String) async throws -> NativeSchedulerMetaResponse {
+    let url = baseURL.appendingPathComponent("/api/native/scheduler/meta")
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    let data = try await perform(request)
+    return try JSONDecoder().decode(NativeSchedulerMetaResponse.self, from: data)
+  }
+
+  func createSchedulerBlock(
+    token: String,
+    date: String,
+    locationId: Int,
+    session: String,
+    startTime: String?,
+    endTime: String?,
+    notes: String
+  ) async throws -> NativeSchedulerCreateBlockResponse {
+    let url = baseURL.appendingPathComponent("/api/native/scheduler/blocks")
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.httpBody = try JSONEncoder().encode(NativeSchedulerCreateBlockPayload(
+      date: date,
+      locationId: locationId,
+      session: session,
+      startTime: startTime,
+      endTime: endTime,
+      notes: notes
+    ))
+    let data = try await perform(request)
+    return try JSONDecoder().decode(NativeSchedulerCreateBlockResponse.self, from: data)
+  }
+
+  func updateSchedulerBlock(
+    token: String,
+    blockId: Int,
+    locationId: Int?,
+    session: String?,
+    startTime: String?,
+    endTime: String?,
+    notes: String?
+  ) async throws -> NativeSchedulerAssignResponse {
+    let url = baseURL.appendingPathComponent("/api/native/scheduler/blocks/\(blockId)")
+    var request = URLRequest(url: url)
+    request.httpMethod = "PATCH"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.httpBody = try JSONEncoder().encode(NativeSchedulerUpdateBlockPayload(
+      locationId: locationId,
+      session: session,
+      startTime: startTime,
+      endTime: endTime,
+      notes: notes
+    ))
+    let data = try await perform(request)
+    return try JSONDecoder().decode(NativeSchedulerAssignResponse.self, from: data)
+  }
+
+  func deleteSchedulerBlock(token: String, blockId: Int) async throws -> NativeSchedulerDeleteBlockResponse {
+    let url = baseURL.appendingPathComponent("/api/native/scheduler/blocks/\(blockId)")
+    var request = URLRequest(url: url)
+    request.httpMethod = "DELETE"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    let data = try await perform(request)
+    return try JSONDecoder().decode(NativeSchedulerDeleteBlockResponse.self, from: data)
+  }
+
   func fetchHome(token: String, start: Date, end: Date) async throws -> NativeHomeResponse {
     var components = URLComponents(url: baseURL.appendingPathComponent("/api/native/home"), resolvingAgainstBaseURL: false)!
     components.queryItems = [

@@ -101,3 +101,72 @@ struct NativeSchedulerChange: Identifiable, Decodable {
   let surgeonInitials: String
   let createdAt: String
 }
+
+struct NativeSchedulerHospital: Identifiable, Decodable, Hashable {
+  let id: Int
+  let name: String
+  let abbreviation: String
+
+  var displayName: String {
+    abbreviation.isEmpty ? name : "\(abbreviation) — \(name)"
+  }
+}
+
+struct NativeSchedulerSessionOption: Identifiable, Decodable, Hashable {
+  let id: String
+  let label: String
+  let start: String
+  let end: String
+}
+
+struct NativeSchedulerMetaResponse: Decodable {
+  let hospitals: [NativeSchedulerHospital]
+  let sessions: [NativeSchedulerSessionOption]
+}
+
+struct NativeSchedulerCreateBlockPayload: Encodable {
+  let date: String
+  let locationId: Int
+  let session: String
+  let startTime: String?
+  let endTime: String?
+  let notes: String
+
+  enum CodingKeys: String, CodingKey {
+    case date
+    case locationId = "location_id"
+    case session
+    case startTime = "start_time"
+    case endTime = "end_time"
+    case notes
+  }
+}
+
+struct NativeSchedulerUpdateBlockPayload: Encodable {
+  let locationId: Int?
+  let session: String?
+  let startTime: String?
+  let endTime: String?
+  let notes: String?
+
+  enum CodingKeys: String, CodingKey {
+    case locationId = "location_id"
+    case session
+    case startTime = "start_time"
+    case endTime = "end_time"
+    case notes
+  }
+}
+
+struct NativeSchedulerCreateBlockResponse: Decodable {
+  let ok: Bool
+  let created: Int
+  let blockIds: [Int]
+  let blocks: [NativeSchedulerBlock]
+}
+
+struct NativeSchedulerDeleteBlockResponse: Decodable {
+  let ok: Bool
+  let deleted: Bool
+  let blockId: Int
+}

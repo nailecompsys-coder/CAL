@@ -1,8 +1,8 @@
-# Mobile Block OR Create — Plan (Hold for Verify)
+# Mobile Block OR Create — Plan
 
-Last updated: 2026-07-09  
-**Status:** Plan only — **no implementation until Don verifies.**  
-**Related:** `BLOCK_OR_SCHEDULER_AUDIT.md`, `SCHEDULER_AND_ANDROID_EXECUTION_PLAN.md`
+Last updated: 2026-07-20  
+**Status:** Implemented on portal + iOS (Android deferred).  
+**Related:** `BLOCK_OR_SCHEDULER_AUDIT.md`, `SCHEDULER_AND_ANDROID_EXECUTION_PLAN.md`, `cal-native-parity-ledger.md`
 
 ---
 
@@ -18,82 +18,58 @@ Epic is **not** CAL’s source of truth. CAL does not sync OR blocks from Advent
 
 ---
 
-## Product decision (proposed)
+## Product decision (shipped)
 
-Scheduler on **mobile iOS** must be able to:
+Scheduler on **mobile iOS** and **portal** can:
 
 1. **Create** open Block OR capacity (facility + date + session/times)
-2. **Assign / edit / remove** surgeons on those blocks (existing functions)
+2. **Modify** capacity (hospital, session, times, notes)
+3. **Cancel** capacity (after clearing surgeon assignments)
+4. **Assign / edit / remove** surgeons on those blocks
 
-Same app, same `native_scheduler` role. Portal create can remain as optional PC/admin backup — **not required** for the daily scheduler workflow.
+Same `native_scheduler` JWT / portal scheduler role. Android create/edit/cancel still deferred.
 
 ---
 
-## How it works (target)
+## How it works
 
 ```text
 Scheduler OTP → Blocks tab → + New block
-  → date + hospital + AM/PM/Both (+ optional notes)
-  → open instance created
-  → tap block → existing assign sheet (surgeon, start, cases, note)
+  → date + hospital + AM/PM/Both/Custom (+ optional notes)
+  → open instance created → stay on week/day list (no auto-assign)
+  → tap a block when ready to assign
+    → Capacity section: edit window / Cancel this block
   → surgeon My Schedule + Changes tab update
 ```
 
----
-
-## Mobile UX (v1)
-
-| Piece | Behavior |
-|-------|----------|
-| Primary tab | Blocks (today’s Open Blocks list/day groups) |
-| `+ New block` | Sheet: date, facility, session (AM/PM/Both), optional notes |
-| After create | Refresh list; user taps block for assign (or auto-open sheet — TBD) |
-| Changes tab | Unchanged audit feed |
-
-**Deferred:** hospital-day timeline canvas, bulk multi-week/multi-facility, mobile edit/delete of open window, case-freeze/end-of-day, personal-item hard block on assign.
+Portal: `/admin/block-or` create form + selected-block edit/delete/assign (scheduler unlocked).
 
 ---
 
-## API (proposed, not built)
-
-Reuse `or_block_service.create_or_blocks()` / `BlockORCreateInput`.
+## API (shipped)
 
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/api/native/scheduler/meta` | Hospitals + session defaults |
-| POST | `/api/native/scheduler/blocks` | Create open block(s) |
+| POST | `/api/native/scheduler/blocks` | Create open block (once, one facility) |
+| PATCH | `/api/native/scheduler/blocks/{id}` | Update capacity |
+| DELETE | `/api/native/scheduler/blocks/{id}` | Cancel/delete open instance |
 
-v1 body: `{ "date", "location_id", "session", "notes?" }` → once recurrence, one location.
-
-Assign/update/remove/clear/home/detail — **already exist**; unchanged.
-
-Auth: `native_scheduler` JWT may create.
+Assign/update/remove/clear/home/detail — unchanged.
 
 ---
 
-## Decisions for Don (before code)
+## Acceptance
 
-1. v1 create = one date + one facility only? (recommended **yes**)
-2. Sessions: AM / PM / Both only, or Custom times in v1?
-3. After create: stay on list, or auto-open assign sheet?
-4. Delete open block from mobile in v1? (or later / portal)
-5. Portal create form: leave for admins, or hide/deprecate?
-
----
-
-## Acceptance (after approve + build)
-
-- Scheduler can create open WG (or other hospital) AM block from mobile
-- Assign CJ via existing sheet; shows on surgeon schedule
+- Scheduler can create open WG (or other hospital) AM block from mobile and portal
+- Edit capacity and cancel (after clear) from mobile assign sheet and portal
 - Duplicate overlapping facility/date/time rejected clearly
-- Surgeon JWT cannot create
-- Contract test: create + duplicate
+- Contract test: create + duplicate + update + delete
 
 ---
 
-## Explicit non-goals for this plan
+## Explicit non-goals
 
 - Epic / Advent API integration
 - Aprima as OR block source
-- Portal-first create as the only path
 - Android create (mirror iOS after iOS ships)

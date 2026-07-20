@@ -1,12 +1,14 @@
 # CAL Native Parity Ledger
 
-Last updated: 2026-07-10
+Last updated: 2026-07-20
 
 iOS test build target: `1.0.1 (15)` from the SwiftUI `ios/` lane.
 
 Production decision: SwiftUI is the production iOS app. Expo/React Native is the temporary Android bridge. Jetpack Compose is the target Android app (real API auth/home/schedule/time-off/patients/coverage wired; UI polish still behind iOS). Surgeon web PWA is retired (`/surgeon/*` HTML → use-app page).
 
 Portal parity (2026-07-10): admins can assign/clear call coverage and Block OR surgeons on portal via the same services as native. Block OR assign with schedule warnings requires an override note.
+
+Portal + mobile Block OR capacity (2026-07-20): scheduler role can create / edit / cancel Block OR capacity on portal (`/admin/block-or`) and iOS (week strip + day drill-in; labeled Add block + create sheet; capacity edit + cancel on block sheet). Native API: `GET /meta`, `POST /blocks`, `PATCH /blocks/{id}`, `DELETE /blocks/{id}`. Android scheduler create/edit/cancel still not integrated.
 
 Adaptive layout (2026-07-10): `ClinicalTypography` + `CalNavigation` (NavigationStack on iOS 16+) + readable columns for iPad. Mac Catalyst and Designed for iPad are enabled in the Xcode target (`SUPPORTS_MACCATALYST`, min window 980×700). Mac is a local/dev destination only until signing and TestFlight Mac distribution are explicitly approved.
 
@@ -29,8 +31,8 @@ Current tracked lane imports:
 | Personal Items | `GET /api/native/home` (display today + next) | Production (display-only) | Temporary Android bridge | Debug lane (display) | iOS + Expo Android | iOS shows today + next personal items from home payload; no day-items CRUD in SwiftUI today. Legacy RN bridge has CRUD via `/surgeon/api/day-items*` but that is not the iOS spec. |
 | Patient Schedule | `GET /api/native/patient-schedule` | Production | Temporary Android bridge | Debug lane | iOS + Expo Android | Must show only actual scheduled patients with correct Eastern times |
 | Push Alerts | `/api/native/push-token`, `/api/native/alerts/read`, `GET /api/native/home` | Simulator/test lane implemented; needs TestFlight verification before production | Temporary Android bridge | Not integrated | iOS test only + Expo Android | iOS registers APNs tokens, decodes alert inbox/banner, and marks alerts read; production push requires APNs env and TestFlight review |
-| Scheduler Block OR | `POST /api/native/scheduler/*`, portal `/admin/block-or/{id}/assign|clear` | Simulator lane + portal admin assign | Not integrated | Not integrated | iOS simulator/test + portal admin | Shared `or_block_service`. Override note required when warnings exist. Scheduler portal role remains capacity view-only. Epic release/give-back stays out of CAL. |
-| Scheduler Digest | `schedule_change_events`, `server/scripts/send_scheduler_digest.py` | Not a native screen; Changes tab reads recent events | Not integrated | Not integrated | Backend test lane only | Daily 6 AM ET job target for scheduler/admin recipients. Email payload is non-PHI and summarizes last-24-hour availability changes plus open Block OR rows. |
+| Scheduler Block OR | `GET/POST/PATCH/DELETE /api/native/scheduler/blocks*`, `GET /meta`, assign/update/remove/clear, portal `/admin/block-or*` | iOS: week strip (7 days) + day detail; create + edit capacity + cancel + assign; create/edit hospital picker shows loaded list, empty copy, or error+retry (never infinite spin) | Not integrated | Not integrated | iOS + portal (admin & scheduler) | Shared `or_block_service`. iOS home is week cliff-notes (open/assigned + hospital badges); tap day for blocks; Add block CTA on empty + day/week. Hospital picker only on create/edit sheets. Cancel requires clearing surgeons first. Epic release/give-back stays out of CAL. Android still deferred. Local mac-dev must run API image that includes `GET /meta` (stale cal_api → 404 → spinner until UI fix). |
+| Scheduler Digest | `schedule_change_events`, `server/scripts/send_scheduler_digest.py` | Not a native screen; Recent sheet via toolbar clock (not primary tab) | Not integrated | Not integrated | Backend test lane only | Daily 6 AM ET job target for scheduler/admin recipients. Email payload is non-PHI and summarizes last-24-hour availability changes plus open Block OR rows. |
 
 ## Ledger Rules
 

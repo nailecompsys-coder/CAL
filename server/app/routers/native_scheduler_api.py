@@ -10,20 +10,27 @@ from datetime import datetime, time, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import func as sql_func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from ..auth import create_native_scheduler_token, get_current_native_scheduler
 from ..database import get_db
 from ..email_service import send_email
-from ..models import AdminOtpChallenge, AdminUser, ORBlockInstance
+from ..models import AdminOtpChallenge, AdminUser, Location, ORBlockAssignment, ORBlockInstance
 from ..or_block_service import (
+    BlockORCreateInput,
+    SESSION_DEFAULTS,
     assign_block,
     candidate_surgeon_rows,
     clear_block_assignment,
+    create_or_blocks,
+    delete_or_block_instance,
+    parse_hhmm,
     remove_block_assignment,
     scheduler_native_home,
     serialize_block_instance,
+    session_default_times,
     update_block_assignment,
+    update_or_block_instance,
 )
 from ..routers.api_common import parse_iso_date_range
 from ..sms_service import generate_sms_otp
@@ -47,6 +54,23 @@ class SchedulerAssignBody(BaseModel):
     start_time: str | None = None
     case_count: int = 0
     note: str = ""
+
+
+class SchedulerCreateBlockBody(BaseModel):
+    date: str
+    location_id: int
+    session: str = "am"
+    start_time: str | None = None
+    end_time: str | None = None
+    notes: str = ""
+
+
+class SchedulerUpdateBlockBody(BaseModel):
+    location_id: int | None = None
+    session: str | None = None
+    start_time: str | None = None
+    end_time: str | None = None
+    notes: str | None = None
 
 
 def _hash_otp(code: str) -> str:
@@ -178,6 +202,160 @@ def scheduler_home(
 ):
     start_date, end_date = parse_iso_date_range(start, end)
     return scheduler_native_home(db, start_date, end_date)
+
+
+@router.get("/meta")
+def scheduler_meta(
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_native_scheduler),
+):
+    hospitals = (
+        db.query(Location)
+        .filter(Location.is_active == True, Location.location_type == "hospital")  # noqa: E712
+        .order_by(Location.name)
+        .all()
+    )
+    sessions = []
+    for key in ("am", "pm", "both", "custom"):
+        start_t, end_t = SESSION_DEFAULTS[key]
+        sessions.append({
+            "id": key,
+            "label": key.upper() if key != "both" else "Both",
+            "start": start_t.strftime("%H:%M"),
+            "end": end_t.strftime("%H:%M"),
+        })
+    return {
+        "hospitals": [
+            {
+                "id": row.id,
+                "name": row.name,
+                "abbreviation": row.abbreviation or "",
+            }
+            for row in hospitals
+        ],
+        "sessions": sessions,
+    }
+
+
+@router.post("/blocks")
+def scheduler_create_block(
+    body: SchedulerCreateBlockBody,
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_native_scheduler),
+):
+    try:
+        block_day = datetime.strptime(body.date.strip(), "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(422, "date must be YYYY-MM-DD")
+    session = (body.session or "am").strip().lower()
+    default_start, default_end = session_default_times(session)
+    try:
+        start_t = parse_hhmm(body.start_time or "", default_start)
+        end_t = parse_hhmm(body.end_time or "", default_end)
+        result = create_or_blocks(
+            db,
+            BlockORCreateInput(
+                name="Open Block",
+                start_date=block_day,
+                end_date=block_day,
+                weekdays=[block_day.weekday()],
+                location_ids=[body.location_id],
+                session=session,
+                start_time=start_t,
+                end_time=end_t,
+                recurrence="once",
+                notes=body.notes or "",
+            ),
+            admin_id=admin.id,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        status = 409 if "Duplicate" in message else 422
+        raise HTTPException(status, message)
+    instances = (
+        db.query(ORBlockInstance)
+        .options(
+            joinedload(ORBlockInstance.location),
+            joinedload(ORBlockInstance.assignments).joinedload(ORBlockAssignment.surgeon),
+            joinedload(ORBlockInstance.assigned_surgeon),
+        )
+        .filter(ORBlockInstance.id.in_(result["instance_ids"]))
+        .all()
+    )
+    by_id = {row.id: row for row in instances}
+    blocks = [serialize_block_instance(by_id[block_id]) for block_id in result["instance_ids"] if block_id in by_id]
+    return {
+        "ok": True,
+        "created": result["created"],
+        "blockIds": result["instance_ids"],
+        "blocks": blocks,
+    }
+
+
+@router.patch("/blocks/{block_id:int}")
+def scheduler_update_block(
+    block_id: int,
+    body: SchedulerUpdateBlockBody,
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_native_scheduler),
+):
+    start_t = None
+    end_t = None
+    if body.start_time is not None:
+        try:
+            start_t = parse_hhmm(body.start_time)
+        except ValueError:
+            raise HTTPException(422, "start_time must be HH:MM")
+    if body.end_time is not None:
+        try:
+            end_t = parse_hhmm(body.end_time)
+        except ValueError:
+            raise HTTPException(422, "end_time must be HH:MM")
+    try:
+        update_or_block_instance(
+            db,
+            block_id,
+            location_id=body.location_id,
+            session=body.session,
+            start_time=start_t,
+            end_time=end_t,
+            notes=body.notes,
+            admin_id=admin.id,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(404, message)
+        if "Duplicate" in message:
+            raise HTTPException(409, message)
+        raise HTTPException(422, message)
+    block = (
+        db.query(ORBlockInstance)
+        .options(
+            joinedload(ORBlockInstance.location),
+            joinedload(ORBlockInstance.assignments).joinedload(ORBlockAssignment.surgeon),
+            joinedload(ORBlockInstance.assigned_surgeon),
+        )
+        .filter(ORBlockInstance.id == block_id)
+        .first()
+    )
+    return {"ok": True, "block": serialize_block_instance(block), "warnings": []}
+
+
+@router.delete("/blocks/{block_id:int}")
+def scheduler_delete_block(
+    block_id: int,
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_native_scheduler),
+):
+    try:
+        delete_or_block_instance(db, block_id, admin_id=admin.id)
+    except ValueError as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            raise HTTPException(404, message)
+        raise HTTPException(409, message)
+    return {"ok": True, "deleted": True, "blockId": block_id}
 
 
 @router.get("/blocks/{block_id:int}")

@@ -45,18 +45,7 @@
 
 <div class="p-6 grid gap-5 xl:grid-cols-[360px_1fr]">
   <div class="space-y-4 h-fit">
-    {% if admin.role == 'scheduler' %}
-    <div class="clinical-panel p-5 space-y-2">
-      <h2 class="font-extrabold text-slate-800">Read-only Block OR</h2>
-      <p class="text-sm text-slate-500">
-        Schedulers can view open blocks here. Create and edit capacity on an admin account;
-        assign surgeons from the portal Block OR panel (admin) or the mobile Blocks tab.
-      </p>
-      <a href="/admin/scheduler-availability" class="inline-flex text-sm font-semibold text-blue-600 hover:text-blue-800">
-        Open Availability view →
-      </a>
-    </div>
-    {% elif selected_block %}
+    {% if selected_block %}
     <div class="space-y-4">
       <form method="post" action="/admin/block-or/{{ selected_block.id }}/assign" class="clinical-panel p-5 space-y-4 border-2 border-teal-200">
         <input type="hidden" name="week_offset" value="{{ week_offset }}" />
@@ -278,7 +267,7 @@
   <section class="clinical-panel overflow-hidden">
     <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
       <h2 class="font-extrabold text-slate-800">OR week</h2>
-      <span class="text-xs text-slate-400">{% if admin.role == 'scheduler' %}View only{% else %}Click a block to assign or edit{% endif %}</span>
+      <span class="text-xs text-slate-400">Click a block to assign or edit</span>
     </div>
     <div class="overflow-x-auto">
       <table class="w-full min-w-[980px] border-collapse text-sm">
@@ -304,19 +293,6 @@
             <td class="px-2 py-2 border border-slate-200 align-top bg-white">
               <div class="min-h-[92px] space-y-1.5">
                 {% for block in blocks %}
-                {% if admin.role == 'scheduler' %}
-                <div class="block rounded-lg border px-2 py-1.5 text-xs shadow-sm
-                   {% if block.status == 'open' %}bg-teal-50 border-teal-200 text-teal-900
-                   {% elif block.status == 'assigned' %}bg-blue-50 border-blue-200 text-blue-900
-                   {% else %}bg-amber-50 border-amber-200 text-amber-900{% endif %}">
-                  <div class="flex items-center justify-between gap-1">
-                    <strong>{{ block.session|upper }}</strong>
-                    <span>{{ block.status.replace('_', ' ') }}</span>
-                  </div>
-                  <div class="font-semibold">{{ block.start }}-{{ block.end }}</div>
-                  <div class="truncate">{% if block.assignmentLabel %}{{ block.assignmentLabel }}{% else %}Open{% endif %}</div>
-                </div>
-                {% else %}
                 <a href="/admin/block-or?week_offset={{ week_offset }}&block_id={{ block.id }}"
                    class="block rounded-lg border px-2 py-1.5 text-xs shadow-sm hover:ring-2 hover:ring-blue-300 transition
                    {% if selected_block and selected_block.id == block.id %}ring-2 ring-blue-500{% endif %}
@@ -330,7 +306,6 @@
                   <div class="font-semibold">{{ block.start }}-{{ block.end }}</div>
                   <div class="truncate">{% if block.assignmentLabel %}{{ block.assignmentLabel }}{% else %}Open{% endif %}</div>
                 </a>
-                {% endif %}
                 {% else %}
                 <div class="text-slate-300 text-xs text-center py-7">No block</div>
                 {% endfor %}

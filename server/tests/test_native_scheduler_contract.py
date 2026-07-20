@@ -14,13 +14,20 @@ from app.auth_tokens import ALGORITHM, SECRET_KEY
 from app.models import AdminUser, Base, Location, Surgeon, SurgicalCase
 from app.or_block_service import BlockORCreateInput, assign_block, create_or_blocks
 from app.routers.native_scheduler_api import (
-    scheduler_clear_block_assignment,
+    SchedulerCreateBlockBody,
     SchedulerOtpRequestBody,
     SchedulerOtpVerifyBody,
+    SchedulerUpdateBlockBody,
+    scheduler_clear_block_assignment,
+    scheduler_create_block,
+    scheduler_delete_block,
     scheduler_home,
+    scheduler_meta,
     scheduler_otp_request,
     scheduler_otp_verify,
+    scheduler_update_block,
 )
+from fastapi import HTTPException
 
 
 class NativeSchedulerContractTest(unittest.TestCase):
@@ -139,6 +146,77 @@ class NativeSchedulerContractTest(unittest.TestCase):
             self.assertEqual(payload["block"]["status"], "open")
             self.assertIsNone(payload["block"]["surgeonId"])
             self.assertEqual(payload["block"]["caseCount"], 0)
+        finally:
+            db.close()
+
+    def test_scheduler_create_update_delete_block_contract(self):
+        db = self.Session()
+        try:
+            admin = AdminUser(
+                username="scheduler",
+                email="scheduler@example.com",
+                password_hash="x",
+                role="scheduler",
+                is_active=True,
+            )
+            hospital = Location(
+                name="Advent Winter Garden",
+                abbreviation="WG",
+                location_type="hospital",
+                is_active=True,
+            )
+            db.add_all([admin, hospital])
+            db.commit()
+            block_day = date(2026, 8, 10)
+
+            meta = scheduler_meta(db=db, admin=admin)
+            self.assertEqual(len(meta["hospitals"]), 1)
+            self.assertEqual(meta["hospitals"][0]["abbreviation"], "WG")
+
+            created = scheduler_create_block(
+                SchedulerCreateBlockBody(
+                    date=block_day.isoformat(),
+                    location_id=hospital.id,
+                    session="am",
+                    notes="mobile create",
+                ),
+                db=db,
+                admin=admin,
+            )
+            self.assertTrue(created["ok"])
+            self.assertEqual(created["created"], 1)
+            block_id = created["blockIds"][0]
+            self.assertEqual(created["blocks"][0]["status"], "open")
+            self.assertEqual(created["blocks"][0]["locationAbbreviation"], "WG")
+
+            with self.assertRaises(HTTPException) as duplicate_exc:
+                scheduler_create_block(
+                    SchedulerCreateBlockBody(
+                        date=block_day.isoformat(),
+                        location_id=hospital.id,
+                        session="am",
+                    ),
+                    db=db,
+                    admin=admin,
+                )
+            self.assertEqual(duplicate_exc.exception.status_code, 409)
+
+            updated = scheduler_update_block(
+                block_id,
+                SchedulerUpdateBlockBody(session="pm", start_time="12:00", end_time="17:00", notes="moved pm"),
+                db=db,
+                admin=admin,
+            )
+            self.assertTrue(updated["ok"])
+            self.assertEqual(updated["block"]["session"], "pm")
+            self.assertEqual(updated["block"]["start"], "12:00")
+            self.assertEqual(updated["block"]["notes"], "moved pm")
+
+            deleted = scheduler_delete_block(block_id, db=db, admin=admin)
+            self.assertTrue(deleted["ok"])
+            self.assertTrue(deleted["deleted"])
+            home = scheduler_home(block_day.isoformat(), block_day.isoformat(), db=db, admin=admin)
+            self.assertEqual(home["blocks"], [])
         finally:
             db.close()
 

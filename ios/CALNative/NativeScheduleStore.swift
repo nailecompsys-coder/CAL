@@ -64,8 +64,8 @@ final class NativeScheduleStore: ObservableObject {
     if let email = Self.debugLoginEmail() {
       session.clearToken()
       sessionToken = nil
-      sessionRole = .surgeon
-      await verifyOtp(email: email, code: "654321", role: .surgeon)
+      sessionRole = Self.debugLoginRole()
+      await verifyOtp(email: email, code: "654321", role: Self.debugLoginRole())
       return
     }
     #endif
@@ -79,13 +79,31 @@ final class NativeScheduleStore: ObservableObject {
   }
 
   #if DEBUG
+  /// Reads DEBUG login email from env (`CAL_LOGIN_EMAIL`), simctl-prefixed env
+  /// (`SIMCTL_CHILD_CAL_LOGIN_EMAIL`), or `--cal-login=` argv.
   private static func debugLoginEmail() -> String? {
+    for key in ["CAL_LOGIN_EMAIL", "SIMCTL_CHILD_CAL_LOGIN_EMAIL"] {
+      if let env = ProcessInfo.processInfo.environment[key]?
+        .trimmingCharacters(in: .whitespacesAndNewlines),
+         !env.isEmpty {
+        return env
+      }
+    }
     guard let arg = CommandLine.arguments.first(where: { $0.hasPrefix("--cal-login=") }) else {
       return nil
     }
     let email = String(arg.dropFirst("--cal-login=".count))
       .trimmingCharacters(in: .whitespacesAndNewlines)
     return email.isEmpty ? nil : email
+  }
+
+  private static func debugLoginRole() -> NativeSessionRole {
+    let raw = ProcessInfo.processInfo.environment["CAL_LOGIN_ROLE"]
+      ?? ProcessInfo.processInfo.environment["SIMCTL_CHILD_CAL_LOGIN_ROLE"]
+      ?? CommandLine.arguments.first(where: { $0.hasPrefix("--cal-role=") }).map { String($0.dropFirst("--cal-role=".count)) }
+      ?? "surgeon"
+    let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    return value == "scheduler" ? .scheduler : .surgeon
   }
   #endif
 
@@ -435,6 +453,75 @@ final class NativeScheduleStore: ObservableObject {
     let response = try await client.clearSchedulerBlock(token: token, blockId: blockId)
     selectedSchedulerDetail = nil
     await loadScheduler(containing: NativeDayResponse.dateFormatter.date(from: response.block.date) ?? Date())
+  }
+
+  func loadSchedulerMeta() async throws -> NativeSchedulerMetaResponse {
+    guard let token = activeToken else {
+      throw NativeCALError.missingSession
+    }
+    do {
+      return try await client.fetchSchedulerMeta(token: token)
+    } catch let error as NativeCALError where error.isAuthenticationFailure {
+      expireSession()
+      throw error
+    }
+  }
+
+  func createSchedulerBlock(
+    date: Date,
+    locationId: Int,
+    session: String,
+    startTime: String?,
+    endTime: String?,
+    notes: String
+  ) async throws -> NativeSchedulerBlock? {
+    guard let token = activeToken else {
+      throw NativeCALError.missingSession
+    }
+    let dateString = NativeDayResponse.dateFormatter.string(from: date)
+    let response = try await client.createSchedulerBlock(
+      token: token,
+      date: dateString,
+      locationId: locationId,
+      session: session,
+      startTime: startTime,
+      endTime: endTime,
+      notes: notes
+    )
+    await loadScheduler(containing: date)
+    return response.blocks.first
+  }
+
+  func updateSchedulerBlock(
+    blockId: Int,
+    locationId: Int?,
+    session: String?,
+    startTime: String?,
+    endTime: String?,
+    notes: String?
+  ) async throws {
+    guard let token = activeToken else {
+      throw NativeCALError.missingSession
+    }
+    let response = try await client.updateSchedulerBlock(
+      token: token,
+      blockId: blockId,
+      locationId: locationId,
+      session: session,
+      startTime: startTime,
+      endTime: endTime,
+      notes: notes
+    )
+    await refreshSchedulerAfterMutation(blockId: blockId, dateString: response.block.date)
+  }
+
+  func deleteSchedulerBlock(blockId: Int, containing date: Date) async throws {
+    guard let token = activeToken else {
+      throw NativeCALError.missingSession
+    }
+    _ = try await client.deleteSchedulerBlock(token: token, blockId: blockId)
+    selectedSchedulerDetail = nil
+    await loadScheduler(containing: date)
   }
 
   private func refreshSchedulerAfterMutation(blockId: Int, dateString: String) async {

@@ -21,7 +21,6 @@ from .auth_tokens import (
 )
 from .database import get_db
 from .models import AdminUser, Surgeon, SurgeonDevice
-from .surgeon_visibility import surgeon_is_visible
 
 # SurgeonDevice.device_name for admin “preview mobile on desktop” sessions.
 SURGEON_ADMIN_PREVIEW_DEVICE_NAME = "Admin desktop preview"
@@ -99,7 +98,9 @@ def get_current_surgeon(
     db.commit()
 
     surgeon = db.get(Surgeon, device.surgeon_id)
-    if not surgeon_is_visible(surgeon):
+    # Own-session auth: active is enough. Roster hide (surgeon_is_visible) must NOT
+    # block a logged-in surgeon — dual-login / hidden test accounts get OTP then 401 on /home.
+    if not surgeon or not surgeon.is_active:
         _raise_html_or_json_auth_error(request, "/admin/login")
 
     return surgeon, device

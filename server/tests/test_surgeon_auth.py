@@ -65,6 +65,47 @@ class SurgeonAuthTest(unittest.TestCase):
         finally:
             db.close()
 
+    def test_hidden_active_surgeon_can_use_own_session(self):
+        """Roster-hidden accounts (e.g. Don dual login) must still pass get_current_surgeon."""
+        db = self.Session()
+        try:
+            surgeon = Surgeon(
+                first_name="Developer",
+                last_name="Admin",
+                email="don@clermontitstore.com",
+                staff_type="physician",
+                is_active=True,
+            )
+            db.add(surgeon)
+            db.flush()
+            device = SurgeonDevice(
+                surgeon_id=surgeon.id,
+                device_name="CAL iPhone app",
+                user_agent="CALNative/17",
+                token_hash="hidden-active",
+                is_active=True,
+            )
+            db.add(device)
+            db.commit()
+
+            token = create_surgeon_session_token(device.id)
+            request = Request({
+                "type": "http",
+                "method": "GET",
+                "path": "/api/native/home",
+                "headers": [
+                    (b"authorization", f"Bearer {token}".encode()),
+                    (b"accept", b"application/json"),
+                ],
+                "client": ("127.0.0.1", 12345),
+            })
+
+            current_surgeon, current_device = get_current_surgeon(request=request, db=db)
+            self.assertEqual(current_surgeon.id, surgeon.id)
+            self.assertEqual(current_device.id, device.id)
+        finally:
+            db.close()
+
 
 if __name__ == "__main__":
     unittest.main()

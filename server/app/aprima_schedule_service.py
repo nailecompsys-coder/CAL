@@ -1,6 +1,8 @@
 """Read-only Aprima PRM schedule helpers for portal + native views.
 
-CAL never writes to Aprima. Patient and meeting rows are live query results.
+CAL never writes to Aprima. Prefer ``aprima_cache_service`` for portal/native
+reads (hourly cache). This module remains the live SQL pull used by the worker
+and as a fallback when cache is stale/missing.
 """
 from __future__ import annotations
 

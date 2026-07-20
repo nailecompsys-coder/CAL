@@ -94,7 +94,21 @@ class SchedulingGateHelpersTest(unittest.TestCase):
         self.assertIn("Clinic at Minneola", msg)
 
     def test_duplicate_message_is_clear(self):
-        self.assertIn("Duplicates are not allowed", DUPLICATE_REJECT_MESSAGE)
+        self.assertIn("Shannon", DUPLICATE_REJECT_MESSAGE)
+        self.assertIn("overlap", DUPLICATE_REJECT_MESSAGE.lower())
+
+
+class DuplicateGateStatusTest(unittest.TestCase):
+    def test_reject_never_raises_http(self):
+        from app.scheduling_gate_service import reject_if_duplicate_day_off
+        import inspect
+        src = inspect.getsource(reject_if_duplicate_day_off)
+        self.assertIn("never hard-block", src)
+        self.assertNotIn("raise HTTPException", src)
+
+    def test_overlap_advisory_mentions_shannon(self):
+        from app.scheduling_gate_service import OVERLAP_ADVISORY_MESSAGE
+        self.assertIn("Shannon", OVERLAP_ADVISORY_MESSAGE)
 
 
 class CallCoverageOverlapTest(unittest.TestCase):

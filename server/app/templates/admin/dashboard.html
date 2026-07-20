@@ -178,11 +178,16 @@
           <p class="text-xs text-slate-500 truncate">
             {{ surgical_one_week.weekStart.strftime('%b %-d') }} – {{ surgical_one_week.weekEnd.strftime('%b %-d') }}
             · {{ surgical_one_week.total }} patients
+            {% if aprima_sync and aprima_sync.lastFinishedAt %}
+            · synced {{ aprima_sync.lastFinishedAt[:16].replace('T', ' ') }} UTC
+            {% endif %}
           </p>
         </div>
       </div>
       {% if surgical_one_week.warning %}
       <span class="text-[11px] font-semibold text-amber-700 bg-amber-50 border border-amber-100 px-2 py-1 rounded-full flex-shrink-0">Aprima offline</span>
+      {% elif surgical_one_week.source == 'cache' %}
+      <span class="text-[11px] font-semibold text-teal-700 bg-teal-50 border border-teal-100 px-2 py-1 rounded-full flex-shrink-0">Live sync</span>
       {% endif %}
     </div>
 
@@ -380,4 +385,38 @@
     </div><!-- /right rail -->
   </div><!-- /main content row -->
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const initialFingerprint = {{ (aprima_sync.fingerprint if aprima_sync else '')|tojson }};
+  let lastFingerprint = initialFingerprint || '';
+  const POLL_MS = 60000;
+
+  async function pollAprimaSync() {
+    try {
+      const res = await fetch('/admin/aprima-sync-status', {
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const next = data.fingerprint || '';
+      if (lastFingerprint && next && next !== lastFingerprint) {
+        window.location.reload();
+        return;
+      }
+      if (next) lastFingerprint = next;
+    } catch (_) {
+      /* ignore transient network errors */
+    }
+  }
+
+  setInterval(pollAprimaSync, POLL_MS);
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') pollAprimaSync();
+  });
+})();
+</script>
 {% endblock %}

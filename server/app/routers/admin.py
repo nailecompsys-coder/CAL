@@ -8,14 +8,14 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
-from ..aprima_schedule_service import fetch_main_office_patients_by_weekday
+from ..aprima_cache_service import main_office_patients_by_weekday, sync_status_payload
 from ..auth import (
     get_current_admin,
 )
 from ..database import get_db
 from ..jinja_env import templates
 from ..models import (
-    AdminNotification, AdminUser, CallRotation, DayOff, Meeting, SiteSettings, Surgeon,
+    AdminUser, CallRotation, DayOff, Meeting, SiteSettings, Surgeon,
 )
 from ..native_home_serializers import is_clinic_day_meeting
 from ..paths import UPLOADS_DIR
@@ -121,12 +121,9 @@ def dashboard(request: Request, db: Session = Depends(get_db), admin=Depends(get
         ).order_by(Meeting.date, Meeting.start_time).all()
         if not is_clinic_day_meeting(row)
     ][:5]
-    from ..admin_settings_page_service import recent_admin_notifications
+    from ..admin_settings_page_service import recent_admin_notifications, unread_admin_notification_count
     admin_notifications = recent_admin_notifications(db, admin.id, limit=8)
-    admin_unread_notifications = db.query(AdminNotification).filter(
-        AdminNotification.admin_user_id == admin.id,
-        AdminNotification.read_at.is_(None),
-    ).count()
+    admin_unread_notifications = unread_admin_notification_count(db, admin.id)
 
     surgeons = [row for row in db.query(Surgeon).filter(Surgeon.is_active == True).all() if surgeon_is_visible(row)]
     surgeons = _sort_surgeons_physicians_first(surgeons)
@@ -140,7 +137,8 @@ def dashboard(request: Request, db: Session = Depends(get_db), admin=Depends(get
     ).all()
     off_ids = {d.surgeon_id for d in off_today if surgeon_is_visible(d.surgeon)}
     available_count = active_count - len(off_ids)
-    surgical_one_week = fetch_main_office_patients_by_weekday(today)
+    surgical_one_week = main_office_patients_by_weekday(db, today)
+    aprima_sync = sync_status_payload(db)
 
     return templates.TemplateResponse("admin/dashboard.html", _base(
         request, admin, db=db,
@@ -154,7 +152,17 @@ def dashboard(request: Request, db: Session = Depends(get_db), admin=Depends(get
         available_count=available_count,
         off_ids=off_ids,
         surgical_one_week=surgical_one_week,
+        aprima_sync=aprima_sync,
     ))
+
+
+@router.get("/aprima-sync-status")
+def aprima_sync_status(
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    """JSON fingerprint for portal soft-refresh (no PHI)."""
+    return sync_status_payload(db)
 
 
 # ── Calendar ─────────────────────────────────────────────────────────────────

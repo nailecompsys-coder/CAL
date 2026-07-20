@@ -38,8 +38,43 @@ def recent_otp_audit_logs(db: Session, limit: int = 50) -> list[SurgeonOtpAuditL
     )
 
 
+def reconcile_stale_dayoff_notifications(db: Session, admin_user_id: int | None = None) -> int:
+    """Mark day_off_request notifications read when the DayOff is no longer pending."""
+    from datetime import datetime, timezone
+    import json
+
+    from .models import DayOff
+
+    q = db.query(AdminNotification).filter(
+        AdminNotification.kind == "day_off_request",
+        AdminNotification.read_at.is_(None),
+    )
+    if admin_user_id is not None:
+        q = q.filter(AdminNotification.admin_user_id == admin_user_id)
+    rows = q.all()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    cleared = 0
+    for row in rows:
+        dayoff_id = None
+        try:
+            data = json.loads(row.payload or "{}")
+            dayoff_id = data.get("dayOffId")
+        except (TypeError, ValueError):
+            dayoff_id = None
+        if dayoff_id is None:
+            continue
+        dayoff = db.get(DayOff, int(dayoff_id))
+        if dayoff is None or (dayoff.status or "") != "pending":
+            row.read_at = now
+            cleared += 1
+    if cleared:
+        db.commit()
+    return cleared
+
+
 def recent_admin_notifications(db: Session, admin_user_id: int, limit: int = 20) -> list[AdminNotification]:
     """FIFO: oldest entered first (top-left → right → down). Unread before read."""
+    reconcile_stale_dayoff_notifications(db, admin_user_id)
     rows = (
         db.query(AdminNotification)
         .filter(AdminNotification.admin_user_id == admin_user_id)
@@ -64,6 +99,7 @@ def recent_admin_notifications(db: Session, admin_user_id: int, limit: int = 20)
 
 
 def unread_admin_notification_count(db: Session, admin_user_id: int) -> int:
+    reconcile_stale_dayoff_notifications(db, admin_user_id)
     return db.query(AdminNotification).filter(
         AdminNotification.admin_user_id == admin_user_id,
         AdminNotification.read_at.is_(None),

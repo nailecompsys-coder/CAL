@@ -4,6 +4,7 @@ struct PatientScheduleView: View {
   @ObservedObject var store: NativeScheduleStore
   @Binding var selectedSection: CALNativeSection
   @Binding var selectedDate: Date
+  @Environment(\.scenePhase) private var scenePhase
 
   private var myAppointments: [PatientAppointment] {
     let me = store.currentSurgeon
@@ -102,6 +103,20 @@ struct PatientScheduleView: View {
       .onChange(of: selectedDate) { nextDate in
         Task {
           await store.loadPatientSchedule(containing: nextDate)
+        }
+      }
+      .onChange(of: scenePhase) { phase in
+        guard phase == .active else { return }
+        Task {
+          await store.loadPatientSchedule(containing: selectedDate)
+        }
+      }
+      // Foreground refresh while Patients is open (hourly Aprima sync lands in CAL cache).
+      .task(id: selectedDate) {
+        while !Task.isCancelled {
+          try? await Task.sleep(nanoseconds: 5 * 60 * 1_000_000_000)
+          guard !Task.isCancelled else { break }
+          await store.loadPatientSchedule(containing: selectedDate)
         }
       }
     }

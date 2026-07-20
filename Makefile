@@ -1,7 +1,7 @@
 # Mid Florida Surgical Cal — local deploy helpers (run from repo root)
 PYTHON ?= python3
 
-.PHONY: doctor seed-guardrail-demo deploy-cal deploy-cal-standalone verify-cal bump-only compile test test-local mac-dev-up mac-dev-down mac-dev-status mac-dev-logs mac-dev-smoke mac-dev-restore-dump scheduler-digest-dry-run
+.PHONY: doctor seed-guardrail-demo deploy-cal deploy-cal-standalone verify-cal bump-only compile test test-local mac-dev-up mac-dev-down mac-dev-status mac-dev-logs mac-dev-smoke mac-dev-restore-dump scheduler-digest-dry-run aprima-sync-dry-run
 
 doctor:
 	@./server/scripts/doctor.sh
@@ -56,3 +56,9 @@ mac-dev-restore-dump:
 scheduler-digest-dry-run:
 	@docker cp server/scripts/send_scheduler_digest.py cal_api:/tmp/send_scheduler_digest.py
 	@docker exec -w /app cal_api python -c "import importlib.util,sys; sys.path.insert(0,'/app'); spec=importlib.util.spec_from_file_location('d','/tmp/send_scheduler_digest.py'); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); raise SystemExit(m.main(['--dry-run']))"
+
+# Print Aprima sync status from local cal_api (requires rebuilt image with aprima_cache_service)
+aprima-sync-dry-run:
+	@docker cp server/scripts/sync_aprima.py cal_api:/tmp/sync_aprima.py
+	@docker cp server/app/aprima_cache_service.py cal_api:/app/app/aprima_cache_service.py
+	@docker exec -w /app cal_api python -c "import importlib.util,sys; sys.path.insert(0,'/app'); spec=importlib.util.spec_from_file_location('s','/tmp/sync_aprima.py'); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); raise SystemExit(m.main(['--dry-run']))"

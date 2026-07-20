@@ -14,7 +14,7 @@ from ..admin_meeting_service import (
     parse_meeting_fields,
     update_meeting as update_meeting_service,
 )
-from ..aprima_schedule_service import fetch_aprima_meetings
+from ..aprima_cache_service import meetings_for_admin, sync_status_payload
 from ..auth import get_current_admin
 from ..database import get_db
 from ..jinja_env import templates
@@ -49,7 +49,7 @@ def meetings_page(
         if surgeon_is_visible(row)
     ]
     surgeons = _sort_surgeons_physicians_first(surgeons)
-    aprima = fetch_aprima_meetings(month["month_start"], month["month_end"])
+    aprima = meetings_for_admin(db, month["month_start"], month["month_end"])
     aprima_meetings = [
         row
         for row in (aprima.get("meetings") or [])
@@ -71,6 +71,7 @@ def meetings_page(
         surgeons=surgeons,
         aprima_meetings=aprima_meetings,
         aprima_warning=aprima.get("warning"),
+        aprima_sync=sync_status_payload(db),
         month_offset=month_offset,
         month_label=month["month_label"],
         schedule_days=schedule_days,

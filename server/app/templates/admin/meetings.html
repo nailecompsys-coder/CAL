@@ -387,5 +387,33 @@ function editFromDetail(event) {
   });
   document.getElementById('edit-modal').classList.remove('hidden');
 }
+
+(function () {
+  const initialFingerprint = {{ (aprima_sync.fingerprint if aprima_sync else '')|tojson }};
+  let lastFingerprint = initialFingerprint || '';
+  const POLL_MS = 60000;
+
+  async function pollAprimaSync() {
+    try {
+      const res = await fetch('/admin/aprima-sync-status', {
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const next = data.fingerprint || '';
+      if (lastFingerprint && next && next !== lastFingerprint) {
+        window.location.reload();
+        return;
+      }
+      if (next) lastFingerprint = next;
+    } catch (_) {}
+  }
+
+  setInterval(pollAprimaSync, POLL_MS);
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') pollAprimaSync();
+  });
+})();
 </script>
 {% endblock %}

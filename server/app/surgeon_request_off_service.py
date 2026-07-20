@@ -131,10 +131,8 @@ def staff_sections(months: list[tuple[int, int]], all_requests: list[DayOff]) ->
 
 def submit_request_off(db: Session, surgeon: Surgeon, start_date: str, end_date: str, reason: str, notes: str) -> dict:
     from .scheduling_gate_service import (
-        DUPLICATE_REJECT_MESSAGE,
+        day_off_overlap_advisory,
         practice_today,
-        purge_newer_duplicates_for_request,
-        reject_if_duplicate_day_off,
         surgeon_friendly_conflict_message,
     )
 
@@ -146,8 +144,7 @@ def submit_request_off(db: Session, surgeon: Surgeon, start_date: str, end_date:
     if end < start:
         return {"ok": False, "warn": "End date must be the same day or after the start date."}
 
-    if reject_if_duplicate_day_off(db, surgeon.id, start, end):
-        return {"ok": False, "warn": DUPLICATE_REJECT_MESSAGE}
+    advisory = day_off_overlap_advisory(db, surgeon.id, start, end)
 
     dayoff = DayOff(
         surgeon_id=surgeon.id,
@@ -160,9 +157,10 @@ def submit_request_off(db: Session, surgeon: Surgeon, start_date: str, end_date:
     db.add(dayoff)
     db.commit()
     db.refresh(dayoff)
-    purge_newer_duplicates_for_request(db, surgeon.id, start, end, keep_id=dayoff.id)
     findings = store_dayoff_findings(db, dayoff)
-    conflict_msgs = []
+    conflict_msgs: list[str] = []
+    if advisory:
+        conflict_msgs.append(advisory)
     if findings:
         conflict_msgs.append(surgeon_friendly_conflict_message(findings))
     notify_admins(

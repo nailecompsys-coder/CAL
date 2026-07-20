@@ -642,3 +642,30 @@ class AdminNotification(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     admin_user = relationship("AdminUser")
+
+
+class AprimaCachedAppointment(Base):
+    """Snapshot of an Aprima appointment row (patient or meeting). Read-only from Aprima."""
+    __tablename__ = "aprima_cached_appointments"
+    appointment_id = Column(String(36), primary_key=True)
+    kind = Column(String(16), nullable=False, index=True)  # patient | meeting
+    date = Column(Date, nullable=False, index=True)
+    surgeon_initials = Column(String(16), index=True)
+    content_hash = Column(String(64), nullable=False)
+    payload_json = Column(Text, nullable=False)
+    synced_at = Column(DateTime, nullable=False, server_default=func.now())
+
+
+class AprimaSyncState(Base):
+    """Singleton-ish sync fingerprint for portal soft-refresh + ops."""
+    __tablename__ = "aprima_sync_state"
+    id = Column(Integer, primary_key=True)
+    last_started_at = Column(DateTime)
+    last_finished_at = Column(DateTime)
+    last_status = Column(String(32), default="never")  # ok | error | never
+    last_error = Column(Text)
+    patient_count = Column(Integer, default=0)
+    meeting_count = Column(Integer, default=0)
+    window_start = Column(Date)
+    window_end = Column(Date)
+    content_fingerprint = Column(String(64), default="")

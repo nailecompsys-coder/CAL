@@ -7,7 +7,6 @@ import logging
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from .conflicts import check_conflicts_structured
@@ -20,9 +19,13 @@ log = logging.getLogger(__name__)
 PRACTICE_TZ = ZoneInfo("America/New_York")
 
 DUPLICATE_REJECT_MESSAGE = (
-    "You already have a time-off request for these dates. "
-    "Duplicates are not allowed — open your existing request to change or cancel it."
+    "These dates overlap an existing time-off request. "
+    "You can cancel or edit the older one, or leave both — Shannon will sort it out."
 )
+
+# Kept as alias for older call sites / tests.
+OVERLAP_ADVISORY_MESSAGE = DUPLICATE_REJECT_MESSAGE
+
 
 CONFER_WITH_SHANNON = (
     "Shannon will review. You can change or cancel this request, "
@@ -108,6 +111,36 @@ def overlapping_day_off(
     return query.order_by(DayOff.id.asc()).first()
 
 
+def day_off_overlap_advisory(
+    db: Session,
+    surgeon_id: int,
+    start_date: date,
+    end_date: date,
+    *,
+    exclude_id: int | None = None,
+) -> str | None:
+    """Advise on overlap with pending/approved time off — never blocks submit."""
+    existing = overlapping_day_off(
+        db,
+        surgeon_id,
+        start_date,
+        end_date,
+        exclude_id=exclude_id,
+        statuses=("pending", "approved"),
+    )
+    if not existing:
+        return None
+    status = (existing.status or "pending").strip().lower()
+    start_label = existing.start_date.strftime("%b %-d")
+    end_label = existing.end_date.strftime("%b %-d")
+    range_label = start_label if existing.start_date == existing.end_date else f"{start_label}–{end_label}"
+    status_label = "approved" if status == "approved" else "pending"
+    return (
+        f"These dates overlap your {status_label} time off ({range_label}). "
+        f"You can cancel or edit that request, or leave both — Shannon will sort it out."
+    )
+
+
 def reject_if_duplicate_day_off(
     db: Session,
     surgeon_id: int,
@@ -116,14 +149,21 @@ def reject_if_duplicate_day_off(
     *,
     exclude_id: int | None = None,
     as_http: bool = False,
+    statuses: tuple[str, ...] = ("pending", "approved"),
 ) -> DayOff | None:
-    """Hard-reject overlapping pending/approved requests. Returns existing row if duplicate."""
-    existing = overlapping_day_off(db, surgeon_id, start_date, end_date, exclude_id=exclude_id)
-    if not existing:
-        return None
-    if as_http:
-        raise HTTPException(409, DUPLICATE_REJECT_MESSAGE)
-    return existing
+    """Compatibility wrapper: finds overlap but never rejects.
+
+    Surgeons may change plans; overlap is advisory only. ``as_http`` is ignored.
+    """
+    _ = as_http  # never hard-block
+    return overlapping_day_off(
+        db,
+        surgeon_id,
+        start_date,
+        end_date,
+        exclude_id=exclude_id,
+        statuses=statuses,
+    )
 
 
 def delete_duplicate_day_off_and_notify(db: Session, duplicate: DayOff, *, keep: DayOff) -> None:
@@ -176,12 +216,16 @@ def purge_newer_duplicates_for_request(
     *,
     keep_id: int,
 ) -> int:
-    """Keep the earliest overlapping request; delete later duplicates and notify."""
+    """Keep the earliest overlapping *pending* request; delete later pending duplicates.
+
+    Approved rows are never considered — otherwise a new extension request would be
+    deleted because an older approved id sorts first.
+    """
     rows = (
         db.query(DayOff)
         .filter(
             DayOff.surgeon_id == surgeon_id,
-            DayOff.status.in_(["pending", "approved"]),
+            DayOff.status == "pending",
             DayOff.start_date <= end_date,
             DayOff.end_date >= start_date,
         )
@@ -191,9 +235,8 @@ def purge_newer_duplicates_for_request(
     if len(rows) <= 1:
         return 0
     keeper = rows[0]
-    # Prefer keep_id if it is among the set and is the earliest; otherwise keep earliest.
     if keep_id and any(r.id == keep_id for r in rows):
-        # If keep_id isn't earliest, still keep earliest (stable anti-dup policy).
+        # Prefer earliest pending (stable anti-dup). keep_id is usually that row.
         pass
     removed = 0
     for row in rows[1:]:

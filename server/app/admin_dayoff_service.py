@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 
 from .models import DayOff, Surgeon
 from .or_block_service import log_schedule_change
-from .push import send_push_to_surgeon
+from .push import clear_dayoff_request_notifications, send_push_to_surgeon
+from .scheduling_gate_service import day_off_overlap_advisory
 from .scheduling_guardrails_service import (
     decode_findings,
     finding_dicts,
@@ -173,10 +174,10 @@ def add_approved_dayoff(
     notes: str,
     approved_by: int,
 ) -> list[str]:
-    from .scheduling_gate_service import reject_if_duplicate_day_off, DUPLICATE_REJECT_MESSAGE
-
-    if reject_if_duplicate_day_off(db, surgeon_id, start, end):
-        return [DUPLICATE_REJECT_MESSAGE]
+    advisories: list[str] = []
+    overlap_note = day_off_overlap_advisory(db, surgeon_id, start, end)
+    if overlap_note:
+        advisories.append(overlap_note)
 
     dayoff = DayOff(
         surgeon_id=surgeon_id,
@@ -208,7 +209,7 @@ def add_approved_dayoff(
         f"Admin added approved time off: {start.strftime('%b %d')}–{end.strftime('%b %d')}.",
         db,
     )
-    return [f["message"] for f in finding_dicts(findings)] + conflict_messages_for_dayoff(db, dayoff)
+    return advisories + [f["message"] for f in finding_dicts(findings)] + conflict_messages_for_dayoff(db, dayoff)
 
 
 def approve_dayoff(db: Session, dayoff_id: int, approved_by: int) -> list[str] | None:
@@ -228,6 +229,9 @@ def approve_dayoff(db: Session, dayoff_id: int, approved_by: int) -> list[str] |
         body=f"{surgeon.initials if surgeon else ''}: {dayoff.start_date.strftime('%b %-d')} to {dayoff.end_date.strftime('%b %-d')}",
     )
     store_dayoff_findings(db, dayoff)
+    # store_dayoff_findings commits; ensure status is persisted even if findings were a no-op path.
+    db.commit()
+    clear_dayoff_request_notifications(db, dayoff_id)
     send_push_to_surgeon(
         dayoff.surgeon_id,
         "Days Off Approved",
@@ -263,6 +267,7 @@ def deny_dayoff(db: Session, dayoff_id: int, admin_note: str, approved_by: int) 
             body=f"{surgeon.initials if surgeon else ''}: {dayoff.start_date.strftime('%b %-d')} to {dayoff.end_date.strftime('%b %-d')}",
         )
         db.commit()
+        clear_dayoff_request_notifications(db, dayoff_id)
         msg = admin_note if admin_note else f"Your request for {dayoff.start_date.strftime('%b %d')}–{dayoff.end_date.strftime('%b %d')} was not approved."
         send_push_to_surgeon(dayoff.surgeon_id, "Days Off Request", msg, db)
 

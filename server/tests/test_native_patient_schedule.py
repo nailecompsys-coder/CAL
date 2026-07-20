@@ -50,15 +50,16 @@ class NativePatientScheduleRouteTest(unittest.TestCase):
                 ],
             }
 
-            with patch("app.routers.native_api.native_patient_schedule_service", return_value=expected) as service:
+            with patch("app.routers.native_api.patient_appointments_for_api", return_value=expected) as service:
                 response = native_patient_schedule(
                     "2026-06-12",
                     "2026-06-18",
+                    db=db,
                     auth=(surgeon, "token"),
                 )
 
             self.assertEqual(response, expected)
-            service.assert_called_once_with(date(2026, 6, 12), date(2026, 6, 18), surgeon=surgeon)
+            service.assert_called_once_with(db, date(2026, 6, 12), date(2026, 6, 18), surgeon=surgeon)
         finally:
             db.close()
 

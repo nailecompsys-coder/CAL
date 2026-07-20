@@ -14,8 +14,7 @@ from .native_support import serialize_day_off
 from .or_block_service import log_schedule_change
 from .push import notify_admins, send_native_push_to_surgeon
 from .scheduling_gate_service import (
-    purge_newer_duplicates_for_request,
-    reject_if_duplicate_day_off,
+    day_off_overlap_advisory,
     surgeon_friendly_conflict_message,
 )
 from .scheduling_guardrails_service import store_dayoff_findings
@@ -25,13 +24,15 @@ def create_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequ
     _validate_request_dates(payload.start_date, payload.end_date, "requested")
     segments, start_t, end_t = _request_segments(payload)
 
-    reject_if_duplicate_day_off(
+    warnings: list[str] = []
+    overlap_note = day_off_overlap_advisory(
         db,
         surgeon.id,
         payload.start_date,
         payload.end_date,
-        as_http=True,
     )
+    if overlap_note:
+        warnings.append(overlap_note)
 
     row = DayOff(
         surgeon_id=surgeon.id,
@@ -48,9 +49,6 @@ def create_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequ
     db.add(row)
     db.commit()
     db.refresh(row)
-    purge_newer_duplicates_for_request(
-        db, surgeon.id, payload.start_date, payload.end_date, keep_id=row.id
-    )
     log_schedule_change(
         db,
         event_type="day_off_requested",
@@ -61,7 +59,6 @@ def create_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequ
     )
     db.commit()
     findings = store_dayoff_findings(db, row)
-    warnings = []
     friendly = surgeon_friendly_conflict_message(findings)
     if friendly:
         warnings.append(friendly)
@@ -82,7 +79,7 @@ def create_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequ
         surgeon.id,
         "Days off request pending",
         (
-            f"{payload.start_date.strftime('%b %-d')} request sent — schedule conflict noted; Shannon will review."
+            f"{payload.start_date.strftime('%b %-d')} request sent — overlap/conflict noted; Shannon will review."
             if warnings
             else f"{payload.start_date.strftime('%b %-d')} request sent for approval"
         ),
@@ -100,14 +97,16 @@ def update_native_request_off(db: Session, surgeon: Surgeon, dayoff_id: int, pay
     _validate_request_dates(payload.start_date, payload.end_date, "changed")
     segments, start_t, end_t = _request_segments(payload)
 
-    reject_if_duplicate_day_off(
+    warnings: list[str] = []
+    overlap_note = day_off_overlap_advisory(
         db,
         surgeon.id,
         payload.start_date,
         payload.end_date,
         exclude_id=row.id,
-        as_http=True,
     )
+    if overlap_note:
+        warnings.append(overlap_note)
 
     row.start_date = payload.start_date
     row.end_date = payload.end_date
@@ -131,7 +130,6 @@ def update_native_request_off(db: Session, surgeon: Surgeon, dayoff_id: int, pay
     )
     db.commit()
     findings = store_dayoff_findings(db, row)
-    warnings = []
     friendly = surgeon_friendly_conflict_message(findings)
     if friendly:
         warnings.append(friendly)
@@ -146,7 +144,11 @@ def update_native_request_off(db: Session, surgeon: Surgeon, dayoff_id: int, pay
     send_native_push_to_surgeon(
         surgeon.id,
         "Days off request updated",
-        f"{payload.start_date.strftime('%b %-d')} request updated and pending approval",
+        (
+            f"{payload.start_date.strftime('%b %-d')} request updated — overlap noted; Shannon will review."
+            if warnings
+            else f"{payload.start_date.strftime('%b %-d')} request updated and pending approval"
+        ),
         db,
         {"type": "day_off", "requestId": row.id},
     )

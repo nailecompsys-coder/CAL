@@ -38,6 +38,7 @@ import com.midfloridasurgical.calcompose.ui.theme.ClinicalPalette
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 @Composable
 fun PatientScheduleScreen(
@@ -52,20 +53,24 @@ fun PatientScheduleScreen(
     var isLoading by remember { mutableStateOf(true) }
 
     LaunchedEffect(anchorDate, token, deviceToken) {
-        isLoading = true
-        warning = null
-        val start = anchorDate
-        val end = anchorDate.plusDays(6)
-        runCatching {
-            apiClient.fetchPatientSchedule(token, deviceToken, start, end)
-        }.onSuccess { response ->
-            appointments = filterMyAppointments(response.appointments, currentSurgeon)
-            warning = response.warning
-        }.onFailure {
-            appointments = emptyList()
-            warning = it.message ?: "Could not load patient schedule."
+        while (true) {
+            isLoading = appointments.isEmpty()
+            warning = null
+            val start = anchorDate
+            val end = anchorDate.plusDays(6)
+            runCatching {
+                apiClient.fetchPatientSchedule(token, deviceToken, start, end)
+            }.onSuccess { response ->
+                appointments = filterMyAppointments(response.appointments, currentSurgeon)
+                warning = response.warning
+            }.onFailure {
+                if (appointments.isEmpty()) {
+                    warning = it.message ?: "Could not load patient schedule."
+                }
+            }
+            isLoading = false
+            delay(5 * 60 * 1000L)
         }
-        isLoading = false
     }
 
     val byDay = appointments

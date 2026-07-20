@@ -2,6 +2,7 @@ import SwiftUI
 
 struct CALNativeRootView: View {
   @StateObject private var store = NativeScheduleStore()
+  @Environment(\.scenePhase) private var scenePhase
 
   var body: some View {
     Group {
@@ -18,6 +19,17 @@ struct CALNativeRootView: View {
     }
     .task {
       await store.bootstrapLookahead(containing: Date())
+    }
+    .onChange(of: scenePhase) { phase in
+      guard phase == .active, store.sessionToken != nil else { return }
+      Task {
+        if store.sessionRole == .scheduler {
+          await store.loadScheduler(containing: Date())
+        } else {
+          await store.loadLookahead(containing: Date(), daysAhead: 30)
+          await store.loadPatientSchedule(containing: Date())
+        }
+      }
     }
   }
 }

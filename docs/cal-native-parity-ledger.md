@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-20
 
-iOS test build target: `1.0.1 (15)` from the SwiftUI `ios/` lane.
+iOS test build target: `1.0.1 (16)` from the SwiftUI `ios/` lane.
 
 Production decision: SwiftUI is the production iOS app. Expo/React Native is the temporary Android bridge. Jetpack Compose is the target Android app (real API auth/home/schedule/time-off/patients/coverage wired; UI polish still behind iOS). Surgeon web PWA is retired (`/surgeon/*` HTML → use-app page).
 

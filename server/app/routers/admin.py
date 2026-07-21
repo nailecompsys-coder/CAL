@@ -95,6 +95,13 @@ def _next_physician_sort_order(db: Session) -> int:
 
 # ── Dashboard ────────────────────────────────────────────────────────────────
 
+def _is_no_call_reason(reason: str | None) -> bool:
+    """DayOff reason 'No Call' (surgeon requested not to take call)."""
+    if not reason:
+        return False
+    return " ".join(reason.strip().lower().split()) == "no call"
+
+
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard(request: Request, db: Session = Depends(get_db), admin=Depends(get_current_admin)):
     today = date.today()
@@ -129,13 +136,21 @@ def dashboard(request: Request, db: Session = Depends(get_db), admin=Depends(get
     surgeons = _sort_surgeons_physicians_first(surgeons)
     active_count = len(surgeons)
 
-    # Who is off today
+    # Who is off today (approved day offs; No Call is separate — still available for clinic)
     off_today = db.query(DayOff).filter(
         DayOff.start_date <= today,
         DayOff.end_date >= today,
         DayOff.status == "approved",
     ).all()
-    off_ids = {d.surgeon_id for d in off_today if surgeon_is_visible(d.surgeon)}
+    no_call_today = [
+        d for d in off_today
+        if _is_no_call_reason(d.reason) and surgeon_is_visible(d.surgeon)
+    ]
+    no_call_ids = {d.surgeon_id for d in no_call_today}
+    off_ids = {
+        d.surgeon_id for d in off_today
+        if surgeon_is_visible(d.surgeon) and d.surgeon_id not in no_call_ids
+    }
     available_count = active_count - len(off_ids)
     surgical_one_week = main_office_patients_by_weekday(db, today)
     aprima_sync = sync_status_payload(db)
@@ -143,6 +158,8 @@ def dashboard(request: Request, db: Session = Depends(get_db), admin=Depends(get
     return templates.TemplateResponse("admin/dashboard.html", _base(
         request, admin, db=db,
         on_call_today=on_call_today,
+        no_call_today=no_call_today,
+        no_call_ids=no_call_ids,
         pending_daysoff=pending_daysoff,
         upcoming_meetings=upcoming_meetings,
         admin_notifications=admin_notifications,

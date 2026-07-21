@@ -45,23 +45,24 @@
   <!-- ── Stat band (4 equal bento cells) ─────────────────────────── -->
   <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
 
-    <!-- On-Call Today -->
+    <!-- No Call Today (DayOff reason — not the same as Today's Coverage) -->
     <div class="bento-card clinical-stat p-4 flex flex-col gap-2.5" style="--i:0">
       <div class="flex items-center justify-between">
-        <p class="text-[11px] font-extrabold uppercase tracking-widest text-slate-400">On-Call Today</p>
+        <p class="text-[11px] font-extrabold uppercase tracking-widest text-slate-400">No Call Today</p>
         <span class="relative flex h-2.5 w-2.5">
-          <span class="breathe-dot absolute inline-flex h-full w-full rounded-full {% if on_call_today %}bg-emerald-400{% else %}bg-rose-400{% endif %}"></span>
-          <span class="relative inline-flex rounded-full h-2.5 w-2.5 {% if on_call_today %}bg-emerald-400{% else %}bg-rose-400{% endif %}"></span>
+          <span class="breathe-dot absolute inline-flex h-full w-full rounded-full {% if no_call_today %}bg-slate-400{% else %}bg-emerald-400{% endif %}"></span>
+          <span class="relative inline-flex rounded-full h-2.5 w-2.5 {% if no_call_today %}bg-slate-400{% else %}bg-emerald-400{% endif %}"></span>
         </span>
       </div>
-      <p class="text-4xl font-extrabold text-slate-800 leading-none tabular-nums">{{ on_call_today|length }}</p>
-      {% if on_call_today %}
-      <p class="text-xs text-emerald-600 font-medium flex items-center gap-1.5">
-        <i class="fa-solid fa-circle-check"></i> Coverage assigned
+      <p class="text-4xl font-extrabold text-slate-800 leading-none tabular-nums">{{ no_call_today|length }}</p>
+      {% if no_call_today %}
+      <p class="text-xs text-slate-600 font-medium leading-snug">
+        <i class="fa-solid fa-bell-slash text-[10px] mr-0.5"></i>
+        {% for d in no_call_today %}{% if not loop.first %}, {% endif %}{{ d.surgeon.full_name }}{% endfor %}
       </p>
       {% else %}
-      <p class="text-xs text-rose-500 font-medium flex items-center gap-1.5">
-        <i class="fa-solid fa-triangle-exclamation"></i> No one assigned
+      <p class="text-xs text-slate-400 flex items-center gap-1.5">
+        <i class="fa-solid fa-circle-check"></i> None requested
       </p>
       {% endif %}
     </div>
@@ -279,8 +280,9 @@
         {% endif %}
       </div>
 
-      {% if off_ids %}
-      <div class="px-5 pb-5">
+      {% if off_ids or no_call_ids %}
+      <div class="px-5 pb-5 space-y-2.5">
+        {% if off_ids %}
         <div class="bg-white/60 rounded-xl px-4 py-3 border border-slate-100">
           <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-widest mb-2">Out Today</p>
           <div class="flex flex-wrap gap-1.5">
@@ -293,6 +295,21 @@
             {% endfor %}
           </div>
         </div>
+        {% endif %}
+        {% if no_call_ids %}
+        <div class="bg-white/60 rounded-xl px-4 py-3 border border-slate-100">
+          <p class="text-[10px] text-slate-400 font-semibold uppercase tracking-widest mb-2">No Call Today</p>
+          <div class="flex flex-wrap gap-1.5">
+            {% for surgeon in surgeons %}
+            {% if surgeon.id in no_call_ids %}
+            <span class="text-xs bg-slate-100 text-slate-600 border border-slate-200 px-2.5 py-1 rounded-full font-medium shadow-sm">
+              <i class="fa-solid fa-bell-slash text-[10px] mr-1"></i>{{ surgeon.full_name }}
+            </span>
+            {% endif %}
+            {% endfor %}
+          </div>
+        </div>
+        {% endif %}
       </div>
       {% endif %}
     </div>

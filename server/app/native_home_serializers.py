@@ -155,6 +155,31 @@ def surgical_item_payload(row) -> dict:
     }
 
 
+def aprima_surgery_item_payload(row: dict) -> dict:
+    """Native My Schedule item for an Aprima Surgery appointment (read-only from EMR)."""
+    appt_id = str(row.get("id") or "")
+    site = (row.get("serviceSite") or "").strip()
+    room = (row.get("room") or "").strip()
+    reason = (row.get("reason") or "").strip()
+    appt_type = (row.get("appointmentType") or "Surgery").strip()
+    return {
+        "id": f"aprima-surg-{appt_id}",
+        "type": "surgery",
+        "title": (row.get("patientName") or "").strip() or "Surgery",
+        "subtitle": reason or appt_type,
+        "start": (row.get("start") or "").strip() or "08:00",
+        "end": (row.get("end") or "").strip() or None,
+        "location": site,
+        "room": room,
+        "status": (row.get("status") or "scheduled").strip().lower() or "scheduled",
+        "notes": reason,
+        "surgeonNotes": "",
+        "color": "#e0f2fe",
+        "source": "aprima",
+        "readOnly": True,
+    }
+
+
 def block_or_item_payload(row, assignments=None) -> dict:
     location = row.location.abbreviation if row.location and row.location.abbreviation else (row.location.name if row.location else "OR")
     assignments = assignments or []

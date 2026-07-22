@@ -18,6 +18,7 @@ from .models import (
     SurgicalCase,
 )
 from .native_home_serializers import (
+    aprima_surgery_item_payload,
     availability_payload,
     block_or_item_payload,
     call_item_payload,
@@ -131,6 +132,36 @@ def append_surgical_items(db: Session, surgeon: Surgeon, start_date: date, end_d
         if blocked_by_day_off(day_off_rows, row.date, fmt_time(row.start_time), fmt_time(row.end_time)):
             continue
         by_date[row.date.isoformat()]["items"].append(surgical_item_payload(row))
+
+
+def append_aprima_surgery_items(
+    db: Session,
+    surgeon: Surgeon,
+    start_date: date,
+    end_date: date,
+    by_date: dict,
+    day_off_rows: list[DayOff],
+) -> None:
+    """Aprima EMR Surgery appointments on My Schedule (alongside CAL SurgicalCase)."""
+    from .aprima_cache_service import patient_appointments_for_api
+    from .aprima_schedule_service import is_surgery_appointment
+
+    payload = patient_appointments_for_api(db, start_date, end_date, surgeon=surgeon)
+    for row in payload.get("appointments") or []:
+        if not is_surgery_appointment(row):
+            continue
+        day_key = (row.get("date") or "").strip()
+        if day_key not in by_date:
+            continue
+        start_t = (row.get("start") or "").strip() or None
+        end_t = (row.get("end") or "").strip() or None
+        try:
+            day = date.fromisoformat(day_key)
+        except ValueError:
+            continue
+        if blocked_by_day_off(day_off_rows, day, start_t, end_t):
+            continue
+        by_date[day_key]["items"].append(aprima_surgery_item_payload(row))
 
 
 def append_block_or_items(db: Session, surgeon: Surgeon, start_date: date, end_date: date, by_date: dict, day_off_rows: list[DayOff]) -> None:

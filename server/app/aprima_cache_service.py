@@ -18,7 +18,7 @@ from .aprima_schedule_service import (
     appointment_belongs_to_surgeon,
     fetch_aprima_meetings,
     fetch_patient_appointments,
-    is_main_office_site,
+    is_surgical_one_dashboard_appointment,
     main_office_site_tokens,
     weekday_range,
 )
@@ -220,14 +220,14 @@ def patient_appointments_for_api(
 
 
 def main_office_patients_by_weekday(db: Session, anchor: date | None = None) -> dict:
-    """Dashboard Surgical One week — cache-first."""
+    """Dashboard Surgical One week — cache-first (office clinic + Aprima Surgery)."""
     week_start, week_end = weekday_range(anchor)
     tokens = main_office_site_tokens()
     payload = patient_appointments_for_api(db, week_start, week_end, surgeon=None)
     rows = [
         row
         for row in (payload.get("appointments") or [])
-        if is_main_office_site(row.get("serviceSite", ""), tokens)
+        if is_surgical_one_dashboard_appointment(row, office_tokens=tokens)
     ]
     warning = payload.get("warning")
 

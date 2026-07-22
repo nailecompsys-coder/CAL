@@ -175,7 +175,7 @@
           <i class="fa-solid fa-user-injured text-white text-xs"></i>
         </div>
         <div class="min-w-0">
-          <h2 class="font-bold text-slate-800">Surgery One · Office Patients</h2>
+          <h2 class="font-bold text-slate-800">Surgery One · Office &amp; Surgery</h2>
           <p class="text-xs text-slate-500 truncate">
             {{ surgical_one_week.weekStart.strftime('%b %-d') }} – {{ surgical_one_week.weekEnd.strftime('%b %-d') }}
             · {{ surgical_one_week.total }} patients
@@ -216,7 +216,7 @@
           <div class="rounded-xl border border-slate-100 px-2.5 py-2">
             <p class="text-xs font-bold text-slate-800 truncate">{{ appt.start }} · {{ appt.patientName }}</p>
             <p class="text-[11px] text-slate-500 truncate">
-              {{ appt.surgeonInitials or appt.surgeonName }}{% if appt.appointmentType %} · {{ appt.appointmentType }}{% endif %}{% if appt.room %} · Rm {{ appt.room }}{% endif %}
+              {{ appt.surgeonInitials or appt.surgeonName }}{% if appt.appointmentType %} · {{ appt.appointmentType }}{% endif %}{% if appt.serviceSite %} · {{ appt.serviceSite }}{% endif %}{% if appt.room %} · Rm {{ appt.room }}{% endif %}
             </p>
           </div>
           {% else %}

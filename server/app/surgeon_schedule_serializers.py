@@ -79,6 +79,8 @@ def serialize_schedule_day(
                 "status": sc.status or "scheduled",
                 "surgeonNotes": sc.surgeon_notes or "",
                 "color": (sc.location.color or None) if sc.location else None,
+                "source": getattr(sc, "source", None) or "cal",
+                "readOnly": getattr(sc, "source", None) == "aprima",
             }
             for sc in surgeries
         ],

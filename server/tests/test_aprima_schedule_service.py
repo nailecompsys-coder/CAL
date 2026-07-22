@@ -15,6 +15,8 @@ from app.aprima_schedule_service import (
     fetch_aprima_meetings,
     fetch_main_office_patients_by_weekday,
     is_main_office_site,
+    is_surgery_appointment,
+    is_surgical_one_dashboard_appointment,
     weekday_range,
 )
 from app.models import Surgeon
@@ -31,6 +33,107 @@ class AprimaScheduleServiceTest(unittest.TestCase):
         self.assertTrue(is_main_office_site("MFSA Main Office", ["Main Office"]))
         self.assertTrue(is_main_office_site("Clermont Office", ["Clermont Office"]))
         self.assertFalse(is_main_office_site("Advent Lake Mary", ["Winter Garden", "Main Office", "Clermont Office"]))
+
+    def test_surgery_appointment_type_matching(self):
+        self.assertTrue(is_surgery_appointment({"appointmentType": "Surgery"}))
+        self.assertTrue(is_surgery_appointment({"appointmentType": "surgery"}))
+        self.assertFalse(is_surgery_appointment({"appointmentType": "Office Visit"}))
+        self.assertFalse(is_surgery_appointment({"appointmentType": "Post Op"}))
+        self.assertTrue(
+            is_surgical_one_dashboard_appointment(
+                {"appointmentType": "Surgery", "serviceSite": "AHWG-Outpt"},
+                office_tokens=["Clermont Office"],
+            )
+        )
+        self.assertFalse(
+            is_surgical_one_dashboard_appointment(
+                {"appointmentType": "Office Visit", "serviceSite": "AHWG-Outpt"},
+                office_tokens=["Clermont Office"],
+            )
+        )
+
+    def test_dashboard_buckets_include_office_and_surgery(self):
+        rows = [
+            {
+                "id": "1",
+                "date": "2026-07-06",
+                "start": "09:00",
+                "end": "09:30",
+                "patientName": "Alpha, A",
+                "serviceSite": "Winter Garden",
+                "surgeonInitials": "JB",
+                "surgeonName": "Jorge",
+                "appointmentType": "Office Visit",
+                "room": "1",
+                "mrn": "1",
+                "status": "Scheduled",
+                "reason": "",
+                "timeZone": "America/New_York",
+            },
+            {
+                "id": "2",
+                "date": "2026-07-07",
+                "start": "10:00",
+                "end": "10:30",
+                "patientName": "Beta, B",
+                "serviceSite": "Lake Mary",
+                "surgeonInitials": "AB",
+                "surgeonName": "Alex",
+                "appointmentType": "Office Visit",
+                "room": "2",
+                "mrn": "2",
+                "status": "Scheduled",
+                "reason": "",
+                "timeZone": "America/New_York",
+            },
+            {
+                "id": "3",
+                "date": "2026-07-08",
+                "start": "11:00",
+                "end": "11:30",
+                "patientName": "Gamma, C",
+                "serviceSite": "Main Office",
+                "surgeonInitials": "CJ",
+                "surgeonName": "Chris",
+                "appointmentType": "Office Visit",
+                "room": "3",
+                "mrn": "3",
+                "status": "Scheduled",
+                "reason": "",
+                "timeZone": "America/New_York",
+            },
+            {
+                "id": "4",
+                "date": "2026-07-07",
+                "start": "07:30",
+                "end": "09:00",
+                "patientName": "Delta, D",
+                "serviceSite": "AHWG-Outpt",
+                "surgeonInitials": "JB",
+                "surgeonName": "Jorge",
+                "appointmentType": "Surgery",
+                "room": "OR 2",
+                "mrn": "4",
+                "status": "Scheduled",
+                "reason": "Hernia",
+                "timeZone": "America/New_York",
+            },
+        ]
+        with patch("app.aprima_schedule_service.fetch_patient_appointments", return_value=rows):
+            with patch.dict(os.environ, {"APRIMA_MAIN_OFFICE_SITE": "Winter Garden,Main Office"}, clear=False):
+                payload = fetch_main_office_patients_by_weekday(date(2026, 7, 9))
+
+        self.assertEqual(payload["total"], 3)
+        self.assertEqual(payload["days"][0]["count"], 1)  # Mon office
+        self.assertEqual(payload["days"][0]["clinicLabel"], "Winter Garden")
+        self.assertEqual(payload["days"][0]["surgeonLabel"], "JB")
+        self.assertEqual(payload["days"][1]["count"], 1)  # Tue Surgery @ AHWG (office visit Lake Mary still out)
+        self.assertEqual(payload["days"][1]["clinicLabel"], "AHWG-Outpt")
+        self.assertEqual(payload["days"][1]["appointments"][0]["appointmentType"], "Surgery")
+        self.assertEqual(payload["days"][2]["count"], 1)  # Wed
+        self.assertEqual(payload["days"][2]["clinicLabel"], "Main Office")
+        self.assertEqual(payload["days"][2]["surgeonLabel"], "CJ")
+        self.assertIsNone(payload["warning"])
 
     def test_dashboard_buckets_filter_main_office_and_group_by_day(self):
         rows = [

@@ -174,6 +174,43 @@ def is_main_office_site(service_site: str, tokens: list[str] | None = None) -> b
     return False
 
 
+def surgery_appointment_type_tokens() -> list[str]:
+    """Aprima ListAppointmentType names that count as scheduled surgery (not office clinic).
+
+    Override with comma-separated APRIMA_SURGERY_APPOINTMENT_TYPES (default: Surgery).
+    Live MFSA types include ``Surgery`` at hospital outpt sites (AHWG-Outpt, AH APOP-Outpt).
+    """
+    raw = os.environ.get("APRIMA_SURGERY_APPOINTMENT_TYPES", "Surgery").strip()
+    tokens = [part.strip() for part in raw.split(",") if part.strip()]
+    return tokens or ["Surgery"]
+
+
+def is_surgery_appointment(row: dict, tokens: list[str] | None = None) -> bool:
+    """True when Aprima appointmentType is a surgery booking (not office visit)."""
+    typ = (row.get("appointmentType") or "").strip().lower()
+    if not typ:
+        return False
+    for token in tokens or surgery_appointment_type_tokens():
+        needle = token.strip().lower()
+        if not needle:
+            continue
+        if typ == needle or needle in typ.split() or typ.startswith(needle):
+            return True
+    return False
+
+
+def is_surgical_one_dashboard_appointment(
+    row: dict,
+    *,
+    office_tokens: list[str] | None = None,
+    surgery_tokens: list[str] | None = None,
+) -> bool:
+    """Dashboard Surgery One pills: main-office clinic patients + Aprima Surgery bookings."""
+    return is_main_office_site(row.get("serviceSite", ""), office_tokens) or is_surgery_appointment(
+        row, surgery_tokens
+    )
+
+
 def monday_of(day: date) -> date:
     return day - timedelta(days=day.weekday())
 
@@ -234,14 +271,14 @@ def fetch_patient_appointments(start_date: date, end_date: date) -> list[dict]:
 
 
 def fetch_main_office_patients_by_weekday(anchor: date | None = None) -> dict:
-    """Mon–Fri main-office patient buckets for the admin dashboard."""
+    """Mon–Fri Surgery One buckets: main-office clinic + Aprima Surgery appointments."""
     week_start, week_end = weekday_range(anchor)
     tokens = main_office_site_tokens()
     try:
         rows = [
             row
             for row in fetch_patient_appointments(week_start, week_end)
-            if is_main_office_site(row.get("serviceSite", ""), tokens)
+            if is_surgical_one_dashboard_appointment(row, office_tokens=tokens)
         ]
         warning = None
     except AprimaScheduleUnavailable as exc:

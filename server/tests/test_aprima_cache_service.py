@@ -142,6 +142,65 @@ class AprimaCacheServiceTest(unittest.TestCase):
         self.assertEqual(week["total"], 1)
         self.assertEqual(week["source"], "cache")
 
+    @patch("app.aprima_cache_service.fetch_patient_appointments")
+    @patch("app.aprima_cache_service.practice_today", return_value=date(2026, 7, 9))
+    def test_dashboard_week_includes_aprima_surgery(self, _today, fetch_patients):
+        state = AprimaSyncState(
+            last_status="ok",
+            last_finished_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            patient_count=2,
+            meeting_count=0,
+            window_start=date(2026, 7, 9),
+            window_end=date(2026, 7, 30),
+            content_fingerprint="sx",
+        )
+        self.db.add(state)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        self.db.add(
+            AprimaCachedAppointment(
+                appointment_id="office1",
+                kind="patient",
+                date=date(2026, 7, 9),
+                surgeon_initials="JB",
+                content_hash="o",
+                payload_json=(
+                    '{"id":"office1","date":"2026-07-09","start":"09:00","end":"09:30",'
+                    '"surgeonInitials":"JB","surgeonName":"Jorge","patientName":"Office Pt",'
+                    '"mrn":"1","appointmentType":"Office Visit","status":"Scheduled",'
+                    '"reason":"","serviceSite":"Clermont Office","room":"1",'
+                    '"timeZone":"America/New_York"}'
+                ),
+                synced_at=now,
+            )
+        )
+        self.db.add(
+            AprimaCachedAppointment(
+                appointment_id="sx1",
+                kind="patient",
+                date=date(2026, 7, 10),
+                surgeon_initials="JB",
+                content_hash="s",
+                payload_json=(
+                    '{"id":"sx1","date":"2026-07-10","start":"07:30","end":"09:00",'
+                    '"surgeonInitials":"JB","surgeonName":"Jorge","patientName":"Sx Pt",'
+                    '"mrn":"2","appointmentType":"Surgery","status":"Scheduled",'
+                    '"reason":"Hernia","serviceSite":"AHWG-Outpt","room":"OR 2",'
+                    '"timeZone":"America/New_York"}'
+                ),
+                synced_at=now,
+            )
+        )
+        self.db.commit()
+
+        week = main_office_patients_by_weekday(self.db, date(2026, 7, 9))
+        self.assertEqual(week["total"], 2)
+        # Week is Mon 7/6–Fri 7/10; office on Thu 7/9, surgery on Fri 7/10
+        self.assertEqual(week["days"][3]["count"], 1)
+        self.assertEqual(week["days"][3]["appointments"][0]["appointmentType"], "Office Visit")
+        self.assertEqual(week["days"][4]["count"], 1)
+        self.assertEqual(week["days"][4]["appointments"][0]["appointmentType"], "Surgery")
+        fetch_patients.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

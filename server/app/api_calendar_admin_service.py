@@ -6,6 +6,7 @@ from datetime import timedelta
 from sqlalchemy.orm import Session, joinedload
 
 from .api_calendar_admin_event_serializers import (
+    aprima_surgery_event,
     call_rotation_event,
     clinic_schedule_event,
     day_off_event,
@@ -13,7 +14,7 @@ from .api_calendar_admin_event_serializers import (
     surgery_event,
     unavailable_event,
 )
-from .models import Availability, CallCoverage, CallRotation, ClinicSchedule, DayOff, Meeting, SurgicalCase
+from .models import Availability, CallCoverage, CallRotation, ClinicSchedule, DayOff, Meeting, Surgeon, SurgicalCase
 from .surgeon_visibility import surgeon_is_visible
 
 
@@ -84,6 +85,25 @@ def add_surgery_events(events: list[dict], db: Session, start_date, end_date) ->
         events.append(surgery_event(case))
 
 
+def add_aprima_surgery_events(events: list[dict], db: Session, start_date, end_date) -> None:
+    """Aprima EMR Surgery appointments on the admin FullCalendar."""
+    from .aprima_cache_service import patient_appointments_for_api
+    from .aprima_schedule_service import appointment_belongs_to_surgeon, is_surgery_appointment
+
+    payload = patient_appointments_for_api(db, start_date, end_date, surgeon=None)
+    surgeons = [
+        row for row in db.query(Surgeon).filter(Surgeon.is_active == True).all()  # noqa: E712
+        if surgeon_is_visible(row)
+    ]
+    for row in payload.get("appointments") or []:
+        if not is_surgery_appointment(row):
+            continue
+        matched = next((s for s in surgeons if appointment_belongs_to_surgeon(row, s)), None)
+        if matched is None:
+            continue
+        events.append(aprima_surgery_event(row, matched))
+
+
 def add_unavailable_events(events: list[dict], db: Session, start_date, end_date) -> None:
     unavails = db.query(Availability).filter(
         Availability.date >= start_date,
@@ -103,5 +123,6 @@ def build_admin_calendar_events(db: Session, start_date, end_date) -> list[dict]
     add_meeting_events(events, db, start_date, end_date)
     add_clinic_schedule_events(events, db, start_date, end_date)
     add_surgery_events(events, db, start_date, end_date)
+    add_aprima_surgery_events(events, db, start_date, end_date)
     add_unavailable_events(events, db, start_date, end_date)
     return events

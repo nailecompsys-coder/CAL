@@ -4,7 +4,7 @@ Last updated: 2026-07-16
 
 ## Goal
 
-Keep Surgical One patients and Aprima meetings current in CAL without manual page refresh, and keep mobile Patients tabs updated when clinic schedules change, cancel, or move.
+Keep Surgical One office patients **and** Aprima Surgery appointments current in CAL without manual page refresh, and keep mobile Patients / My Schedule updated when clinic or surgery bookings change, cancel, or move.
 
 ## Architecture
 
@@ -16,8 +16,9 @@ CAL Postgres cache
   · aprima_cached_appointments
   · aprima_sync_state (fingerprint)
         │
-        ├── Portal dashboard / Meetings  (cache-first, soft-reload on fingerprint change)
-        └── Native Patients API          (cache-first, live fallback)
+        ├── Portal dashboard / Meetings  (cache-first; dashboard pills = main-office clinic + appointmentType Surgery)
+        ├── Admin calendar               (Aprima Surgery as surgery events)
+        └── Native Patients + My Schedule (cache-first; My Schedule shows Aprima Surgery items)
                  │
                  ├── iOS / Android foreground + 5‑min refresh
                  └── PHI-free push when a surgeon’s patient fingerprint changes

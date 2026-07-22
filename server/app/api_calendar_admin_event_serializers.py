@@ -154,6 +154,36 @@ def surgery_event(case) -> dict:
     }
 
 
+def aprima_surgery_event(row: dict, surgeon) -> dict:
+    """Admin calendar event for an Aprima Surgery appointment."""
+    day = (row.get("date") or "").strip()
+    start = (row.get("start") or "").strip()
+    end = (row.get("end") or "").strip()
+    start_dt = f"{day}T{start}:00" if day and start else day
+    end_dt = f"{day}T{end}:00" if day and end else None
+    site = (row.get("serviceSite") or "").strip() or "Surgery"
+    appt_id = str(row.get("id") or "")
+    return {
+        "id": f"aprima-surg-{appt_id}",
+        "title": f"{surgeon_initials(surgeon)} Sx",
+        "start": start_dt,
+        "end": end_dt,
+        "color": NEUTRAL_CAL_BG,
+        "textColor": NEUTRAL_CAL_TEXT,
+        "extendedProps": {
+            "type": "surgery",
+            "source": "aprima",
+            "surgeon": surgeon.full_name,
+            "surgeon_id": surgeon.id,
+            "location": site,
+            "procedure": (row.get("reason") or row.get("appointmentType") or "Surgery"),
+            "patient_name": row.get("patientName") or "",
+            "room": row.get("room") or "",
+            "sort_key": SORT_SURG,
+        },
+    }
+
+
 def unavailable_event(availability) -> dict:
     surgeon = availability.surgeon
     return {

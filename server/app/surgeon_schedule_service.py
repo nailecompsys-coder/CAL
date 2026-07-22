@@ -24,6 +24,52 @@ from .surgeon_schedule_serializers import serialize_schedule_week
 from .surgeon_schedule_slots import compute_schedule_slots
 
 
+def _merge_aprima_surgeries(db: Session, surgeon, surgeries_by_day: dict, start_day: date, end_day: date) -> None:
+    """Append Aprima Surgery appointments into the surgeon schedule surgery buckets."""
+    from types import SimpleNamespace
+    from datetime import time as time_cls
+
+    from .aprima_cache_service import patient_appointments_for_api
+    from .aprima_schedule_service import is_surgery_appointment
+
+    def _hhmm(value: str | None):
+        raw = (value or "").strip()
+        if not raw or ":" not in raw:
+            return None
+        try:
+            hour_s, minute_s = raw.split(":", 1)
+            return time_cls(int(hour_s), int(minute_s))
+        except ValueError:
+            return None
+
+    payload = patient_appointments_for_api(db, start_day, end_day, surgeon=surgeon)
+    for row in payload.get("appointments") or []:
+        if not is_surgery_appointment(row):
+            continue
+        day_key = (row.get("date") or "").strip()
+        try:
+            day = date.fromisoformat(day_key)
+        except ValueError:
+            continue
+        if day < start_day or day > end_day:
+            continue
+        appt_id = str(row.get("id") or "")
+        surgeries_by_day.setdefault(day, []).append(
+            SimpleNamespace(
+                id=f"aprima-{appt_id}",
+                start_time=_hhmm(row.get("start")) or time_cls(8, 0),
+                end_time=_hhmm(row.get("end")),
+                patient_name=(row.get("patientName") or "").strip(),
+                procedure=(row.get("reason") or row.get("appointmentType") or "Surgery").strip(),
+                location=None,
+                room_text=(row.get("room") or row.get("serviceSite") or "").strip(),
+                status=(row.get("status") or "scheduled").strip().lower(),
+                surgeon_notes="",
+                source="aprima",
+            )
+        )
+
+
 def build_surgeon_schedule_view(db: Session, surgeon, week_offset: int = 0) -> dict:
     today = date.today()
     week_start = today - timedelta(days=today.weekday()) + timedelta(weeks=week_offset)
@@ -41,6 +87,7 @@ def build_surgeon_schedule_view(db: Session, surgeon, week_offset: int = 0) -> d
     meetings_by_day = surgeon_meetings_by_day(db, surgeon.id, summary_start, summary_end)
     clinics_by_day = surgeon_clinics_by_day(db, surgeon.id, summary_start, summary_end)
     surgeries_by_day = surgeon_surgeries_by_day(db, surgeon.id, summary_start, summary_end)
+    _merge_aprima_surgeries(db, surgeon, surgeries_by_day, summary_start, summary_end)
     my_off_by_day = surgeon_approved_off_by_day(db, surgeon.id, summary_start, summary_end)
 
     week_summary = []

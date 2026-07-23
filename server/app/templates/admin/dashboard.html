@@ -42,11 +42,41 @@
 
 <div class="p-4 space-y-4">
 
-  <!-- ── Stat band (4 equal bento cells) ─────────────────────────── -->
-  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+  <!-- ── Stat band ───────────────────────────────────────────────── -->
+  <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
+
+    <!-- Surgical Cases Today -->
+    <a href="/admin/clinic-schedule" class="bento-card clinical-stat p-4 flex flex-col gap-2.5 hover:ring-1 hover:ring-teal-200 transition-shadow" style="--i:0">
+      <p class="text-[11px] font-extrabold uppercase tracking-widest text-slate-400">Surgical Cases Today</p>
+      <p class="text-4xl font-extrabold text-slate-800 leading-none tabular-nums">{{ surgical_cases_today }}</p>
+      {% if surgical_cases_today %}
+      <p class="text-xs text-teal-700 font-medium flex items-center gap-1.5">
+        <i class="fa-solid fa-user-doctor"></i> All campuses
+      </p>
+      {% else %}
+      <p class="text-xs text-slate-400 flex items-center gap-1.5">
+        <i class="fa-solid fa-hospital"></i> None scheduled
+      </p>
+      {% endif %}
+    </a>
+
+    <!-- Clinic Visits Today -->
+    <a href="/admin/clinic-schedule" class="bento-card clinical-stat p-4 flex flex-col gap-2.5 hover:ring-1 hover:ring-teal-200 transition-shadow" style="--i:1">
+      <p class="text-[11px] font-extrabold uppercase tracking-widest text-slate-400">Clinic Visits Today</p>
+      <p class="text-4xl font-extrabold text-slate-800 leading-none tabular-nums">{{ clinic_visits_today }}</p>
+      {% if clinic_visits_today %}
+      <p class="text-xs text-teal-700 font-medium flex items-center gap-1.5">
+        <i class="fa-solid fa-stethoscope"></i> All campuses
+      </p>
+      {% else %}
+      <p class="text-xs text-slate-400 flex items-center gap-1.5">
+        <i class="fa-solid fa-calendar-xmark"></i> None scheduled
+      </p>
+      {% endif %}
+    </a>
 
     <!-- No Call Today (DayOff reason — not the same as Today's Coverage) -->
-    <div class="bento-card clinical-stat p-4 flex flex-col gap-2.5" style="--i:0">
+    <div class="bento-card clinical-stat p-4 flex flex-col gap-2.5" style="--i:2">
       <div class="flex items-center justify-between">
         <p class="text-[11px] font-extrabold uppercase tracking-widest text-slate-400">No Call Today</p>
         <span class="relative flex h-2.5 w-2.5">
@@ -68,7 +98,7 @@
     </div>
 
     <!-- Available Today -->
-    <div class="bento-card clinical-stat p-4 flex flex-col gap-2.5" style="--i:1">
+    <div class="bento-card clinical-stat p-4 flex flex-col gap-2.5" style="--i:3">
       <p class="text-[11px] font-extrabold uppercase tracking-widest text-slate-400">Available Today</p>
       <div class="flex items-end gap-2">
         <p class="text-4xl font-extrabold text-slate-800 leading-none tabular-nums">{{ available_count }}</p>
@@ -86,7 +116,7 @@
     </div>
 
     <!-- Days Off Pending -->
-    <div class="bento-card clinical-stat p-4 flex flex-col gap-2.5 {% if pending_daysoff %}ring-1 ring-amber-200{% endif %}" style="--i:2">
+    <div class="bento-card clinical-stat p-4 flex flex-col gap-2.5 {% if pending_daysoff %}ring-1 ring-amber-200{% endif %}" style="--i:4">
       <p class="text-[11px] font-extrabold uppercase tracking-widest {% if pending_daysoff %}text-amber-500{% else %}text-slate-400{% endif %}">Pending Approvals</p>
       <p class="text-4xl font-extrabold leading-none tabular-nums {% if pending_daysoff %}text-amber-500{% else %}text-slate-800{% endif %}">{{ pending_daysoff|length }}</p>
       {% if pending_daysoff %}
@@ -101,7 +131,7 @@
     </div>
 
     <!-- Meetings This Week -->
-    <div class="bento-card clinical-stat p-4 flex flex-col gap-2.5" style="--i:3">
+    <div class="bento-card clinical-stat p-4 flex flex-col gap-2.5" style="--i:5">
       <p class="text-[11px] font-extrabold uppercase tracking-widest text-slate-400">Meetings This Week</p>
       <p class="text-4xl font-extrabold text-slate-800 leading-none tabular-nums">{{ upcoming_meetings|length }}</p>
       {% if upcoming_meetings %}

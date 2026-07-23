@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
+from ..admin_dashboard_stats_service import dashboard_today_volume_stats
 from ..aprima_cache_service import main_office_patients_by_weekday, sync_status_payload
 from ..auth import (
     get_current_admin,
@@ -154,6 +155,7 @@ def dashboard(request: Request, db: Session = Depends(get_db), admin=Depends(get
     available_count = active_count - len(off_ids)
     surgical_one_week = main_office_patients_by_weekday(db, today)
     aprima_sync = sync_status_payload(db)
+    today_volume = dashboard_today_volume_stats(db, today)
 
     return templates.TemplateResponse("admin/dashboard.html", _base(
         request, admin, db=db,
@@ -170,6 +172,8 @@ def dashboard(request: Request, db: Session = Depends(get_db), admin=Depends(get
         off_ids=off_ids,
         surgical_one_week=surgical_one_week,
         aprima_sync=aprima_sync,
+        surgical_cases_today=today_volume["surgical_cases_today"],
+        clinic_visits_today=today_volume["clinic_visits_today"],
     ))
 
 

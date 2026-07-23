@@ -16,9 +16,7 @@ struct NativeSchedulerShell: View {
 
   /// US work week for scheduler: Monday–Sunday (not locale Sunday–Saturday).
   private var calendar: Calendar {
-    var cal = Calendar.current
-    cal.firstWeekday = 2 // Monday
-    return cal
+    ClinicalCalendar.mondayFirst
   }
 
   private var weekStart: Date {

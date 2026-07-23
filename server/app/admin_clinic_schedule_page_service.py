@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import re
 from datetime import date, time, timedelta
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from .models import ClinicSchedule, Location, SurgicalCase
 from .or_block_service import (
@@ -26,6 +27,101 @@ def _hhmm_compact(value: str | None) -> str:
     if not raw:
         return ""
     return raw.replace(":", "")[:4]
+
+
+_FAX_CLINIC_TIME_RE = re.compile(r"\b([01]?\d|2[0-3]):([0-5]\d)\b")
+_FAX_CLINIC_CHUNK_RE = re.compile(
+    r"^([01]?\d|2[0-3]):([0-5]\d)(?:\s+(.+))?$"
+)
+
+
+def _is_hospital_schedule_location(loc: Location | None) -> bool:
+    if not loc:
+        return False
+    abbr = (loc.abbreviation or "").upper()
+    ltype = (loc.location_type or "").lower()
+    return abbr.endswith("-OR") or ltype in {"hospital", "or"}
+
+
+def parse_clinic_fax_visit_segments(notes: str) -> list[dict]:
+    """Parse `13:00 NIEVES, ROSA; 13:10 PINDER…` from Desk clinic notes."""
+    text = notes or ""
+    first = _FAX_CLINIC_TIME_RE.search(text)
+    if not first:
+        return []
+    body = text[first.start() :]
+    segments: list[dict] = []
+    seen: set[str] = set()
+    for raw in re.split(r"\s*;\s*", body):
+        chunk = raw.strip(" ·\t")
+        if not chunk:
+            continue
+        match = _FAX_CLINIC_CHUNK_RE.match(chunk)
+        if not match:
+            continue
+        stamp = f"{int(match.group(1)):02d}:{match.group(2)}"
+        label = (match.group(3) or "").strip()
+        lower = label.lower()
+        if "desk fax" in lower or "kno2" in lower or lower.startswith("source="):
+            continue
+        if stamp in seen:
+            continue
+        seen.add(stamp)
+        segments.append({
+            "start": stamp,
+            "caseCount": 1,
+            "note": label,
+            "label": label,
+        })
+    return segments[:24]
+
+
+def clinic_fax_overlay_from_notes(
+    schedule: ClinicSchedule,
+) -> dict | None:
+    """Build an AP-CL pill overlay from Desk fax times stored in ClinicSchedule.notes."""
+    if (schedule.assignment_type or "").lower() != "assigned":
+        return None
+    loc = schedule.location
+    if not loc or _is_hospital_schedule_location(loc):
+        return None
+    notes = schedule.notes or ""
+    if "Desk fax" not in notes and "source=desk" not in notes:
+        return None
+    segments = parse_clinic_fax_visit_segments(notes)
+    if not segments:
+        return None
+    start = segments[0]["start"]
+    count = len(segments)
+    abbr = loc.abbreviation or loc.name or "CL"
+    visit_word = "Visit" if count == 1 else "Visits"
+    return {
+        "detailId": f"clinic-fax-{schedule.id}",
+        "scheduleId": schedule.id,
+        "locationId": schedule.location_id,
+        "locationAbbreviation": abbr,
+        "location": loc.name or abbr,
+        "session": (schedule.session or "pm").lower(),
+        "assignedStart": start,
+        "startCompact": _hhmm_compact(start),
+        "caseCount": count,
+        "kind": "clinic",
+        "countLabel": visit_word,
+        "pillLabel": f"{abbr} {_hhmm_compact(start)} {count} {visit_word}",
+        "segments": segments,
+        "notes": notes,
+    }
+
+
+def build_clinic_fax_overlays(sched_map: dict) -> dict[int, dict]:
+    overlays: dict[int, dict] = {}
+    for by_day in sched_map.values():
+        for schedules in by_day.values():
+            for schedule in schedules:
+                overlay = clinic_fax_overlay_from_notes(schedule)
+                if overlay:
+                    overlays[schedule.id] = overlay
+    return overlays
 
 
 def _block_display_session(block: dict) -> str:
@@ -89,9 +185,158 @@ def aggregate_assigned_or_blocks(blocks: list[dict]) -> list[dict]:
         case_word = "Case" if cases == 1 else "Cases"
         group["pillLabel"] = f"{group['locationAbbreviation']} {start_compact} {cases} {case_word}".strip()
         group["startCompact"] = start_compact
+        group["kind"] = "or"
+        group["countLabel"] = case_word
         out.append(group)
     out.sort(key=lambda row: (SESSION_SORT_ORDER.get(row["session"], 9), row.get("assignedStart") or "", row.get("locationAbbreviation") or ""))
     return out
+
+
+def _sessions_compatible(schedule_session: str | None, block_session: str | None) -> bool:
+    sched = (schedule_session or "full").lower()
+    block = (block_session or "am").lower()
+    if sched == "full":
+        return True
+    return sched == block
+
+
+def _enrich_or_block_with_live_cases(block: dict, cases: list[SurgicalCase]) -> dict:
+    """Replace assignment caseCount/segments with real SurgicalCase rows for the pill."""
+    loc_id = block.get("locationId")
+    matching = [
+        case
+        for case in cases
+        if not loc_id or case.location_id == loc_id
+    ]
+    if not matching:
+        return block
+    matching = sorted(
+        matching,
+        key=lambda case: (case.start_time or time(0, 0), case.id or 0),
+    )
+    segments = []
+    for case in matching:
+        stamp = case.start_time.strftime("%H:%M") if case.start_time else ""
+        patient = (case.patient_name or "").strip() or "Case"
+        proc = (case.procedure or "").strip()
+        room = (case.room_text or "").strip()
+        secondary = " · ".join(part for part in (proc[:80], room) if part)
+        segments.append({
+            "start": stamp,
+            "caseCount": 1,
+            "note": secondary,
+            "label": patient,
+            "patient": patient,
+            "procedure": proc[:80],
+            "room": room,
+            "caseId": case.id,
+        })
+    out = dict(block)
+    out["caseCount"] = len(segments)
+    out["segments"] = segments
+    start = segments[0]["start"] if segments else out.get("assignedStart")
+    if start:
+        out["assignedStart"] = start
+    start_compact = _hhmm_compact(out.get("assignedStart"))
+    case_word = "Case" if len(segments) == 1 else "Cases"
+    abbr = out.get("locationAbbreviation") or out.get("location") or "OR"
+    out["startCompact"] = start_compact
+    out["countLabel"] = case_word
+    out["kind"] = "or"
+    out["pillLabel"] = f"{abbr} {start_compact} {len(segments)} {case_word}".strip()
+    return out
+
+
+def enrich_or_blocks_with_live_cases(
+    assigned_or_blocks: dict,
+    surgical_map: dict,
+) -> dict:
+    enriched: dict = {}
+    for surgeon_id, by_day in assigned_or_blocks.items():
+        for day, blocks in by_day.items():
+            day_cases = surgical_map.get(surgeon_id, {}).get(day, []) or []
+            enriched.setdefault(surgeon_id, {})[day] = [
+                _enrich_or_block_with_live_cases(block, day_cases) for block in blocks
+            ]
+    return enriched
+
+
+def enrich_or_overlays_with_live_cases(
+    overlays: dict[int, dict],
+    sched_map: dict,
+    surgical_map: dict,
+) -> dict[int, dict]:
+    out: dict[int, dict] = {}
+    for schedule_id, block in overlays.items():
+        surgeon_id = block.get("surgeonId")
+        day = None
+        raw_day = block.get("date")
+        if isinstance(raw_day, date):
+            day = raw_day
+        elif isinstance(raw_day, str) and raw_day:
+            try:
+                day = date.fromisoformat(raw_day[:10])
+            except ValueError:
+                day = None
+        if day is None or not surgeon_id:
+            for sid, by_day in sched_map.items():
+                for d, schedules in by_day.items():
+                    if any(s.id == schedule_id for s in schedules):
+                        surgeon_id = surgeon_id or sid
+                        day = d
+                        break
+                if day is not None:
+                    break
+        day_cases = (
+            surgical_map.get(surgeon_id, {}).get(day, []) or []
+            if day and surgeon_id
+            else []
+        )
+        out[schedule_id] = _enrich_or_block_with_live_cases(block, day_cases)
+    return out
+
+
+def merge_or_blocks_into_clinic_grid(
+    sched_map: dict,
+    assigned_or_blocks: dict,
+) -> tuple[dict[int, dict], dict]:
+    """
+    Append Block OR start/cases onto the ClinicSchedule hospital pill (SSOT grid).
+    Drop the duplicate Block OR pill when location+session already exists on the grid.
+    """
+    overlays: dict[int, dict] = {}
+    remaining: dict = {}
+
+    for surgeon_id, by_day in assigned_or_blocks.items():
+        remaining.setdefault(surgeon_id, {})
+        for day, blocks in by_day.items():
+            schedules = list(sched_map.get(surgeon_id, {}).get(day, []) or [])
+            used: set[int] = set()
+            for schedule in schedules:
+                if (schedule.assignment_type or "").lower() != "assigned":
+                    continue
+                if not _is_hospital_schedule_location(schedule.location):
+                    continue
+                for idx, block in enumerate(blocks):
+                    if idx in used:
+                        continue
+                    if block.get("locationId") != schedule.location_id:
+                        continue
+                    if not _sessions_compatible(schedule.session, block.get("session")):
+                        continue
+                    overlays[schedule.id] = block
+                    used.add(idx)
+                    break
+            leftover = [block for idx, block in enumerate(blocks) if idx not in used]
+            if leftover:
+                remaining[surgeon_id][day] = leftover
+
+    remaining = {
+        sid: {d: blks for d, blks in days.items() if blks}
+        for sid, days in remaining.items()
+        if any(days.values())
+    }
+    return overlays, remaining
 
 
 def clinic_schedule_sort_key(schedule: ClinicSchedule) -> tuple[int, int]:
@@ -131,18 +376,17 @@ def surgical_case_json(cases: list[SurgicalCase]) -> list[dict]:
 
 
 def _hour_label(hhmm: str | None) -> str:
-    """07:00 → 7, 12:30 → 12:30 for compact Open Block pills."""
+    """07:00 → 7:00, 12:30 → 12:30 — keep minutes so the time line stays tidy."""
     raw = (hhmm or "").strip()
     if not raw or ":" not in raw:
         return raw
-    hour_s, minute_s = raw.split(":", 1)
+    hour_s, minute_s = raw.split(":", 1)[:2]
     try:
         hour = int(hour_s)
+        minute = int(minute_s[:2])
     except ValueError:
         return raw
-    if minute_s == "00":
-        return str(hour)
-    return f"{hour}:{minute_s}"
+    return f"{hour}:{minute:02d}"
 
 
 def open_block_day_slots(
@@ -211,16 +455,22 @@ def page_data(db: Session, week_offset: int) -> dict:
     all_locations = db.query(Location).filter(
         Location.is_active == True,
     ).order_by(Location.location_type, Location.name).all()
-    schedules = db.query(ClinicSchedule).filter(
-        ClinicSchedule.date >= week_days[0],
-        ClinicSchedule.date <= week_days[6],
-    ).all()
+    schedules = (
+        db.query(ClinicSchedule)
+        .options(joinedload(ClinicSchedule.location))
+        .filter(
+            ClinicSchedule.date >= week_days[0],
+            ClinicSchedule.date <= week_days[6],
+        )
+        .all()
+    )
     sched_map = {}
     for schedule in sorted(schedules, key=clinic_schedule_sort_key):
         sched_map.setdefault(schedule.surgeon_id, {}).setdefault(schedule.date, []).append(schedule)
 
     surgical_cases = (
         db.query(SurgicalCase)
+        .options(joinedload(SurgicalCase.location))
         .filter(
             SurgicalCase.date >= week_days[0],
             SurgicalCase.date <= week_days[6],
@@ -269,6 +519,13 @@ def page_data(db: Session, week_offset: int) -> dict:
         for day, blocks in by_day.items():
             assigned_or_blocks.setdefault(surgeon_id, {})[day] = aggregate_assigned_or_blocks(blocks)
 
+    or_block_overlays, assigned_or_blocks = merge_or_blocks_into_clinic_grid(sched_map, assigned_or_blocks)
+    assigned_or_blocks = enrich_or_blocks_with_live_cases(assigned_or_blocks, surgical_map)
+    or_block_overlays = enrich_or_overlays_with_live_cases(
+        or_block_overlays, sched_map, surgical_map
+    )
+    clinic_fax_overlays = build_clinic_fax_overlays(sched_map)
+
     hospital_locations = [loc for loc in all_locations if loc.location_type == "hospital"]
 
     # All Block OR instances for the week (open + assigned) → Open Block day grid
@@ -299,4 +556,6 @@ def page_data(db: Session, week_offset: int) -> dict:
         },
         "open_or_day_slots": open_or_day_slots,
         "assigned_or_blocks": assigned_or_blocks,
+        "or_block_overlays": or_block_overlays,
+        "clinic_fax_overlays": clinic_fax_overlays,
     }

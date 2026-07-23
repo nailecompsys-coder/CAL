@@ -121,21 +121,117 @@ class CallCoverageOverlapTest(unittest.TestCase):
             id=1,
             surgeon_id=16,
             date=day,
+            call_group_id=1,
             call_group=SimpleNamespace(name="Winter Garden"),
             coverages=[coverage],
         )
         db = MagicMock()
-        query = MagicMock()
-        db.query.return_value = query
-        query.options.return_value = query
-        query.filter.return_value = query
-        query.all.return_value = [rotation]
+
+        def query_any(*args, **kwargs):
+            query = MagicMock()
+            query.options.return_value = query
+            query.filter.return_value = query
+            # First call is CallRotation; later CallGroupLocation
+            if not hasattr(query_any, "n"):
+                query_any.n = 0
+            query_any.n += 1
+            if query_any.n == 1:
+                query.all.return_value = [rotation]
+            else:
+                query.all.return_value = []
+            return query
+
+        db.query.side_effect = query_any
 
         covering = list(check_overlap_call(22, day, day, db, {}, None, {"type": "day_off", "start_date": day, "end_date": day, "is_full_day": True, "segments": []}))
+        query_any.n = 0
         original = list(check_overlap_call(16, day, day, db, {}, None, {"type": "day_off", "start_date": day, "end_date": day, "is_full_day": True, "segments": []}))
         self.assertEqual(len(covering), 1)
         self.assertIn("Covering on-call", covering[0].message)
         self.assertEqual(original, [])
+
+    def test_or_block_at_on_call_hospital_is_not_a_conflict(self):
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        from app.models import Base, CallGroup, CallGroupLocation, CallRotation, Location, Surgeon
+        from app.rules_engine.overlap_checkers import check_overlap_call
+
+        engine = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(engine)
+        db = sessionmaker(bind=engine)()
+        try:
+            day = date(2026, 7, 29)
+            surgeon = Surgeon(
+                first_name="Alex",
+                last_name="Schroeder",
+                email="alex@example.com",
+                is_active=True,
+                staff_type="physician",
+            )
+            ap = Location(name="Apopka OR", abbreviation="AP-OR", location_type="hospital", is_active=True)
+            al = Location(name="Altamonte OR", abbreviation="AL-OR", location_type="hospital", is_active=True)
+            group = CallGroup(name="Winter Garden / Apopka / Minneola Hospital")
+            db.add_all([surgeon, ap, al, group])
+            db.flush()
+            db.add_all([
+                CallGroupLocation(call_group_id=group.id, location_id=ap.id),
+                CallRotation(surgeon_id=surgeon.id, call_group_id=group.id, date=day),
+            ])
+            db.commit()
+
+            same = list(
+                check_overlap_call(
+                    surgeon.id,
+                    day,
+                    day,
+                    db,
+                    {},
+                    None,
+                    {
+                        "type": "or_block",
+                        "date": day,
+                        "start_time": time(7, 15),
+                        "end_time": time(10, 15),
+                        "location_id": ap.id,
+                    },
+                )
+            )
+            other = list(
+                check_overlap_call(
+                    surgeon.id,
+                    day,
+                    day,
+                    db,
+                    {},
+                    None,
+                    {
+                        "type": "or_block",
+                        "date": day,
+                        "start_time": time(7, 15),
+                        "end_time": time(10, 15),
+                        "location_id": al.id,
+                    },
+                )
+            )
+            day_off = list(
+                check_overlap_call(
+                    surgeon.id,
+                    day,
+                    day,
+                    db,
+                    {},
+                    None,
+                    {"type": "day_off", "start_date": day, "end_date": day, "is_full_day": True, "segments": []},
+                )
+            )
+            self.assertEqual(same, [])
+            self.assertEqual(len(other), 1)
+            self.assertIn("Assigned on-call", other[0].message)
+            self.assertEqual(len(day_off), 1)
+        finally:
+            db.close()
+            engine.dispose()
 
 
 if __name__ == "__main__":

@@ -68,6 +68,8 @@ def clinic_schedule_page(
         open_or_blocks=data["open_or_blocks"],
         open_or_day_slots=data["open_or_day_slots"],
         assigned_or_blocks=data["assigned_or_blocks"],
+        or_block_overlays=data.get("or_block_overlays") or {},
+        clinic_fax_overlays=data.get("clinic_fax_overlays") or {},
         week_offset=week_offset,
         locations=data["all_locations"],
         today=data["today"],

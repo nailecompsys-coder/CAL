@@ -24,12 +24,11 @@ struct CompactWeekDayCard: View {
   let coverAction: (ScheduleAssignment) -> Void
 
   private var clinicSummary: String {
-    let parts = day.mySchedule.prefix(3).map { item in
-      let label = item.title
-      if item.period.uppercased() == "AM" || item.period.uppercased() == "PM" {
-        return "\(item.period.uppercased()) \(label)"
+    let parts = ClinicOrScheduleBuilder.groups(from: day.mySchedule).prefix(3).map { group in
+      if group.timeRange.isEmpty {
+        return group.title
       }
-      return label
+      return "\(group.timeRange) \(group.title)"
     }
     return parts.joined(separator: " · ")
   }
@@ -47,7 +46,7 @@ struct CompactWeekDayCard: View {
       .frame(width: 34)
 
       VStack(alignment: .leading, spacing: 4) {
-        HStack(spacing: 8) {
+        HStack(alignment: .center, spacing: 8) {
           ScheduleAssignmentActionLine(
             prefix: "ON",
             assignments: Array(day.assignments.prefix(3)),
@@ -60,19 +59,23 @@ struct CompactWeekDayCard: View {
               .font(ClinicalTypography.captionEmphasized)
               .foregroundStyle(ClinicalPalette.lavender)
           }
-        }
 
-        ScheduleStatusLine(
-          prefix: "OFF",
-          value: day.off.prefix(4).joined(separator: " "),
-          tint: ClinicalPalette.scrubInk
-        )
+          Spacer(minLength: 8)
+
+          ScheduleStatusLine(
+            prefix: "OFF",
+            value: day.off.prefix(4).joined(separator: " "),
+            tint: ClinicalPalette.scrubInk,
+            alignment: .trailing
+          )
+        }
 
         if !clinicSummary.isEmpty {
           ScheduleStatusLine(
-            prefix: "OR",
+            prefix: "OR/CL",
             value: clinicSummary,
-            tint: ClinicalPalette.teal
+            tint: ClinicalPalette.teal,
+            alignment: .leading
           )
         }
       }
@@ -130,7 +133,6 @@ private struct ScheduleAssignmentActionLine: View {
         }
       }
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
   }
 }
 
@@ -166,13 +168,20 @@ private struct ScheduleStatusLine: View {
   let prefix: String
   let value: String
   let tint: Color
+  var alignment: HorizontalAlignment = .leading
+
+  private var isTrailing: Bool { alignment == .trailing }
 
   var body: some View {
     HStack(spacing: 6) {
+      if isTrailing {
+        Spacer(minLength: 0)
+      }
+
       Text(prefix)
         .font(ClinicalTypography.badge)
         .foregroundStyle(tint)
-        .frame(width: 26, alignment: .leading)
+        .frame(width: isTrailing ? nil : (prefix.count > 3 ? 40 : 26), alignment: .leading)
 
       if value.isEmpty {
         Text("—")
@@ -184,8 +193,9 @@ private struct ScheduleStatusLine: View {
           .foregroundStyle(.primary)
           .lineLimit(1)
           .minimumScaleFactor(0.72)
+          .multilineTextAlignment(isTrailing ? .trailing : .leading)
       }
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
+    .frame(maxWidth: isTrailing ? nil : .infinity, alignment: isTrailing ? .trailing : .leading)
   }
 }

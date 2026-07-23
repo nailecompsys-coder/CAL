@@ -1,8 +1,14 @@
 # CAL Native Parity Ledger
 
-Last updated: 2026-07-20
+Last updated: 2026-07-23
 
-iOS test build target: `1.0.1 (17)` from the SwiftUI `ios/` lane.
+iOS test build target: `1.0.1 (18)` from the SwiftUI `ios/` lane.
+
+Desk fax re-ingest (2026-07-23): identity is surgeon + date + normalized patient name. Identical rows stay `unchanged` (no note overlay); time/room/procedure/facility changes update; missing desk-sourced cases in the day window cancel. Same-fax duplicate lines and cross-surgeon same patient+day skip. Block OR assign from fax uses `notify=False`.
+
+Schedule flags (2026-07-23): surgery/Block OR at a hospital in the same call group is not an on-call conflict. Stale `desk_or_schedule_flag` / Block OR conflict admin notifications are reconciled away when the conflict is fixed (deleted, not merely marked read). iOS drops the sticky “Block OR updated” banner; alerts stay in the toolbar bell sheet.
+
+Clinic / OR portal (2026-07-23): Clinic Schedule shows live surgical-case enrichment and clinic fax visit names; draggable floating case/visit panel; Open Block pills use facility / time / cases lines. Block OR selected panel lists linked cases.
 
 Production decision: SwiftUI is the production iOS app. Expo/React Native is the temporary Android bridge. Jetpack Compose is the target Android app (real API auth/home/schedule/time-off/patients/coverage wired; UI polish still behind iOS). Surgeon web PWA is retired (`/surgeon/*` HTML → use-app page).
 
@@ -30,8 +36,8 @@ Current tracked lane imports:
 | Meetings | `GET /api/native/home` | Production | Temporary Android bridge | Debug lane | iOS + Expo Android | Today and next item display are required |
 | Personal Items | `GET /api/native/home` (display today + next) | Production (display-only) | Temporary Android bridge | Debug lane (display) | iOS + Expo Android | iOS shows today + next personal items from home payload; no day-items CRUD in SwiftUI today. Legacy RN bridge has CRUD via `/surgeon/api/day-items*` but that is not the iOS spec. |
 | Patient Schedule | `GET /api/native/patient-schedule` | Production | Temporary Android bridge | Debug lane | iOS + Expo Android | Must show only actual scheduled patients with correct Eastern times |
-| Push Alerts | `/api/native/push-token`, `/api/native/alerts/read`, `GET /api/native/home` | Simulator/test lane implemented; needs TestFlight verification before production | Temporary Android bridge | Not integrated | iOS test only + Expo Android | iOS registers APNs tokens, decodes alert inbox/banner, and marks alerts read; production push requires APNs env and TestFlight review |
-| Scheduler Block OR | `GET/POST/PATCH/DELETE /api/native/scheduler/blocks*`, `GET /meta`, assign/update/remove/clear, portal `/admin/block-or*` | iOS: week strip (7 days) + day detail; create + edit capacity + cancel + assign; create/edit hospital picker shows loaded list, empty copy, or error+retry (never infinite spin) | Not integrated | Not integrated | iOS + portal (admin & scheduler) | Shared `or_block_service`. iOS home is week cliff-notes (open/assigned + hospital badges); tap day for blocks; Add block CTA on empty + day/week. Hospital picker only on create/edit sheets. Cancel requires clearing surgeons first. Epic release/give-back stays out of CAL. Android still deferred. Local mac-dev must run API image that includes `GET /meta` (stale cal_api → 404 → spinner until UI fix). |
+| Push Alerts | `/api/native/push-token`, `/api/native/alerts/read`, `GET /api/native/home` | Production: toolbar bell + sheet; sticky Block OR banner removed (build 18+) | Temporary Android bridge | Not integrated | iOS + Expo Android | iOS registers APNs tokens, decodes alert inbox, marks alerts read; production push requires APNs env. Schedule-flag admin notifications auto-clear when conflicts resolve. |
+| Scheduler Block OR | `GET/POST/PATCH/DELETE /api/native/scheduler/blocks*`, `GET /meta`, assign/update/remove/clear, portal `/admin/block-or*` | iOS: week strip (7 days) + day detail; create + edit capacity + cancel + assign; create/edit hospital picker shows loaded list, empty copy, or error+retry (never infinite spin) | Not integrated | Not integrated | iOS + portal (admin & scheduler) | Shared `or_block_service`. Linked surgical cases listed on portal Block OR panel. Same-call-group hospital surgery is not an on-call conflict. Fax ingest assign suppresses push spam. Android still deferred. |
 | Scheduler Digest | `schedule_change_events`, `server/scripts/send_scheduler_digest.py` | Not a native screen; Recent sheet via toolbar clock (not primary tab) | Not integrated | Not integrated | Backend test lane only | Daily 6 AM ET job target for scheduler/admin recipients. Email payload is non-PHI and summarizes last-24-hour availability changes plus open Block OR rows. |
 
 ## Ledger Rules

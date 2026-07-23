@@ -9,7 +9,7 @@ struct NativeScheduleProjection {
   }
 
   func week(containing date: Date) -> [ScheduleDay] {
-    let calendar = Calendar.current
+    let calendar = ClinicalCalendar.mondayFirst
     let interval = calendar.dateInterval(of: .weekOfYear, for: date)
     let start = interval?.start ?? calendar.startOfDay(for: date)
 

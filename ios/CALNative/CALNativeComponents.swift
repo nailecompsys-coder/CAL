@@ -49,6 +49,15 @@ enum ClinicalLayout {
   static let wideColumn: CGFloat = .infinity
 }
 
+enum ClinicalCalendar {
+  /// Work week Monday–Sunday (not locale Sunday–Saturday).
+  static var mondayFirst: Calendar {
+    var calendar = Calendar.current
+    calendar.firstWeekday = 2
+    return calendar
+  }
+}
+
 /// Horizontal chips when they fit; adaptive grid when they do not.
 struct AdaptiveChipRow<Content: View>: View {
   var minimumChipWidth: CGFloat = 96

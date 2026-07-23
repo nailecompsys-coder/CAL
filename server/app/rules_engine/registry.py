@@ -90,7 +90,10 @@ def _build_rules() -> list[RuleDef]:
             rule_id="OVERLAP_CALL",
             name="Call overlap",
             category="overlap",
-            description="Effective on-call (including coverage swaps) vs clinic/surgery/day off",
+            description=(
+                "Effective on-call (including coverage swaps) vs clinic/day off/other commitments. "
+                "Surgery or Block OR at a hospital in the same call group is allowed."
+            ),
             default_config={},
             config_schema=[],
             checker=check_overlap_call,

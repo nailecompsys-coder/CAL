@@ -11,7 +11,7 @@ from ..auth import get_current_admin
 from ..database import get_db
 from ..jinja_env import templates
 from ..models import Surgeon
-from ..or_block_service import ACTIVE_BLOCK_STATUSES, block_instances_for_range, serialize_block_instance
+from ..or_block_service import ACTIVE_BLOCK_STATUSES, block_instances_for_range, recent_schedule_changes, serialize_block_instance
 from ..scheduling_guardrails_service import scheduler_safe_rows
 from ..surgeon_visibility import surgeon_is_visible
 from .admin import _base, _sort_surgeons_physicians_first
@@ -73,8 +73,26 @@ def scheduler_availability_page(
 
     open_blocks = [row for row in blocks if row.get("status") == "open"]
     assigned_blocks = [row for row in blocks if row.get("status") != "open"]
-    case_rows = scheduler_safe_rows(db, start_date, end_date, selected_surgeon_id)
-
+    case_rows = [
+        row for row in scheduler_safe_rows(db, start_date, end_date, selected_surgeon_id)
+        if row.get("warnings")
+    ]
+    schedule_flags = []
+    for row in recent_schedule_changes(db, hours=24 * 90):
+        if row.get("type") != "desk_or_schedule_flag":
+            continue
+        if row.get("date"):
+            try:
+                flag_day = date.fromisoformat(str(row["date"])[:10])
+            except ValueError:
+                flag_day = None
+            if flag_day and (flag_day < start_date or flag_day > end_date):
+                continue
+        if selected_surgeon_id:
+            selected = next((s for s in surgeons if s.id == selected_surgeon_id), None)
+            if selected and row.get("surgeon") != selected.full_name:
+                continue
+        schedule_flags.append(row)
     return templates.TemplateResponse("admin/scheduler_availability.html", _base(
         request,
         admin,
@@ -87,4 +105,5 @@ def scheduler_availability_page(
         open_blocks=open_blocks,
         assigned_blocks=assigned_blocks,
         rows=case_rows,
+        schedule_flags=schedule_flags,
     ))

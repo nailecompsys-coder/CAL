@@ -157,11 +157,15 @@ def surgical_item_payload(row) -> dict:
 
 def aprima_surgery_item_payload(row: dict) -> dict:
     """Native My Schedule item for an Aprima Surgery appointment (read-only from EMR)."""
+    from .aprima_schedule_service import is_surgery_appointment, resolve_aprima_facility_name
+
     appt_id = str(row.get("id") or "")
     site = (row.get("serviceSite") or "").strip()
     room = (row.get("room") or "").strip()
     reason = (row.get("reason") or "").strip()
     appt_type = (row.get("appointmentType") or "Surgery").strip()
+    is_surg = is_surgery_appointment(row)
+    facility = resolve_aprima_facility_name(site, is_surgery=is_surg)
     return {
         "id": f"aprima-surg-{appt_id}",
         "type": "surgery",
@@ -169,8 +173,8 @@ def aprima_surgery_item_payload(row: dict) -> dict:
         "subtitle": reason or appt_type,
         "start": (row.get("start") or "").strip() or "08:00",
         "end": (row.get("end") or "").strip() or None,
-        "location": site,
-        "room": room,
+        "location": facility,
+        "room": room or site,
         "status": (row.get("status") or "scheduled").strip().lower() or "scheduled",
         "notes": reason,
         "surgeonNotes": "",

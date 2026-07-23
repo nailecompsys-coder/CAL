@@ -119,25 +119,27 @@
             {% for slot in day_slots[:6] %}
             {% if slot.blockId %}
             <a href="/admin/block-or?week_offset={{ week_offset }}&block_id={{ slot.blockId }}"
-               class="flex flex-col justify-center items-center aspect-[5/4] min-h-[48px] px-1 py-1 rounded-md text-center leading-tight shadow-sm block-gradient border border-black/5 hover:ring-2 hover:ring-blue-300 transition"
+               class="flex flex-col justify-center items-center min-h-[58px] px-1 py-1.5 rounded-md text-center leading-none shadow-sm block-gradient border border-black/5 hover:ring-2 hover:ring-blue-300 transition gap-0.5"
                style="--block-c: {{ slot.locationColor }}; color:#1e293b"
                title="{{ slot.pillTitle }} — edit block">
-              <span class="text-[10px] font-bold truncate w-full">{{ slot.locationAbbreviation }} {{ slot.timeLabel }}</span>
-              <span class="text-[9px] font-semibold opacity-80">{{ slot.caseCount }} case{{ '' if slot.caseCount == 1 else 's' }}</span>
+              <span class="text-[10px] font-extrabold tracking-wide w-full truncate">{{ slot.locationAbbreviation }}</span>
+              <span class="text-[9px] font-semibold tabular-nums w-full">{{ slot.timeLabel }}</span>
+              <span class="text-[9px] font-semibold opacity-80 w-full">{{ slot.caseCount }} case{{ '' if slot.caseCount == 1 else 's' }}</span>
             </a>
             {% else %}
             <a href="/admin/block-or?week_offset={{ week_offset }}"
-               class="flex flex-col justify-center items-center aspect-[5/4] min-h-[48px] px-1 py-1 rounded-md text-center leading-tight border border-dashed border-slate-200 bg-white/80 text-slate-400 hover:border-teal-300 hover:text-teal-600 transition"
+               class="flex flex-col justify-center items-center min-h-[58px] px-1 py-1.5 rounded-md text-center leading-none border border-dashed border-slate-200 bg-white/80 text-slate-400 hover:border-teal-300 hover:text-teal-600 transition gap-0.5"
                title="{{ slot.locationAbbreviation }} — no block · open Block OR">
-              <span class="text-[10px] font-bold truncate w-full">{{ slot.locationAbbreviation }}</span>
-              <span class="text-[9px]">—</span>
+              <span class="text-[10px] font-extrabold tracking-wide w-full truncate">{{ slot.locationAbbreviation }}</span>
+              <span class="text-[9px] font-semibold">—</span>
+              <span class="text-[9px]">no block</span>
             </a>
             {% endif %}
             {% endfor %}
             {# Always fill a 3×2 board (6 equal cells) #}
             {% for i in range(6) %}
             {% if i >= (day_slots|length) %}
-            <div class="aspect-[5/4] min-h-[48px] rounded-md border border-dashed border-slate-100 bg-white/40" aria-hidden="true"></div>
+            <div class="min-h-[58px] rounded-md border border-dashed border-slate-100 bg-white/40" aria-hidden="true"></div>
             {% endif %}
             {% endfor %}
           </div>
@@ -166,8 +168,8 @@
         {% set am_blocks = day_block_assignments|selectattr('session', 'equalto', 'am')|list %}
         {% set pm_blocks = day_block_assignments|selectattr('session', 'equalto', 'pm')|list %}
         {% set day_has_hospital_clinic = (day_entries|selectattr('assignment_type', 'equalto', 'assigned')|map(attribute='location')|selectattr('location_type', 'equalto', 'hospital')|list|length > 0) %}
-        {# Show separate "Hospital" pill only when there are surgical cases AND no hospital location pill (avoid duplicate) #}
-        {% set day_has_hospital = settings.show_or_patient_procedure_form and day_surgeries|length > 0 and not day_has_hospital_clinic %}
+        {# Cases chip when surgeries exist and nothing else already surfaces them (OR pills / hospital grid). #}
+        {% set day_has_hospital = day_surgeries|length > 0 and not day_has_hospital_clinic and not day_block_assignments %}
         <td class="px-1.5 py-1.5 border border-slate-200 align-top
           {% if is_today %}bg-blue-50/30{% else %}bg-white{% endif %}
           {% if selected_surgeon_id == surgeon.id and day_entries %}ring-2 ring-inset ring-teal-300 bg-teal-50/30{% endif %}
@@ -184,11 +186,20 @@
             <div class="min-h-[18px] space-y-0.5">
               {% for entry in slot.entries %}
               {% set entry_location_choice = '__off__' if entry.assignment_type == 'off' else entry.location_id|string %}
-              <div class="flex items-center gap-1 group/entry">
+              {% set or_overlay = or_block_overlays.get(entry.id) if or_block_overlays is defined else none %}
+              {% set clinic_overlay = clinic_fax_overlays.get(entry.id) if clinic_fax_overlays is defined else none %}
+              {% set pill_overlay = or_overlay or clinic_overlay %}
+              <div class="flex items-center gap-1 group/entry relative">
                 <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-md leading-tight flex-1 truncate cursor-pointer hover:opacity-90 {% if entry.assignment_type == 'off' %}bg-slate-200 text-slate-700 shadow-sm{% else %}block-gradient shadow-sm{% endif %}"
                   style="{% if entry.assignment_type == 'assigned' %}--block-c: {{ entry.location.color or '#0ea5e9' }};color:#1e293b{% endif %}"
-                  title="{% if entry.assignment_type == 'off' %}OFF{% else %}{{ entry.location.name }} — {{ entry.session }}{% endif %}{% if entry.notes %} · {{ entry.notes }}{% endif %}"
-                  onclick='event.stopPropagation(); event.preventDefault(); openAssignModal({"scheduleId": {{ entry.id }}, "surgeonId": {{ surgeon.id }}, "date": {{ day.isoformat()|tojson }}, "surgeonName": {{ surgeon.full_name|tojson }}, "dateLabel": {{ day.strftime("%a, %b %-d")|tojson }}, "locationChoice": {{ entry_location_choice|tojson }}, "session": {{ (entry.session or "full")|tojson }}, "notes": {{ (entry.notes or "")|tojson }}});'>
+                  title="{% if entry.assignment_type == 'off' %}OFF{% else %}{{ entry.location.name }} — {{ entry.session }}{% endif %}{% if pill_overlay %} · {{ pill_overlay.assignedStart }} · {{ pill_overlay.caseCount }}{% endif %}{% if entry.notes %} · {{ entry.notes }}{% endif %}"
+                  {% if pill_overlay %}
+                  onclick='event.stopPropagation(); event.preventDefault(); openPillDetailModal({{ {"kind": pill_overlay.kind or ("or" if or_overlay else "clinic"), "title": pill_overlay.location or pill_overlay.locationAbbreviation or entry.location.name, "abbr": pill_overlay.locationAbbreviation or entry.location.abbreviation or "", "session": (pill_overlay.session or entry.session or "")|upper, "earliest": pill_overlay.assignedStart or "", "count": pill_overlay.caseCount or 0, "countLabel": pill_overlay.countLabel or ("Cases" if or_overlay else "Visits"), "pillLabel": pill_overlay.pillLabel or "", "segments": pill_overlay.segments or [], "surgeonId": surgeon.id, "date": day.isoformat(), "locationId": pill_overlay.locationId or entry.location_id, "edit": {"scheduleId": entry.id, "surgeonId": surgeon.id, "date": day.isoformat(), "surgeonName": surgeon.full_name, "dateLabel": day.strftime("%a, %b %-d"), "locationChoice": entry_location_choice, "session": entry.session or "full", "notes": entry.notes or ""}} | tojson }})'
+                  {% elif entry.assignment_type == 'assigned' and entry.location and (entry.location.location_type == 'hospital' or (entry.location.abbreviation or '')[-3:] == '-OR') and day_surgeries %}
+                  onclick='event.stopPropagation(); event.preventDefault(); openPillDetailModal({{ {"kind": "or", "title": entry.location.name, "abbr": entry.location.abbreviation or "", "session": (entry.session or "")|upper, "earliest": "", "count": day_surgeries|length, "countLabel": "Cases", "pillLabel": entry.location.abbreviation or entry.location.name, "segments": [], "surgeonId": surgeon.id, "date": day.isoformat(), "locationId": entry.location_id, "edit": {"scheduleId": entry.id, "surgeonId": surgeon.id, "date": day.isoformat(), "surgeonName": surgeon.full_name, "dateLabel": day.strftime("%a, %b %-d"), "locationChoice": entry_location_choice, "session": entry.session or "full", "notes": entry.notes or ""}} | tojson }})'
+                  {% else %}
+                  onclick='event.stopPropagation(); event.preventDefault(); openAssignModal({"scheduleId": {{ entry.id }}, "surgeonId": {{ surgeon.id }}, "date": {{ day.isoformat()|tojson }}, "surgeonName": {{ surgeon.full_name|tojson }}, "dateLabel": {{ day.strftime("%a, %b %-d")|tojson }}, "locationChoice": {{ entry_location_choice|tojson }}, "session": {{ (entry.session or "full")|tojson }}, "notes": {{ (entry.notes or "")|tojson }}});'
+                  {% endif %}>
                   {% if entry.assignment_type == 'off' %}<i class="fa-solid fa-bed text-[8px] opacity-90"></i>
                   {% elif entry.location.location_type == 'hospital' %}<i class="fa-solid fa-hospital text-[8px] opacity-90"></i>
                   {% else %}<i class="fa-solid fa-clinic-medical text-[8px] opacity-90"></i>
@@ -196,7 +207,7 @@
                   {% if entry.session == 'am' %}<i class="fa-solid fa-sun text-[8px] opacity-80"></i>
                   {% elif entry.session == 'pm' %}<i class="fa-solid fa-moon text-[8px] opacity-80"></i>
                   {% endif %}
-                  <span class="truncate">{% if entry.assignment_type == 'off' %}OFF{% else %}{{ entry.location.abbreviation or entry.location.name }}{% endif %}</span>
+                  <span class="truncate">{% if entry.assignment_type == 'off' %}OFF{% elif pill_overlay %}{{ pill_overlay.pillLabel }}{% else %}{{ entry.location.abbreviation or entry.location.name }}{% endif %}</span>
                 </span>
                 <form method="post" action="/admin/clinic-schedule/clear" class="js-preserve-scroll" onclick="event.stopPropagation()">
                   <input type="hidden" name="schedule_id" value="{{ entry.id }}" />
@@ -210,30 +221,18 @@
               {% endfor %}
 
               {% for block in slot.blocks %}
-              <div class="relative">
+              <div>
                 <button type="button"
                   class="inline-flex items-center gap-1 w-full text-xs font-medium px-2 py-0.5 rounded-md leading-tight truncate cursor-pointer hover:opacity-90 block-gradient shadow-sm text-left"
                   style="--block-c: {{ block.locationColor or '#A7F3D0' }};color:#1e293b"
                   title="{{ block.location }} · {{ block.assignedStart }} · {{ block.caseCount }} case{{ '' if block.caseCount == 1 else 's' }} — click for detail"
-                  onclick="event.stopPropagation(); toggleBlockCaseDetails('block-cases-{{ block.detailId }}')">
+                  onclick='event.stopPropagation(); openPillDetailModal({{ {"kind": "or", "title": block.location or block.locationAbbreviation, "abbr": block.locationAbbreviation or "", "session": (block.session or "")|upper, "earliest": block.assignedStart or "", "count": block.caseCount or 0, "countLabel": block.countLabel or "Cases", "pillLabel": block.pillLabel or "", "segments": block.segments or [], "surgeonId": surgeon.id, "date": day.isoformat(), "locationId": block.locationId} | tojson }})'>
                   <i class="fa-solid fa-hospital text-[8px] opacity-90"></i>
                   {% if block.session == 'am' %}<i class="fa-solid fa-sun text-[8px] opacity-80"></i>
                   {% elif block.session == 'pm' %}<i class="fa-solid fa-moon text-[8px] opacity-80"></i>
                   {% endif %}
                   <span class="truncate">{{ block.pillLabel }}</span>
                 </button>
-                <div id="block-cases-{{ block.detailId }}" class="hidden absolute left-0 right-0 top-full z-20 mt-0.5 rounded-md border border-emerald-200 bg-white px-2 py-1.5 text-[11px] text-slate-700 shadow-lg" onclick="event.stopPropagation()">
-                  <div class="font-bold text-emerald-800 mb-1">{{ block.locationAbbreviation or block.location }} Block OR · {{ block.session|upper }}</div>
-                  <div class="flex justify-between gap-2"><span>Earliest</span><strong>{{ block.assignedStart }}</strong></div>
-                  <div class="flex justify-between gap-2 mb-1"><span>Cases</span><strong>{{ block.caseCount }}</strong></div>
-                  {% for seg in block.segments %}
-                  <div class="flex justify-between gap-2 text-slate-600 border-t border-slate-100 pt-0.5 mt-0.5">
-                    <span>{{ seg.start }}</span>
-                    <strong>{{ seg.caseCount }} case{{ '' if seg.caseCount == 1 else 's' }}</strong>
-                  </div>
-                  {% if seg.note %}<div class="text-slate-400 pl-0.5">{{ seg.note }}</div>{% endif %}
-                  {% endfor %}
-                </div>
               </div>
               {% endfor %}
             </div>
@@ -266,7 +265,33 @@
   </table>
 </div>
 
-<!-- Assign Modal -->
+<!-- Floating Clinic / OR case-visit panel (draggable, non-blocking) -->
+<div id="pill-detail-float"
+     class="hidden fixed z-[60] w-[min(440px,calc(100vw-24px))] max-h-[min(70vh,640px)] flex flex-col rounded-2xl border border-slate-200 bg-white shadow-2xl"
+     style="top: 96px; right: 24px;"
+     role="dialog"
+     aria-labelledby="pill-detail-title">
+  <div id="pill-detail-drag"
+       class="px-4 py-3 border-b border-slate-100 flex items-start justify-between gap-3 cursor-grab active:cursor-grabbing select-none bg-gradient-to-r from-teal-50 to-white rounded-t-2xl">
+    <div class="min-w-0">
+      <p id="pill-detail-kicker" class="text-[11px] font-semibold uppercase tracking-wider text-teal-700"></p>
+      <h3 id="pill-detail-title" class="font-bold text-slate-900 text-base truncate"></h3>
+      <p id="pill-detail-meta" class="text-xs text-slate-500 mt-0.5"></p>
+    </div>
+    <div class="flex items-center gap-1 flex-shrink-0">
+      <span class="hidden sm:inline text-[10px] font-semibold text-slate-400 uppercase tracking-wide mr-1">Drag</span>
+      <button type="button" onclick="closePillDetailModal()" class="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-100" aria-label="Close">
+        <i class="fa-solid fa-xmark text-lg"></i>
+      </button>
+    </div>
+  </div>
+  <div id="pill-detail-body" class="px-3 py-3 overflow-y-auto flex-1 min-h-0"></div>
+  <div class="px-3 py-2.5 border-t border-slate-100 flex flex-wrap gap-2 justify-end bg-slate-50/90 rounded-b-2xl">
+    <button type="button" id="pill-detail-edit" class="hidden px-3 py-1.5 rounded-lg text-xs font-semibold bg-teal-600 text-white hover:bg-teal-700">Edit assignment</button>
+    <button type="button" onclick="closePillDetailModal()" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50">Close</button>
+  </div>
+</div>
+
 <div id="assign-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden">
   <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6">
     <div class="flex items-center justify-between mb-4">
@@ -543,14 +568,229 @@ var COPY_SELECTED_LABEL = {{ ('all visible surgeons' if not selected_surgeon_id 
 var COPY_SOURCE_COUNT = {{ copy_source_count }};
 var SCHEDULE_SCROLL_KEY = 'clinic-schedule-scroll:' + window.location.pathname + '?week_offset=' + WEEK_OFFSET;
 
-function toggleBlockCaseDetails(id) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  document.querySelectorAll('[id^="block-cases-"]').forEach(function(other) {
-    if (other.id !== id) other.classList.add('hidden');
-  });
-  el.classList.toggle('hidden');
+var PILL_FLOAT_POS_KEY = 'clinic-pill-float-pos';
+
+function closePillDetailModal() {
+  var panel = document.getElementById('pill-detail-float');
+  if (panel) panel.classList.add('hidden');
+  window._pillDetailEdit = null;
 }
+
+function restorePillFloatPosition(panel) {
+  try {
+    var saved = JSON.parse(sessionStorage.getItem(PILL_FLOAT_POS_KEY) || 'null');
+    if (saved && typeof saved.left === 'number' && typeof saved.top === 'number') {
+      panel.style.left = saved.left + 'px';
+      panel.style.top = saved.top + 'px';
+      panel.style.right = 'auto';
+      return;
+    }
+  } catch (e) {}
+  panel.style.top = '96px';
+  panel.style.right = '24px';
+  panel.style.left = 'auto';
+}
+
+function clampPillFloatPosition(panel, left, top) {
+  var pad = 8;
+  var maxLeft = Math.max(pad, window.innerWidth - panel.offsetWidth - pad);
+  var maxTop = Math.max(pad, window.innerHeight - Math.min(panel.offsetHeight, 120) - pad);
+  return {
+    left: Math.min(Math.max(pad, left), maxLeft),
+    top: Math.min(Math.max(pad, top), maxTop),
+  };
+}
+
+function initPillFloatDrag() {
+  var panel = document.getElementById('pill-detail-float');
+  var handle = document.getElementById('pill-detail-drag');
+  if (!panel || !handle || handle.dataset.dragBound === '1') return;
+  handle.dataset.dragBound = '1';
+  var drag = null;
+
+  handle.addEventListener('pointerdown', function(e) {
+    if (e.button != null && e.button !== 0) return;
+    if (e.target.closest('button')) return;
+    var rect = panel.getBoundingClientRect();
+    panel.style.left = rect.left + 'px';
+    panel.style.top = rect.top + 'px';
+    panel.style.right = 'auto';
+    drag = { dx: e.clientX - rect.left, dy: e.clientY - rect.top };
+    handle.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+
+  handle.addEventListener('pointermove', function(e) {
+    if (!drag) return;
+    var next = clampPillFloatPosition(panel, e.clientX - drag.dx, e.clientY - drag.dy);
+    panel.style.left = next.left + 'px';
+    panel.style.top = next.top + 'px';
+  });
+
+  function endDrag(e) {
+    if (!drag) return;
+    drag = null;
+    try {
+      var rect = panel.getBoundingClientRect();
+      sessionStorage.setItem(PILL_FLOAT_POS_KEY, JSON.stringify({ left: rect.left, top: rect.top }));
+    } catch (err) {}
+  }
+  handle.addEventListener('pointerup', endDrag);
+  handle.addEventListener('pointercancel', endDrag);
+}
+
+function openPillDetailModal(payload) {
+  var kind = payload.kind === 'or' ? 'or' : 'clinic';
+  var count = payload.count || 0;
+  var countLabel = payload.countLabel || (kind === 'or' ? 'Cases' : 'Visits');
+  if (count === 1) {
+    if (/^cases$/i.test(countLabel)) countLabel = 'Case';
+    if (/^visits$/i.test(countLabel)) countLabel = 'Visit';
+  } else {
+    if (/^case$/i.test(countLabel)) countLabel = 'Cases';
+    if (/^visit$/i.test(countLabel)) countLabel = 'Visits';
+  }
+
+  document.getElementById('pill-detail-kicker').textContent =
+    (kind === 'or' ? 'Block OR' : 'Clinic') + (payload.session ? ' · ' + payload.session : '');
+  document.getElementById('pill-detail-title').textContent =
+    payload.title || payload.abbr || payload.pillLabel || 'Schedule';
+  var metaParts = [];
+  if (payload.earliest) metaParts.push('Starts ' + payload.earliest);
+  metaParts.push(count + ' ' + countLabel);
+  document.getElementById('pill-detail-meta').textContent = metaParts.join(' · ');
+
+  var rows = buildPillDetailRows(payload, kind);
+  var body = document.getElementById('pill-detail-body');
+  if (!rows.length) {
+    body.innerHTML = '<p class="text-sm text-slate-500 py-8 text-center">No ' +
+      (kind === 'or' ? 'cases' : 'visits') + ' listed for this pill.</p>';
+  } else {
+    var headLabel = kind === 'or' ? 'Patient / procedure' : 'Patient';
+    body.innerHTML =
+      '<table class="w-full text-sm">' +
+        '<thead><tr class="text-[10px] uppercase tracking-wide text-slate-400 border-b border-slate-100">' +
+          '<th class="text-left font-semibold py-1.5 pl-1 w-16">Time</th>' +
+          '<th class="text-left font-semibold py-1.5">' + headLabel + '</th>' +
+        '</tr></thead><tbody>' +
+      rows.map(function(row) {
+        return (
+          '<tr class="border-b border-slate-50 align-top">' +
+            '<td class="py-2 pl-1 font-mono text-xs font-semibold text-slate-800 whitespace-nowrap">' +
+              escapeHtml(row.time || '—') +
+            '</td>' +
+            '<td class="py-2 pr-1">' +
+              '<div class="font-semibold text-slate-900 leading-snug">' +
+                escapeHtml(row.primary || (kind === 'or' ? 'Case' : 'Visit')) +
+              '</div>' +
+              (row.secondary
+                ? '<div class="text-xs text-slate-500 mt-0.5 leading-snug">' + escapeHtml(row.secondary) + '</div>'
+                : '') +
+            '</td>' +
+          '</tr>'
+        );
+      }).join('') +
+      '</tbody></table>';
+  }
+
+  // Prefer live row count in the header when we actually listed patients.
+  if (rows.length) {
+    var liveLabel = kind === 'or'
+      ? (rows.length === 1 ? 'Case' : 'Cases')
+      : (rows.length === 1 ? 'Visit' : 'Visits');
+    var liveMeta = [];
+    if (payload.earliest || (rows[0] && rows[0].time)) {
+      liveMeta.push('Starts ' + (payload.earliest || rows[0].time));
+    }
+    liveMeta.push(rows.length + ' ' + liveLabel);
+    document.getElementById('pill-detail-meta').textContent = liveMeta.join(' · ');
+  }
+
+  var editBtn = document.getElementById('pill-detail-edit');
+  window._pillDetailEdit = payload.edit || null;
+  if (window._pillDetailEdit) {
+    editBtn.classList.remove('hidden');
+    editBtn.onclick = function() {
+      var edit = window._pillDetailEdit;
+      if (edit) openAssignModal(edit);
+    };
+  } else {
+    editBtn.classList.add('hidden');
+    editBtn.onclick = null;
+  }
+
+  var panel = document.getElementById('pill-detail-float');
+  restorePillFloatPosition(panel);
+  panel.classList.remove('hidden');
+  initPillFloatDrag();
+  // Re-clamp after layout (width/height known)
+  requestAnimationFrame(function() {
+    var rect = panel.getBoundingClientRect();
+    var next = clampPillFloatPosition(panel, rect.left, rect.top);
+    panel.style.left = next.left + 'px';
+    panel.style.top = next.top + 'px';
+    panel.style.right = 'auto';
+  });
+}
+
+function buildPillDetailRows(payload, kind) {
+  var rows = [];
+  var seen = {};
+
+  function pushRow(time, primary, secondary) {
+    var key = (time || '') + '|' + (primary || '').toLowerCase();
+    if (seen[key]) return;
+    seen[key] = true;
+    rows.push({ time: time || '', primary: primary || '', secondary: secondary || '' });
+  }
+
+  if (kind === 'or' && payload.surgeonId && payload.date) {
+    var key = payload.surgeonId + '_' + payload.date;
+    var cases = SCHEDULE_DATA[key] || [];
+    var locationId = payload.locationId;
+    cases.forEach(function(c) {
+      if (locationId && c.location_id && String(c.location_id) !== String(locationId)) {
+        return;
+      }
+      var secondary = [c.procedure || c.procedure_short || '', c.room || c.room_text || '']
+        .filter(Boolean).join(' · ');
+      pushRow(c.start || '', c.patient || 'Case', secondary);
+    });
+  }
+
+  (payload.segments || []).forEach(function(seg) {
+    var label = (seg.label || seg.patient || seg.note || '').trim();
+    if (kind === 'or') {
+      if (rows.length) return; // surgical cases already listed
+      if (label && !/^\d+\s+cases?$/i.test(label)) {
+        pushRow(seg.start || '', label, seg.procedure || seg.note || '');
+        return;
+      }
+      var caseWord = (seg.caseCount === 1) ? 'case' : 'cases';
+      pushRow(seg.start || '', (seg.caseCount || 1) + ' ' + caseWord, label);
+    } else {
+      // Clinic fax visits: time + patient name (never leave the name blank when present)
+      var secondary = '';
+      if (seg.note && seg.note !== label) secondary = seg.note;
+      pushRow(seg.start || '', label || 'Visit', secondary);
+    }
+  });
+
+  rows.sort(function(a, b) { return (a.time || '').localeCompare(b.time || ''); });
+  return rows;
+}
+
+function escapeHtml(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closePillDetailModal();
+});
 
 document.querySelectorAll('.js-preserve-scroll').forEach(function(form) {
   form.addEventListener('submit', function() {

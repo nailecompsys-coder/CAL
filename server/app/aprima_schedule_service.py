@@ -174,6 +174,58 @@ def is_main_office_site(service_site: str, tokens: list[str] | None = None) -> b
     return False
 
 
+def resolve_aprima_facility_name(service_site: str, *, is_surgery: bool | None = None) -> str:
+    """Map Aprima serviceSite onto CAL Clinic / OR schedule facility names.
+
+    Hospital outpatient surgery sites (AHWG-Outpt, …) hang under the matching OR.
+    Clermont / main-office IPA patients show as Surgery One on Clinic / OR.
+    """
+    raw = (service_site or "").strip()
+    if not raw:
+        return raw
+    compact = "".join(ch for ch in raw.upper() if ch.isalnum())
+    upper = raw.upper()
+
+    surgery = is_surgery
+    if surgery is None:
+        surgery = "OUTPT" in upper or compact.startswith("AH")
+
+    # Advent hospital outpatient / OR aliases → CAL hospital locations
+    or_aliases = (
+        (("AHWG", "WGD", "WINTERGARDENOR"), "Winter Garden OR"),
+        (("AHAPOP", "APK", "APOPKAOR"), "Apopka OR"),
+        (("AHALT", "ALTAMONTEOR"), "Altamonte OR"),
+        (("AHMIN", "MINNEOLAOR"), "Minneola OR"),
+        (("AHLM", "LAKEMARYOR"), "Lake Mary OR"),
+    )
+    for needles, name in or_aliases:
+        if any(n in compact for n in needles):
+            return name
+
+    # Explicit OR name already in site text
+    if "WINTER GARDEN OR" in upper:
+        return "Winter Garden OR"
+    if "APOPKA OR" in upper:
+        return "Apopka OR"
+
+    # Surgery One / IPA / main-office clinic patients
+    if is_main_office_site(raw) or not surgery:
+        if "APOPKA" in upper and "CLINIC" in upper:
+            return "Apopka Clinic"
+        if "ALTAMONTE" in upper and "CLINIC" in upper:
+            return "Altamonte Clinic"
+        if "LAKE MARY" in upper and "CLINIC" in upper:
+            return "Lake Mary Clinic"
+        if "MINNEOLA" in upper and "CLINIC" in upper:
+            return "Minneola Clinic"
+        if "WINTER GARDEN CLINIC" in upper:
+            return "Winter Garden Clinic"
+        # Clermont Office / Main Office / IPA → Surgery One
+        return "Surgery One"
+
+    return raw
+
+
 def surgery_appointment_type_tokens() -> list[str]:
     """Aprima ListAppointmentType names that count as scheduled surgery (not office clinic).
 

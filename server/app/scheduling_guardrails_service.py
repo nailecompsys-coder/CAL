@@ -18,6 +18,8 @@ from .models import (
     Location,
     Meeting,
     MeetingAttendee,
+    ORBlockAssignment,
+    ORBlockInstance,
     Surgeon,
     SurgicalBlock,
     SurgicalCase,
@@ -228,6 +230,33 @@ def active_blocks_for_case(db: Session, surgeon_id: int, case_date: date) -> lis
     )
 
 
+def active_or_block_instances_for_case(
+    db: Session,
+    surgeon_id: int,
+    case_date: date,
+    *,
+    or_block_instance_id: int | None = None,
+) -> list[ORBlockInstance]:
+    """Block OR inventory (preferred) for surgeon/day — supersedes legacy SurgicalBlock."""
+    if or_block_instance_id:
+        linked = db.get(ORBlockInstance, or_block_instance_id)
+        if linked and linked.date == case_date and (linked.status or "") != "released":
+            return [linked]
+    rows = (
+        db.query(ORBlockInstance)
+        .options(joinedload(ORBlockInstance.location))
+        .join(ORBlockAssignment, ORBlockAssignment.block_instance_id == ORBlockInstance.id)
+        .filter(
+            ORBlockAssignment.surgeon_id == surgeon_id,
+            ORBlockInstance.date == case_date,
+            ORBlockInstance.status.in_(["open", "assigned"]),
+        )
+        .order_by(ORBlockInstance.start_time, ORBlockInstance.id)
+        .all()
+    )
+    return rows
+
+
 def surgical_case_warning_messages(
     db: Session,
     surgeon_id: int,
@@ -236,13 +265,35 @@ def surgical_case_warning_messages(
     end_time: time | None,
     location_id: int | None = None,
     exclude_case_id: int | None = None,
+    or_block_instance_id: int | None = None,
 ) -> list[str]:
     warnings: list[str] = []
-    blocks = active_blocks_for_case(db, surgeon_id, case_date)
     case_start, case_end = case_range(case_date, start_time, end_time)
-    if blocks:
+
+    or_instances = active_or_block_instances_for_case(
+        db, surgeon_id, case_date, or_block_instance_id=or_block_instance_id
+    )
+    legacy_blocks = active_blocks_for_case(db, surgeon_id, case_date) if not or_instances else []
+
+    if or_instances:
         inside_any = False
-        for block in blocks:
+        for block in or_instances:
+            block_start = datetime.combine(case_date, block.start_time)
+            block_end = datetime.combine(case_date, block.end_time)
+            same_location = not location_id or not block.location_id or block.location_id == location_id
+            if same_location and block_start <= case_start and case_end <= block_end:
+                inside_any = True
+                break
+        if not inside_any:
+            block_labels = ", ".join(
+                f"{b.start_time.strftime('%H:%M')}-{b.end_time.strftime('%H:%M')}"
+                + (f" {b.location.abbreviation}" if b.location and b.location.abbreviation else "")
+                for b in or_instances
+            )
+            warnings.append(f"Outside surgical block time. Available block(s): {block_labels}.")
+    elif legacy_blocks:
+        inside_any = False
+        for block in legacy_blocks:
             block_start, block_end = day_block_range(block, case_date)
             same_location = not location_id or not block.location_id or block.location_id == location_id
             if same_location and block_start <= case_start and case_end <= block_end:
@@ -252,7 +303,7 @@ def surgical_case_warning_messages(
             block_labels = ", ".join(
                 f"{b.start_time.strftime('%H:%M')}-{b.end_time.strftime('%H:%M')}"
                 + (f" {b.location.abbreviation}" if b.location else "")
-                for b in blocks
+                for b in legacy_blocks
             )
             warnings.append(f"Outside surgical block time. Available block(s): {block_labels}.")
     else:
@@ -269,9 +320,14 @@ def surgical_case_warning_messages(
             "date": case_date,
             "start_time": start_time,
             "end_time": end_time,
+            "location_id": location_id,
+            "or_block_instance_id": or_block_instance_id,
         },
     )
     for conflict in conflicts:
+        # Cases belong inside Block OR — overlapping own/same-facility capacity is not a warning.
+        if conflict.rule_id == "OVERLAP_OR_BLOCK":
+            continue
         if conflict.rule_id.startswith("BUFFER_") or conflict.rule_id.startswith("LOCATION_"):
             warnings.append(conflict.message)
             continue
@@ -326,6 +382,7 @@ def scheduler_safe_rows(db: Session, start_date: date, end_date: date, surgeon_i
             case.end_time,
             case.location_id,
             exclude_case_id=case.id,
+            or_block_instance_id=case.or_block_instance_id,
         )
         rows.append({
             "date": case.date,

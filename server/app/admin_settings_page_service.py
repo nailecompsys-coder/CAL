@@ -82,13 +82,79 @@ def reconcile_stale_dayoff_notifications(db: Session, admin_user_id: int | None 
     return removed
 
 
+def _schedule_flag_keys(row: AdminNotification) -> tuple[int | None, int | None]:
+    import json
+
+    try:
+        data = json.loads(row.payload or "{}")
+    except (TypeError, ValueError):
+        return None, None
+    try:
+        block_id = int(data["blockId"]) if data.get("blockId") is not None else None
+    except (TypeError, ValueError):
+        block_id = None
+    try:
+        surgeon_id = int(data["surgeonId"]) if data.get("surgeonId") is not None else None
+    except (TypeError, ValueError):
+        surgeon_id = None
+    return block_id, surgeon_id
+
+
+def reconcile_stale_schedule_flag_notifications(
+    db: Session,
+    admin_user_id: int | None = None,
+) -> int:
+    """Remove Block OR schedule_flag cards once the conflict is no longer real.
+
+    Fixed ⇒ gone from the dashboard (not left as 'read').
+    """
+    from .models import ORBlockAssignment, ORBlockInstance
+    from .or_block_service import ACTIVE_BLOCK_STATUSES, block_assignment_warnings
+
+    q = db.query(AdminNotification).filter(AdminNotification.kind == "schedule_flag")
+    if admin_user_id is not None:
+        q = q.filter(AdminNotification.admin_user_id == admin_user_id)
+    rows = q.all()
+    removed = 0
+    for row in rows:
+        block_id, surgeon_id = _schedule_flag_keys(row)
+        if not block_id or not surgeon_id:
+            db.delete(row)
+            removed += 1
+            continue
+        block = db.get(ORBlockInstance, block_id)
+        if block is None or (block.status or "") not in ACTIVE_BLOCK_STATUSES:
+            db.delete(row)
+            removed += 1
+            continue
+        link = (
+            db.query(ORBlockAssignment)
+            .filter(
+                ORBlockAssignment.block_instance_id == block_id,
+                ORBlockAssignment.surgeon_id == surgeon_id,
+            )
+            .first()
+        )
+        if not link and block.assigned_surgeon_id != surgeon_id:
+            db.delete(row)
+            removed += 1
+            continue
+        if not block_assignment_warnings(db, block, surgeon_id):
+            db.delete(row)
+            removed += 1
+    if removed:
+        db.commit()
+    return removed
+
+
 def recent_admin_notifications(db: Session, admin_user_id: int, limit: int = 20) -> list[AdminNotification]:
     """FIFO: oldest entered first (top-left → right → down). Unread before read.
 
-    Day-off request cards only appear while the underlying DayOff is still pending.
-    Duplicate notify spam (one row per admin fan-out) is collapsed to one card per dayOffId.
+    Day-off / schedule-flag cards only appear while the underlying issue is still open.
+    Duplicate notify spam is collapsed (one card per dayOffId / block+surgeon).
     """
     reconcile_stale_dayoff_notifications(db, admin_user_id)
+    reconcile_stale_schedule_flag_notifications(db, admin_user_id)
     rows = (
         db.query(AdminNotification)
         .filter(AdminNotification.admin_user_id == admin_user_id)
@@ -97,7 +163,7 @@ def recent_admin_notifications(db: Session, admin_user_id: int, limit: int = 20)
             AdminNotification.created_at.asc().nullsfirst(),
             AdminNotification.id.asc(),
         )
-        .limit(max(limit * 5, limit))
+        .limit(max(limit * 5, 40))
         .all()
     )
     rows = sorted(
@@ -109,6 +175,7 @@ def recent_admin_notifications(db: Session, admin_user_id: int, limit: int = 20)
         ),
     )
     seen_dayoff: set[int] = set()
+    seen_flags: set[tuple[int, int]] = set()
     visible: list[AdminNotification] = []
     for row in rows:
         if row.kind == "day_off_request":
@@ -117,6 +184,13 @@ def recent_admin_notifications(db: Session, admin_user_id: int, limit: int = 20)
                 if dayoff_id in seen_dayoff:
                     continue
                 seen_dayoff.add(dayoff_id)
+        elif row.kind == "schedule_flag":
+            block_id, surgeon_id = _schedule_flag_keys(row)
+            if block_id is not None and surgeon_id is not None:
+                key = (block_id, surgeon_id)
+                if key in seen_flags:
+                    continue
+                seen_flags.add(key)
         visible.append(row)
         if len(visible) >= limit:
             break
@@ -125,6 +199,7 @@ def recent_admin_notifications(db: Session, admin_user_id: int, limit: int = 20)
 
 def unread_admin_notification_count(db: Session, admin_user_id: int) -> int:
     reconcile_stale_dayoff_notifications(db, admin_user_id)
+    reconcile_stale_schedule_flag_notifications(db, admin_user_id)
     # Count distinct pending day-off requests + other unread kinds.
     rows = (
         db.query(AdminNotification)
@@ -135,6 +210,7 @@ def unread_admin_notification_count(db: Session, admin_user_id: int) -> int:
         .all()
     )
     seen_dayoff: set[int] = set()
+    seen_flags: set[tuple[int, int]] = set()
     count = 0
     for row in rows:
         if row.kind == "day_off_request":
@@ -143,6 +219,13 @@ def unread_admin_notification_count(db: Session, admin_user_id: int) -> int:
                 if dayoff_id in seen_dayoff:
                     continue
                 seen_dayoff.add(dayoff_id)
+        elif row.kind == "schedule_flag":
+            block_id, surgeon_id = _schedule_flag_keys(row)
+            if block_id is not None and surgeon_id is not None:
+                key = (block_id, surgeon_id)
+                if key in seen_flags:
+                    continue
+                seen_flags.add(key)
         count += 1
     return count
 

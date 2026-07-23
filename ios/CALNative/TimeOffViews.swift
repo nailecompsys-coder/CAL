@@ -130,7 +130,8 @@ struct TimeOffHomeView: View {
           CALNativeTitleMenu(selectedSection: $selectedSection, store: store)
         }
 
-        ToolbarItem(placement: .navigationBarTrailing) {
+        ToolbarItemGroup(placement: .navigationBarTrailing) {
+          NativeAlertsToolbarButton(store: store)
           Button {
             showingRequestSheet = true
           } label: {

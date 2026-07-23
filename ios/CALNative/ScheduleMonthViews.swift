@@ -99,7 +99,6 @@ struct MonthSelectedDayAgenda: View {
   let day: ScheduleDay
   let openDayAction: () -> Void
   let coverAction: (ScheduleAssignment) -> Void
-  var openPatientsAction: (() -> Void)?
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -120,14 +119,12 @@ struct MonthSelectedDayAgenda: View {
 
       ScheduleDailyGlanceCard(day: day, coverAction: coverAction)
 
-      if !day.mySchedule.isEmpty {
+      if !day.mySchedule.filter({ $0.kind != "block_or" }).isEmpty {
         VStack(alignment: .leading, spacing: 4) {
           Text("Clinic / OR")
             .font(.caption2.weight(.semibold))
             .foregroundStyle(.secondary)
-          ForEach(day.mySchedule.prefix(4)) { item in
-            MyScheduleRow(item: item, openPatientsAction: openPatientsAction)
-          }
+          ClinicOrScheduleList(dayId: day.id, items: day.mySchedule)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)

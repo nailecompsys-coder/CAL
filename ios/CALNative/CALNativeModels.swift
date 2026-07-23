@@ -114,9 +114,78 @@ struct DoctorScheduleItem: Identifiable {
   let timeRange: String
   /// Native item type: clinic, surgery, block_or, meeting, …
   let kind: String
+  let location: String
+  let room: String
+  /// Procedure / visit detail (surgery subtitle from API).
+  let procedure: String
+  let notes: String
+  let start: String
+  let end: String
 
   var isBlockOr: Bool { kind == "block_or" }
   var isClinicOrSurgery: Bool { kind == "clinic" || kind == "surgery" }
+
+  init(
+    id: String,
+    period: String,
+    title: String,
+    subtitle: String,
+    timeRange: String,
+    kind: String,
+    location: String = "",
+    room: String = "",
+    procedure: String = "",
+    notes: String = "",
+    start: String = "",
+    end: String = ""
+  ) {
+    self.id = id
+    self.period = period
+    self.title = title
+    self.subtitle = subtitle
+    self.timeRange = timeRange
+    self.kind = kind
+    self.location = location
+    self.room = room
+    self.procedure = procedure
+    self.notes = notes
+    self.start = start
+    self.end = end
+  }
+}
+
+/// Collapsible facility header (Apopka OR, Apopka Clinic, Surgery One — CBO, …).
+struct ClinicOrFacilityGroup: Identifiable {
+  enum CountStyle {
+    case cases
+    case visits
+  }
+
+  let id: String
+  let title: String
+  let timeRange: String
+  let details: [ClinicOrDetailRow]
+  let countStyle: CountStyle
+
+  /// e.g. "Apopka OR - 2 Cases" / "Apopka Clinic - 7 Visits"
+  var headerTitle: String {
+    let count = details.count
+    switch countStyle {
+    case .cases:
+      let noun = count == 1 ? "Case" : "Cases"
+      return "\(title) - \(count) \(noun)"
+    case .visits:
+      let noun = count == 1 ? "Visit" : "Visits"
+      return "\(title) - \(count) \(noun)"
+    }
+  }
+}
+
+struct ClinicOrDetailRow: Identifiable {
+  let id: String
+  let time: String
+  let primary: String
+  let secondary: String
 }
 
 struct ScheduleDay: Identifiable {
@@ -343,9 +412,10 @@ struct DateRange {
       start = calendar.startOfDay(for: date)
       end = calendar.startOfDay(for: date)
     case .week:
-      let interval = calendar.dateInterval(of: .weekOfYear, for: date)
-      start = interval?.start ?? calendar.startOfDay(for: date)
-      end = calendar.date(byAdding: .day, value: 6, to: start) ?? start
+      let weekCalendar = ClinicalCalendar.mondayFirst
+      let interval = weekCalendar.dateInterval(of: .weekOfYear, for: date)
+      start = interval?.start ?? weekCalendar.startOfDay(for: date)
+      end = weekCalendar.date(byAdding: .day, value: 6, to: start) ?? start
     case .month:
       let interval = calendar.dateInterval(of: .month, for: date)
       start = interval?.start ?? calendar.startOfDay(for: date)

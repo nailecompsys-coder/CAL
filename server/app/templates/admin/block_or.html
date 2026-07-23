@@ -95,6 +95,42 @@
         </div>
         {% endif %}
 
+        {% if block_cases %}
+        <div class="space-y-2">
+          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+            Cases · {{ block_cases|length }}
+          </div>
+          <div class="max-h-56 overflow-y-auto space-y-1.5 rounded-lg border border-slate-200 bg-white p-2">
+            {% for case in block_cases %}
+            <div class="rounded-md border border-slate-100 bg-slate-50 px-2.5 py-2">
+              <div class="flex gap-3 items-start">
+                <div class="w-12 flex-shrink-0 font-mono text-xs font-semibold text-slate-800">
+                  {{ case.start_time.strftime('%H:%M') if case.start_time else '—' }}
+                </div>
+                <div class="min-w-0 flex-1">
+                  <div class="text-sm font-semibold text-slate-900 truncate">
+                    {{ case.patient_name or 'Case' }}
+                  </div>
+                  <div class="text-xs text-slate-500 truncate">
+                    {% if case.surgeon %}{{ case.surgeon.initials or case.surgeon.full_name }} · {% endif %}
+                    {{ case.procedure or 'TBD' }}{% if case.room_text %} · {{ case.room_text }}{% endif %}
+                  </div>
+                </div>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          <a href="/admin/clinic-schedule?week_offset={{ week_offset }}"
+             class="block text-center text-xs font-semibold text-teal-700 hover:text-teal-900 py-1">
+            Open in Clinic Schedule
+          </a>
+        </div>
+        {% elif selected_block %}
+        <div class="rounded-lg border border-dashed border-slate-200 px-3 py-3 text-xs text-slate-500 text-center">
+          No linked cases on this block yet.
+        </div>
+        {% endif %}
+
         <div>
           <label class="block text-xs font-semibold text-slate-500 mb-1">Surgeon</label>
           <select name="surgeon_id" id="assign-surgeon" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">

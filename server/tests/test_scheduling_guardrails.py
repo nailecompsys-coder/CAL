@@ -174,6 +174,94 @@ class SchedulingGuardrailsTest(unittest.TestCase):
         finally:
             db.close()
 
+    def test_block_or_cases_do_not_false_warn(self):
+        """Desk-linked Block OR cases must not warn about missing block / own block / grid OR."""
+        from app.models import ORBlockAssignment, ORBlockInstance
+
+        db = self.Session()
+        try:
+            surgeon = self._surgeon(db, "Jorge", "Florin", 1)
+            ap_or = Location(name="Apopka OR", abbreviation="AP-OR", location_type="hospital", is_active=True)
+            ap_cl = Location(name="Apopka Clinic", abbreviation="AP-CL", location_type="clinic", is_active=True)
+            db.add_all([ap_or, ap_cl])
+            db.flush()
+            case_day = date(2026, 7, 27)
+            block = ORBlockInstance(
+                location_id=ap_or.id,
+                date=case_day,
+                session="am",
+                start_time=time(8, 30),
+                end_time=time(11, 15),
+                status="assigned",
+            )
+            db.add(block)
+            db.flush()
+            db.add(ORBlockAssignment(
+                block_instance_id=block.id,
+                surgeon_id=surgeon.id,
+                start_time=time(8, 30),
+                case_count=2,
+            ))
+            db.add_all([
+                ClinicSchedule(
+                    surgeon_id=surgeon.id,
+                    location_id=ap_or.id,
+                    date=case_day,
+                    session="am",
+                    assignment_type="assigned",
+                ),
+                ClinicSchedule(
+                    surgeon_id=surgeon.id,
+                    location_id=ap_cl.id,
+                    date=case_day,
+                    session="pm",
+                    assignment_type="assigned",
+                ),
+                SurgicalCase(
+                    surgeon_id=surgeon.id,
+                    date=case_day,
+                    start_time=time(8, 30),
+                    patient_name="Sheffield, Martin",
+                    procedure="Hernia",
+                    location_id=ap_or.id,
+                    or_block_instance_id=block.id,
+                    status="scheduled",
+                ),
+                SurgicalCase(
+                    surgeon_id=surgeon.id,
+                    date=case_day,
+                    start_time=time(9, 45),
+                    patient_name="Cruz Mejia, Cristina",
+                    procedure="Incisional",
+                    location_id=ap_or.id,
+                    or_block_instance_id=block.id,
+                    status="scheduled",
+                ),
+            ])
+            db.commit()
+
+            for start in (time(8, 30), time(9, 45)):
+                warnings = surgical_case_warning_messages(
+                    db,
+                    surgeon.id,
+                    case_day,
+                    start,
+                    None,
+                    ap_or.id,
+                    or_block_instance_id=block.id,
+                )
+                text = " | ".join(warnings)
+                self.assertNotIn("No surgical block", text)
+                self.assertNotIn("Clinic at Apopka OR", text)
+                self.assertNotIn("OR block at Apopka OR", text)
+
+            rows = scheduler_safe_rows(db, case_day, case_day)
+            self.assertEqual(len(rows), 2)
+            for row in rows:
+                self.assertEqual(row["warnings"], [])
+        finally:
+            db.close()
+
     def _surgeon(self, db, first_name, last_name, sort_order):
         surgeon = Surgeon(
             first_name=first_name,

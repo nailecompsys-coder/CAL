@@ -131,16 +131,22 @@ struct NativeScheduleItemResponse: Decodable {
       return nil
     }
 
+    let procedure = (subtitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    let loc = (location ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    let roomValue = (room ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     return DoctorScheduleItem(
       id: id ?? "\(dateKey)-\(rawId ?? 0)-\(title)",
       period: periodLabel,
       title: displayTitle,
-      subtitle: [location, room, subtitle].compactMap { value in
-        guard let value, !value.isEmpty else { return nil }
-        return value
-      }.joined(separator: " · "),
+      subtitle: [loc, roomValue, procedure].filter { !$0.isEmpty }.joined(separator: " · "),
       timeRange: timeRange,
-      kind: type
+      kind: type,
+      location: loc,
+      room: roomValue,
+      procedure: procedure,
+      notes: (notes ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
+      start: start ?? "",
+      end: end ?? ""
     )
   }
 
@@ -155,7 +161,13 @@ struct NativeScheduleItemResponse: Decodable {
         return value
       }.joined(separator: " · "),
       timeRange: timeRange,
-      kind: "meeting"
+      kind: "meeting",
+      location: (location ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
+      room: (room ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
+      procedure: (subtitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
+      notes: (notes ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
+      start: start ?? "",
+      end: end ?? ""
     )
   }
 

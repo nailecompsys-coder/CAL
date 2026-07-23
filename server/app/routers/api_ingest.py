@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from ..admin_surgical_schedule_service import add_surgical_case, surgery_fields
 from ..database import get_db
-from ..ingest_resolve import resolve_location, resolve_surgeon
+from ..ingest_resolve import resolve_surgeon
 from ..ingest_schedule_service import ingest_surgeon_schedule
 from ..models import Surgeon
 
@@ -146,8 +146,20 @@ def ingest_surgical_cases(
             loc_id = str(item.location_id)
         else:
             from ..ingest_resolve import resolve_or_location
+            from datetime import date as date_cls
 
-            loc = resolve_or_location(db, item.room_text) or resolve_location(db, item.room_text)
+            case_day = None
+            try:
+                case_day = date_cls.fromisoformat(str(item.case_date)[:10])
+            except ValueError:
+                case_day = None
+            loc = resolve_or_location(
+                db,
+                item.room_text,
+                surgeon_id=surgeon.id,
+                day=case_day,
+            )
+            # Never fall back to clinic locations (e.g. HP-CL) for OR cases
             if loc:
                 loc_id = str(loc.id)
 

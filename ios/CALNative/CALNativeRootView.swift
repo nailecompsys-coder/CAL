@@ -27,7 +27,6 @@ struct CALNativeRootView: View {
           await store.loadScheduler(containing: Date())
         } else {
           await store.loadLookahead(containing: Date(), daysAhead: 30)
-          await store.loadPatientSchedule(containing: Date())
         }
       }
     }
@@ -134,9 +133,6 @@ struct ScheduleHomeView: View {
                 statusMessage: store.warningMessage,
                 coverAction: { assignment in
                   coveringAssignment = assignment
-                },
-                openPatientsAction: {
-                  selectedSection = .patients
                 }
               )
               .calReadableColumn(ClinicalLayout.contentColumn)
@@ -192,9 +188,6 @@ struct ScheduleHomeView: View {
                       },
                       coverAction: { assignment in
                         coveringAssignment = assignment
-                      },
-                      openPatientsAction: {
-                        selectedSection = .patients
                       }
                     )
                     .padding(.top, 4)
@@ -218,7 +211,8 @@ struct ScheduleHomeView: View {
           CALNativeTitleMenu(selectedSection: $selectedSection, store: store)
         }
 
-        ToolbarItem(placement: .navigationBarTrailing) {
+        ToolbarItemGroup(placement: .navigationBarTrailing) {
+          NativeAlertsToolbarButton(store: store)
           Button {
             Task {
               await loadCurrentScope()

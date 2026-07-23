@@ -28,11 +28,13 @@ class AprimaScheduleServiceTest(unittest.TestCase):
         self.assertEqual(start, date(2026, 7, 6))
         self.assertEqual(end, date(2026, 7, 10))
 
-    def test_main_office_site_matching(self):
-        self.assertTrue(is_main_office_site("Winter Garden Clinic", ["Winter Garden"]))
-        self.assertTrue(is_main_office_site("MFSA Main Office", ["Main Office"]))
-        self.assertTrue(is_main_office_site("Clermont Office", ["Clermont Office"]))
-        self.assertFalse(is_main_office_site("Advent Lake Mary", ["Winter Garden", "Main Office", "Clermont Office"]))
+    def test_resolve_aprima_facility_maps_hospital_and_ipa(self):
+        from app.aprima_schedule_service import resolve_aprima_facility_name
+
+        self.assertEqual(resolve_aprima_facility_name("AHWG-Outpt", is_surgery=True), "Winter Garden OR")
+        self.assertEqual(resolve_aprima_facility_name("AH APOP-Outpt", is_surgery=True), "Apopka OR")
+        self.assertEqual(resolve_aprima_facility_name("Clermont Office", is_surgery=False), "Surgery One")
+        self.assertEqual(resolve_aprima_facility_name("Winter Garden Clinic", is_surgery=False), "Winter Garden Clinic")
 
     def test_surgery_appointment_type_matching(self):
         self.assertTrue(is_surgery_appointment({"appointmentType": "Surgery"}))

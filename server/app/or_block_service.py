@@ -547,9 +547,18 @@ def block_assignment_warnings(
             "date": block.date,
             "start_time": start,
             "end_time": end,
+            "location_id": block.location_id,
+            "or_block_instance_id": block.id,
+            "block_id": block.id,
         },
     )
     for conflict in conflicts:
+        # Surgical cases belong inside this Block OR — not a conflict for Shannon.
+        if conflict.rule_id == "OVERLAP_SURGERY":
+            continue
+        # Do not flag this block against itself.
+        if conflict.rule_id == "OVERLAP_OR_BLOCK" and conflict.conflicting_entity_id == block.id:
+            continue
         label = {
             "OVERLAP_SURGERY": "Overlaps another surgical case",
             "OVERLAP_CLINIC": "Overlaps clinic schedule",
@@ -667,6 +676,8 @@ def assign_block(
     assigned_start_time: time | None = None,
     case_count: int | None = None,
     assignment_note: str | None = None,
+    *,
+    notify: bool = True,
 ) -> tuple[ORBlockInstance, list[str]]:
     block = db.get(ORBlockInstance, block_id)
     surgeon = db.get(Surgeon, surgeon_id)
@@ -732,13 +743,19 @@ def assign_block(
     db.commit()
     db.refresh(block)
     db.expire(block, ["assignments"])
-    _notify_block_or_surgeon(
-        db,
-        surgeon_id,
-        title="Block OR updated",
-        body=label,
-        block=block,
-    )
+    # Fixed placement ⇒ drop prior admin schedule flags for this surgeon/block.
+    from .push import clear_block_or_schedule_flag_notifications
+
+    if not warnings:
+        clear_block_or_schedule_flag_notifications(db, block.id, surgeon_id)
+    if notify:
+        _notify_block_or_surgeon(
+            db,
+            surgeon_id,
+            title="Block OR updated",
+            body=label,
+            block=block,
+        )
     return block, warnings
 
 
@@ -751,6 +768,8 @@ def update_block_assignment(
     assigned_start_time: time | None = None,
     case_count: int | None = None,
     assignment_note: str | None = None,
+    *,
+    notify: bool = True,
 ) -> tuple[ORBlockInstance, list[str]]:
     block = (
         db.query(ORBlockInstance)
@@ -818,21 +837,28 @@ def update_block_assignment(
     db.commit()
     db.refresh(block)
     db.expire(block, ["assignments"])
+    from .push import clear_block_or_schedule_flag_notifications
+
     if previous_surgeon_id and previous_surgeon_id != surgeon_id:
+        clear_block_or_schedule_flag_notifications(db, block.id, previous_surgeon_id)
+    if not warnings:
+        clear_block_or_schedule_flag_notifications(db, block.id, surgeon_id)
+    if notify:
+        if previous_surgeon_id and previous_surgeon_id != surgeon_id:
+            _notify_block_or_surgeon(
+                db,
+                previous_surgeon_id,
+                title="Block OR removed",
+                body=label,
+                block=block,
+            )
         _notify_block_or_surgeon(
             db,
-            previous_surgeon_id,
-            title="Block OR removed",
+            surgeon_id,
+            title="Block OR updated",
             body=label,
             block=block,
         )
-    _notify_block_or_surgeon(
-        db,
-        surgeon_id,
-        title="Block OR updated",
-        body=label,
-        block=block,
-    )
     return block, warnings
 
 
@@ -904,7 +930,10 @@ def remove_block_assignment(
     db.commit()
     db.refresh(block)
     db.expire(block, ["assignments"])
+    from .push import clear_block_or_schedule_flag_notifications
+
     if previous_surgeon_id:
+        clear_block_or_schedule_flag_notifications(db, block.id, previous_surgeon_id)
         _notify_block_or_surgeon(
             db,
             previous_surgeon_id,
@@ -957,11 +986,14 @@ def clear_block_assignment(db: Session, block_id: int, admin_id: int | None = No
     db.commit()
     db.refresh(block)
     db.expire(block, ["assignments"])
+    from .push import clear_block_or_schedule_flag_notifications
+
     seen: set[int] = set()
     for surgeon_id, label in notify_targets:
         if surgeon_id in seen:
             continue
         seen.add(surgeon_id)
+        clear_block_or_schedule_flag_notifications(db, block.id, surgeon_id)
         _notify_block_or_surgeon(
             db,
             surgeon_id,
@@ -1014,8 +1046,15 @@ def recent_schedule_changes(db: Session, hours: int = 24) -> list[dict]:
         .limit(100)
         .all()
     )
-    return [
-        {
+    out = []
+    for row in rows:
+        payload = {}
+        if row.payload:
+            try:
+                payload = json.loads(row.payload)
+            except (TypeError, ValueError):
+                payload = {}
+        out.append({
             "id": row.id,
             "type": row.event_type,
             "date": row.date.isoformat() if row.date else None,
@@ -1024,9 +1063,12 @@ def recent_schedule_changes(db: Session, hours: int = 24) -> list[dict]:
             "surgeon": row.surgeon.full_name if row.surgeon else "",
             "surgeonInitials": row.surgeon.initials if row.surgeon else "",
             "createdAt": row.created_at.isoformat() if row.created_at else "",
-        }
-        for row in rows
-    ]
+            "href": payload.get("href") or (
+                f"/admin/block-or?block_id={payload['blockId']}" if payload.get("blockId") else "/admin/block-or"
+            ),
+            "blockId": payload.get("blockId"),
+        })
+    return out
 
 
 def scheduler_digest_recipients(db: Session) -> list[AdminUser]:

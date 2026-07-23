@@ -11,9 +11,12 @@ from sqlalchemy.orm import sessionmaker
 from app.admin_clinic_schedule_action_service import assign_clinic, copy_clinic_week
 from app.admin_clinic_schedule_page_service import (
     aggregate_assigned_or_blocks,
+    clinic_fax_overlay_from_notes,
     clinic_schedule_sort_key,
+    merge_or_blocks_into_clinic_grid,
     open_block_day_slots,
     page_data,
+    parse_clinic_fax_visit_segments,
 )
 from app.migrate_location_admin_fields import normalize_office_location_name
 from app.models import Base, ClinicSchedule, Location, Surgeon
@@ -224,6 +227,40 @@ class AdminClinicScheduleTest(unittest.TestCase):
         self.assertEqual(pm["pillLabel"], "WG-OR 1300 1 Case")
         self.assertEqual(pm["assignmentNote"], "late")
 
+    def test_merge_or_block_into_clinic_grid_pill(self):
+        day = date(2026, 7, 27)
+        ap_or = Location(id=8, name="Apopka OR", abbreviation="AP-OR", location_type="hospital", is_active=True)
+        schedule = ClinicSchedule(
+            id=100,
+            surgeon_id=13,
+            location_id=8,
+            date=day,
+            session="am",
+            assignment_type="assigned",
+        )
+        schedule.location = ap_or
+        sched_map = {13: {day: [schedule]}}
+        assigned = {
+            13: {
+                day: [{
+                    "detailId": "agg-13-8-am-2026-07-27",
+                    "surgeonId": 13,
+                    "locationId": 8,
+                    "location": "Apopka OR",
+                    "locationAbbreviation": "AP-OR",
+                    "session": "am",
+                    "assignedStart": "08:30",
+                    "caseCount": 2,
+                    "pillLabel": "AP-OR 0830 2 Cases",
+                    "startCompact": "0830",
+                    "segments": [],
+                }]
+            }
+        }
+        overlays, remaining = merge_or_blocks_into_clinic_grid(sched_map, assigned)
+        self.assertEqual(overlays[100]["pillLabel"], "AP-OR 0830 2 Cases")
+        self.assertEqual(remaining, {})
+
     def test_open_block_day_slots_one_pill_per_or(self):
         hospitals = [
             SimpleNamespace(id=1, abbreviation="AL-OR", name="Altamonte OR", color="#79CDBD"),
@@ -267,13 +304,46 @@ class AdminClinicScheduleTest(unittest.TestCase):
         self.assertIsNone(slots[0]["blockId"])
         mn = slots[2]
         self.assertEqual(mn["locationAbbreviation"], "MN-OR")
-        self.assertEqual(mn["timeLabel"], "7-12")
+        self.assertEqual(mn["timeLabel"], "7:00-12:00")
         self.assertEqual(mn["caseCount"], 0)
         self.assertEqual(mn["blockId"], 50)
         wg = slots[3]
-        self.assertEqual(wg["timeLabel"], "7-12")
+        self.assertEqual(wg["timeLabel"], "7:00-12:00")
         self.assertEqual(wg["caseCount"], 3)
         self.assertEqual(wg["blockId"], 51)
+
+    def test_clinic_fax_notes_include_patient_names(self):
+        notes = (
+            "Desk fax #26 · Kno2 pxrjw4bczqiluegrhlyogzina3puwc2xtvnb6gaa · source=desk · "
+            "13:00 NIEVES, ROSA CAROLINA; 13:10 PINDER, MARJORIE PAMELA; 13:20 CTA; "
+            "13:30 GONZALEZ, LUIS; 13:50 HATTER; 14:00 New AHMGGENSRG CORRALES, MAGDA; "
+            "14:30 ABD EL RAHMAN, GENERAL; 15:00 MARTINEZ CORRALES, MAGDA; 15:20 ZEPEDA"
+        )
+        segments = parse_clinic_fax_visit_segments(notes)
+        self.assertEqual(len(segments), 9)
+        self.assertEqual(segments[0]["start"], "13:00")
+        self.assertEqual(segments[0]["label"], "NIEVES, ROSA CAROLINA")
+        self.assertEqual(segments[2]["label"], "CTA")
+        self.assertEqual(segments[-1]["label"], "ZEPEDA")
+
+        clinic = Location(
+            name="Apopka Clinic",
+            abbreviation="AP-CL",
+            location_type="clinic",
+            is_active=True,
+        )
+        schedule = ClinicSchedule(
+            id=1515,
+            session="pm",
+            assignment_type="assigned",
+            notes=notes,
+            location=clinic,
+            location_id=4,
+        )
+        overlay = clinic_fax_overlay_from_notes(schedule)
+        self.assertIsNotNone(overlay)
+        self.assertEqual(overlay["caseCount"], 9)
+        self.assertEqual(overlay["segments"][0]["label"], "NIEVES, ROSA CAROLINA")
 
     def _surgeon(self, db, first_name, last_name):
         row = Surgeon(

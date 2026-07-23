@@ -142,13 +142,20 @@ def append_aprima_surgery_items(
     by_date: dict,
     day_off_rows: list[DayOff],
 ) -> None:
-    """Aprima EMR Surgery appointments on My Schedule (alongside CAL SurgicalCase)."""
+    """Aprima EMR appointments on Clinic / OR schedule (Surgery One / IPA + hospital OR).
+
+    Surgeries map onto hospital OR facilities (AHWG → Winter Garden OR).
+    Office / IPA visits map onto clinic facilities (Clermont / WG → Winter Garden Clinic).
+    """
     from .aprima_cache_service import patient_appointments_for_api
-    from .aprima_schedule_service import is_surgery_appointment
+    from .aprima_schedule_service import is_main_office_site, is_surgery_appointment
 
     payload = patient_appointments_for_api(db, start_date, end_date, surgeon=surgeon)
     for row in payload.get("appointments") or []:
-        if not is_surgery_appointment(row):
+        is_surg = is_surgery_appointment(row)
+        is_office = is_main_office_site(row.get("serviceSite") or "")
+        # Keep Clinic / OR uniform: hospital surgeries + Surgery One / IPA office visits.
+        if not is_surg and not is_office:
             continue
         day_key = (row.get("date") or "").strip()
         if day_key not in by_date:

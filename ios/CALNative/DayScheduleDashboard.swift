@@ -5,7 +5,6 @@ struct DayScheduleDashboard: View {
   let days: [ScheduleDay]
   let statusMessage: String?
   let coverAction: (ScheduleAssignment) -> Void
-  var openPatientsAction: (() -> Void)?
 
   private var orderedDays: [ScheduleDay] {
     var byId = Dictionary(uniqueKeysWithValues: days.map { ($0.id, $0) })
@@ -60,13 +59,7 @@ struct DayScheduleDashboard: View {
         ScheduleDailyGlanceCard(day: day, coverAction: coverAction)
 
         DashboardSection(title: "Clinic / OR Schedule", tint: ClinicalPalette.cardStrong) {
-          if day.mySchedule.isEmpty {
-            EmptyDashboardRow(title: "No clinic or hospital schedule")
-          } else {
-            ForEach(day.mySchedule) { item in
-              MyScheduleRow(item: item, openPatientsAction: openPatientsAction)
-            }
-          }
+          ClinicOrScheduleList(dayId: day.id, items: day.mySchedule)
         }
 
         DashboardSection(title: "Meetings", tint: ClinicalPalette.meeting) {

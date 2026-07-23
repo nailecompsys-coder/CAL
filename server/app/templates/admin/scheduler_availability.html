@@ -39,6 +39,40 @@
   <section class="clinical-panel clinical-table overflow-hidden">
     <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-3">
       <div>
+        <h2 class="font-extrabold text-sm text-slate-800">Scheduling flags</h2>
+        <p class="text-xs text-slate-500">Desk OR vs day-off / clinic / call — edit in Block OR</p>
+      </div>
+      <span class="text-xs font-bold text-slate-500">{{ schedule_flags|length }}</span>
+    </div>
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="border-b border-slate-100 bg-slate-50 text-left">
+          <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Date</th>
+          <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Surgeon</th>
+          <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Issue</th>
+          <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Edit</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {% for row in schedule_flags %}
+        <tr>
+          <td class="px-4 py-3 font-semibold text-slate-700">{{ row.date or '—' }}</td>
+          <td class="px-4 py-3 text-slate-700"><span class="font-bold">{{ row.surgeonInitials }}</span> {{ row.surgeon }}</td>
+          <td class="px-4 py-3 text-amber-900 text-xs">{{ row.body }}</td>
+          <td class="px-4 py-3">
+            <a class="text-xs font-bold text-blue-700 hover:underline" href="{{ row.href or '/admin/block-or' }}">Edit</a>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="px-4 py-8 text-center text-sm text-slate-400">No Desk scheduling flags in the recent window.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="clinical-panel clinical-table overflow-hidden">
+    <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-3">
+      <div>
         <h2 class="font-extrabold text-sm text-slate-800">Open Block OR</h2>
         <p class="text-xs text-slate-500">Needs a surgeon assignment</p>
       </div>

@@ -10,16 +10,8 @@ struct DayScheduleSections: View {
     .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 6, trailing: 16))
     .listRowBackground(Color.clear)
 
-    Section("My Schedule") {
-      if day.mySchedule.isEmpty {
-        Label("No clinic or hospital schedule", systemImage: "checkmark.circle")
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
-      } else {
-        ForEach(day.mySchedule) { item in
-          MyScheduleRow(item: item)
-        }
-      }
+    Section("Clinic / OR Schedule") {
+      ClinicOrScheduleList(dayId: day.id, items: day.mySchedule)
     }
     .listRowBackground(Color.white.opacity(0.68))
 
@@ -56,26 +48,15 @@ struct MyScheduleRow: View {
   let item: DoctorScheduleItem
   var openPatientsAction: (() -> Void)?
 
-  private var accent: Color {
-    if item.isBlockOr {
-      return ClinicalPalette.blockStrong
-    }
-    return ClinicalPalette.amber
-  }
-
   var body: some View {
     Button {
       openPatientsAction?()
     } label: {
-      HStack(spacing: 10) {
-        RoundedRectangle(cornerRadius: 2, style: .continuous)
-          .fill(accent)
-          .frame(width: 4, height: 28)
-
-        Text(item.period)
-          .font(.caption2.weight(.bold))
-          .foregroundStyle(accent)
-          .frame(width: 28, alignment: .leading)
+      HStack(alignment: .top, spacing: 10) {
+        Text(item.timeRange.isEmpty ? "—" : item.timeRange)
+          .font(ClinicalTypography.monoCaption)
+          .foregroundStyle(ClinicalPalette.ink)
+          .frame(width: 96, alignment: .leading)
 
         VStack(alignment: .leading, spacing: 2) {
           Text(item.title)
@@ -84,17 +65,12 @@ struct MyScheduleRow: View {
           if !item.subtitle.isEmpty {
             Text(item.subtitle)
               .font(.caption2)
-              .foregroundStyle(.secondary)
+              .foregroundStyle(ClinicalPalette.muted)
+              .lineLimit(1)
           }
         }
 
-        Spacer()
-
-        if !item.timeRange.isEmpty {
-          Text(item.timeRange)
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(.secondary)
-        }
+        Spacer(minLength: 0)
 
         if openPatientsAction != nil {
           Image(systemName: "chevron.right")

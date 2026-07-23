@@ -4,44 +4,54 @@ struct CALNativeTabShell: View {
   @ObservedObject var store: NativeScheduleStore
   @State private var selectedSection: CALNativeSection = .schedule
   @State private var sharedFocusDate = Date()
-  @State private var showingAlerts = false
-
-  private var latestUnreadAlert: NativeScheduleAlert? {
-    store.alerts.recent.first { !$0.isRead } ?? store.alerts.recent.first
-  }
 
   var body: some View {
-    ZStack(alignment: .top) {
-      Group {
-        switch selectedSection {
-        case .schedule:
-          ScheduleHomeView(
-            store: store,
-            selectedSection: $selectedSection,
-            selectedDate: $sharedFocusDate
-          )
-        case .timeOff:
-          TimeOffHomeView(store: store, selectedSection: $selectedSection)
-        case .patients:
-          PatientScheduleView(
-            store: store,
-            selectedSection: $selectedSection,
-            selectedDate: $sharedFocusDate
-          )
-        }
-      }
-
-      if store.alerts.unreadCount > 0, let alert = latestUnreadAlert {
-        NativeAlertBanner(alert: alert, unreadCount: store.alerts.unreadCount) {
-          showingAlerts = true
-        }
-        .padding(.horizontal, 14)
-        .padding(.top, 54)
-        .calReadableColumn(ClinicalLayout.contentColumn)
-        .transition(.move(edge: .top).combined(with: .opacity))
+    Group {
+      switch selectedSection {
+      case .schedule:
+        ScheduleHomeView(
+          store: store,
+          selectedSection: $selectedSection,
+          selectedDate: $sharedFocusDate
+        )
+      case .timeOff:
+        TimeOffHomeView(store: store, selectedSection: $selectedSection)
       }
     }
     .tint(ClinicalPalette.teal)
+  }
+}
+
+struct NativeAlertsToolbarButton: View {
+  @ObservedObject var store: NativeScheduleStore
+  @State private var showingAlerts = false
+
+  private var unreadCount: Int { store.alerts.unreadCount }
+
+  var body: some View {
+    Button {
+      showingAlerts = true
+    } label: {
+      ZStack(alignment: .topTrailing) {
+        Image(systemName: unreadCount > 0 ? "bell.badge" : "bell")
+          .font(.body.weight(.semibold))
+          .foregroundStyle(unreadCount > 0 ? ClinicalPalette.teal : ClinicalPalette.ink)
+          .frame(width: 28, height: 28)
+
+        if unreadCount > 0 {
+          Text(unreadCount > 9 ? "9+" : "\(unreadCount)")
+            .font(ClinicalTypography.badge)
+            .foregroundStyle(.white)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(ClinicalPalette.teal, in: Capsule())
+            .offset(x: 8, y: -6)
+        }
+      }
+      .frame(width: 34, height: 34)
+      .contentShape(Rectangle())
+    }
+    .accessibilityLabel(unreadCount > 0 ? "Alerts, \(unreadCount) unread" : "Alerts")
     .sheet(isPresented: $showingAlerts) {
       NativeAlertInbox(alerts: store.alerts.recent, markRead: {
         showingAlerts = false
@@ -50,64 +60,6 @@ struct CALNativeTabShell: View {
         }
       })
     }
-  }
-}
-
-private struct NativeAlertBanner: View {
-  let alert: NativeScheduleAlert
-  let unreadCount: Int
-  let action: () -> Void
-  @ScaledMetric(relativeTo: .title3) private var bellSize: CGFloat = 34
-
-  var body: some View {
-    Button(action: action) {
-      HStack(alignment: .top, spacing: 10) {
-        ZStack(alignment: .topTrailing) {
-          Image(systemName: "bell.badge")
-            .font(.title3.weight(.bold))
-            .foregroundStyle(ClinicalPalette.teal)
-            .frame(width: bellSize, height: bellSize)
-            .background(ClinicalPalette.tealSoft.opacity(0.9), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-          Text("\(unreadCount)")
-            .font(ClinicalTypography.badge)
-            .foregroundStyle(.white)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 2)
-            .background(ClinicalPalette.teal, in: Capsule())
-            .offset(x: 6, y: -5)
-        }
-
-        VStack(alignment: .leading, spacing: 2) {
-          Text(alert.title)
-            .font(ClinicalTypography.rowTitleStrong)
-            .foregroundStyle(ClinicalPalette.ink)
-            .lineLimit(1)
-            .minimumScaleFactor(0.85)
-          Text(alert.body)
-            .font(.caption.weight(.medium))
-            .foregroundStyle(ClinicalPalette.muted)
-            .lineLimit(2)
-          if !alert.displayTime.isEmpty {
-            Text(alert.displayTime)
-              .font(ClinicalTypography.captionEmphasized)
-              .foregroundStyle(ClinicalPalette.teal)
-          }
-        }
-
-        Spacer(minLength: 4)
-
-        Image(systemName: "chevron.right")
-          .font(ClinicalTypography.caption)
-          .foregroundStyle(ClinicalPalette.teal)
-          .padding(.top, 8)
-      }
-      .padding(.horizontal, 12)
-      .padding(.vertical, 10)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .liquidGlassCard(cornerRadius: 18, tint: ClinicalPalette.tealSoft)
-    }
-    .buttonStyle(.plain)
   }
 }
 
@@ -166,7 +118,6 @@ private struct NativeAlertInbox: View {
 enum CALNativeSection: String, CaseIterable, Identifiable {
   case schedule = "Schedule"
   case timeOff = "Time Off"
-  case patients = "Patients"
 
   var id: String { rawValue }
 
@@ -176,8 +127,6 @@ enum CALNativeSection: String, CaseIterable, Identifiable {
       return "calendar"
     case .timeOff:
       return "person.crop.circle.badge.minus"
-    case .patients:
-      return "person.text.rectangle"
     }
   }
 }

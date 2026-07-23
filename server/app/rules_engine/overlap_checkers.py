@@ -77,6 +77,41 @@ def _day_off_row_range(row, day: date) -> tuple[datetime, datetime]:
     return datetime.combine(day, start_t), datetime.combine(day, end_t)
 
 
+def _call_group_location_ids(db: Session, call_group_id: int | None) -> set[int]:
+    if not call_group_id:
+        return set()
+    from ..models import CallGroupLocation
+
+    rows = (
+        db.query(CallGroupLocation.location_id)
+        .filter(CallGroupLocation.call_group_id == call_group_id)
+        .all()
+    )
+    return {row[0] for row in rows if row[0] is not None}
+
+
+def _surgery_at_on_call_facility(
+    *,
+    target_entity: Optional[dict],
+    covered_location_ids: set[int],
+) -> bool:
+    """True when OR/surgery is at a hospital covered by this call group.
+
+    On-call + operating at the same Advent campus is expected, not a conflict.
+    """
+    if not target_entity or not covered_location_ids:
+        return False
+    target_type = (target_entity.get("type") or "").strip().lower()
+    if target_type not in {"or_block", "surgical_case"}:
+        return False
+    location_id = target_entity.get("location_id")
+    try:
+        location_id = int(location_id) if location_id is not None else None
+    except (TypeError, ValueError):
+        return False
+    return location_id in covered_location_ids
+
+
 def check_overlap_call(
     surgeon_id: int,
     start_date: date,
@@ -86,7 +121,10 @@ def check_overlap_call(
     exclude_entity: Optional[tuple[str, int]] = None,
     target_entity: Optional[dict] = None,
 ) -> Iterator[Conflict]:
-    """Effective on-call: original rotation unless covered; covering surgeon is on-call."""
+    """Effective on-call: original rotation unless covered; covering surgeon is on-call.
+
+    Surgery / Block OR at a hospital in the call group is allowed (same-facility call).
+    """
     from ..models import CallCoverage, CallRotation
 
     target = overlap_target(target_entity, start_date, end_date)
@@ -118,6 +156,12 @@ def check_overlap_call(
             r.date,
             call_range,
             {"day_off", "clinic_schedule", "surgical_case", "meeting", "or_block", "call_rotation"},
+        ):
+            continue
+        covered_ids = _call_group_location_ids(db, r.call_group_id)
+        if _surgery_at_on_call_facility(
+            target_entity=target_entity,
+            covered_location_ids=covered_ids,
         ):
             continue
         group = r.call_group.name if r.call_group else "call"
@@ -195,17 +239,32 @@ def check_overlap_clinic(
     target_entity: Optional[dict] = None,
 ) -> Iterator[Conflict]:
     from ..models import ClinicSchedule
+    from sqlalchemy.orm import joinedload
+
     target = overlap_target(target_entity, start_date, end_date)
-    for cs in db.query(ClinicSchedule).filter(
-        ClinicSchedule.surgeon_id == surgeon_id,
-        ClinicSchedule.date >= target.start,
-        ClinicSchedule.date <= target.end,
-    ).all():
+    for cs in (
+        db.query(ClinicSchedule)
+        .options(joinedload(ClinicSchedule.location))
+        .filter(
+            ClinicSchedule.surgeon_id == surgeon_id,
+            ClinicSchedule.date >= target.start,
+            ClinicSchedule.date <= target.end,
+        )
+        .all()
+    ):
         if _exclude_entity(exclude_entity, "clinic_schedule", cs.id):
             continue
         # "Off" clinic markers are not a scheduled clinic commitment.
         if (cs.assignment_type or "").lower() in {"off", "__off__", "day_off"}:
             continue
+        # Clinic/OR grid stores OR days as hospital locations on ClinicSchedule —
+        # that is Block OR capacity, not a clinic conflict.
+        loc = cs.location
+        if loc:
+            abbr = (loc.abbreviation or "").upper()
+            ltype = (loc.location_type or "").lower()
+            if abbr.endswith("-OR") or ltype in {"hospital", "or"}:
+                continue
         if should_skip_time_overlap(
             target,
             cs.date,
@@ -213,7 +272,7 @@ def check_overlap_clinic(
             {"clinic_schedule", "surgical_case", "meeting", "day_off", "or_block", "call_rotation"},
         ):
             continue
-        loc_name = cs.location.name if cs.location else "Clinic"
+        loc_name = loc.name if loc else "Clinic"
         yield Conflict(
             rule_id="OVERLAP_CLINIC",
             surgeon_id=surgeon_id,
@@ -244,6 +303,14 @@ def check_overlap_surgery(
     if exclude_entity and exclude_entity[0] == "surgical_case":
         q = q.filter(SurgicalCase.id != exclude_entity[1])
     for sc in q.all():
+        # Cases under this Block OR are inventory under the block — not a conflict.
+        if target.kind == "or_block":
+            block_id = (target.entity or {}).get("or_block_instance_id") or (target.entity or {}).get("block_id")
+            if block_id and sc.or_block_instance_id and int(block_id) == int(sc.or_block_instance_id):
+                continue
+            loc_id = (target.entity or {}).get("location_id")
+            if loc_id and sc.location_id and int(loc_id) == int(sc.location_id):
+                continue
         if should_skip_time_overlap(
             target,
             sc.date,
@@ -333,6 +400,19 @@ def check_overlap_or_block(
             continue
         if _exclude_entity(exclude_entity, "or_block", instance.id):
             continue
+        # Surgical cases are expected to live inside Block OR capacity.
+        if target.kind == "surgical_case":
+            target_block_id = (target.entity or {}).get("or_block_instance_id")
+            target_loc = (target.entity or {}).get("location_id")
+            if target_block_id and int(target_block_id) == instance.id:
+                continue
+            if not target_loc or target_loc == instance.location_id:
+                continue
+        # Assigning/evaluating this same block is not a conflict with itself.
+        if target.kind == "or_block":
+            target_block_id = (target.entity or {}).get("or_block_instance_id") or (target.entity or {}).get("block_id")
+            if target_block_id and int(target_block_id) == instance.id:
+                continue
         start_t = assignment.start_time or instance.start_time or time(7, 0)
         end_t = instance.end_time or time(17, 0)
         row_range = (

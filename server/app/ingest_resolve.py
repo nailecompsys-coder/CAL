@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
-from .models import Location, Surgeon
+from .models import ClinicSchedule, Location, Surgeon
 
 _CRED_RE = re.compile(
     r"\b(?:dr\.?|md|do|pa\s*-?\s*c|pac|np|aprn|facs|phd|mba|rn|lpn)\b",
@@ -91,7 +92,77 @@ def resolve_surgeon(db: Session, raw: str | None) -> Surgeon | None:
     return None
 
 
+def _is_or_location(loc: Location | None) -> bool:
+    if not loc:
+        return False
+    abbr = (loc.abbreviation or "").upper()
+    ltype = (loc.location_type or "").lower()
+    return abbr.endswith("-OR") or ltype in ("hospital", "or")
+
+
+def _is_clinic_location(loc: Location | None) -> bool:
+    if not loc:
+        return False
+    abbr = (loc.abbreviation or "").upper()
+    ltype = (loc.location_type or "").lower()
+    return abbr.endswith("-CL") or ltype == "clinic"
+
+
+def _loc_by_abbr(db: Session, abbr: str) -> Location | None:
+    return db.query(Location).filter(Location.abbreviation == abbr).first()
+
+
+def schedule_location_for_day(
+    db: Session,
+    surgeon_id: int,
+    day: date,
+    *,
+    want: str,
+    session: str | None = None,
+) -> Location | None:
+    """Prefer the surgeon's Clinic/OR grid for that date (SSOT for facility).
+
+    want: \"or\" | \"clinic\"
+    """
+    rows = (
+        db.query(ClinicSchedule)
+        .options(joinedload(ClinicSchedule.location))
+        .filter(
+            ClinicSchedule.surgeon_id == surgeon_id,
+            ClinicSchedule.date == day,
+            ClinicSchedule.assignment_type == "assigned",
+            ClinicSchedule.location_id.isnot(None),
+        )
+        .all()
+    )
+    if not rows:
+        return None
+
+    sess = (session or "").lower() or None
+
+    def _session_ok(row: ClinicSchedule) -> bool:
+        rs = (row.session or "full").lower()
+        if not sess or sess == "full" or rs == "full":
+            return True
+        return rs == sess
+
+    preferred = [r for r in rows if _session_ok(r)]
+    pool = preferred or rows
+
+    if want == "or":
+        for row in pool:
+            if _is_or_location(row.location):
+                return row.location
+        return None
+
+    for row in pool:
+        if _is_clinic_location(row.location):
+            return row.location
+    return None
+
+
 def resolve_location(db: Session, room_or_site: str | None) -> Location | None:
+    """Legacy fuzzy match — avoid loose tokens like PARK (Health Park ≠ Apopka OR)."""
     if not room_or_site or not str(room_or_site).strip():
         return None
     raw = str(room_or_site).strip().upper()
@@ -99,28 +170,41 @@ def resolve_location(db: Session, room_or_site: str | None) -> Location | None:
     for loc in locs:
         abbr = (loc.abbreviation or "").upper()
         name = (loc.name or "").upper()
-        if abbr and (abbr in raw or raw.startswith(abbr)):
+        if abbr and (abbr == raw or raw.startswith(abbr + " ") or abbr in raw.split()):
             return loc
-        if name and name in raw:
+        if name and name == raw:
             return loc
-    for prefix, hints in (
-        ("APK", ("APK", "ADVENTHEALTH PARK", "PARK")),
-        ("WGD", ("WGD", "WINTER GARDEN", "OSOR")),
-        ("AHMG", ("AHMG", "ADVENTHEALTH MEDICAL GROUP")),
-    ):
-        if any(h in raw for h in hints):
-            for loc in locs:
-                blob = f"{(loc.abbreviation or '').upper()} {(loc.name or '').upper()}"
-                if prefix in blob or any(h in blob for h in hints):
-                    return loc
+    # Explicit Advent room/site aliases only — no substring "PARK"
+    aliases = (
+        ("APK", "AP-OR"),
+        ("APOPKA OR", "AP-OR"),
+        ("APOPKA CLINIC", "AP-CL"),
+        ("WGD", "WG-OR"),
+        ("WINTER GARDEN OR", "WG-OR"),
+        ("WINTER GARDEN CLINIC", "WG-CL"),
+        ("MIN", "MN-OR"),
+        ("MINNEOLA OR", "MN-OR"),
+        ("HEALTH PARK", "HP-CL"),
+        ("HP-CL", "HP-CL"),
+    )
+    for needle, abbr in aliases:
+        if needle in raw or raw.startswith(needle):
+            loc = _loc_by_abbr(db, abbr)
+            if loc:
+                return loc
     return None
 
 
-def resolve_or_location(db: Session, room_or_site: str | None) -> Location | None:
-    """Map Advent OR room codes (APK S03, WGD OSOR, MIN…) to CAL hospital locations."""
+def resolve_or_location(
+    db: Session,
+    room_or_site: str | None,
+    *,
+    surgeon_id: int | None = None,
+    day: date | None = None,
+    session: str | None = None,
+) -> Location | None:
+    """Map Advent OR room codes to CAL hospital locations. Never returns a clinic."""
     raw = str(room_or_site or "").strip().upper()
-    if not raw:
-        return None
     compact = raw.replace(" ", "")
     prefix_map = (
         ("APK", "AP-OR"),
@@ -130,16 +214,48 @@ def resolve_or_location(db: Session, room_or_site: str | None) -> Location | Non
         ("MIN", "MN-OR"),
         ("ALT", "AL-OR"),
     )
-    for needle, abbr in prefix_map:
-        if needle in compact:
-            loc = db.query(Location).filter(Location.abbreviation == abbr).first()
-            if loc:
-                return loc
-    return resolve_location(db, room_or_site)
+    if compact:
+        for needle, abbr in prefix_map:
+            if needle in compact:
+                loc = _loc_by_abbr(db, abbr)
+                if loc and _is_or_location(loc):
+                    return loc
+
+    if surgeon_id and day:
+        scheduled = schedule_location_for_day(
+            db, surgeon_id, day, want="or", session=session or "am"
+        )
+        if scheduled:
+            return scheduled
+
+    if raw:
+        loc = resolve_location(db, room_or_site)
+        if loc and _is_or_location(loc):
+            return loc
+    return None
 
 
-def resolve_clinic_location(db: Session, site_raw: str | None) -> Location | None:
-    """Map Advent clinic site codes to CAL clinic locations."""
+def resolve_clinic_location(
+    db: Session,
+    site_raw: str | None,
+    *,
+    surgeon_id: int | None = None,
+    day: date | None = None,
+    session: str | None = None,
+) -> Location | None:
+    """Map Advent clinic site codes to CAL clinic locations.
+
+    Prefer the surgeon's clinic grid for that date when present — fax site codes
+    like AHMGGENSRG are not reliable facility labels (HP is clinic-only; Florin
+    7/27 clinic is AP-CL, not HP-CL).
+    """
+    if surgeon_id and day:
+        scheduled = schedule_location_for_day(
+            db, surgeon_id, day, want="clinic", session=session or "pm"
+        )
+        if scheduled:
+            return scheduled
+
     raw = str(site_raw or "").strip().upper()
     if not raw:
         return None
@@ -147,9 +263,6 @@ def resolve_clinic_location(db: Session, site_raw: str | None) -> Location | Non
     code_map = (
         ("MGALTGS", "AL-CL"),
         ("MGLKM", "LM-CL"),
-        ("AHMGGEN", "HP-CL"),
-        ("CLMMFLGS", "HP-CL"),
-        ("CLMM", "HP-CL"),
         ("AHWG", "WG-CL"),
         ("WINTERGARDEN", "WG-CL"),
         ("APOPKA", "AP-CL"),
@@ -157,13 +270,17 @@ def resolve_clinic_location(db: Session, site_raw: str | None) -> Location | Non
         ("LAKEMARY", "LM-CL"),
         ("ALTAMONTE", "AL-CL"),
         ("HEALTHPARK", "HP-CL"),
+        # Advent generic group codes — only when no schedule override above
+        ("AHMGGEN", "HP-CL"),
+        ("CLMMFLGS", "HP-CL"),
+        ("CLMM", "HP-CL"),
     )
     for needle, abbr in code_map:
         if needle in compact:
-            loc = db.query(Location).filter(Location.abbreviation == abbr).first()
-            if loc:
+            loc = _loc_by_abbr(db, abbr)
+            if loc and _is_clinic_location(loc):
                 return loc
     loc = resolve_location(db, site_raw)
-    if loc and ((loc.location_type or "").lower() == "clinic" or (loc.abbreviation or "").upper().endswith("-CL")):
+    if loc and _is_clinic_location(loc):
         return loc
-    return loc
+    return None

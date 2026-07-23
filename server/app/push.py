@@ -253,6 +253,36 @@ def clear_dayoff_request_notifications(db: Session, dayoff_id: int) -> int:
     return removed
 
 
+def clear_block_or_schedule_flag_notifications(
+    db: Session,
+    block_id: int | None,
+    surgeon_id: int | None = None,
+) -> int:
+    """Remove Block OR schedule_flag cards once the conflict is gone / replaced."""
+    if not block_id:
+        return 0
+    rows = (
+        db.query(AdminNotification)
+        .filter(AdminNotification.kind == "schedule_flag")
+        .all()
+    )
+    removed = 0
+    for row in rows:
+        try:
+            data = json.loads(row.payload or "{}") if row.payload else {}
+        except (TypeError, ValueError):
+            data = {}
+        if str(data.get("blockId") or "") != str(block_id):
+            continue
+        if surgeon_id is not None and str(data.get("surgeonId") or "") != str(surgeon_id):
+            continue
+        db.delete(row)
+        removed += 1
+    if removed:
+        db.commit()
+    return removed
+
+
 def notify_admins(
     title: str,
     body: str,

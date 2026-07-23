@@ -65,16 +65,19 @@ def conflict_warning_query(db: Session, surgical_case: SurgicalCase, exclude_cas
     return "&warn=" + urllib.parse.quote(" · ".join(conflicts[:8]))
 
 
-def add_surgical_case(db: Session, fields: dict) -> tuple[SurgicalCase, str]:
+def add_surgical_case(
+    db: Session, fields: dict, *, notify: bool = True
+) -> tuple[SurgicalCase, str]:
     surgical_case = SurgicalCase(**fields)
     db.add(surgical_case)
     db.commit()
-    send_push_to_surgeon(
-        surgical_case.surgeon_id,
-        "Schedule updated",
-        f"Surgery added {surgical_case.date.strftime('%b %-d')} {surgical_case.start_time.strftime('%-I:%M %p')}",
-        db,
-    )
+    if notify:
+        send_push_to_surgeon(
+            surgical_case.surgeon_id,
+            "Schedule updated",
+            f"Surgery added {surgical_case.date.strftime('%b %-d')} {surgical_case.start_time.strftime('%-I:%M %p')}",
+            db,
+        )
     return surgical_case, conflict_warning_query(db, surgical_case, exclude_case_id=surgical_case.id)
 
 

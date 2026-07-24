@@ -33,10 +33,18 @@ from .admin import _base, _sort_surgeons_physicians_first
 router = APIRouter(prefix="/admin")
 
 
-def _redirect(week_offset: int, msg: str = "", warn: str = "", block_id: int | None = None) -> RedirectResponse:
+def _redirect(
+    week_offset: int,
+    msg: str = "",
+    warn: str = "",
+    block_id: int | None = None,
+    panel: str = "",
+) -> RedirectResponse:
     target = f"/admin/block-or?week_offset={week_offset}"
     if block_id:
         target += f"&block_id={block_id}"
+    if panel:
+        target += f"&panel={quote(panel)}"
     if msg:
         target += f"&msg={quote(msg)}"
     if warn:
@@ -162,7 +170,7 @@ def block_or_create(
     warn = ""
     if not (room_text or "").strip():
         warn = "Created without OR room — flagged for immediate follow-up."
-    return _redirect(week_offset, msg=f"created:{result['created']}", warn=warn)
+    return _redirect(week_offset, msg=f"created:{result['created']}", warn=warn, panel="create")
 
 
 @router.post("/block-or/copy")
@@ -189,7 +197,12 @@ def block_or_copy(
             admin_id=admin.id,
         )
     except ValueError as exc:
-        return _redirect(week_offset, warn=str(exc), block_id=int(block_raw) if block_raw.isdigit() else None)
+        return _redirect(
+            week_offset,
+            warn=str(exc),
+            block_id=int(block_raw) if block_raw.isdigit() else None,
+            panel="copy",
+        )
     skipped = result.get("skipped") or []
     warn = " · ".join(skipped[:6])
     if len(skipped) > 6:
@@ -199,6 +212,7 @@ def block_or_copy(
         msg=f"copied:{result['created']}",
         warn=warn,
         block_id=int(block_raw) if block_raw.isdigit() else None,
+        panel="copy",
     )
 
 
@@ -229,11 +243,11 @@ def block_or_edit(
             admin_id=admin.id,
         )
     except ValueError as exc:
-        return _redirect(week_offset, warn=str(exc), block_id=block_id)
+        return _redirect(week_offset, warn=str(exc), block_id=block_id, panel="edit")
     warn = ""
     if not (room_text or "").strip():
         warn = "Saved without OR room — flagged for immediate follow-up."
-    return _redirect(week_offset, msg="updated", warn=warn, block_id=block_id)
+    return _redirect(week_offset, msg="updated", warn=warn, block_id=block_id, panel="edit")
 
 
 @router.post("/block-or/{block_id:int}/assign")
@@ -261,9 +275,9 @@ def block_or_assign(
             assignment_note=assignment_note,
         )
     except ValueError as exc:
-        return _redirect(week_offset, warn=str(exc), block_id=block_id)
+        return _redirect(week_offset, warn=str(exc), block_id=block_id, panel="assign")
     warn = "; ".join(warnings[:3]) if warnings else ""
-    return _redirect(week_offset, msg="assigned", warn=warn, block_id=block_id)
+    return _redirect(week_offset, msg="assigned", warn=warn, block_id=block_id, panel="assign")
 
 
 @router.post("/block-or/{block_id:int}/assignments/{assignment_id:int}/update")
@@ -309,8 +323,8 @@ def block_or_remove_assignment(
     try:
         remove_block_assignment(db, block_id, assignment_id, admin_id=admin.id)
     except ValueError as exc:
-        return _redirect(week_offset, warn=str(exc), block_id=block_id)
-    return _redirect(week_offset, msg="assignment-removed", block_id=block_id)
+        return _redirect(week_offset, warn=str(exc), block_id=block_id, panel="assign")
+    return _redirect(week_offset, msg="assignment-removed", block_id=block_id, panel="assign")
 
 
 @router.post("/block-or/{block_id:int}/clear")
@@ -323,8 +337,8 @@ def block_or_clear(
     try:
         clear_block_assignment(db, block_id, admin_id=admin.id)
     except ValueError as exc:
-        return _redirect(week_offset, warn=str(exc), block_id=block_id)
-    return _redirect(week_offset, msg="cleared", block_id=block_id)
+        return _redirect(week_offset, warn=str(exc), block_id=block_id, panel="assign")
+    return _redirect(week_offset, msg="cleared", block_id=block_id, panel="assign")
 
 
 @router.post("/block-or/{block_id:int}/delete")
@@ -337,5 +351,5 @@ def block_or_delete(
     try:
         delete_or_block_instance(db, block_id, admin_id=admin.id)
     except ValueError as exc:
-        return _redirect(week_offset, warn=str(exc), block_id=block_id)
-    return _redirect(week_offset, msg="deleted")
+        return _redirect(week_offset, warn=str(exc), block_id=block_id, panel="remove")
+    return _redirect(week_offset, msg="deleted", panel="create")

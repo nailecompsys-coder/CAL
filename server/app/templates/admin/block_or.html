@@ -15,6 +15,13 @@
 </header>
 
 {% set msg = request.query_params.get('msg') %}
+{% set panel_q = (request.query_params.get('panel') or '').strip().lower() %}
+{% if selected_block %}
+  {% set default_panel = panel_q if panel_q in ['assign','edit','copy','remove'] else 'assign' %}
+{% else %}
+  {% set default_panel = panel_q if panel_q in ['create','copy'] else 'create' %}
+{% endif %}
+
 {% if msg %}
 <div id="block-or-toast" class="fixed top-4 right-4 z-50 max-w-sm bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-green-700 text-sm shadow-lg">
   {% if msg.startswith('created:') %}
@@ -45,344 +52,12 @@
 </div>
 {% endif %}
 
-<div class="p-6 grid gap-5 xl:grid-cols-[360px_1fr]">
-  <div class="space-y-4 h-fit">
-    {% if selected_block %}
-    <div class="space-y-4">
-      <form method="post" action="/admin/block-or/{{ selected_block.id }}/assign" class="clinical-panel p-5 space-y-4 border-2 border-teal-200">
-        <input type="hidden" name="week_offset" value="{{ week_offset }}" />
-        <div class="flex items-start justify-between gap-2">
-          <div>
-            <h2 class="font-extrabold text-slate-800">Assign surgeon</h2>
-            <p class="text-xs text-slate-500 mt-1">
-              {{ selected_block.date.strftime('%a %b %-d, %Y') }}
-              · {{ selected_block.location.abbreviation if selected_block.location else 'OR' }}
-              · {{ selected_block.start_time.strftime('%H:%M') }}-{{ selected_block.end_time.strftime('%H:%M') }}
-              · {% if selected_block.room_text %}Rm {{ selected_block.room_text }}{% else %}<span class="text-amber-600 font-semibold">No room</span>{% endif %}
-            </p>
-          </div>
-          <a href="/admin/block-or?week_offset={{ week_offset }}" class="text-xs font-semibold text-slate-500 hover:text-slate-700">Close</a>
-        </div>
-
-        {% if assignments %}
-        <div class="space-y-2">
-          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide">On this block</div>
-          {% for row in assignments %}
-          <div class="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-            <div class="min-w-0">
-              <div class="font-semibold text-slate-800 truncate">
-                {{ row.surgeon.initials if row.surgeon else '—' }}
-                <span class="font-normal text-slate-500">
-                  · {{ (row.start_time or selected_block.start_time).strftime('%H:%M') }}
-                  · {{ row.case_count or 1 }} case{{ '' if (row.case_count or 1) == 1 else 's' }}
-                </span>
-              </div>
-              {% if row.note %}
-              <div class="text-xs text-slate-500 truncate">{{ row.note }}</div>
-              {% endif %}
-            </div>
-            <button form="remove-assignment-{{ row.id }}" type="submit"
-              class="text-xs font-semibold text-rose-600 hover:text-rose-800 flex-shrink-0"
-              onclick="return confirm('Remove this surgeon from the block?');">
-              Remove
-            </button>
-          </div>
-          {% endfor %}
-          {% if assignments|length > 0 %}
-          <button form="clear-block-{{ selected_block.id }}" type="submit"
-            class="w-full text-xs font-semibold text-amber-700 hover:text-amber-900 py-1.5"
-            onclick="return confirm('Clear all surgeons from this block?');">
-            Clear all assignments
-          </button>
-          {% endif %}
-        </div>
-        {% endif %}
-
-        {% if block_cases %}
-        <div class="space-y-2">
-          <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide">
-            Cases · {{ block_cases|length }}
-          </div>
-          <div class="max-h-56 overflow-y-auto space-y-1.5 rounded-lg border border-slate-200 bg-white p-2">
-            {% for case in block_cases %}
-            <div class="rounded-md border border-slate-100 bg-slate-50 px-2.5 py-2">
-              <div class="flex gap-3 items-start">
-                <div class="w-12 flex-shrink-0 font-mono text-xs font-semibold text-slate-800">
-                  {{ case.start_time.strftime('%H:%M') if case.start_time else '—' }}
-                </div>
-                <div class="min-w-0 flex-1">
-                  <div class="text-sm font-semibold text-slate-900 truncate">
-                    {{ case.patient_name or 'Case' }}
-                  </div>
-                  <div class="text-xs text-slate-500 truncate">
-                    {% if case.surgeon %}{{ case.surgeon.initials or case.surgeon.full_name }} · {% endif %}
-                    {{ case.procedure or 'TBD' }}{% if case.room_text %} · {{ case.room_text }}{% endif %}
-                  </div>
-                </div>
-              </div>
-            </div>
-            {% endfor %}
-          </div>
-          <a href="/admin/clinic-schedule?week_offset={{ week_offset }}"
-             class="block text-center text-xs font-semibold text-teal-700 hover:text-teal-900 py-1">
-            Open in Clinic Schedule
-          </a>
-        </div>
-        {% elif selected_block %}
-        <div class="rounded-lg border border-dashed border-slate-200 px-3 py-3 text-xs text-slate-500 text-center">
-          No linked cases on this block yet.
-        </div>
-        {% endif %}
-
-        <div>
-          <label class="block text-xs font-semibold text-slate-500 mb-1">Surgeon</label>
-          <select name="surgeon_id" id="assign-surgeon" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
-            <option value="">Select surgeon…</option>
-            {% for row in candidates %}
-            <option value="{{ row.surgeon.id }}"
-              data-status="{{ row.status }}"
-              data-availability="{{ row.availability }}"
-              data-warnings="{{ row.warnings|join(' | ') }}">
-              {{ row.surgeon.initials }} — {{ row.surgeon.full_name }}
-              {% if row.status != 'clear' %} ({{ row.availability }}){% endif %}
-            </option>
-            {% endfor %}
-          </select>
-          <p id="assign-warning" class="hidden mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"></p>
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-semibold text-slate-500 mb-1">Start time</label>
-            <input type="time" name="start_time" value="{{ selected_block.start_time.strftime('%H:%M') }}" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-500 mb-1">Cases</label>
-            <input type="number" name="case_count" value="1" min="1" max="20" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
-          </div>
-        </div>
-        <div>
-          <label class="block text-xs font-semibold text-slate-500 mb-1">Assignment note</label>
-          <input name="assignment_note" id="assign-note" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Required when surgeon shows Not Available" />
-          <p class="text-[11px] text-slate-400 mt-1">If availability is not clear, a note is required to override.</p>
-        </div>
-        <button class="w-full bg-teal-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-teal-700">Place on block</button>
-      </form>
-
-      {% for row in assignments %}
-      <form id="remove-assignment-{{ row.id }}" method="post" action="/admin/block-or/{{ selected_block.id }}/assignments/{{ row.id }}/remove" class="hidden">
-        <input type="hidden" name="week_offset" value="{{ week_offset }}" />
-      </form>
-      {% endfor %}
-      <form id="clear-block-{{ selected_block.id }}" method="post" action="/admin/block-or/{{ selected_block.id }}/clear" class="hidden">
-        <input type="hidden" name="week_offset" value="{{ week_offset }}" />
-      </form>
-
-      <form method="post" action="/admin/block-or/{{ selected_block.id }}/edit" class="clinical-panel p-5 space-y-4 border-2 border-blue-200">
-        <input type="hidden" name="week_offset" value="{{ week_offset }}" />
-        <div>
-          <h2 class="font-extrabold text-slate-800">Edit block capacity</h2>
-          <p class="text-xs text-slate-500 mt-1">Adjust facility/times. Assignments stay if start remains inside the window.</p>
-        </div>
-
-        <div>
-          <label class="block text-xs font-semibold text-slate-500 mb-1">Facility</label>
-          <select name="location_id" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
-            {% for location in locations %}
-            <option value="{{ location.id }}" {% if selected_block.location_id == location.id %}selected{% endif %}>
-              {{ location.abbreviation or location.name }} — {{ location.name }}
-            </option>
-            {% endfor %}
-          </select>
-        </div>
-        <div>
-          <label class="block text-xs font-semibold text-slate-500 mb-1">Session</label>
-          <select name="session" id="edit-session" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
-            <option value="am" {% if selected_block.session == 'am' %}selected{% endif %}>AM 07:00-12:00</option>
-            <option value="pm" {% if selected_block.session == 'pm' %}selected{% endif %}>PM 12:00-17:00</option>
-            <option value="both" {% if selected_block.session == 'both' %}selected{% endif %}>Both 07:00-17:00</option>
-            <option value="custom" {% if selected_block.session == 'custom' %}selected{% endif %}>Custom</option>
-          </select>
-        </div>
-        <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-semibold text-slate-500 mb-1">Start time</label>
-            <input type="time" name="start_time" id="edit-start" value="{{ selected_block.start_time.strftime('%H:%M') }}" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-500 mb-1">End time</label>
-            <input type="time" name="end_time" id="edit-end" value="{{ selected_block.end_time.strftime('%H:%M') }}" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
-          </div>
-        </div>
-        <div>
-          <label class="block text-xs font-semibold text-slate-500 mb-1">OR room</label>
-          <input name="room_text" value="{{ selected_block.room_text or '' }}" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm {% if not selected_block.room_text %}border-amber-300{% endif %}" placeholder="e.g. S03" />
-          <p class="text-[11px] text-slate-400 mt-1">Same hospital/time + different rooms = dual capacity. Blank is allowed but flagged.</p>
-        </div>
-        <div>
-          <label class="block text-xs font-semibold text-slate-500 mb-1">Notes</label>
-          <input name="notes" value="{{ selected_block.notes or '' }}" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Internal scheduling note" />
-        </div>
-        <button class="w-full bg-blue-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-blue-700">Save capacity</button>
-      </form>
-
-      <form method="post" action="/admin/block-or/copy" class="clinical-panel p-5 space-y-3 border border-teal-100">
-        <input type="hidden" name="week_offset" value="{{ week_offset }}" />
-        <input type="hidden" name="source_block_id" value="{{ selected_block.id }}" />
-        <div>
-          <h2 class="font-extrabold text-slate-800">Copy this capacity forward</h2>
-          <p class="text-xs text-slate-500 mt-1">Open capacity only (no surgeons). Skips days that already have the same room/time.</p>
-        </div>
-        <div>
-          <label class="block text-xs font-semibold text-slate-500 mb-2">Weekdays</label>
-          <div class="grid grid-cols-7 gap-1">
-            {% for label in ['M','T','W','T','F','S','S'] %}
-            <label class="text-center rounded-lg border border-slate-200 py-1.5 text-xs cursor-pointer has-[:checked]:bg-teal-50 has-[:checked]:border-teal-300">
-              <input type="checkbox" name="weekdays" value="{{ loop.index0 }}" class="sr-only" {% if loop.index0 == selected_block.date.weekday() %}checked{% endif %} />
-              {{ label }}
-            </label>
-            {% endfor %}
-          </div>
-        </div>
-        <div>
-          <label class="block text-xs font-semibold text-slate-500 mb-1">Copy through</label>
-          <input type="date" name="end_date" value="{{ copy_default_end.isoformat() }}" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
-          <p class="text-[11px] text-slate-400 mt-1">Same weekday each week until this date (default ~1 year).</p>
-        </div>
-        <button class="w-full bg-teal-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-teal-800"
-          onclick="return confirm('Copy this open capacity forward on the selected weekdays? Existing conflicts will be skipped.');">
-          Copy capacity forward
-        </button>
-      </form>
-
-      <form method="post" action="/admin/block-or/{{ selected_block.id }}/delete" class="clinical-panel p-4"
-        onsubmit="return confirm('Remove this Block OR for {{ selected_block.date.strftime('%b %-d') }} at {{ selected_block.location.abbreviation if selected_block.location else 'OR' }}?');">
-        <input type="hidden" name="week_offset" value="{{ week_offset }}" />
-        <button type="submit" class="w-full text-sm font-semibold text-rose-600 hover:text-rose-800 py-2">
-          <i class="fa-solid fa-trash mr-1"></i> Remove this block
-        </button>
-        <p class="text-[11px] text-slate-400 mt-1 text-center">Removes this facility/day only. Does not delete the whole series.</p>
-      </form>
-    </div>
-    {% else %}
-    <form method="post" action="/admin/block-or/create" class="clinical-panel p-5 space-y-4">
-      <input type="hidden" name="week_offset" value="{{ week_offset }}" />
-      <div>
-        <h2 class="font-extrabold text-slate-800">Create open block</h2>
-        <p class="text-xs text-slate-500 mt-1">Click a block on the grid to assign surgeons or edit capacity.</p>
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-500 mb-1">Name</label>
-        <input name="name" value="Open Block" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
-      </div>
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="block text-xs font-semibold text-slate-500 mb-1">Start</label>
-          <input type="date" name="start_date" value="{{ week_days[0].isoformat() }}" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
-        </div>
-        <div>
-          <label class="block text-xs font-semibold text-slate-500 mb-1">End</label>
-          <input type="date" name="end_date" value="{{ week_days[6].isoformat() }}" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
-        </div>
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-500 mb-2">Weekdays</label>
-        <div class="grid grid-cols-7 gap-1">
-          {% for label in ['M','T','W','T','F','S','S'] %}
-          <label class="text-center rounded-lg border border-slate-200 py-1.5 text-xs cursor-pointer has-[:checked]:bg-teal-50 has-[:checked]:border-teal-300">
-            <input type="checkbox" name="weekdays" value="{{ loop.index0 }}" class="sr-only" {% if loop.index0 < 5 %}checked{% endif %} />
-            {{ label }}
-          </label>
-          {% endfor %}
-        </div>
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-500 mb-2">OR locations</label>
-        <div class="space-y-1.5 max-h-52 overflow-y-auto">
-          {% for location in locations %}
-          <label class="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm cursor-pointer hover:bg-slate-50 has-[:checked]:bg-blue-50 has-[:checked]:border-blue-300">
-            <input type="checkbox" name="location_ids" value="{{ location.id }}" class="accent-blue-600" />
-            <span class="w-3 h-3 rounded-full" style="background:{{ location.color or '#0ea5e9' }}"></span>
-            <span class="font-semibold text-slate-700">{{ location.abbreviation or location.name }}</span>
-            <span class="text-slate-400 truncate">{{ location.name }}</span>
-          </label>
-          {% else %}
-          <div class="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">No hospital locations are active.</div>
-          {% endfor %}
-        </div>
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-500 mb-1">Session</label>
-        <select name="session" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
-          <option value="am">AM 07:00-12:00</option>
-          <option value="pm">PM 12:00-17:00</option>
-          <option value="both">Both 07:00-17:00</option>
-          <option value="custom">Custom</option>
-        </select>
-      </div>
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="block text-xs font-semibold text-slate-500 mb-1">Start time</label>
-          <input type="time" name="start_time" value="07:00" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
-        </div>
-        <div>
-          <label class="block text-xs font-semibold text-slate-500 mb-1">End time</label>
-          <input type="time" name="end_time" value="12:00" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
-        </div>
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-500 mb-1">OR room</label>
-        <input name="room_text" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="e.g. S03 (blank = flagged)" />
-        <p class="text-[11px] text-slate-400 mt-1">Dual rooms at the same hospital/time need distinct room codes.</p>
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-500 mb-1">Notes</label>
-        <input name="notes" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Internal scheduling note" />
-      </div>
-      <button class="w-full bg-blue-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-blue-700">Create Block OR Time</button>
-    </form>
-
-    <form method="post" action="/admin/block-or/copy" class="clinical-panel p-5 space-y-3 border border-teal-100">
-      <input type="hidden" name="week_offset" value="{{ week_offset }}" />
-      <div>
-        <h2 class="font-extrabold text-slate-800">Copy week capacity forward</h2>
-        <p class="text-xs text-slate-500 mt-1">Copies open capacity from this week (selected weekdays) one-for-one. No surgeon assignments. Skips conflicts.</p>
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-500 mb-2">Weekdays to copy</label>
-        <div class="grid grid-cols-7 gap-1">
-          {% for label in ['M','T','W','T','F','S','S'] %}
-          <label class="text-center rounded-lg border border-slate-200 py-1.5 text-xs cursor-pointer has-[:checked]:bg-teal-50 has-[:checked]:border-teal-300">
-            <input type="checkbox" name="weekdays" value="{{ loop.index0 }}" class="sr-only" {% if loop.index0 < 5 %}checked{% endif %} />
-            {{ label }}
-          </label>
-          {% endfor %}
-        </div>
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-500 mb-1">Hospital filter (optional)</label>
-        <select name="location_id" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
-          <option value="">All hospitals in this week</option>
-          {% for location in locations %}
-          <option value="{{ location.id }}">{{ location.abbreviation or location.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-slate-500 mb-1">Copy through</label>
-        <input type="date" name="end_date" value="{{ copy_default_end.isoformat() }}" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
-      </div>
-      <button class="w-full bg-teal-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-teal-800"
-        onclick="return confirm('Copy open Block OR capacity forward for the selected weekdays? Conflicts will be skipped and listed.');">
-        Copy selected weekdays forward
-      </button>
-    </form>
-    {% endif %}
-  </div>
+<div class="p-6 space-y-5" id="block-or-workspace" data-default-panel="{{ default_panel }}">
 
   <section class="clinical-panel overflow-hidden">
     <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
       <h2 class="font-extrabold text-slate-800">OR week</h2>
-      <span class="text-xs text-slate-400">Click a block to assign or edit</span>
+      <span class="text-xs text-slate-400">Click a block to assign, edit, or copy</span>
     </div>
     <div class="overflow-x-auto">
       <table class="w-full min-w-[980px] border-collapse text-sm">
@@ -408,7 +83,7 @@
             <td class="px-2 py-2 border border-slate-200 align-top bg-white">
               <div class="min-h-[92px] space-y-1.5">
                 {% for block in blocks %}
-                <a href="/admin/block-or?week_offset={{ week_offset }}&block_id={{ block.id }}"
+                <a href="/admin/block-or?week_offset={{ week_offset }}&block_id={{ block.id }}&panel=assign"
                    class="block rounded-lg border px-2 py-1.5 text-xs shadow-sm hover:ring-2 hover:ring-blue-300 transition
                    {% if selected_block and selected_block.id == block.id %}ring-2 ring-blue-500{% endif %}
                    {% if block.status == 'open' %}bg-teal-50 border-teal-200 text-teal-900
@@ -437,6 +112,359 @@
     </div>
   </section>
 
+  <section class="clinical-panel p-4 space-y-4">
+    {% if selected_block %}
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <div class="min-w-0">
+        <p class="text-[11px] font-extrabold uppercase tracking-widest text-slate-400">Selected block</p>
+        <p class="font-extrabold text-slate-800">
+          {{ selected_block.date.strftime('%a %b %-d, %Y') }}
+          · {{ selected_block.location.abbreviation if selected_block.location else 'OR' }}
+          · {{ selected_block.start_time.strftime('%H:%M') }}-{{ selected_block.end_time.strftime('%H:%M') }}
+          · {% if selected_block.room_text %}Rm {{ selected_block.room_text }}{% else %}<span class="text-amber-600">No room</span>{% endif %}
+        </p>
+      </div>
+      <a href="/admin/block-or?week_offset={{ week_offset }}&panel=create" class="text-xs font-semibold text-slate-500 hover:text-slate-700">Clear selection</a>
+    </div>
+
+    <div class="flex flex-wrap gap-2" role="tablist" aria-label="Block actions">
+      <button type="button" class="block-or-pill px-3.5 py-2 rounded-full text-sm font-bold border transition"
+              data-panel="assign">Assign</button>
+      <button type="button" class="block-or-pill px-3.5 py-2 rounded-full text-sm font-bold border transition"
+              data-panel="edit">Edit</button>
+      <button type="button" class="block-or-pill px-3.5 py-2 rounded-full text-sm font-bold border transition"
+              data-panel="copy">Copy</button>
+      <button type="button" class="block-or-pill px-3.5 py-2 rounded-full text-sm font-bold border transition"
+              data-panel="remove">Remove</button>
+    </div>
+
+    <div class="block-or-panel" data-panel="assign">
+      <form method="post" action="/admin/block-or/{{ selected_block.id }}/assign" class="grid gap-4 lg:grid-cols-2">
+        <input type="hidden" name="week_offset" value="{{ week_offset }}" />
+        <div class="space-y-3">
+          {% if assignments %}
+          <div class="space-y-2">
+            <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide">On this block</div>
+            {% for row in assignments %}
+            <div class="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+              <div class="min-w-0">
+                <div class="font-semibold text-slate-800 truncate">
+                  {{ row.surgeon.initials if row.surgeon else '—' }}
+                  <span class="font-normal text-slate-500">
+                    · {{ (row.start_time or selected_block.start_time).strftime('%H:%M') }}
+                    · {{ row.case_count or 1 }} case{{ '' if (row.case_count or 1) == 1 else 's' }}
+                  </span>
+                </div>
+                {% if row.note %}
+                <div class="text-xs text-slate-500 truncate">{{ row.note }}</div>
+                {% endif %}
+              </div>
+              <button form="remove-assignment-{{ row.id }}" type="submit"
+                class="text-xs font-semibold text-rose-600 hover:text-rose-800 flex-shrink-0"
+                onclick="return confirm('Remove this surgeon from the block?');">
+                Remove
+              </button>
+            </div>
+            {% endfor %}
+            {% if assignments|length > 0 %}
+            <button form="clear-block-{{ selected_block.id }}" type="submit"
+              class="text-xs font-semibold text-amber-700 hover:text-amber-900"
+              onclick="return confirm('Clear all surgeons from this block?');">
+              Clear all assignments
+            </button>
+            {% endif %}
+          </div>
+          {% endif %}
+
+          {% if block_cases %}
+          <div class="space-y-2">
+            <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Cases · {{ block_cases|length }}</div>
+            <div class="max-h-48 overflow-y-auto space-y-1.5 rounded-lg border border-slate-200 bg-white p-2">
+              {% for case in block_cases %}
+              <div class="rounded-md border border-slate-100 bg-slate-50 px-2.5 py-2">
+                <div class="flex gap-3 items-start">
+                  <div class="w-12 flex-shrink-0 font-mono text-xs font-semibold text-slate-800">
+                    {{ case.start_time.strftime('%H:%M') if case.start_time else '—' }}
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <div class="text-sm font-semibold text-slate-900 truncate">{{ case.patient_name or 'Case' }}</div>
+                    <div class="text-xs text-slate-500 truncate">
+                      {% if case.surgeon %}{{ case.surgeon.initials or case.surgeon.full_name }} · {% endif %}
+                      {{ case.procedure or 'TBD' }}{% if case.room_text %} · {{ case.room_text }}{% endif %}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          {% else %}
+          <div class="rounded-lg border border-dashed border-slate-200 px-3 py-3 text-xs text-slate-500 text-center">
+            No linked cases on this block yet.
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="space-y-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 mb-1">Surgeon</label>
+            <select name="surgeon_id" id="assign-surgeon" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+              <option value="">Select surgeon…</option>
+              {% for row in candidates %}
+              <option value="{{ row.surgeon.id }}"
+                data-status="{{ row.status }}"
+                data-availability="{{ row.availability }}"
+                data-warnings="{{ row.warnings|join(' | ') }}">
+                {{ row.surgeon.initials }} — {{ row.surgeon.full_name }}
+                {% if row.status != 'clear' %} ({{ row.availability }}){% endif %}
+              </option>
+              {% endfor %}
+            </select>
+            <p id="assign-warning" class="hidden mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"></p>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-semibold text-slate-500 mb-1">Start time</label>
+              <input type="time" name="start_time" value="{{ selected_block.start_time.strftime('%H:%M') }}" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-500 mb-1">Cases</label>
+              <input type="number" name="case_count" value="1" min="1" max="20" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-500 mb-1">Assignment note</label>
+            <input name="assignment_note" id="assign-note" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Required when surgeon shows Not Available" />
+          </div>
+          <button class="w-full bg-teal-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-teal-700">Place on block</button>
+        </div>
+      </form>
+      {% for row in assignments %}
+      <form id="remove-assignment-{{ row.id }}" method="post" action="/admin/block-or/{{ selected_block.id }}/assignments/{{ row.id }}/remove" class="hidden">
+        <input type="hidden" name="week_offset" value="{{ week_offset }}" />
+      </form>
+      {% endfor %}
+      <form id="clear-block-{{ selected_block.id }}" method="post" action="/admin/block-or/{{ selected_block.id }}/clear" class="hidden">
+        <input type="hidden" name="week_offset" value="{{ week_offset }}" />
+      </form>
+    </div>
+
+    <div class="block-or-panel" data-panel="edit">
+      <form method="post" action="/admin/block-or/{{ selected_block.id }}/edit" class="grid gap-3 md:grid-cols-2 lg:grid-cols-3 max-w-5xl">
+        <input type="hidden" name="week_offset" value="{{ week_offset }}" />
+        <div class="md:col-span-2 lg:col-span-3">
+          <h3 class="font-extrabold text-slate-800">Edit capacity</h3>
+          <p class="text-xs text-slate-500 mt-1">Adjust facility/times/room. Assignments stay if start remains inside the window.</p>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Facility</label>
+          <select name="location_id" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+            {% for location in locations %}
+            <option value="{{ location.id }}" {% if selected_block.location_id == location.id %}selected{% endif %}>
+              {{ location.abbreviation or location.name }} — {{ location.name }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Session</label>
+          <select name="session" id="edit-session" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+            <option value="am" {% if selected_block.session == 'am' %}selected{% endif %}>AM 07:00-12:00</option>
+            <option value="pm" {% if selected_block.session == 'pm' %}selected{% endif %}>PM 12:00-17:00</option>
+            <option value="both" {% if selected_block.session == 'both' %}selected{% endif %}>Both 07:00-17:00</option>
+            <option value="custom" {% if selected_block.session == 'custom' %}selected{% endif %}>Custom</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">OR room</label>
+          <input name="room_text" value="{{ selected_block.room_text or '' }}" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm {% if not selected_block.room_text %}border-amber-300{% endif %}" placeholder="e.g. S03" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Start time</label>
+          <input type="time" name="start_time" id="edit-start" value="{{ selected_block.start_time.strftime('%H:%M') }}" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">End time</label>
+          <input type="time" name="end_time" id="edit-end" value="{{ selected_block.end_time.strftime('%H:%M') }}" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Notes</label>
+          <input name="notes" value="{{ selected_block.notes or '' }}" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Internal scheduling note" />
+        </div>
+        <div class="md:col-span-2 lg:col-span-3">
+          <button class="bg-blue-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-blue-700">Save capacity</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="block-or-panel" data-panel="copy">
+      <form method="post" action="/admin/block-or/copy" class="grid gap-3 md:grid-cols-2 max-w-3xl">
+        <input type="hidden" name="week_offset" value="{{ week_offset }}" />
+        <input type="hidden" name="source_block_id" value="{{ selected_block.id }}" />
+        <div class="md:col-span-2">
+          <h3 class="font-extrabold text-slate-800">Copy this capacity forward</h3>
+          <p class="text-xs text-slate-500 mt-1">Open capacity only (no surgeons). Skips days that already have the same room/time.</p>
+        </div>
+        <div class="md:col-span-2">
+          <label class="block text-xs font-semibold text-slate-500 mb-2">Weekdays</label>
+          <div class="grid grid-cols-7 gap-1 max-w-md">
+            {% for label in ['M','T','W','T','F','S','S'] %}
+            <label class="text-center rounded-lg border border-slate-200 py-1.5 text-xs cursor-pointer has-[:checked]:bg-teal-50 has-[:checked]:border-teal-300">
+              <input type="checkbox" name="weekdays" value="{{ loop.index0 }}" class="sr-only" {% if loop.index0 == selected_block.date.weekday() %}checked{% endif %} />
+              {{ label }}
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Copy through</label>
+          <input type="date" name="end_date" value="{{ copy_default_end.isoformat() }}" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        </div>
+        <div class="flex items-end">
+          <button class="w-full bg-teal-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-teal-800"
+            onclick="return confirm('Copy this open capacity forward on the selected weekdays? Existing conflicts will be skipped.');">
+            Copy capacity forward
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <div class="block-or-panel" data-panel="remove">
+      <form method="post" action="/admin/block-or/{{ selected_block.id }}/delete" class="max-w-xl space-y-3"
+        onsubmit="return confirm('Remove this Block OR for {{ selected_block.date.strftime('%b %-d') }} at {{ selected_block.location.abbreviation if selected_block.location else 'OR' }}?');">
+        <input type="hidden" name="week_offset" value="{{ week_offset }}" />
+        <p class="text-sm text-slate-600">Removes this facility/day/room only. Does not delete the whole series.</p>
+        <button type="submit" class="bg-rose-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-rose-700">
+          <i class="fa-solid fa-trash mr-1"></i> Remove this block
+        </button>
+      </form>
+    </div>
+
+    {% else %}
+    <div class="flex flex-wrap gap-2" role="tablist" aria-label="Block OR tools">
+      <button type="button" class="block-or-pill px-3.5 py-2 rounded-full text-sm font-bold border transition"
+              data-panel="create">Create</button>
+      <button type="button" class="block-or-pill px-3.5 py-2 rounded-full text-sm font-bold border transition"
+              data-panel="copy">Copy week</button>
+    </div>
+
+    <div class="block-or-panel" data-panel="create">
+      <form method="post" action="/admin/block-or/create" class="grid gap-3 md:grid-cols-2 lg:grid-cols-3 max-w-5xl">
+        <input type="hidden" name="week_offset" value="{{ week_offset }}" />
+        <div class="md:col-span-2 lg:col-span-3">
+          <h3 class="font-extrabold text-slate-800">Create open block</h3>
+          <p class="text-xs text-slate-500 mt-1">Click a block on the grid above to assign, edit, or copy capacity.</p>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Name</label>
+          <input name="name" value="Open Block" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Start</label>
+          <input type="date" name="start_date" value="{{ week_days[0].isoformat() }}" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">End</label>
+          <input type="date" name="end_date" value="{{ week_days[6].isoformat() }}" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        </div>
+        <div class="md:col-span-2 lg:col-span-3">
+          <label class="block text-xs font-semibold text-slate-500 mb-2">Weekdays</label>
+          <div class="grid grid-cols-7 gap-1 max-w-md">
+            {% for label in ['M','T','W','T','F','S','S'] %}
+            <label class="text-center rounded-lg border border-slate-200 py-1.5 text-xs cursor-pointer has-[:checked]:bg-teal-50 has-[:checked]:border-teal-300">
+              <input type="checkbox" name="weekdays" value="{{ loop.index0 }}" class="sr-only" {% if loop.index0 < 5 %}checked{% endif %} />
+              {{ label }}
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="md:col-span-2 lg:col-span-3">
+          <label class="block text-xs font-semibold text-slate-500 mb-2">OR locations</label>
+          <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-1.5 max-h-40 overflow-y-auto">
+            {% for location in locations %}
+            <label class="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm cursor-pointer hover:bg-slate-50 has-[:checked]:bg-blue-50 has-[:checked]:border-blue-300">
+              <input type="checkbox" name="location_ids" value="{{ location.id }}" class="accent-blue-600" />
+              <span class="w-3 h-3 rounded-full flex-shrink-0" style="background:{{ location.color or '#0ea5e9' }}"></span>
+              <span class="font-semibold text-slate-700 truncate">{{ location.abbreviation or location.name }}</span>
+            </label>
+            {% else %}
+            <div class="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 md:col-span-2">No hospital locations are active.</div>
+            {% endfor %}
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Session</label>
+          <select name="session" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+            <option value="am">AM 07:00-12:00</option>
+            <option value="pm">PM 12:00-17:00</option>
+            <option value="both">Both 07:00-17:00</option>
+            <option value="custom">Custom</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Start time</label>
+          <input type="time" name="start_time" value="07:00" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">End time</label>
+          <input type="time" name="end_time" value="12:00" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">OR room</label>
+          <input name="room_text" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="e.g. S03 (blank = flagged)" />
+        </div>
+        <div class="md:col-span-2">
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Notes</label>
+          <input name="notes" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Internal scheduling note" />
+        </div>
+        <div class="md:col-span-2 lg:col-span-3">
+          <button class="bg-blue-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-blue-700">Create Block OR Time</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="block-or-panel" data-panel="copy">
+      <form method="post" action="/admin/block-or/copy" class="grid gap-3 md:grid-cols-2 max-w-3xl">
+        <input type="hidden" name="week_offset" value="{{ week_offset }}" />
+        <div class="md:col-span-2">
+          <h3 class="font-extrabold text-slate-800">Copy week capacity forward</h3>
+          <p class="text-xs text-slate-500 mt-1">Copies open capacity from this week (selected weekdays) one-for-one. No surgeon assignments. Skips conflicts.</p>
+        </div>
+        <div class="md:col-span-2">
+          <label class="block text-xs font-semibold text-slate-500 mb-2">Weekdays to copy</label>
+          <div class="grid grid-cols-7 gap-1 max-w-md">
+            {% for label in ['M','T','W','T','F','S','S'] %}
+            <label class="text-center rounded-lg border border-slate-200 py-1.5 text-xs cursor-pointer has-[:checked]:bg-teal-50 has-[:checked]:border-teal-300">
+              <input type="checkbox" name="weekdays" value="{{ loop.index0 }}" class="sr-only" {% if loop.index0 < 5 %}checked{% endif %} />
+              {{ label }}
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Hospital filter (optional)</label>
+          <select name="location_id" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+            <option value="">All hospitals in this week</option>
+            {% for location in locations %}
+            <option value="{{ location.id }}">{{ location.abbreviation or location.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Copy through</label>
+          <input type="date" name="end_date" value="{{ copy_default_end.isoformat() }}" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        </div>
+        <div class="md:col-span-2">
+          <button class="bg-teal-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-teal-800"
+            onclick="return confirm('Copy open Block OR capacity forward for the selected weekdays? Conflicts will be skipped and listed.');">
+            Copy selected weekdays forward
+          </button>
+        </div>
+      </form>
+    </div>
+    {% endif %}
+  </section>
+
 </div>
 {% endblock %}
 
@@ -450,6 +478,41 @@
       toast.style.opacity = '0';
       setTimeout(function () { toast.remove(); }, 300);
     }, 2500);
+  }
+
+  var root = document.getElementById('block-or-workspace');
+  var pills = Array.prototype.slice.call(document.querySelectorAll('.block-or-pill'));
+  var panels = Array.prototype.slice.call(document.querySelectorAll('.block-or-panel'));
+
+  function setPanel(name) {
+    pills.forEach(function (pill) {
+      var active = pill.getAttribute('data-panel') === name;
+      pill.classList.toggle('bg-teal-700', active);
+      pill.classList.toggle('text-white', active);
+      pill.classList.toggle('border-teal-700', active);
+      pill.classList.toggle('bg-white', !active);
+      pill.classList.toggle('text-slate-700', !active);
+      pill.classList.toggle('border-slate-200', !active);
+      pill.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+    panels.forEach(function (panel) {
+      panel.classList.toggle('hidden', panel.getAttribute('data-panel') !== name);
+    });
+    try {
+      var url = new URL(window.location.href);
+      url.searchParams.set('panel', name);
+      window.history.replaceState({}, '', url.toString());
+    } catch (e) {}
+  }
+
+  pills.forEach(function (pill) {
+    pill.addEventListener('click', function () {
+      setPanel(pill.getAttribute('data-panel'));
+    });
+  });
+
+  if (root) {
+    setPanel(root.getAttribute('data-default-panel') || 'create');
   }
 
   var session = document.getElementById('edit-session');

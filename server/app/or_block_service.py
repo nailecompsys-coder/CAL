@@ -60,6 +60,13 @@ class BlockORCreateInput:
     owner_surgeon_id: int | None = None
     release_policy_days: int = 3
     notes: str | None = None
+    room_text: str | None = None
+
+
+def normalize_room_text(value: str | None) -> str | None:
+    """Canonical room key for dual-capacity matching (S03 vs s03). Blank → None."""
+    text = " ".join((value or "").strip().split())
+    return text.upper() if text else None
 
 
 def parse_hhmm(value: str, fallback: time | None = None) -> time:
@@ -93,6 +100,11 @@ def block_times_overlap(start_a: time, end_a: time, start_b: time, end_b: time) 
     return start_a < end_b and start_b < end_a
 
 
+def rooms_collide(room_a: str | None, room_b: str | None) -> bool:
+    """True when both blank or both the same room — dual rooms do not collide."""
+    return normalize_room_text(room_a) == normalize_room_text(room_b)
+
+
 def overlapping_or_blocks(
     db: Session,
     *,
@@ -100,8 +112,10 @@ def overlapping_or_blocks(
     location_id: int,
     start_time: time,
     end_time: time,
+    room_text: str | None = None,
     exclude_block_id: int | None = None,
 ) -> list[ORBlockInstance]:
+    """Overlaps at same hospital/day/time that share the same room key (incl. both blank)."""
     q = db.query(ORBlockInstance).filter(
         ORBlockInstance.date == block_date,
         ORBlockInstance.location_id == location_id,
@@ -111,12 +125,14 @@ def overlapping_or_blocks(
     )
     if exclude_block_id is not None:
         q = q.filter(ORBlockInstance.id != exclude_block_id)
-    return q.order_by(ORBlockInstance.start_time, ORBlockInstance.id).all()
+    rows = q.order_by(ORBlockInstance.start_time, ORBlockInstance.id).all()
+    return [row for row in rows if rooms_collide(row.room_text, room_text)]
 
 
 def duplicate_block_messages(db: Session, payload: BlockORCreateInput) -> list[str]:
     weekdays = set(payload.weekdays or [payload.start_date.weekday()])
     location_ids = list(dict.fromkeys(payload.location_ids))
+    room = normalize_room_text(payload.room_text)
     messages = []
     seen = set()
     for block_date in daterange(payload.start_date, payload.end_date):
@@ -131,18 +147,96 @@ def duplicate_block_messages(db: Session, payload: BlockORCreateInput) -> list[s
                 location_id=location_id,
                 start_time=payload.start_time,
                 end_time=payload.end_time,
+                room_text=room,
             )
             for overlap in overlaps:
                 location = overlap.location.name if overlap.location else f"location {location_id}"
-                key = (block_date, location_id, overlap.start_time, overlap.end_time, overlap.status)
+                room_label = normalize_room_text(overlap.room_text) or "no room"
+                key = (
+                    block_date,
+                    location_id,
+                    overlap.start_time,
+                    overlap.end_time,
+                    normalize_room_text(overlap.room_text),
+                    overlap.status,
+                )
                 if key in seen:
                     continue
                 seen.add(key)
                 messages.append(
-                    f"{location} already has {overlap.status.replace('_', ' ')} block time "
+                    f"{location} room {room_label} already has {overlap.status.replace('_', ' ')} block time "
                     f"{block_date.strftime('%a %-m/%-d')} {overlap.start_time.strftime('%H:%M')}-{overlap.end_time.strftime('%H:%M')}."
                 )
     return messages
+
+
+def flag_block_missing_room(db: Session, block: ORBlockInstance, *, admin_id: int | None = None) -> None:
+    """Immediate admin flag when capacity has no room (dual OR inventory needs rooms)."""
+    from .push import notify_admins
+
+    if normalize_room_text(block.room_text):
+        clear_block_missing_room_flag(db, block.id)
+        return
+    location_label = (
+        block.location.abbreviation if block.location and block.location.abbreviation
+        else (block.location.name if block.location else "OR")
+    )
+    body = (
+        f"Missing OR room · {location_label} · {block.date.isoformat()} "
+        f"{block.start_time.strftime('%H:%M')}-{block.end_time.strftime('%H:%M')}. "
+        "Add room (e.g. S03) so dual blocks at the same hospital/time stay distinct."
+    )
+    log_schedule_change(
+        db,
+        event_type="block_missing_room",
+        title="Block OR missing room",
+        body=body,
+        admin_user_id=admin_id,
+        event_date=block.date,
+        payload={
+            "blockId": block.id,
+            "flagType": "missing_room",
+            "href": f"/admin/block-or?block_id={block.id}",
+        },
+    )
+    notify_admins(
+        title="Scheduling flag · Missing OR room",
+        body=body,
+        db=db,
+        kind="schedule_flag",
+        payload={
+            "blockId": block.id,
+            "flagType": "missing_room",
+            "warnings": ["Missing OR room on Block OR capacity"],
+            "href": f"/admin/block-or?block_id={block.id}",
+        },
+        require_schedule_opt_in=True,
+    )
+
+
+def clear_block_missing_room_flag(db: Session, block_id: int) -> None:
+    from .models import AdminNotification
+
+    def _payload_matches_block(payload_text: str) -> bool:
+        return (
+            f'"blockId": {block_id}' in payload_text
+            or f'"blockId":{block_id}' in payload_text
+        )
+
+    events = (
+        db.query(ScheduleChangeEvent)
+        .filter(ScheduleChangeEvent.event_type == "block_missing_room")
+        .all()
+    )
+    for row in events:
+        if _payload_matches_block(row.payload or ""):
+            db.delete(row)
+    for row in db.query(AdminNotification).filter(AdminNotification.kind == "schedule_flag").all():
+        payload_text = row.payload or ""
+        if "missing_room" not in payload_text:
+            continue
+        if _payload_matches_block(payload_text):
+            db.delete(row)
 
 
 def audit_block(db: Session, block_id: int, admin_id: int | None, event_type: str, detail: dict | str | None = None) -> None:
@@ -211,6 +305,7 @@ def create_or_blocks(db: Session, payload: BlockORCreateInput, admin_id: int | N
     db.add(series)
     db.flush()
 
+    room = normalize_room_text(payload.room_text)
     created: list[ORBlockInstance] = []
     for block_date in daterange(payload.start_date, payload.end_date):
         if payload.recurrence == "once" and block_date != payload.start_date:
@@ -225,6 +320,7 @@ def create_or_blocks(db: Session, payload: BlockORCreateInput, admin_id: int | N
                 session=series.session,
                 start_time=payload.start_time,
                 end_time=payload.end_time,
+                room_text=room,
                 status="open",
                 release_deadline=_block_release_deadline(block_date, payload.release_policy_days),
                 notes=series.notes,
@@ -235,7 +331,10 @@ def create_or_blocks(db: Session, payload: BlockORCreateInput, admin_id: int | N
                 "seriesId": series.id,
                 "locationId": location_id,
                 "date": block_date.isoformat(),
+                "room": room,
             })
+            if not room:
+                flag_block_missing_room(db, instance, admin_id=admin_id)
             created.append(instance)
     db.commit()
     return {"series_id": series.id, "created": len(created), "instance_ids": [row.id for row in created]}
@@ -250,6 +349,7 @@ def update_or_block_instance(
     start_time: time | None = None,
     end_time: time | None = None,
     notes: str | None = None,
+    room_text: str | None = None,
     admin_id: int | None = None,
 ) -> ORBlockInstance:
     block = (
@@ -268,6 +368,7 @@ def update_or_block_instance(
     new_session = normalize_session(session) if session is not None else block.session
     new_start = start_time if start_time is not None else block.start_time
     new_end = end_time if end_time is not None else block.end_time
+    new_room = normalize_room_text(room_text) if room_text is not None else normalize_room_text(block.room_text)
     if new_start >= new_end:
         raise ValueError("Start time must be before end time")
 
@@ -283,13 +384,15 @@ def update_or_block_instance(
         location_id=new_location_id,
         start_time=new_start,
         end_time=new_end,
+        room_text=new_room,
         exclude_block_id=block.id,
     )
     if overlaps:
         other = overlaps[0]
         loc_label = other.location.name if other.location else "location"
+        room_label = normalize_room_text(other.room_text) or "no room"
         raise ValueError(
-            f"Duplicate Block OR time: {loc_label} already has "
+            f"Duplicate Block OR time: {loc_label} room {room_label} already has "
             f"{other.status.replace('_', ' ')} block time "
             f"{block.date.strftime('%a %-m/%-d')} "
             f"{other.start_time.strftime('%H:%M')}-{other.end_time.strftime('%H:%M')}."
@@ -307,12 +410,19 @@ def update_or_block_instance(
         "session": block.session,
         "start": block.start_time.strftime("%H:%M"),
         "end": block.end_time.strftime("%H:%M"),
+        "room": block.room_text or "",
         "notes": block.notes or "",
     }
     block.location_id = new_location_id
     block.session = new_session
     block.start_time = new_start
     block.end_time = new_end
+    if room_text is not None:
+        block.room_text = new_room
+        if new_room:
+            clear_block_missing_room_flag(db, block.id)
+        else:
+            flag_block_missing_room(db, block, admin_id=admin_id)
     if notes is not None:
         block.notes = notes.strip() or None
     audit_block(db, block.id, admin_id, "updated", {
@@ -322,6 +432,7 @@ def update_or_block_instance(
             "session": block.session,
             "start": block.start_time.strftime("%H:%M"),
             "end": block.end_time.strftime("%H:%M"),
+            "room": block.room_text or "",
             "notes": block.notes or "",
         },
     })
@@ -332,10 +443,11 @@ def update_or_block_instance(
         body=(
             f"{block.date.isoformat()} "
             f"{block.start_time.strftime('%H:%M')}-{block.end_time.strftime('%H:%M')}"
+            + (f" · {block.room_text}" if block.room_text else " · no room")
         ),
         admin_user_id=admin_id,
         event_date=block.date,
-        payload={"blockId": block.id, "locationId": block.location_id},
+        payload={"blockId": block.id, "locationId": block.location_id, "room": block.room_text},
     )
     db.commit()
     db.refresh(block)
@@ -492,6 +604,7 @@ def serialize_block_instance(block: ORBlockInstance) -> dict:
         "locationId": block.location_id,
         "location": block.location.name if block.location else "",
         "locationAbbreviation": block.location.abbreviation if block.location else "",
+        "room": block.room_text or "",
         "surgeonId": first_assignment["surgeonId"] if first_assignment else block.assigned_surgeon_id,
         "surgeon": first_assignment["surgeon"] if first_assignment else (block.assigned_surgeon.full_name if block.assigned_surgeon else None),
         "surgeonInitials": first_assignment["surgeonInitials"] if first_assignment else _safe_surgeon_label(block.assigned_surgeon),
@@ -501,6 +614,113 @@ def serialize_block_instance(block: ORBlockInstance) -> dict:
         "assignmentLabel": assignment_label,
         "assignments": assignments,
         "notes": block.notes or "",
+    }
+
+
+def copy_or_block_capacity(
+    db: Session,
+    *,
+    source_week_start: date,
+    weekdays: list[int],
+    end_date: date,
+    location_id: int | None = None,
+    source_block_id: int | None = None,
+    admin_id: int | None = None,
+) -> dict:
+    """Copy open capacity forward one weekday → same weekday until end_date.
+
+    Capacity only (no surgeon assignments). Skips target days that already have a
+    colliding room/time at that hospital and returns skip notes.
+    """
+    weekdays_set = {int(day) for day in weekdays}
+    if not weekdays_set:
+        raise ValueError("Select at least one weekday to copy")
+    if end_date < source_week_start:
+        raise ValueError("Copy end date must be on or after the source week")
+
+    source_week_end = source_week_start + timedelta(days=6)
+    q = (
+        db.query(ORBlockInstance)
+        .options(joinedload(ORBlockInstance.location))
+        .filter(
+            ORBlockInstance.date >= source_week_start,
+            ORBlockInstance.date <= source_week_end,
+            ORBlockInstance.status.in_(ACTIVE_BLOCK_STATUSES),
+        )
+    )
+    if location_id is not None:
+        q = q.filter(ORBlockInstance.location_id == int(location_id))
+    if source_block_id is not None:
+        q = q.filter(ORBlockInstance.id == int(source_block_id))
+    sources = [
+        row for row in q.order_by(ORBlockInstance.date, ORBlockInstance.location_id, ORBlockInstance.id).all()
+        if row.date.weekday() in weekdays_set
+    ]
+    if not sources:
+        raise ValueError("No Block OR capacity found for the selected weekdays in this week")
+
+    created = 0
+    skipped: list[str] = []
+    # Horizon starts the week after the source week (do not recreate source days).
+    cursor_week = source_week_start + timedelta(days=7)
+    while cursor_week <= end_date:
+        for source in sources:
+            target_date = cursor_week + timedelta(days=source.date.weekday())
+            if target_date > end_date:
+                continue
+            if target_date.weekday() != source.date.weekday():
+                continue
+            room = normalize_room_text(source.room_text)
+            overlaps = overlapping_or_blocks(
+                db,
+                block_date=target_date,
+                location_id=source.location_id,
+                start_time=source.start_time,
+                end_time=source.end_time,
+                room_text=room,
+            )
+            loc_label = (
+                source.location.abbreviation if source.location and source.location.abbreviation
+                else (source.location.name if source.location else f"location {source.location_id}")
+            )
+            room_label = room or "no room"
+            if overlaps:
+                skipped.append(
+                    f"Skipped {loc_label} room {room_label} {target_date.strftime('%a %-m/%-d')} "
+                    f"{source.start_time.strftime('%H:%M')}-{source.end_time.strftime('%H:%M')} "
+                    "(already has block time)."
+                )
+                continue
+            try:
+                result = create_or_blocks(
+                    db,
+                    BlockORCreateInput(
+                        name=f"Copy · {loc_label}",
+                        start_date=target_date,
+                        end_date=target_date,
+                        weekdays=[target_date.weekday()],
+                        location_ids=[source.location_id],
+                        session=source.session or "custom",
+                        start_time=source.start_time,
+                        end_time=source.end_time,
+                        recurrence="once",
+                        notes=source.notes,
+                        room_text=room,
+                    ),
+                    admin_id=admin_id,
+                )
+                created += int(result.get("created") or 0)
+            except ValueError as exc:
+                skipped.append(
+                    f"Skipped {loc_label} room {room_label} {target_date.strftime('%a %-m/%-d')}: {exc}"
+                )
+        cursor_week += timedelta(days=7)
+
+    return {
+        "created": created,
+        "skipped": skipped,
+        "source_count": len(sources),
+        "end_date": end_date.isoformat(),
     }
 
 

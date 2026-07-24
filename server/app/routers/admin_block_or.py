@@ -1,6 +1,6 @@
 """Admin Block OR workspace routes."""
 
-from datetime import date, time
+from datetime import date, time, timedelta
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Form, Request
@@ -18,6 +18,7 @@ from ..or_block_service import (
     block_workspace,
     candidate_surgeon_rows,
     clear_block_assignment,
+    copy_or_block_capacity,
     create_or_blocks,
     delete_or_block_instance,
     parse_hhmm,
@@ -120,6 +121,7 @@ def block_or_page(
         candidates=candidates,
         assignments=assignments,
         block_cases=block_cases,
+        copy_default_end=week_days[0] + timedelta(days=364),
     ))
 
 
@@ -133,6 +135,7 @@ def block_or_create(
     session: str = Form("am"),
     start_time: str = Form(""),
     end_time: str = Form(""),
+    room_text: str = Form(""),
     notes: str = Form(""),
     week_offset: int = Form(0),
     db: Session = Depends(get_db),
@@ -151,11 +154,52 @@ def block_or_create(
             end_time=parse_hhmm(end_time, default_end),
             recurrence="weekly" if date.fromisoformat(start_date) != date.fromisoformat(end_date) else "once",
             notes=notes,
+            room_text=room_text,
         )
         result = create_or_blocks(db, payload, admin.id)
     except ValueError as exc:
         return _redirect(week_offset, warn=str(exc))
-    return _redirect(week_offset, msg=f"created:{result['created']}")
+    warn = ""
+    if not (room_text or "").strip():
+        warn = "Created without OR room — flagged for immediate follow-up."
+    return _redirect(week_offset, msg=f"created:{result['created']}", warn=warn)
+
+
+@router.post("/block-or/copy")
+def block_or_copy(
+    weekdays: list[int] = Form(...),
+    end_date: str = Form(...),
+    location_id: str = Form(""),
+    source_block_id: str = Form(""),
+    week_offset: int = Form(0),
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    _, week_days = week_days_for_offset(week_offset)
+    loc_raw = (location_id or "").strip()
+    block_raw = (source_block_id or "").strip()
+    try:
+        result = copy_or_block_capacity(
+            db,
+            source_week_start=week_days[0],
+            weekdays=weekdays,
+            end_date=date.fromisoformat(end_date),
+            location_id=int(loc_raw) if loc_raw.isdigit() else None,
+            source_block_id=int(block_raw) if block_raw.isdigit() else None,
+            admin_id=admin.id,
+        )
+    except ValueError as exc:
+        return _redirect(week_offset, warn=str(exc), block_id=int(block_raw) if block_raw.isdigit() else None)
+    skipped = result.get("skipped") or []
+    warn = " · ".join(skipped[:6])
+    if len(skipped) > 6:
+        warn += f" · +{len(skipped) - 6} more skipped"
+    return _redirect(
+        week_offset,
+        msg=f"copied:{result['created']}",
+        warn=warn,
+        block_id=int(block_raw) if block_raw.isdigit() else None,
+    )
 
 
 @router.post("/block-or/{block_id:int}/edit")
@@ -165,6 +209,7 @@ def block_or_edit(
     session: str = Form("am"),
     start_time: str = Form(...),
     end_time: str = Form(...),
+    room_text: str = Form(""),
     notes: str = Form(""),
     week_offset: int = Form(0),
     db: Session = Depends(get_db),
@@ -180,11 +225,15 @@ def block_or_edit(
             start_time=parse_hhmm(start_time, default_start),
             end_time=parse_hhmm(end_time, default_end),
             notes=notes,
+            room_text=room_text,
             admin_id=admin.id,
         )
     except ValueError as exc:
         return _redirect(week_offset, warn=str(exc), block_id=block_id)
-    return _redirect(week_offset, msg="updated", block_id=block_id)
+    warn = ""
+    if not (room_text or "").strip():
+        warn = "Saved without OR room — flagged for immediate follow-up."
+    return _redirect(week_offset, msg="updated", warn=warn, block_id=block_id)
 
 
 @router.post("/block-or/{block_id:int}/assign")

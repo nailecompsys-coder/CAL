@@ -26,6 +26,7 @@ from app.or_block_service import (
     assign_block,
     block_assignment_warnings,
     clear_block_assignment,
+    copy_or_block_capacity,
     create_or_blocks,
     delete_or_block_instance,
     remove_block_assignment,
@@ -87,6 +88,7 @@ class ORBlockServiceTest(unittest.TestCase):
                 start_time=time(7, 0),
                 end_time=time(12, 0),
                 recurrence="once",
+                room_text="S03",
             )
             create_or_blocks(db, payload)
 
@@ -95,6 +97,73 @@ class ORBlockServiceTest(unittest.TestCase):
 
             self.assertIn("Duplicate Block OR time", str(ctx.exception))
             self.assertEqual(db.query(ORBlockInstance).count(), 1)
+        finally:
+            db.close()
+
+    def test_dual_rooms_same_hospital_day_time_are_allowed(self):
+        db = self.Session()
+        try:
+            hospital = self._location(db, "Advent Winter Garden", "WG-OR")
+            monday = date(2026, 8, 3)
+            base = dict(
+                start_date=monday,
+                end_date=monday,
+                weekdays=[monday.weekday()],
+                location_ids=[hospital.id],
+                session="am",
+                start_time=time(7, 0),
+                end_time=time(12, 0),
+                recurrence="once",
+            )
+            create_or_blocks(db, BlockORCreateInput(name="Dr A room", room_text="S03", **base))
+            create_or_blocks(db, BlockORCreateInput(name="Dr B room", room_text="S08", **base))
+            rows = db.query(ORBlockInstance).order_by(ORBlockInstance.room_text).all()
+            self.assertEqual(len(rows), 2)
+            self.assertEqual({row.room_text for row in rows}, {"S03", "S08"})
+        finally:
+            db.close()
+
+    def test_copy_capacity_forward_skips_conflicts(self):
+        db = self.Session()
+        try:
+            hospital = self._location(db, "Advent Winter Garden", "WG-OR")
+            monday = date(2026, 8, 3)
+            create_or_blocks(db, BlockORCreateInput(
+                name="WG Mon",
+                start_date=monday,
+                end_date=monday,
+                weekdays=[0],
+                location_ids=[hospital.id],
+                session="am",
+                start_time=time(7, 0),
+                end_time=time(12, 0),
+                recurrence="once",
+                room_text="S03",
+            ))
+            # Pre-seed next Monday conflict
+            next_mon = monday + timedelta(days=7)
+            create_or_blocks(db, BlockORCreateInput(
+                name="Existing",
+                start_date=next_mon,
+                end_date=next_mon,
+                weekdays=[0],
+                location_ids=[hospital.id],
+                session="am",
+                start_time=time(7, 0),
+                end_time=time(12, 0),
+                recurrence="once",
+                room_text="S03",
+            ))
+            result = copy_or_block_capacity(
+                db,
+                source_week_start=monday,
+                weekdays=[0],
+                end_date=monday + timedelta(days=21),
+                location_id=hospital.id,
+            )
+            self.assertEqual(result["created"], 2)  # +14 and +21; +7 skipped
+            self.assertTrue(any("Skipped" in note for note in result["skipped"]))
+            self.assertEqual(db.query(ORBlockInstance).count(), 4)
         finally:
             db.close()
 

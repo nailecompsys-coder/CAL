@@ -150,6 +150,10 @@ def run_migration():
             ADD COLUMN IF NOT EXISTS assignment_note TEXT
         """))
         conn.execute(text("""
+            ALTER TABLE or_block_instances
+            ADD COLUMN IF NOT EXISTS room_text VARCHAR(64)
+        """))
+        conn.execute(text("""
             CREATE TABLE IF NOT EXISTS or_block_assignments (
                 id SERIAL PRIMARY KEY,
                 block_instance_id INTEGER NOT NULL REFERENCES or_block_instances(id) ON DELETE CASCADE,

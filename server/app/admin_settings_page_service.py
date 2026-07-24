@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from sqlalchemy import case
 from sqlalchemy.orm import Session
 
@@ -117,13 +119,27 @@ def reconcile_stale_schedule_flag_notifications(
     rows = q.all()
     removed = 0
     for row in rows:
+        try:
+            payload = json.loads(row.payload or "{}") if row.payload else {}
+        except (TypeError, ValueError):
+            payload = {}
         block_id, surgeon_id = _schedule_flag_keys(row)
-        if not block_id or not surgeon_id:
+        if not block_id:
             db.delete(row)
             removed += 1
             continue
         block = db.get(ORBlockInstance, block_id)
         if block is None or (block.status or "") not in ACTIVE_BLOCK_STATUSES:
+            db.delete(row)
+            removed += 1
+            continue
+        # Dual-room inventory: blank room flags clear once room is filled.
+        if (payload.get("flagType") or "") == "missing_room":
+            if (block.room_text or "").strip():
+                db.delete(row)
+                removed += 1
+            continue
+        if not surgeon_id:
             db.delete(row)
             removed += 1
             continue

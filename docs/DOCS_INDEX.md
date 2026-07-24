@@ -33,6 +33,7 @@ Do not create new long-lived docs in retired folders under `/Users/donnaile/dev/
 | `CAL_AGENT_GUARDRAILS.md` | Anti-drift / anti-hallucination rules for all agents |
 | `SCHEDULER_AND_ANDROID_EXECUTION_PLAN.md` | Scheduler portal/mobile + Android-iOS parity build plan |
 | `BLOCK_OR_SCHEDULER_AUDIT.md` | Block OR logic/screen audit — intent vs Codex code, bugs, continue path |
+| `BLOCK_OR_DUAL_CAPACITY.md` | Dual rooms / dual docs / blank-room flags / portal capacity copy |
 | `MOBILE_BLOCK_OR_CREATE_PLAN.md` | Scheduler mobile create open blocks — **plan only, hold for Don verify** |
 | `LOCAL_DEV_REAL_DATA.md` | Load real dump into Mac-dev; portal + DEBUG sim share localhost dataset |
 | `APRIMA_HOURLY_SYNC.md` | Hourly Aprima → CAL cache sync, portal soft-refresh, mobile refresh |

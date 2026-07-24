@@ -179,6 +179,7 @@ class NativeSchedulerContractTest(unittest.TestCase):
                     location_id=hospital.id,
                     session="am",
                     notes="mobile create",
+                    room_text="S03",
                 ),
                 db=db,
                 admin=admin,
@@ -188,6 +189,21 @@ class NativeSchedulerContractTest(unittest.TestCase):
             block_id = created["blockIds"][0]
             self.assertEqual(created["blocks"][0]["status"], "open")
             self.assertEqual(created["blocks"][0]["locationAbbreviation"], "WG")
+            self.assertEqual(created["blocks"][0]["room"], "S03")
+
+            # Dual capacity: same hospital/day/time, different room is allowed.
+            dual = scheduler_create_block(
+                SchedulerCreateBlockBody(
+                    date=block_day.isoformat(),
+                    location_id=hospital.id,
+                    session="am",
+                    room_text="S08",
+                ),
+                db=db,
+                admin=admin,
+            )
+            self.assertTrue(dual["ok"])
+            self.assertEqual(dual["blocks"][0]["room"], "S08")
 
             with self.assertRaises(HTTPException) as duplicate_exc:
                 scheduler_create_block(
@@ -195,6 +211,7 @@ class NativeSchedulerContractTest(unittest.TestCase):
                         date=block_day.isoformat(),
                         location_id=hospital.id,
                         session="am",
+                        room_text="S03",
                     ),
                     db=db,
                     admin=admin,
@@ -203,7 +220,13 @@ class NativeSchedulerContractTest(unittest.TestCase):
 
             updated = scheduler_update_block(
                 block_id,
-                SchedulerUpdateBlockBody(session="pm", start_time="12:00", end_time="17:00", notes="moved pm"),
+                SchedulerUpdateBlockBody(
+                    session="pm",
+                    start_time="12:00",
+                    end_time="17:00",
+                    notes="moved pm",
+                    room_text="S03",
+                ),
                 db=db,
                 admin=admin,
             )
@@ -211,10 +234,14 @@ class NativeSchedulerContractTest(unittest.TestCase):
             self.assertEqual(updated["block"]["session"], "pm")
             self.assertEqual(updated["block"]["start"], "12:00")
             self.assertEqual(updated["block"]["notes"], "moved pm")
+            self.assertEqual(updated["block"]["room"], "S03")
 
+            dual_id = dual["blockIds"][0]
             deleted = scheduler_delete_block(block_id, db=db, admin=admin)
             self.assertTrue(deleted["ok"])
             self.assertTrue(deleted["deleted"])
+            deleted_dual = scheduler_delete_block(dual_id, db=db, admin=admin)
+            self.assertTrue(deleted_dual["ok"])
             home = scheduler_home(block_day.isoformat(), block_day.isoformat(), db=db, admin=admin)
             self.assertEqual(home["blocks"], [])
         finally:

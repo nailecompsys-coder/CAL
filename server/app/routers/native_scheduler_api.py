@@ -63,6 +63,7 @@ class SchedulerCreateBlockBody(BaseModel):
     start_time: str | None = None
     end_time: str | None = None
     notes: str = ""
+    room_text: str | None = None
 
 
 class SchedulerUpdateBlockBody(BaseModel):
@@ -71,6 +72,7 @@ class SchedulerUpdateBlockBody(BaseModel):
     start_time: str | None = None
     end_time: str | None = None
     notes: str | None = None
+    room_text: str | None = None
 
 
 def _hash_otp(code: str) -> str:
@@ -265,6 +267,7 @@ def scheduler_create_block(
                 end_time=end_t,
                 recurrence="once",
                 notes=body.notes or "",
+                room_text=body.room_text,
             ),
             admin_id=admin.id,
         )
@@ -320,6 +323,7 @@ def scheduler_update_block(
             start_time=start_t,
             end_time=end_t,
             notes=body.notes,
+            room_text=body.room_text,
             admin_id=admin.id,
         )
     except ValueError as exc:

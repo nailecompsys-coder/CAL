@@ -513,6 +513,9 @@ class ORBlockInstance(Base):
     session = Column(String(16), default="am", server_default="am")
     start_time = Column(Time, nullable=False)
     end_time = Column(Time, nullable=False)
+    # OR room within the hospital (e.g. S03 / S08). Blank allowed but flagged immediately.
+    # Same day+location+overlapping time+same room (or both blank) = duplicate; different rooms = dual capacity OK.
+    room_text = Column(String(64))
     status = Column(String(24), default="open", server_default="open")  # open | assigned
     assigned_surgeon_id = Column(Integer, ForeignKey("surgeons.id"))
     assigned_by_admin_id = Column(Integer, ForeignKey("admin_users.id"))

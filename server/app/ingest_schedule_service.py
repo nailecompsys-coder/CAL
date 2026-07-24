@@ -94,9 +94,12 @@ def _same_day_facility_block(
     *,
     block_date: date,
     location_id: int,
+    room_text: str | None = None,
 ) -> ORBlockInstance | None:
-    """Prefer an existing Block OR on that date/facility (inventory set months out)."""
-    return (
+    """Prefer existing Block OR on that date/facility/room (dual rooms stay separate)."""
+    from .or_block_service import normalize_room_text, rooms_collide
+
+    rows = (
         db.query(ORBlockInstance)
         .filter(
             ORBlockInstance.date == block_date,
@@ -104,8 +107,13 @@ def _same_day_facility_block(
             ORBlockInstance.status.in_(ACTIVE_BLOCK_STATUSES),
         )
         .order_by(ORBlockInstance.start_time, ORBlockInstance.id)
-        .first()
+        .all()
     )
+    room = normalize_room_text(room_text)
+    for row in rows:
+        if rooms_collide(row.room_text, room):
+            return row
+    return None
 
 
 def _ensure_or_block_for_fax(
@@ -117,12 +125,22 @@ def _ensure_or_block_for_fax(
     end_time: time,
     session: str,
     notes: str,
+    room_text: str | None = None,
 ) -> tuple[ORBlockInstance, str]:
     """Create missing Block OR, or expand an existing one to fit fax SSOT times.
 
+    Room is part of identity: S03 and S08 at the same hospital/day/time are dual
+    capacity rows. Same room (or both blank) reuses/expands one row so two docs
+    in one room become two assignments on one block.
+
     Returns (block, action) where action is created | expanded | reused.
     """
-    existing = _same_day_facility_block(db, block_date=block_date, location_id=location_id)
+    from .or_block_service import normalize_room_text
+
+    room = normalize_room_text(room_text)
+    existing = _same_day_facility_block(
+        db, block_date=block_date, location_id=location_id, room_text=room
+    )
     if existing:
         new_start = min(existing.start_time, start_time)
         new_end = max(existing.end_time, end_time)
@@ -153,6 +171,7 @@ def _ensure_or_block_for_fax(
             end_time=end_time,
             recurrence="once",
             notes=notes,
+            room_text=room,
         ),
         admin_id=None,
     )
@@ -770,6 +789,7 @@ def ingest_surgeon_schedule(
                     end_time=end_t,
                     session=session,
                     notes=base_note,
+                    room_text=room,
                 )
                 # Re-read window after possible expansion (fax SSOT fitted into inventory).
                 start_t, end_t = instance.start_time, instance.end_time

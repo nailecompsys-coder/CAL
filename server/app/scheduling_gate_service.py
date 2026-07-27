@@ -154,6 +154,7 @@ def reject_if_duplicate_day_off(
     """Compatibility wrapper: finds overlap but never rejects.
 
     Surgeons may change plans; overlap is advisory only. ``as_http`` is ignored.
+    Exact same pending range is handled by ``find_exact_pending_day_off`` on create.
     """
     _ = as_http  # never hard-block
     return overlapping_day_off(
@@ -164,6 +165,63 @@ def reject_if_duplicate_day_off(
         exclude_id=exclude_id,
         statuses=statuses,
     )
+
+
+def find_exact_pending_day_off(
+    db: Session,
+    surgeon_id: int,
+    start_date: date,
+    end_date: date,
+    *,
+    exclude_id: int | None = None,
+) -> DayOff | None:
+    """Same surgeon + same start/end already pending — reuse instead of another row."""
+    query = db.query(DayOff).filter(
+        DayOff.surgeon_id == surgeon_id,
+        DayOff.status == "pending",
+        DayOff.start_date == start_date,
+        DayOff.end_date == end_date,
+    )
+    if exclude_id is not None:
+        query = query.filter(DayOff.id != exclude_id)
+    return query.order_by(DayOff.id.asc()).first()
+
+
+def purge_exact_pending_duplicates(
+    db: Session,
+    surgeon_id: int,
+    start_date: date,
+    end_date: date,
+    *,
+    keep_id: int,
+) -> int:
+    """Delete later pending rows with the exact same date range (double-tap / retry)."""
+    from .push import clear_dayoff_request_notifications
+
+    rows = (
+        db.query(DayOff)
+        .filter(
+            DayOff.surgeon_id == surgeon_id,
+            DayOff.status == "pending",
+            DayOff.start_date == start_date,
+            DayOff.end_date == end_date,
+        )
+        .order_by(DayOff.id.asc())
+        .all()
+    )
+    if len(rows) <= 1:
+        return 0
+    keeper = next((r for r in rows if r.id == keep_id), rows[0])
+    removed = 0
+    for row in rows:
+        if row.id == keeper.id:
+            continue
+        clear_dayoff_request_notifications(db, row.id)
+        db.delete(row)
+        removed += 1
+    if removed:
+        db.commit()
+    return removed
 
 
 def delete_duplicate_day_off_and_notify(db: Session, duplicate: DayOff, *, keep: DayOff) -> None:

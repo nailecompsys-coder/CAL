@@ -93,6 +93,81 @@ class DayOffPendingBugsTest(unittest.TestCase):
         self.assertIsNotNone(note)
         self.assertIn("Shannon", note)
 
+    def test_exact_pending_duplicate_is_reused_not_recreated(self):
+        from app.native_request_off_helpers import NativeRequestOffInput
+        from app.native_request_off_service import create_native_request_off
+
+        start = date(2026, 12, 8)
+        end = date(2026, 12, 12)
+        first = DayOff(
+            surgeon_id=self.surgeon.id,
+            start_date=start,
+            end_date=end,
+            status="pending",
+            reason="Day Off",
+        )
+        self.db.add(first)
+        self.db.commit()
+        self.db.refresh(first)
+
+        with unittest.mock.patch("app.native_request_off_service.send_native_push_to_surgeon"), \
+             unittest.mock.patch("app.native_request_off_service.notify_admins"), \
+             unittest.mock.patch("app.native_request_off_service.log_schedule_change"), \
+             unittest.mock.patch("app.native_request_off_service.store_dayoff_findings", return_value=[]):
+            result = create_native_request_off(
+                self.db,
+                self.surgeon,
+                NativeRequestOffInput(start_date=start, end_date=end, reason="Day Off"),
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["request"]["id"], first.id)
+        self.assertIn("already pending", result["warnings"][0].lower())
+        self.assertEqual(
+            self.db.query(DayOff).filter(DayOff.surgeon_id == self.surgeon.id).count(),
+            1,
+        )
+
+    def test_purge_exact_pending_duplicates(self):
+        from app.scheduling_gate_service import purge_exact_pending_duplicates
+
+        start = date(2026, 12, 8)
+        end = date(2026, 12, 12)
+        keep = DayOff(
+            surgeon_id=self.surgeon.id,
+            start_date=start,
+            end_date=end,
+            status="pending",
+            reason="Day Off",
+        )
+        dup = DayOff(
+            surgeon_id=self.surgeon.id,
+            start_date=start,
+            end_date=end,
+            status="pending",
+            reason="Day Off",
+        )
+        other = DayOff(
+            surgeon_id=self.surgeon.id,
+            start_date=date(2026, 11, 26),
+            end_date=date(2026, 11, 30),
+            status="pending",
+            reason="Day Off",
+        )
+        self.db.add_all([keep, dup, other])
+        self.db.commit()
+        self.db.refresh(keep)
+        self.db.refresh(dup)
+        self.db.refresh(other)
+
+        removed = purge_exact_pending_duplicates(
+            self.db, self.surgeon.id, start, end, keep_id=keep.id
+        )
+        self.assertEqual(removed, 1)
+        self.assertIsNone(self.db.get(DayOff, dup.id))
+        self.assertIsNotNone(self.db.get(DayOff, keep.id))
+        self.assertIsNotNone(self.db.get(DayOff, other.id))
+
     def test_purge_does_not_delete_pending_when_approved_overlaps(self):
         approved = DayOff(
             surgeon_id=self.surgeon.id,

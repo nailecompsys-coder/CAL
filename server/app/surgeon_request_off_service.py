@@ -132,7 +132,9 @@ def staff_sections(months: list[tuple[int, int]], all_requests: list[DayOff]) ->
 def submit_request_off(db: Session, surgeon: Surgeon, start_date: str, end_date: str, reason: str, notes: str) -> dict:
     from .scheduling_gate_service import (
         day_off_overlap_advisory,
+        find_exact_pending_day_off,
         practice_today,
+        purge_exact_pending_duplicates,
         surgeon_friendly_conflict_message,
     )
 
@@ -143,6 +145,15 @@ def submit_request_off(db: Session, surgeon: Surgeon, start_date: str, end_date:
         return {"ok": False, "warn": "Days off can only be requested for today or later."}
     if end < start:
         return {"ok": False, "warn": "End date must be the same day or after the start date."}
+
+    existing = find_exact_pending_day_off(db, surgeon.id, start, end)
+    if existing:
+        return {
+            "ok": True,
+            "warn_param": "&warn=" + urllib.parse.quote(
+                "This request is already pending approval."
+            ),
+        }
 
     advisory = day_off_overlap_advisory(db, surgeon.id, start, end)
 
@@ -156,6 +167,8 @@ def submit_request_off(db: Session, surgeon: Surgeon, start_date: str, end_date:
     )
     db.add(dayoff)
     db.commit()
+    db.refresh(dayoff)
+    purge_exact_pending_duplicates(db, surgeon.id, start, end, keep_id=dayoff.id)
     db.refresh(dayoff)
     findings = store_dayoff_findings(db, dayoff)
     conflict_msgs: list[str] = []

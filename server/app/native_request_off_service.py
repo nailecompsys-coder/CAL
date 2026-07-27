@@ -15,6 +15,8 @@ from .or_block_service import log_schedule_change
 from .push import notify_admins, send_native_push_to_surgeon
 from .scheduling_gate_service import (
     day_off_overlap_advisory,
+    find_exact_pending_day_off,
+    purge_exact_pending_duplicates,
     surgeon_friendly_conflict_message,
 )
 from .scheduling_guardrails_service import store_dayoff_findings
@@ -25,6 +27,22 @@ def create_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequ
     segments, start_t, end_t = _request_segments(payload)
 
     warnings: list[str] = []
+    existing = find_exact_pending_day_off(
+        db, surgeon.id, payload.start_date, payload.end_date
+    )
+    if existing:
+        warnings.append("This request is already pending approval.")
+        overlap_note = day_off_overlap_advisory(
+            db,
+            surgeon.id,
+            payload.start_date,
+            payload.end_date,
+            exclude_id=existing.id,
+        )
+        if overlap_note:
+            warnings.append(overlap_note)
+        return {"ok": True, "request": serialize_day_off(existing), "warnings": warnings[:3]}
+
     overlap_note = day_off_overlap_advisory(
         db,
         surgeon.id,
@@ -48,6 +66,14 @@ def create_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequ
     )
     db.add(row)
     db.commit()
+    db.refresh(row)
+    purge_exact_pending_duplicates(
+        db,
+        surgeon.id,
+        payload.start_date,
+        payload.end_date,
+        keep_id=row.id,
+    )
     db.refresh(row)
     log_schedule_change(
         db,

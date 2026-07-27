@@ -250,21 +250,6 @@ struct NativeSchedulerShell: View {
               store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't clear block.")
             }
           },
-          updateBlockAction: { locationId, session, startTime, endTime, notes in
-            do {
-              try await store.updateSchedulerBlock(
-                blockId: block.id,
-                locationId: locationId,
-                session: session,
-                startTime: startTime,
-                endTime: endTime,
-                notes: notes
-              )
-            } catch {
-              store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't update capacity.")
-              throw error
-            }
-          },
           deleteBlockAction: {
             do {
               let containing = NativeDayResponse.dateFormatter.date(from: block.date) ?? selectedDate
@@ -274,9 +259,6 @@ struct NativeSchedulerShell: View {
               store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't cancel block.")
               throw error
             }
-          },
-          loadMeta: {
-            try await store.loadSchedulerMeta()
           }
         )
       }
@@ -735,9 +717,7 @@ private struct SchedulerAssignSheet: View {
   let updateAction: (Int, NativeSchedulerCandidate, String, Int, String) async -> Void
   let removeAssignmentAction: (Int) async -> Void
   let clearAction: () async -> Void
-  let updateBlockAction: (Int, String, String, String, String) async throws -> Void
   let deleteBlockAction: () async throws -> Void
-  let loadMeta: () async throws -> NativeSchedulerMetaResponse
   @Environment(\.dismiss) private var dismiss
   @State private var mode: SheetMode = .idle
   @State private var editingAssignmentId: Int?
@@ -748,16 +728,8 @@ private struct SchedulerAssignSheet: View {
   @State private var showUnavailable = false
   @State private var didSeedDefaults = false
   @State private var isSaving = false
-  @State private var hospitals: [NativeSchedulerHospital] = []
-  @State private var isLoadingHospitals = false
-  @State private var capacityLocationId: Int = 0
-  @State private var capacitySession: String = "am"
-  @State private var capacityStart: Date = Date()
-  @State private var capacityEnd: Date = Date()
-  @State private var capacityNotes: String = ""
-  @State private var capacitySeeded = false
   @State private var showCancelConfirm = false
-  @State private var capacityError: String?
+  @State private var actionError: String?
 
   private enum SheetMode {
     case idle
@@ -811,14 +783,6 @@ private struct SchedulerAssignSheet: View {
     }
   }
 
-  private var capacityDirty: Bool {
-    capacityLocationId != liveBlock.locationId
-      || capacitySession != liveBlock.session
-      || Self.hhmm(capacityStart) != liveBlock.start
-      || Self.hhmm(capacityEnd) != liveBlock.end
-      || capacityNotes != NativeSchedulerShell.humanScheduleNote(liveBlock.notes)
-  }
-
   private var primaryButtonTitle: String {
     guard let candidate = selectedCandidate else { return "Select a surgeon" }
     switch mode {
@@ -858,7 +822,12 @@ private struct SchedulerAssignSheet: View {
             }
           }
 
-          capacitySection
+          if let actionError {
+            Text(NativeSchedulerShell.friendlyWarning(actionError) ?? actionError)
+              .font(.caption.weight(.semibold))
+              .foregroundStyle(ClinicalPalette.warningText)
+              .fixedSize(horizontal: false, vertical: true)
+          }
 
           VStack(alignment: .leading, spacing: 8) {
             Text("ON THIS BLOCK")
@@ -1045,7 +1014,7 @@ private struct SchedulerAssignSheet: View {
         }
       }
       .confirmationDialog(
-        "Cancel this Block OR capacity?",
+        "Cancel this Block OR?",
         isPresented: $showCancelConfirm,
         titleVisibility: .visible
       ) {
@@ -1057,20 +1026,16 @@ private struct SchedulerAssignSheet: View {
               try await deleteBlockAction()
               dismiss()
             } catch {
-              capacityError = error.localizedDescription
+              actionError = error.localizedDescription
             }
           }
         }
         Button("Keep block", role: .cancel) {}
       } message: {
-        Text("Removes this facility/day window only. Surgeons stay unassigned.")
+        Text("Removes this hospital/day window. Surgeons must already be cleared.")
       }
       .onAppear {
         seedDefaultsIfNeeded()
-        seedCapacityIfNeeded()
-      }
-      .task {
-        await loadHospitalsIfNeeded()
       }
       .onChange(of: assignedRows.map(\.id)) { ids in
         if let editingAssignmentId, !ids.contains(editingAssignmentId) {
@@ -1083,154 +1048,6 @@ private struct SchedulerAssignSheet: View {
       .onChange(of: detail?.candidates.count ?? 0) { _ in
         seedDefaultsIfNeeded()
       }
-      .onChange(of: liveBlock.id) { _ in
-        capacitySeeded = false
-        seedCapacityIfNeeded()
-      }
-      .onChange(of: "\(liveBlock.start)-\(liveBlock.end)-\(liveBlock.session)-\(liveBlock.locationId)") { _ in
-        capacitySeeded = false
-        seedCapacityIfNeeded()
-      }
-    }
-  }
-
-  private var capacitySection: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      Text("CAPACITY")
-        .font(ClinicalTypography.sectionLabel)
-        .foregroundStyle(.secondary)
-      Text("OR window for this day — hospital, AM/PM, and start/end. Surgeons are assigned below.")
-        .font(.caption2)
-        .foregroundStyle(.secondary)
-        .fixedSize(horizontal: false, vertical: true)
-      if isLoadingHospitals {
-        HStack(spacing: 8) {
-          ProgressView()
-          Text("Loading hospitals…")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-        }
-      } else if hospitals.isEmpty {
-        VStack(alignment: .leading, spacing: 6) {
-          Text(Self.friendlyCapacityError(capacityError) ?? "No hospitals available. Add one in Manage locations.")
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(capacityError == nil ? .secondary : ClinicalPalette.warningText)
-          Button("Retry") {
-            Task { await loadHospitalsIfNeeded(force: true) }
-          }
-          .font(.caption.weight(.semibold))
-        }
-      } else {
-        Picker("Hospital", selection: $capacityLocationId) {
-          ForEach(hospitals) { hospital in
-            Text(hospital.displayName).tag(hospital.id)
-          }
-        }
-        .pickerStyle(.menu)
-      }
-      Picker("Session", selection: $capacitySession) {
-        Text("AM").tag("am")
-        Text("PM").tag("pm")
-        Text("Both").tag("both")
-        Text("Custom").tag("custom")
-      }
-      .pickerStyle(.segmented)
-      .onChange(of: capacitySession) { session in
-        applySessionDefaults(session)
-      }
-      HStack {
-        DatePicker("Start", selection: $capacityStart, displayedComponents: .hourAndMinute)
-          .labelsHidden()
-        Text("–")
-          .foregroundStyle(.secondary)
-        DatePicker("End", selection: $capacityEnd, displayedComponents: .hourAndMinute)
-          .labelsHidden()
-      }
-      TextField("Notes (optional)", text: $capacityNotes)
-        .textFieldStyle(.roundedBorder)
-      if let capacityError, !hospitals.isEmpty {
-        Text(Self.friendlyCapacityError(capacityError) ?? capacityError)
-          .font(.caption2.weight(.semibold))
-          .foregroundStyle(ClinicalPalette.warningText)
-          .fixedSize(horizontal: false, vertical: true)
-      }
-      Button {
-        Task { await saveCapacity() }
-      } label: {
-        Text(capacityDirty ? "Save capacity" : "Capacity saved")
-          .font(.subheadline.weight(.bold))
-          .frame(maxWidth: .infinity)
-          .padding(.vertical, 8)
-      }
-      .buttonStyle(.borderedProminent)
-      .tint(ClinicalPalette.teal)
-      .disabled(!capacityDirty || isLoading || isSaving)
-    }
-    .padding(12)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.cardStrong)
-  }
-
-  private func loadHospitalsIfNeeded(force: Bool = false) async {
-    guard force || hospitals.isEmpty else { return }
-    isLoadingHospitals = true
-    capacityError = nil
-    defer { isLoadingHospitals = false }
-    do {
-      let meta = try await loadMeta()
-      hospitals = meta.hospitals
-      seedCapacityIfNeeded()
-    } catch {
-      capacityError = error.localizedDescription
-    }
-  }
-
-  private func seedCapacityIfNeeded() {
-    guard !capacitySeeded else { return }
-    capacitySeeded = true
-    capacityLocationId = liveBlock.locationId
-    capacitySession = liveBlock.session
-    capacityStart = Self.dateForTime(liveBlock.start)
-    capacityEnd = Self.dateForTime(liveBlock.end)
-    capacityNotes = NativeSchedulerShell.humanScheduleNote(liveBlock.notes)
-  }
-
-  private static func friendlyCapacityError(_ message: String?) -> String? {
-    NativeSchedulerShell.friendlyWarning(message)
-  }
-
-  private func applySessionDefaults(_ session: String) {
-    switch session {
-    case "am":
-      capacityStart = Self.dateForTime("07:00")
-      capacityEnd = Self.dateForTime("12:00")
-    case "pm":
-      capacityStart = Self.dateForTime("12:00")
-      capacityEnd = Self.dateForTime("17:00")
-    case "both":
-      capacityStart = Self.dateForTime("07:00")
-      capacityEnd = Self.dateForTime("17:00")
-    default:
-      break
-    }
-  }
-
-  private func saveCapacity() async {
-    isSaving = true
-    capacityError = nil
-    defer { isSaving = false }
-    do {
-      try await updateBlockAction(
-        capacityLocationId,
-        capacitySession,
-        Self.hhmm(capacityStart),
-        Self.hhmm(capacityEnd),
-        capacityNotes
-      )
-      capacitySeeded = false
-      seedCapacityIfNeeded()
-    } catch {
-      capacityError = error.localizedDescription
     }
   }
 

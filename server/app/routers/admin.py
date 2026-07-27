@@ -104,9 +104,20 @@ def _is_no_call_reason(reason: str | None) -> bool:
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
-def dashboard(request: Request, db: Session = Depends(get_db), admin=Depends(get_current_admin)):
+def dashboard(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+    s1: str | None = None,
+):
     today = date.today()
     week_end = today + timedelta(days=7)
+    surgical_one_anchor = today
+    if s1:
+        try:
+            surgical_one_anchor = date.fromisoformat(s1.strip())
+        except ValueError:
+            surgical_one_anchor = today
 
     on_call_today = [
         r for r in db.query(CallRotation).filter(CallRotation.date == today).all()
@@ -153,7 +164,7 @@ def dashboard(request: Request, db: Session = Depends(get_db), admin=Depends(get
         if surgeon_is_visible(d.surgeon) and d.surgeon_id not in no_call_ids
     }
     available_count = active_count - len(off_ids)
-    surgical_one_week = main_office_patients_by_weekday(db, today)
+    surgical_one_week = main_office_patients_by_weekday(db, surgical_one_anchor)
     aprima_sync = sync_status_payload(db)
     today_volume = dashboard_today_volume_stats(db, today)
 

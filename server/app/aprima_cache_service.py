@@ -262,9 +262,13 @@ def main_office_patients_by_weekday(db: Session, anchor: date | None = None) -> 
             "isToday": day == date.today(),
         })
 
+    today = date.today()
     return {
         "weekStart": week_start,
         "weekEnd": week_end,
+        "prevWeek": week_start - timedelta(days=7),
+        "nextWeek": week_start + timedelta(days=7),
+        "isCurrentWeek": week_start == weekday_range(today)[0],
         "siteTokens": tokens,
         "days": days,
         "total": len(rows),

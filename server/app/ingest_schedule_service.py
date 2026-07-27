@@ -199,9 +199,13 @@ def _assign_surgeon_to_block(
     )
     note = base_note
     if warnings:
-        note = f"{base_note} · flags: " + "; ".join(warnings[:4])
+        note = (f"{base_note} · flags: " + "; ".join(warnings[:4])).strip(" ·") if base_note else (
+            "flags: " + "; ".join(warnings[:4])
+        )
+    elif base_note:
+        note = base_note
     else:
-        note = f"{base_note} · fax schedule"
+        note = ""
 
     existing = (
         db.query(ORBlockAssignment)
@@ -684,12 +688,11 @@ def ingest_surgeon_schedule(
     errors: list[dict] = []
 
     note_bits = []
+    # Keep fax provenance in audit/flags only — not in human-facing OR notes.
+    base_note = ""
     if source_fax_id:
-        note_bits.append(f"Desk fax #{source_fax_id}")
-    if source_message_id:
-        note_bits.append(f"Kno2 {source_message_id}")
-    note_bits.append(f"source={source}")
-    base_note = " · ".join(note_bits)
+        # Internal-only tag for re-ingest matching; stripped before native/portal display.
+        base_note = f"Desk fax #{source_fax_id}"
 
     for idx, block in enumerate(surgeons):
         surgeon = resolve_surgeon(db, block.get("surgeon_name") or block.get("surgeon_raw"))

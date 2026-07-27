@@ -7,6 +7,7 @@ because open block time may exist before any surgeon is assigned.
 from __future__ import annotations
 
 import json
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
@@ -31,6 +32,24 @@ from .push import send_push_to_surgeon
 from .email_service import send_email
 from .scheduling_guardrails_service import scheduler_safe_warning
 from .surgeon_visibility import surgeon_is_visible
+
+
+# Desk fax / Kno2 provenance — keep out of scheduler-facing notes.
+_INGEST_NOTE_NOISE_RE = re.compile(
+    r"(Desk fax\s*#\d+|Kno2\s+\S+|source=\S+|fax schedule|flags:\s*[^·]*)",
+    re.IGNORECASE,
+)
+
+
+def sanitize_schedule_note_for_humans(notes: str | None) -> str:
+    """Drop ingest provenance tokens; leave only human-written content."""
+    text = (notes or "").strip()
+    if not text:
+        return ""
+    text = _INGEST_NOTE_NOISE_RE.sub("", text)
+    text = re.sub(r"\s*·\s*", " · ", text)
+    text = re.sub(r"^[\s·]+|[\s·]+$", "", text)
+    return text.strip()
 
 
 SESSION_DEFAULTS = {
@@ -561,7 +580,7 @@ def _assignment_payload(block: ORBlockInstance, assignment: ORBlockAssignment) -
         "surgeonInitials": initials,
         "start": assignment.start_time.strftime("%H:%M"),
         "caseCount": cases,
-        "note": assignment.note or "",
+        "note": sanitize_schedule_note_for_humans(assignment.note),
         "label": label,
     }
 
@@ -610,10 +629,10 @@ def serialize_block_instance(block: ORBlockInstance) -> dict:
         "surgeonInitials": first_assignment["surgeonInitials"] if first_assignment else _safe_surgeon_label(block.assigned_surgeon),
         "assignedStart": assigned_start.strftime("%H:%M") if assigned_start else None,
         "caseCount": total_cases,
-        "assignmentNote": block.assignment_note or "",
+        "assignmentNote": sanitize_schedule_note_for_humans(block.assignment_note),
         "assignmentLabel": assignment_label,
         "assignments": assignments,
-        "notes": block.notes or "",
+        "notes": sanitize_schedule_note_for_humans(block.notes),
     }
 
 

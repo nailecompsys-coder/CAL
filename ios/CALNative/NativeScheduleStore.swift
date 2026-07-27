@@ -408,11 +408,11 @@ final class NativeScheduleStore: ObservableObject {
       return
     }
     loadState = .loading
-    let calendar = Calendar.current
-    let start = calendar.startOfDay(for: date)
-    let end = calendar.date(byAdding: .day, value: 56, to: start) ?? start
+    let calendar = ClinicalCalendar.mondayFirst
+    let weekStart = calendar.dateInterval(of: .weekOfYear, for: date)?.start ?? calendar.startOfDay(for: date)
+    let end = calendar.date(byAdding: .day, value: 56, to: weekStart) ?? weekStart
     do {
-      let response = try await client.fetchSchedulerHome(token: token, start: start, end: end)
+      let response = try await client.fetchSchedulerHome(token: token, start: weekStart, end: end)
       schedulerBlocks = response.blocks
       schedulerChanges = response.changes
       loadState = .loaded

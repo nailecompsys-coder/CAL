@@ -188,10 +188,7 @@ struct NativeSchedulerShell: View {
       }
       .confirmationDialog("Jump", isPresented: $showJumpMenu, titleVisibility: .visible) {
         Button("This week") { jumpToThisWeek() }
-        Button("Next month") {
-          selectedDate = calendar.date(byAdding: .month, value: 1, to: selectedDate) ?? selectedDate
-          scope = .week
-        }
+        Button("Next month") { jumpToNextMonth() }
         Button("Cancel", role: .cancel) {}
       }
       .sheet(isPresented: $showChanges) {
@@ -340,10 +337,31 @@ struct NativeSchedulerShell: View {
 
   /// Land on the Monday–Sunday work week that contains today (never day-scope “Today”).
   private func jumpToThisWeek() {
+    let today = calendar.startOfDay(for: Date())
     withAnimation(.easeInOut(duration: 0.2)) {
-      selectedDate = calendar.startOfDay(for: Date())
+      selectedDate = today
       scope = .week
     }
+    Task { await store.loadScheduler(containing: today) }
+  }
+
+  /// First Monday that falls inside the next calendar month (so the week actually changes).
+  private func jumpToNextMonth() {
+    let parts = calendar.dateComponents([.year, .month], from: selectedDate)
+    guard let thisMonthStart = calendar.date(from: parts),
+          let nextMonthStart = calendar.date(byAdding: .month, value: 1, to: thisMonthStart) else {
+      return
+    }
+    var target = calendar.dateInterval(of: .weekOfYear, for: nextMonthStart)?.start ?? nextMonthStart
+    // Week containing the 1st often still starts in the previous month (e.g. Aug 1 → Jul 27).
+    if calendar.component(.month, from: target) != calendar.component(.month, from: nextMonthStart) {
+      target = calendar.date(byAdding: .day, value: 7, to: target) ?? nextMonthStart
+    }
+    withAnimation(.easeInOut(duration: 0.2)) {
+      selectedDate = target
+      scope = .week
+    }
+    Task { await store.loadScheduler(containing: target) }
   }
 
   fileprivate static func friendlyWarning(_ message: String?) -> String? {
@@ -360,7 +378,33 @@ struct NativeSchedulerShell: View {
     if lower.hasPrefix("scheduler sync failed") && lower.contains("not found") {
       return "Couldn't sync Block OR. Try refresh."
     }
+    if lower.contains("network connection was lost") || lower.contains("NSURLErrorDomain") || lower.contains("-1005") {
+      return "Network dropped. Check Wi‑Fi / VPN, then Retry."
+    }
+    if lower.contains("the internet connection appears to be offline") || lower.contains("-1009") {
+      return "You're offline. Reconnect, then Retry."
+    }
     return trimmed
+  }
+
+  /// Strip Desk fax / Kno2 / source= provenance from notes shown to schedulers.
+  fileprivate static func humanScheduleNote(_ raw: String) -> String {
+    var text = raw
+    let patterns = [
+      #"Desk fax\s*#\d+"#,
+      #"Kno2\s+\S+"#,
+      #"source=\S+"#,
+      #"fax schedule"#,
+      #"flags:\s*[^·]*"#,
+    ]
+    for pattern in patterns {
+      text = text.replacingOccurrences(of: pattern, with: "", options: [.regularExpression, .caseInsensitive])
+    }
+    text = text
+      .replacingOccurrences(of: #"\s*·\s*"#, with: " · ", options: .regularExpression)
+      .replacingOccurrences(of: #"^[\s·]+|[\s·]+$"#, with: "", options: .regularExpression)
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    return text
   }
 }
 
@@ -772,7 +816,7 @@ private struct SchedulerAssignSheet: View {
       || capacitySession != liveBlock.session
       || Self.hhmm(capacityStart) != liveBlock.start
       || Self.hhmm(capacityEnd) != liveBlock.end
-      || capacityNotes != liveBlock.notes
+      || capacityNotes != NativeSchedulerShell.humanScheduleNote(liveBlock.notes)
   }
 
   private var primaryButtonTitle: String {
@@ -884,7 +928,7 @@ private struct SchedulerAssignSheet: View {
               if let candidate = selectedCandidate, !candidate.isClear {
                 Text(candidate.warnings.first ?? candidate.availability)
                   .font(.caption2.weight(.semibold))
-                  .foregroundStyle(ClinicalPalette.amber)
+                  .foregroundStyle(ClinicalPalette.warningText)
               }
               if mode == .editing, let editing = editingAssignment {
                 Text("Editing \(editing.surgeonInitials) at \(editing.start)")
@@ -1055,6 +1099,10 @@ private struct SchedulerAssignSheet: View {
       Text("CAPACITY")
         .font(ClinicalTypography.sectionLabel)
         .foregroundStyle(.secondary)
+      Text("OR window for this day — hospital, AM/PM, and start/end. Surgeons are assigned below.")
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
       if isLoadingHospitals {
         HStack(spacing: 8) {
           ProgressView()
@@ -1064,9 +1112,9 @@ private struct SchedulerAssignSheet: View {
         }
       } else if hospitals.isEmpty {
         VStack(alignment: .leading, spacing: 6) {
-          Text(capacityError ?? "No hospitals available. Add one in Manage locations.")
+          Text(Self.friendlyCapacityError(capacityError) ?? "No hospitals available. Add one in Manage locations.")
             .font(.caption.weight(.semibold))
-            .foregroundStyle(capacityError == nil ? .secondary : ClinicalPalette.amber)
+            .foregroundStyle(capacityError == nil ? .secondary : ClinicalPalette.warningText)
           Button("Retry") {
             Task { await loadHospitalsIfNeeded(force: true) }
           }
@@ -1101,14 +1149,15 @@ private struct SchedulerAssignSheet: View {
       TextField("Notes (optional)", text: $capacityNotes)
         .textFieldStyle(.roundedBorder)
       if let capacityError, !hospitals.isEmpty {
-        Text(capacityError)
+        Text(Self.friendlyCapacityError(capacityError) ?? capacityError)
           .font(.caption2.weight(.semibold))
-          .foregroundStyle(ClinicalPalette.amber)
+          .foregroundStyle(ClinicalPalette.warningText)
+          .fixedSize(horizontal: false, vertical: true)
       }
       Button {
         Task { await saveCapacity() }
       } label: {
-        Text("Save capacity")
+        Text(capacityDirty ? "Save capacity" : "Capacity saved")
           .font(.subheadline.weight(.bold))
           .frame(maxWidth: .infinity)
           .padding(.vertical, 8)
@@ -1143,7 +1192,11 @@ private struct SchedulerAssignSheet: View {
     capacitySession = liveBlock.session
     capacityStart = Self.dateForTime(liveBlock.start)
     capacityEnd = Self.dateForTime(liveBlock.end)
-    capacityNotes = liveBlock.notes
+    capacityNotes = NativeSchedulerShell.humanScheduleNote(liveBlock.notes)
+  }
+
+  private static func friendlyCapacityError(_ message: String?) -> String? {
+    NativeSchedulerShell.friendlyWarning(message)
   }
 
   private func applySessionDefaults(_ session: String) {
@@ -1434,7 +1487,7 @@ private struct SchedulerCreateBlockSheet: View {
             VStack(alignment: .leading, spacing: 8) {
               Text(hospitalsError)
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(ClinicalPalette.amber)
+                .foregroundStyle(ClinicalPalette.warningText)
               Button("Retry") {
                 Task { await reloadHospitals() }
               }
@@ -1473,7 +1526,7 @@ private struct SchedulerCreateBlockSheet: View {
           Section {
             Text(errorMessage)
               .font(.caption.weight(.semibold))
-              .foregroundStyle(ClinicalPalette.amber)
+              .foregroundStyle(ClinicalPalette.warningText)
           }
         }
       }

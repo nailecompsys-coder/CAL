@@ -15,6 +15,8 @@ enum ClinicalPalette {
   static let porcelainChip = Color("ClinicalPorcelainChip")
   static let mint = Color("ClinicalMint")
   static let amber = Color("ClinicalAmber")
+  /// Readable status/warning text — `amber` is a soft fill, not for type.
+  static let warningText = Color.orange
   static let lavender = Color("ClinicalLavender")
   static let meeting = Color("ClinicalMeeting")
   static let meetingStrong = Color("ClinicalMeetingStrong")

@@ -566,13 +566,17 @@ def _safe_surgeon_label(surgeon: Surgeon | None) -> str:
 
 
 def _assignment_payload(block: ORBlockInstance, assignment: ORBlockAssignment) -> dict:
-    location_label = block.location.abbreviation if block.location and block.location.abbreviation else (block.location.name if block.location else "OR")
+    room = (block.room_text or "").strip()
     cases = assignment.case_count or 0
     case_word = "Case" if cases == 1 else "Cases"
     initials = assignment.surgeon.initials if assignment.surgeon else ""
-    label = f"{location_label} - {assignment.start_time.strftime('%H:%M')} - {cases} {case_word}"
+    parts = []
+    if room:
+        parts.append(f"Rm {room}")
+    parts.append(assignment.start_time.strftime("%H:%M"))
+    parts.append(f"{cases} {case_word}")
     if initials:
-        label = f"{label} {initials}"
+        parts.append(initials)
     return {
         "id": assignment.id,
         "surgeonId": assignment.surgeon_id,
@@ -581,8 +585,31 @@ def _assignment_payload(block: ORBlockInstance, assignment: ORBlockAssignment) -
         "start": assignment.start_time.strftime("%H:%M"),
         "caseCount": cases,
         "note": sanitize_schedule_note_for_humans(assignment.note),
-        "label": label,
+        "room": room,
+        "label": " · ".join(parts),
     }
+
+
+def _surgical_case_payload(case: SurgicalCase) -> dict:
+    return {
+        "id": case.id,
+        "surgeonId": case.surgeon_id,
+        "start": case.start_time.strftime("%H:%M") if case.start_time else "",
+        "end": case.end_time.strftime("%H:%M") if case.end_time else "",
+        "procedure": (case.procedure or "").strip(),
+        "patientName": (case.patient_name or "").strip(),
+        "room": (case.room_text or "").strip(),
+    }
+
+
+def block_case_payloads(block: ORBlockInstance) -> list[dict]:
+    rows = [
+        case
+        for case in list(block.cases or [])
+        if (case.status or "").lower() != "cancelled"
+    ]
+    rows.sort(key=lambda row: (row.start_time or time(0, 0), row.id or 0))
+    return [_surgical_case_payload(case) for case in rows]
 
 
 def block_assignment_payloads(block: ORBlockInstance) -> list[dict]:
@@ -608,11 +635,15 @@ def block_assignment_payloads(block: ORBlockInstance) -> list[dict]:
 
 def serialize_block_instance(block: ORBlockInstance) -> dict:
     assignments = block_assignment_payloads(block)
+    cases = block_case_payloads(block)
     first_assignment = assignments[0] if assignments else None
     assigned_start = parse_hhmm(first_assignment["start"], block.start_time) if first_assignment else (block.assigned_start_time or block.start_time)
-    total_cases = sum(row["caseCount"] for row in assignments) if assignments else (block.assigned_case_count or 0)
+    total_cases = len(cases) if cases else (
+        sum(row["caseCount"] for row in assignments) if assignments else (block.assigned_case_count or 0)
+    )
     assignment_label = first_assignment["label"] if first_assignment else ""
     status = "assigned" if assignments else (block.status or "open")
+    room = (block.room_text or "").strip()
     return {
         "id": block.id,
         "date": block.date.isoformat(),
@@ -623,7 +654,7 @@ def serialize_block_instance(block: ORBlockInstance) -> dict:
         "locationId": block.location_id,
         "location": block.location.name if block.location else "",
         "locationAbbreviation": block.location.abbreviation if block.location else "",
-        "room": block.room_text or "",
+        "room": room,
         "surgeonId": first_assignment["surgeonId"] if first_assignment else block.assigned_surgeon_id,
         "surgeon": first_assignment["surgeon"] if first_assignment else (block.assigned_surgeon.full_name if block.assigned_surgeon else None),
         "surgeonInitials": first_assignment["surgeonInitials"] if first_assignment else _safe_surgeon_label(block.assigned_surgeon),
@@ -632,6 +663,7 @@ def serialize_block_instance(block: ORBlockInstance) -> dict:
         "assignmentNote": sanitize_schedule_note_for_humans(block.assignment_note),
         "assignmentLabel": assignment_label,
         "assignments": assignments,
+        "cases": cases,
         "notes": sanitize_schedule_note_for_humans(block.notes),
     }
 

@@ -235,13 +235,6 @@ struct NativeSchedulerShell: View {
               store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't update assignment.")
             }
           },
-          removeAssignmentAction: { assignmentId in
-            do {
-              try await store.removeSchedulerAssignment(blockId: block.id, assignmentId: assignmentId)
-            } catch {
-              store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't remove assignment.")
-            }
-          },
           clearAction: {
             do {
               try await store.clearSchedulerBlock(blockId: block.id)
@@ -402,8 +395,32 @@ private struct SchedulerBlockGroup: Identifiable {
 
   var sortKey: String { "\(date)|\(String(format: "%05d", locationId))|\(start)|\(end)" }
 
+  var roomCount: Int {
+    let rooms = Set(blocks.map(\.displayRoom).filter { !$0.isEmpty })
+    return max(rooms.count, blocks.count)
+  }
+
+  var roomSummary: String {
+    let rooms = blocks.map(\.displayRoom).filter { !$0.isEmpty }
+    var seen = Set<String>()
+    var unique: [String] = []
+    for room in rooms where seen.insert(room).inserted {
+      unique.append(room)
+    }
+    if unique.isEmpty {
+      return roomCount == 1 ? "1 room (blank)" : "\(roomCount) rooms"
+    }
+    if unique.count == 1 {
+      return "Rm \(unique[0])"
+    }
+    return "\(unique.count) rooms · " + unique.map { "Rm \($0)" }.joined(separator: ", ")
+  }
+
   init(blocks: [NativeSchedulerBlock]) {
     let sortedBlocks = blocks.sorted { lhs, rhs in
+      if lhs.displayRoom != rhs.displayRoom {
+        return lhs.displayRoom < rhs.displayRoom
+      }
       if lhs.isOpen != rhs.isOpen { return lhs.isOpen && !rhs.isOpen }
       return lhs.id < rhs.id
     }
@@ -628,6 +645,11 @@ private struct SchedulerDayDetailView: View {
                   .lineLimit(1)
                   .minimumScaleFactor(0.85)
                 Spacer(minLength: 0)
+                Text(group.roomSummary)
+                  .font(ClinicalTypography.badge)
+                  .foregroundStyle(ClinicalPalette.ink.opacity(0.7))
+                  .lineLimit(1)
+                  .minimumScaleFactor(0.8)
               }
 
               ForEach(group.blocks) { block in
@@ -688,8 +710,31 @@ private struct SchedulerBlockPill: View {
   var body: some View {
     HStack(alignment: .center, spacing: 10) {
       VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 6) {
+          if !block.displayRoom.isEmpty {
+            Text("Rm \(block.displayRoom)")
+              .font(ClinicalTypography.badge)
+              .foregroundStyle(ClinicalPalette.teal)
+              .padding(.horizontal, 6)
+              .padding(.vertical, 2)
+              .background(ClinicalPalette.teal.opacity(0.12), in: Capsule())
+          } else {
+            Text("No room")
+              .font(ClinicalTypography.badge)
+              .foregroundStyle(ClinicalPalette.warningText)
+              .padding(.horizontal, 6)
+              .padding(.vertical, 2)
+              .background(ClinicalPalette.amber.opacity(0.35), in: Capsule())
+          }
+          if !block.cases.isEmpty {
+            Text("\(block.cases.count) case\(block.cases.count == 1 ? "" : "s")")
+              .font(ClinicalTypography.caption)
+              .foregroundStyle(.secondary)
+          }
+        }
+
         if block.assignments.isEmpty {
-          Text("Open practice block")
+          Text("Open — tap to assign surgeon")
             .font(.caption.weight(.bold))
             .foregroundStyle(ClinicalPalette.teal)
         } else {
@@ -705,6 +750,7 @@ private struct SchedulerBlockPill: View {
         .foregroundStyle(block.isOpen ? ClinicalPalette.teal : .green)
     }
     .padding(10)
+    .frame(maxWidth: .infinity, alignment: .leading)
     .background(block.isOpen ? Color.white.opacity(0.45) : Color.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
   }
 }
@@ -715,7 +761,6 @@ private struct SchedulerAssignSheet: View {
   let isLoading: Bool
   let assignAction: (NativeSchedulerCandidate, String, Int, String) async -> Void
   let updateAction: (Int, NativeSchedulerCandidate, String, Int, String) async -> Void
-  let removeAssignmentAction: (Int) async -> Void
   let clearAction: () async -> Void
   let deleteBlockAction: () async throws -> Void
   @Environment(\.dismiss) private var dismiss
@@ -812,9 +857,24 @@ private struct SchedulerAssignSheet: View {
               Text("\(liveBlock.displayLocation)  \(liveBlock.start)-\(liveBlock.end)")
                 .font(ClinicalTypography.headlineStrong)
                 .foregroundStyle(ClinicalPalette.ink)
-              Text(liveBlock.displayDate)
-                .font(ClinicalTypography.caption)
-                .foregroundStyle(.secondary)
+              HStack(spacing: 6) {
+                Text(liveBlock.displayDate)
+                  .font(ClinicalTypography.caption)
+                  .foregroundStyle(.secondary)
+                if !liveBlock.displayRoom.isEmpty {
+                  Text("·")
+                    .foregroundStyle(.secondary)
+                  Text("Rm \(liveBlock.displayRoom)")
+                    .font(ClinicalTypography.caption)
+                    .foregroundStyle(ClinicalPalette.teal)
+                } else {
+                  Text("·")
+                    .foregroundStyle(.secondary)
+                  Text("No room set")
+                    .font(ClinicalTypography.caption)
+                    .foregroundStyle(ClinicalPalette.warningText)
+                }
+              }
             }
             Spacer()
             if isLoading || isSaving {
@@ -830,7 +890,7 @@ private struct SchedulerAssignSheet: View {
           }
 
           VStack(alignment: .leading, spacing: 8) {
-            Text("ON THIS BLOCK")
+            Text("SURGEONS ON THIS ROOM")
               .font(ClinicalTypography.sectionLabel)
               .foregroundStyle(.secondary)
             if assignedRows.isEmpty {
@@ -843,27 +903,26 @@ private struct SchedulerAssignSheet: View {
                   assignment: assignment,
                   isSelected: editingAssignmentId == assignment.id && mode == .editing,
                   isBusy: isLoading || isSaving,
-                  onSelect: { beginEditing(assignment) },
-                  onRemove: {
-                    Task {
-                      if editingAssignmentId == assignment.id {
-                        resetToIdle()
-                      }
-                      await removeAssignmentAction(assignment.id)
-                    }
-                  }
+                  onSelect: { beginEditing(assignment) }
                 )
               }
-              Text("Tap a row to edit that slot · × removes it")
+              Text("Tap a surgeon to see their cases")
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
+            }
+
+            if let editing = editingAssignment {
+              SurgeonCasesPanel(
+                surgeonName: editing.surgeon.isEmpty ? editing.surgeonInitials : editing.surgeon,
+                cases: liveBlock.cases.filter { $0.surgeonId == editing.surgeonId }
+              )
             }
 
             if !assignedRows.isEmpty {
               Button {
                 beginAdding()
               } label: {
-                Label("Add another slot", systemImage: "plus.circle.fill")
+                Label("Add another surgeon", systemImage: "plus.circle.fill")
                   .font(.subheadline.weight(.bold))
                   .frame(maxWidth: .infinity)
                   .padding(.vertical, 8)
@@ -879,7 +938,7 @@ private struct SchedulerAssignSheet: View {
 
           if mode != .idle || assignedRows.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
-              Text(mode == .editing ? "EDIT SLOT" : "NEW SLOT")
+              Text(mode == .editing ? "EDIT SURGEON" : "ADD SURGEON")
                 .font(ClinicalTypography.sectionLabel)
                 .foregroundStyle(.secondary)
               HStack(spacing: 12) {
@@ -1164,58 +1223,81 @@ private struct AssignedSurgeonPill: View {
   let isSelected: Bool
   let isBusy: Bool
   let onSelect: () -> Void
-  let onRemove: () -> Void
 
   var body: some View {
-    HStack(spacing: 8) {
-      Button(action: onSelect) {
-        HStack(spacing: 10) {
-          Text(assignment.surgeonInitials.isEmpty ? "—" : assignment.surgeonInitials)
-            .font(ClinicalTypography.sectionLabel)
-            .foregroundStyle(.white)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(isSelected ? ClinicalPalette.teal : ClinicalPalette.teal.opacity(0.75), in: Capsule())
+    Button(action: onSelect) {
+      HStack(spacing: 10) {
+        Text(assignment.surgeonInitials.isEmpty ? "—" : assignment.surgeonInitials)
+          .font(ClinicalTypography.sectionLabel)
+          .foregroundStyle(.white)
+          .padding(.horizontal, 10)
+          .padding(.vertical, 6)
+          .background(isSelected ? ClinicalPalette.teal : ClinicalPalette.teal.opacity(0.75), in: Capsule())
+        VStack(alignment: .leading, spacing: 2) {
+          Text(assignment.surgeon.isEmpty ? assignment.label : assignment.surgeon)
+            .font(ClinicalTypography.rowTitleStrong)
+            .foregroundStyle(ClinicalPalette.ink)
+            .lineLimit(1)
+            .minimumScaleFactor(0.85)
+          Text("\(assignment.start) · \(assignment.caseCount) case\(assignment.caseCount == 1 ? "" : "s")")
+            .font(ClinicalTypography.caption)
+            .foregroundStyle(.secondary)
+        }
+        Spacer(minLength: 0)
+        Image(systemName: "chevron.right")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.tertiary)
+      }
+      .padding(.horizontal, 10)
+      .padding(.vertical, 8)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(
+        isSelected ? ClinicalPalette.teal.opacity(0.12) : Color.white.opacity(0.7),
+        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+      )
+      .overlay(
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+          .stroke(isSelected ? ClinicalPalette.teal.opacity(0.5) : Color.clear, lineWidth: 1.5)
+      )
+    }
+    .buttonStyle(.plain)
+    .disabled(isBusy)
+  }
+}
+
+private struct SurgeonCasesPanel: View {
+  let surgeonName: String
+  let cases: [NativeSchedulerCase]
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      Text("\(surgeonName)'s cases")
+        .font(ClinicalTypography.caption)
+        .foregroundStyle(.secondary)
+      if cases.isEmpty {
+        Text("No case rows on file yet — tally only. Cases appear after fax/Aprima sync.")
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      } else {
+        ForEach(cases) { surgicalCase in
           VStack(alignment: .leading, spacing: 2) {
-            Text(assignment.surgeon.isEmpty ? assignment.label : assignment.surgeon)
-              .font(ClinicalTypography.rowTitleStrong)
-              .foregroundStyle(ClinicalPalette.ink)
-              .lineLimit(1)
-              .minimumScaleFactor(0.85)
-            Text("\(assignment.start) · \(assignment.caseCount) case\(assignment.caseCount == 1 ? "" : "s")")
-              .font(ClinicalTypography.caption)
-              .foregroundStyle(.secondary)
-          }
-          Spacer(minLength: 0)
-          if isSelected {
-            Text("Editing")
-              .font(ClinicalTypography.badge)
+            Text(surgicalCase.timeLabel)
+              .font(ClinicalTypography.monoCaption)
               .foregroundStyle(ClinicalPalette.teal)
+            Text(surgicalCase.detailLine.isEmpty ? "Case" : surgicalCase.detailLine)
+              .font(ClinicalTypography.caption)
+              .foregroundStyle(ClinicalPalette.ink)
+              .lineLimit(2)
           }
+          .padding(.horizontal, 8)
+          .padding(.vertical, 6)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .background(Color.white.opacity(0.75), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
       }
-      .buttonStyle(.plain)
-      .disabled(isBusy)
-
-      Button(role: .destructive, action: onRemove) {
-        Image(systemName: "xmark.circle.fill")
-          .font(.title3)
-          .foregroundStyle(.red.opacity(0.85))
-      }
-      .buttonStyle(.plain)
-      .disabled(isBusy)
-      .accessibilityLabel("Remove \(assignment.surgeonInitials)")
     }
-    .padding(.horizontal, 10)
-    .padding(.vertical, 8)
-    .background(
-      isSelected ? ClinicalPalette.teal.opacity(0.12) : Color.white.opacity(0.7),
-      in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-    )
-    .overlay(
-      RoundedRectangle(cornerRadius: 12, style: .continuous)
-        .stroke(isSelected ? ClinicalPalette.teal.opacity(0.5) : Color.clear, lineWidth: 1.5)
-    )
+    .padding(.top, 4)
   }
 }
 

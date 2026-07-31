@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Rebuild and restart cal_api so the running container matches this repo.
-# By default: bumps VERSION (new build badge), syncs sw.js cache name, then builds.
-#   NO_BUMP=1 ./server/scripts/rebuild-cal-api.sh   — rebuild without changing VERSION
+# By default: keeps VERSION clean (no +UTC suffix), syncs sw.js cache name, then builds.
+#   NO_BUMP=1 ./server/scripts/rebuild-cal-api.sh   — rebuild without touching VERSION/sw.js
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 REPO_ROOT="$(cd "$ROOT/.." && pwd)"
 cd "$ROOT"
 
 if [[ "${NO_BUMP:-}" != "1" ]]; then
-  echo "==> Bump VERSION (unique build id)"
+  echo "==> Normalize VERSION (clean product version, no +timestamp)"
   "$ROOT/scripts/bump-version.sh"
   "$ROOT/scripts/sync-sw-cache-name.sh"
 else

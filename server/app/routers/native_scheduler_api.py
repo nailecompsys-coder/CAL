@@ -19,6 +19,7 @@ from ..models import AdminOtpChallenge, AdminUser, Location, ORBlockAssignment, 
 from ..or_block_service import (
     BlockORCreateInput,
     SESSION_DEFAULTS,
+    add_case_to_block,
     assign_block,
     candidate_surgeon_rows,
     clear_block_assignment,
@@ -30,6 +31,7 @@ from ..or_block_service import (
     serialize_block_instance,
     session_default_times,
     update_block_assignment,
+    update_block_case,
     update_or_block_instance,
 )
 from ..routers.api_common import parse_iso_date_range
@@ -73,6 +75,23 @@ class SchedulerUpdateBlockBody(BaseModel):
     end_time: str | None = None
     notes: str | None = None
     room_text: str | None = None
+
+
+class SchedulerCaseBody(BaseModel):
+    surgeon_id: int
+    start_time: str
+    end_time: str | None = None
+    procedure: str = ""
+    patient_name: str = ""
+
+
+class SchedulerCaseUpdateBody(BaseModel):
+    start_time: str | None = None
+    end_time: str | None = None
+    procedure: str | None = None
+    patient_name: str | None = None
+    surgeon_id: int | None = None
+    target_block_id: int | None = None
 
 
 def _hash_otp(code: str) -> str:
@@ -471,5 +490,84 @@ def scheduler_clear_block_assignment(
     try:
         block = clear_block_assignment(db, block_id, admin.id)
     except ValueError as exc:
-        raise HTTPException(404, str(exc))
+        message = str(exc)
+        status = 404 if "not found" in message.lower() else 409
+        raise HTTPException(status, message)
     return {"ok": True, "block": serialize_block_instance(block), "warnings": []}
+
+
+@router.post("/blocks/{block_id:int}/cases")
+def scheduler_add_block_case(
+    block_id: int,
+    body: SchedulerCaseBody,
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_native_scheduler),
+):
+    try:
+        start_t = parse_hhmm(body.start_time)
+    except ValueError:
+        raise HTTPException(422, "start_time must be HH:MM")
+    end_t = None
+    if body.end_time:
+        try:
+            end_t = parse_hhmm(body.end_time)
+        except ValueError:
+            raise HTTPException(422, "end_time must be HH:MM")
+    try:
+        block, warnings = add_case_to_block(
+            db,
+            block_id,
+            body.surgeon_id,
+            start_t,
+            end_time=end_t,
+            procedure=body.procedure or "",
+            patient_name=body.patient_name or "",
+            admin_id=admin.id,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        status = 404 if "not found" in message.lower() else 422
+        if "not on this block" in message.lower():
+            status = 409
+        raise HTTPException(status, message)
+    return {"ok": True, "block": serialize_block_instance(block), "warnings": warnings}
+
+
+@router.post("/blocks/{block_id:int}/cases/{case_id:int}/update")
+def scheduler_update_block_case(
+    block_id: int,
+    case_id: int,
+    body: SchedulerCaseUpdateBody,
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_native_scheduler),
+):
+    start_t = None
+    end_t = None
+    if body.start_time is not None:
+        try:
+            start_t = parse_hhmm(body.start_time)
+        except ValueError:
+            raise HTTPException(422, "start_time must be HH:MM")
+    if body.end_time is not None:
+        try:
+            end_t = parse_hhmm(body.end_time)
+        except ValueError:
+            raise HTTPException(422, "end_time must be HH:MM")
+    try:
+        block, warnings = update_block_case(
+            db,
+            block_id,
+            case_id,
+            start_time=start_t,
+            end_time=end_t,
+            procedure=body.procedure,
+            patient_name=body.patient_name,
+            surgeon_id=body.surgeon_id,
+            target_block_id=body.target_block_id,
+            admin_id=admin.id,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        status = 404 if "not found" in message.lower() else 422
+        raise HTTPException(status, message)
+    return {"ok": True, "block": serialize_block_instance(block), "warnings": warnings}

@@ -18,14 +18,28 @@ from ..auth import (
     get_current_admin,
 )
 from ..database import get_db
+from ..models import Surgeon
 from .admin import _next_physician_sort_order
 
 router = APIRouter(prefix="/admin")
 
 
+def _users_filter_for_clinical(staff_type: str | None) -> str:
+    """Map surgeons.staff_type → Users section filter (physician→surgeons, staff→pas)."""
+    return "pas" if (staff_type or "physician") != "physician" else "surgeons"
+
+
+def _users_redirect(staff_type: str | None, msg: str | None = None) -> RedirectResponse:
+    filt = _users_filter_for_clinical(staff_type)
+    url = f"/admin/settings/people?filter={filt}"
+    if msg:
+        url = f"{url}&msg={msg}"
+    return RedirectResponse(url, status_code=303)
+
+
 @router.get("/surgeons")
 def surgeons_page(request: Request, db: Session = Depends(get_db), admin=Depends(get_current_admin)):
-    return RedirectResponse("/admin/settings/people?filter=mobile", status_code=303)
+    return RedirectResponse("/admin/settings/people?filter=surgeons", status_code=303)
 
 @router.post("/surgeons/add")
 def add_surgeon(
@@ -51,7 +65,7 @@ def add_surgeon(
         lambda: _next_physician_sort_order(db),
     )
     add_surgeon_service(db, fields)
-    return RedirectResponse("/admin/settings/people?filter=mobile&msg=added", status_code=303)
+    return _users_redirect(staff_type, "added")
 
 
 @router.post("/surgeons/{surgeon_id}/edit")
@@ -78,26 +92,32 @@ def edit_surgeon(
         lambda: _next_physician_sort_order(db),
     )
     update_surgeon_service(db, surgeon_id, fields)
-    return RedirectResponse("/admin/settings/people?filter=mobile&msg=updated", status_code=303)
+    return _users_redirect(staff_type, "updated")
 
 
 @router.post("/surgeons/{surgeon_id}/delete")
 def delete_surgeon(surgeon_id: int, db: Session = Depends(get_db), admin=Depends(get_current_admin)):
+    row = db.get(Surgeon, surgeon_id)
+    staff_type = row.staff_type if row else "physician"
     if not delete_surgeon_service(db, surgeon_id):
-        return RedirectResponse("/admin/settings/people?filter=mobile&msg=not_found", status_code=303)
-    return RedirectResponse("/admin/settings/people?filter=mobile&msg=deleted", status_code=303)
+        return _users_redirect(staff_type, "not_found")
+    return _users_redirect(staff_type, "deleted")
 
 
 @router.post("/surgeons/{surgeon_id}/toggle")
 def toggle_surgeon(surgeon_id: int, db: Session = Depends(get_db), admin=Depends(get_current_admin)):
+    row = db.get(Surgeon, surgeon_id)
+    staff_type = row.staff_type if row else "physician"
     toggle_surgeon_service(db, surgeon_id)
-    return RedirectResponse("/admin/settings/people?filter=mobile", status_code=303)
+    return _users_redirect(staff_type)
 
 
 @router.post("/surgeons/{surgeon_id}/devices/{device_id}/revoke")
 def revoke_device(surgeon_id: int, device_id: int, db: Session = Depends(get_db), admin=Depends(get_current_admin)):
+    row = db.get(Surgeon, surgeon_id)
+    staff_type = row.staff_type if row else "physician"
     revoke_device_service(db, surgeon_id, device_id)
-    return RedirectResponse("/admin/settings/people?filter=mobile", status_code=303)
+    return _users_redirect(staff_type)
 
 
 @router.post("/surgeons/{surgeon_id}/preview-mobile")

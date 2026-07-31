@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+import secrets
 
 from sqlalchemy.orm import Session
 
@@ -47,11 +49,43 @@ def _normalize_role(role: str) -> str:
     return "admin"
 
 
+def _username_base_from_identity(
+    email: str,
+    first_name: str = "",
+    last_name: str = "",
+    phone: str = "",
+) -> str:
+    """Derive a unique-friendly username for DB uniqueness; OTP uses email/phone."""
+    if email and "@" in email:
+        local = email.split("@", 1)[0].lower()
+        local = re.sub(r"[^a-z0-9._-]", "", local)
+        if local:
+            return local[:64]
+    name = f"{(first_name or '').strip()}.{(last_name or '').strip()}".strip(".").lower()
+    name = re.sub(r"[^a-z0-9._-]", "", name)
+    if name:
+        return name[:64]
+    digits = re.sub(r"\D+", "", phone or "")
+    if digits:
+        return f"user{digits[-10:]}"[:64]
+    return "user"
+
+
+def _unique_username(db: Session, base: str) -> str:
+    candidate = (base or "user")[:64]
+    n = 2
+    while db.query(AdminUser).filter(AdminUser.username == candidate).first():
+        suffix = str(n)
+        candidate = f"{(base or 'user')[: max(1, 64 - len(suffix))]}{suffix}"
+        n += 1
+    return candidate
+
+
 def add_admin_user(
     db: Session,
     username: str,
     email: str,
-    password: str,
+    password: str = "",
     role: str = "admin",
     first_name: str = "",
     last_name: str = "",
@@ -60,14 +94,29 @@ def add_admin_user(
     notify_schedule_changes: bool = True,
     sms_fallback_enabled: bool = False,
 ) -> str:
-    username = username.strip().lower()
-    email = email.strip().lower()
-    if not username or not email:
+    email = (email or "").strip().lower()
+    phone_fmt = format_us_phone(phone)
+    if not email and not (phone_fmt or "").strip():
         return "user_invalid"
-    if len(password) < 8:
+    if not email:
+        # AdminUser.email is required; OTP portal login keys off email.
+        # Phone-only portal users are not supported yet.
+        return "user_invalid"
+    username = (username or "").strip().lower()
+    if not username:
+        username = _unique_username(
+            db,
+            _username_base_from_identity(email, first_name, last_name, phone_fmt),
+        )
+    else:
+        if db.query(AdminUser).filter(AdminUser.username == username).first():
+            return "username_taken"
+    password = (password or "").strip()
+    if password and len(password) < 8:
         return "password_short"
-    if db.query(AdminUser).filter(AdminUser.username == username).first():
-        return "username_taken"
+    if not password:
+        # OTP is the primary sign-in; keep a random hash for legacy password column.
+        password = secrets.token_urlsafe(24)
     if db.query(AdminUser).filter(AdminUser.email == email).first():
         return "email_taken"
     db.add(
@@ -76,7 +125,7 @@ def add_admin_user(
             first_name=first_name.strip() or None,
             last_name=last_name.strip() or None,
             email=email,
-            phone=format_us_phone(phone),
+            phone=phone_fmt,
             password_hash=hash_password(password),
             role=_normalize_role(role),
             notify_day_off_requests=notify_day_off_requests,
@@ -129,10 +178,13 @@ def edit_admin_user(
     user = db.get(AdminUser, user_id)
     if not user:
         return "user_not_found"
-    username = username.strip().lower()
-    email = email.strip().lower()
-    if not username or not email:
+    email = (email or "").strip().lower()
+    if not email:
         return "user_invalid"
+    username = (username or "").strip().lower()
+    if not username:
+        # OTP-first edits keep the existing internal username.
+        username = user.username
     other_username = db.query(AdminUser).filter(AdminUser.username == username, AdminUser.id != user_id).first()
     if other_username:
         return "username_taken"

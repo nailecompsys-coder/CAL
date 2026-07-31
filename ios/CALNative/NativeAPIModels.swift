@@ -63,9 +63,7 @@ struct NativeDayResponse: Decodable {
     let allItems = items ?? []
     let scheduleItems = allItems.compactMap { $0.doctorScheduleItem(dateKey: date) }
     let meetingItems = allItems.compactMap { $0.meetingItem(dateKey: date) }
-    let personal = allItems
-      .filter { $0.type == "personal" }
-      .map(\.personalDisplayTitle)
+    let personal = allItems.compactMap(\.personalCalendarItem)
 
     return ScheduleDay(
       id: dateKey(parsedDate),
@@ -172,9 +170,18 @@ struct NativeScheduleItemResponse: Decodable {
   }
 
   var personalDisplayTitle: String {
-    [title, displayTime(start)]
-      .filter { !$0.isEmpty }
-      .joined(separator: " ")
+    personalCalendarItem?.displayTitle ?? title
+  }
+
+  var personalCalendarItem: PersonalCalendarItem? {
+    guard type == "personal", let rawId else { return nil }
+    return PersonalCalendarItem(
+      id: rawId,
+      title: title,
+      notes: (notes ?? subtitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
+      start: start ?? "",
+      end: end ?? ""
+    )
   }
 
   private var displayTitle: String {

@@ -13,6 +13,12 @@ _CRED_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Common Advent fax OCR misspellings → CAL last-name tokens
+_SURGEON_TOKEN_ALIASES = {
+    "wocdley": "woodley",
+    "woodely": "woodley",
+}
+
 
 def _tokens(value: str) -> list[str]:
     s = _CRED_RE.sub(" ", str(value or "").lower())
@@ -46,7 +52,7 @@ def _name_parts(raw: str) -> list[str]:
 def resolve_surgeon(db: Session, raw: str | None) -> Surgeon | None:
     if not raw or not str(raw).strip():
         return None
-    parts = _name_parts(str(raw))
+    parts = [_SURGEON_TOKEN_ALIASES.get(p, p) for p in _name_parts(str(raw))]
     if not parts:
         return None
     needle = " ".join(parts)
@@ -105,11 +111,35 @@ def _is_clinic_location(loc: Location | None) -> bool:
         return False
     abbr = (loc.abbreviation or "").upper()
     ltype = (loc.location_type or "").lower()
-    return abbr.endswith("-CL") or ltype == "clinic"
+    # Prod clinic rows use *-OV (office/visit); older seeds used *-CL.
+    return (
+        abbr.endswith("-CL")
+        or abbr.endswith("-OV")
+        or (ltype == "clinic" and not abbr.endswith("-OR"))
+    )
 
 
 def _loc_by_abbr(db: Session, abbr: str) -> Location | None:
-    return db.query(Location).filter(Location.abbreviation == abbr).first()
+    """Find by abbreviation; accept legacy *-CL ↔ live *-OV clinic swap."""
+    target = str(abbr or "").strip().upper()
+    if not target:
+        return None
+    loc = db.query(Location).filter(Location.abbreviation == target).first()
+    if loc:
+        return loc
+    if target.endswith("-OV"):
+        return (
+            db.query(Location)
+            .filter(Location.abbreviation == f"{target[:-3]}-CL")
+            .first()
+        )
+    if target.endswith("-CL"):
+        return (
+            db.query(Location)
+            .filter(Location.abbreviation == f"{target[:-3]}-OV")
+            .first()
+        )
+    return None
 
 
 def schedule_location_for_day(
@@ -175,17 +205,21 @@ def resolve_location(db: Session, room_or_site: str | None) -> Location | None:
         if name and name == raw:
             return loc
     # Explicit Advent room/site aliases only — no substring "PARK"
+    # Clinic abbreviations match live CAL rows (*-OV). OR rows stay *-OR.
     aliases = (
         ("APK", "AP-OR"),
         ("APOPKA OR", "AP-OR"),
-        ("APOPKA CLINIC", "AP-CL"),
+        ("APOPKA CLINIC", "AP-OV"),
         ("WGD", "WG-OR"),
         ("WINTER GARDEN OR", "WG-OR"),
-        ("WINTER GARDEN CLINIC", "WG-CL"),
+        ("WINTER GARDEN CLINIC", "WG-OV"),
         ("MIN", "MN-OR"),
         ("MINNEOLA OR", "MN-OR"),
-        ("HEALTH PARK", "HP-CL"),
-        ("HP-CL", "HP-CL"),
+        ("HEALTH PARK", "HP-OV"),
+        ("HP-CL", "HP-OV"),
+        ("HP-OV", "HP-OV"),
+        ("CLERMONT", "CL-OV"),
+        ("CL-OV", "CL-OV"),
     )
     for needle, abbr in aliases:
         if needle in raw or raw.startswith(needle):
@@ -246,8 +280,7 @@ def resolve_clinic_location(
     """Map Advent clinic site codes to CAL clinic locations.
 
     Prefer the surgeon's clinic grid for that date when present — fax site codes
-    like AHMGGENSRG are not reliable facility labels (HP is clinic-only; Florin
-    7/27 clinic is AP-CL, not HP-CL).
+    like AHMGGENSRG are not always reliable facility labels.
     """
     if surgeon_id and day:
         scheduled = schedule_location_for_day(
@@ -260,20 +293,32 @@ def resolve_clinic_location(
     if not raw:
         return None
     compact = raw.replace(" ", "")
+    # Map Advent fax site codes → live CAL clinic abbreviations (*-OV).
     code_map = (
-        ("MGALTGS", "AL-CL"),
-        ("MGLKM", "LM-CL"),
-        ("AHWG", "WG-CL"),
-        ("WINTERGARDEN", "WG-CL"),
-        ("APOPKA", "AP-CL"),
-        ("MINNEOLA", "MN-CL"),
-        ("LAKEMARY", "LM-CL"),
-        ("ALTAMONTE", "AL-CL"),
-        ("HEALTHPARK", "HP-CL"),
-        # Advent generic group codes — only when no schedule override above
-        ("AHMGGEN", "HP-CL"),
-        ("CLMMFLGS", "HP-CL"),
-        ("CLMM", "HP-CL"),
+        ("MGALTGS", "AL-OV"),
+        ("MGLKM", "LM-OV"),
+        ("AHWG", "WG-OV"),
+        ("WINTERGARDEN", "WG-OV"),
+        ("WGD", "WG-OV"),
+        ("APOPKA", "AP-OV"),
+        ("APK", "AP-OV"),
+        ("MINNEOLA", "MN-OV"),
+        ("LAKEMARY", "LM-OV"),
+        ("ALTAMONTE", "AL-OV"),
+        ("CLERMONT", "CL-OV"),
+        ("CLMMFLGS", "CL-OV"),
+        ("CLMM", "CL-OV"),
+        ("HEALTHPARK", "HP-OV"),
+        ("AHMGGEN", "HP-OV"),
+        ("DRPHILLIPS", "DP-OV"),
+        ("DP-OV", "DP-OV"),
+        # Legacy aliases still accepted if present in a DB
+        ("HP-CL", "HP-OV"),
+        ("AP-CL", "AP-OV"),
+        ("WG-CL", "WG-OV"),
+        ("MN-CL", "MN-OV"),
+        ("LM-CL", "LM-OV"),
+        ("AL-CL", "AL-OV"),
     )
     for needle, abbr in code_map:
         if needle in compact:

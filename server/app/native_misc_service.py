@@ -23,7 +23,7 @@ def save_push_token(db: Session, surgeon, device, token: str, platform: str, pro
     row = db.query(NativePushToken).filter(NativePushToken.token == token).first()
     normalized_platform = (platform or "ios").strip().lower()
     normalized_provider = (provider or ("apns" if normalized_platform == "ios" else "expo")).strip().lower()
-    if normalized_provider not in {"apns", "expo"}:
+    if normalized_provider not in {"apns", "expo", "fcm"}:
         normalized_provider = "expo"
     if row:
         row.surgeon_id = surgeon.id

@@ -188,6 +188,40 @@ struct ClinicOrDetailRow: Identifiable {
   let secondary: String
 }
 
+struct PersonalCalendarItem: Identifiable, Equatable {
+  let id: Int
+  let title: String
+  let notes: String
+  let start: String
+  let end: String
+
+  var displayTitle: String {
+    let time = displayTime(start)
+    if time.isEmpty { return title }
+    return "\(title) \(time)"
+  }
+
+  var timeRangeLabel: String {
+    let startText = displayTime(start)
+    let endText = displayTime(end)
+    if startText.isEmpty { return "" }
+    if endText.isEmpty { return startText }
+    return "\(startText) – \(endText)"
+  }
+
+  private func displayTime(_ value: String) -> String {
+    guard !value.isEmpty else { return "" }
+    let parts = value.split(separator: ":")
+    guard let hourText = parts.first, let hour24 = Int(hourText) else {
+      return value
+    }
+    let minute = parts.count > 1 ? String(parts[1]) : "00"
+    let hour12 = ((hour24 + 11) % 12) + 1
+    let suffix = hour24 >= 12 ? "PM" : "AM"
+    return "\(hour12):\(minute) \(suffix)"
+  }
+}
+
 struct ScheduleDay: Identifiable {
   let id: String
   let date: Date
@@ -196,7 +230,7 @@ struct ScheduleDay: Identifiable {
   let requestedOff: [String]
   let mySchedule: [DoctorScheduleItem]
   let meetings: [DoctorScheduleItem]
-  let personalItems: [String]
+  let personalItems: [PersonalCalendarItem]
   /// Logged-in surgeon's approved Day Off (from home `dayoff` items).
   let hasMyApprovedOff: Bool
   let hasClinicOr: Bool

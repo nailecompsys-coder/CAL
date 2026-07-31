@@ -58,10 +58,55 @@ SESSION_DEFAULTS = {
     "both": (time(7, 0), time(17, 0)),
     "custom": (time(7, 0), time(12, 0)),
 }
+SESSION_SPLIT_NOON = time(12, 0)
 
 ACTIVE_BLOCK_STATUSES = {"open", "assigned"}
 OPEN_BLOCK_STATUSES = {"open"}
 NON_DUPLICATE_BLOCKING_STATUSES = {"open", "assigned"}
+
+
+def spans_am_and_pm(start_time: time, end_time: time) -> bool:
+    """True when a single window crosses noon (should be two cards: AM + PM)."""
+    return start_time < SESSION_SPLIT_NOON < end_time
+
+
+def infer_session_label(start_time: time, end_time: time, stored: str | None = None) -> str:
+    if spans_am_and_pm(start_time, end_time):
+        return "both"
+    if end_time <= SESSION_SPLIT_NOON:
+        return "am"
+    if start_time >= SESSION_SPLIT_NOON:
+        return "pm"
+    return normalize_session(stored or "custom")
+
+
+def am_pm_windows(start_time: time, end_time: time) -> list[tuple[str, time, time]]:
+    """Expand a day-spanning window into AM then PM hospital cards."""
+    if not spans_am_and_pm(start_time, end_time):
+        return [(infer_session_label(start_time, end_time), start_time, end_time)]
+    return [
+        ("am", start_time, SESSION_SPLIT_NOON),
+        ("pm", SESSION_SPLIT_NOON, end_time),
+    ]
+
+
+def _case_room_labels(block: ORBlockInstance) -> list[str]:
+    rooms: list[str] = []
+    seen: set[str] = set()
+    for case in _active_block_cases(block):
+        room = (case.room_text or "").strip()
+        key = room.upper()
+        if room and key not in seen:
+            seen.add(key)
+            rooms.append(room)
+    return rooms
+
+
+def _display_room_label(block: ORBlockInstance) -> str:
+    primary = (block.room_text or "").strip()
+    if primary:
+        return primary
+    return ", ".join(_case_room_labels(block))
 
 
 @dataclass(frozen=True)
@@ -152,6 +197,7 @@ def duplicate_block_messages(db: Session, payload: BlockORCreateInput) -> list[s
     weekdays = set(payload.weekdays or [payload.start_date.weekday()])
     location_ids = list(dict.fromkeys(payload.location_ids))
     room = normalize_room_text(payload.room_text)
+    windows = am_pm_windows(payload.start_time, payload.end_time)
     messages = []
     seen = set()
     for block_date in daterange(payload.start_date, payload.end_date):
@@ -160,77 +206,42 @@ def duplicate_block_messages(db: Session, payload: BlockORCreateInput) -> list[s
         if payload.recurrence != "once" and block_date.weekday() not in weekdays:
             continue
         for location_id in location_ids:
-            overlaps = overlapping_or_blocks(
-                db,
-                block_date=block_date,
-                location_id=location_id,
-                start_time=payload.start_time,
-                end_time=payload.end_time,
-                room_text=room,
-            )
-            for overlap in overlaps:
-                location = overlap.location.name if overlap.location else f"location {location_id}"
-                room_label = normalize_room_text(overlap.room_text) or "no room"
-                key = (
-                    block_date,
-                    location_id,
-                    overlap.start_time,
-                    overlap.end_time,
-                    normalize_room_text(overlap.room_text),
-                    overlap.status,
+            for _session, win_start, win_end in windows:
+                overlaps = overlapping_or_blocks(
+                    db,
+                    block_date=block_date,
+                    location_id=location_id,
+                    start_time=win_start,
+                    end_time=win_end,
+                    room_text=room,
                 )
-                if key in seen:
-                    continue
-                seen.add(key)
-                messages.append(
-                    f"{location} room {room_label} already has {overlap.status.replace('_', ' ')} block time "
-                    f"{block_date.strftime('%a %-m/%-d')} {overlap.start_time.strftime('%H:%M')}-{overlap.end_time.strftime('%H:%M')}."
-                )
+                for overlap in overlaps:
+                    location = overlap.location.name if overlap.location else f"location {location_id}"
+                    room_label = normalize_room_text(overlap.room_text) or "shared window"
+                    key = (
+                        block_date,
+                        location_id,
+                        win_start,
+                        win_end,
+                        overlap.start_time,
+                        overlap.end_time,
+                        normalize_room_text(overlap.room_text),
+                        overlap.status,
+                    )
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    messages.append(
+                        f"{location} {room_label} already has {overlap.status.replace('_', ' ')} block time "
+                        f"{block_date.strftime('%a %-m/%-d')} {overlap.start_time.strftime('%H:%M')}-{overlap.end_time.strftime('%H:%M')}."
+                    )
     return messages
 
 
 def flag_block_missing_room(db: Session, block: ORBlockInstance, *, admin_id: int | None = None) -> None:
-    """Immediate admin flag when capacity has no room (dual OR inventory needs rooms)."""
-    from .push import notify_admins
-
-    if normalize_room_text(block.room_text):
-        clear_block_missing_room_flag(db, block.id)
-        return
-    location_label = (
-        block.location.abbreviation if block.location and block.location.abbreviation
-        else (block.location.name if block.location else "OR")
-    )
-    body = (
-        f"Missing OR room · {location_label} · {block.date.isoformat()} "
-        f"{block.start_time.strftime('%H:%M')}-{block.end_time.strftime('%H:%M')}. "
-        "Add room (e.g. S03) so dual blocks at the same hospital/time stay distinct."
-    )
-    log_schedule_change(
-        db,
-        event_type="block_missing_room",
-        title="Block OR missing room",
-        body=body,
-        admin_user_id=admin_id,
-        event_date=block.date,
-        payload={
-            "blockId": block.id,
-            "flagType": "missing_room",
-            "href": f"/admin/block-or?block_id={block.id}",
-        },
-    )
-    notify_admins(
-        title="Scheduling flag · Missing OR room",
-        body=body,
-        db=db,
-        kind="schedule_flag",
-        payload={
-            "blockId": block.id,
-            "flagType": "missing_room",
-            "warnings": ["Missing OR room on Block OR capacity"],
-            "href": f"/admin/block-or?block_id={block.id}",
-        },
-        require_schedule_opt_in=True,
-    )
+    """No-op UI flag. Rooms often live on cases; never surface 'No room' on Block OR cards."""
+    clear_block_missing_room_flag(db, block.id)
+    return
 
 
 def clear_block_missing_room_flag(db: Session, block_id: int) -> None:
@@ -325,6 +336,7 @@ def create_or_blocks(db: Session, payload: BlockORCreateInput, admin_id: int | N
     db.flush()
 
     room = normalize_room_text(payload.room_text)
+    windows = am_pm_windows(payload.start_time, payload.end_time)
     created: list[ORBlockInstance] = []
     for block_date in daterange(payload.start_date, payload.end_date):
         if payload.recurrence == "once" and block_date != payload.start_date:
@@ -332,29 +344,31 @@ def create_or_blocks(db: Session, payload: BlockORCreateInput, admin_id: int | N
         if payload.recurrence != "once" and block_date.weekday() not in weekdays:
             continue
         for location_id in location_ids:
-            instance = ORBlockInstance(
-                series_id=series.id,
-                location_id=location_id,
-                date=block_date,
-                session=series.session,
-                start_time=payload.start_time,
-                end_time=payload.end_time,
-                room_text=room,
-                status="open",
-                release_deadline=_block_release_deadline(block_date, payload.release_policy_days),
-                notes=series.notes,
-            )
-            db.add(instance)
-            db.flush()
-            audit_block(db, instance.id, admin_id, "created", {
-                "seriesId": series.id,
-                "locationId": location_id,
-                "date": block_date.isoformat(),
-                "room": room,
-            })
-            if not room:
-                flag_block_missing_room(db, instance, admin_id=admin_id)
-            created.append(instance)
+            for session_label, win_start, win_end in windows:
+                instance = ORBlockInstance(
+                    series_id=series.id,
+                    location_id=location_id,
+                    date=block_date,
+                    session=session_label,
+                    start_time=win_start,
+                    end_time=win_end,
+                    room_text=room,
+                    status="open",
+                    release_deadline=_block_release_deadline(block_date, payload.release_policy_days),
+                    notes=series.notes,
+                )
+                db.add(instance)
+                db.flush()
+                audit_block(db, instance.id, admin_id, "created", {
+                    "seriesId": series.id,
+                    "locationId": location_id,
+                    "date": block_date.isoformat(),
+                    "session": session_label,
+                    "room": room,
+                })
+                if not room:
+                    flag_block_missing_room(db, instance, admin_id=admin_id)
+                created.append(instance)
     db.commit()
     return {"series_id": series.id, "created": len(created), "instance_ids": [row.id for row in created]}
 
@@ -409,9 +423,9 @@ def update_or_block_instance(
     if overlaps:
         other = overlaps[0]
         loc_label = other.location.name if other.location else "location"
-        room_label = normalize_room_text(other.room_text) or "no room"
+        room_label = normalize_room_text(other.room_text) or "shared window"
         raise ValueError(
-            f"Duplicate Block OR time: {loc_label} room {room_label} already has "
+            f"Duplicate Block OR time: {loc_label} {room_label} already has "
             f"{other.status.replace('_', ' ')} block time "
             f"{block.date.strftime('%a %-m/%-d')} "
             f"{other.start_time.strftime('%H:%M')}-{other.end_time.strftime('%H:%M')}."
@@ -462,7 +476,7 @@ def update_or_block_instance(
         body=(
             f"{block.date.isoformat()} "
             f"{block.start_time.strftime('%H:%M')}-{block.end_time.strftime('%H:%M')}"
-            + (f" · {block.room_text}" if block.room_text else " · no room")
+            + (f" · {block.room_text}" if block.room_text else "")
         ),
         admin_user_id=admin_id,
         event_date=block.date,
@@ -499,7 +513,7 @@ def delete_or_block_instance(
         )
     active_cases = [case for case in (block.cases or []) if (case.status or "") != "cancelled"]
     if active_cases:
-        raise ValueError("This block still has linked surgical cases. Move or cancel those cases first.")
+        raise ValueError("This block still has linked surgical cases. Reschedule those cases before deleting the block.")
 
     loc_label = block.location.abbreviation if block.location and block.location.abbreviation else (
         block.location.name if block.location else "OR"
@@ -536,7 +550,145 @@ def delete_or_block_instance(
     db.commit()
 
 
+def split_day_spanning_block(
+    db: Session,
+    block: ORBlockInstance,
+    *,
+    admin_id: int | None = None,
+) -> ORBlockInstance | None:
+    """Split one all-day capacity into AM + PM cards; move noon+ surgeons/cases to PM."""
+    if not spans_am_and_pm(block.start_time, block.end_time):
+        return None
+
+    pm_end = block.end_time
+    am_start = block.start_time
+    overlaps = overlapping_or_blocks(
+        db,
+        block_date=block.date,
+        location_id=block.location_id,
+        start_time=SESSION_SPLIT_NOON,
+        end_time=pm_end,
+        room_text=block.room_text,
+        exclude_block_id=block.id,
+    )
+    if overlaps:
+        # Already has a PM sibling — just truncate this row to AM.
+        block.session = "am"
+        block.end_time = SESSION_SPLIT_NOON
+        audit_block(
+            db,
+            block.id,
+            admin_id,
+            "split_to_am",
+            {"reason": "day_spanning_truncated", "keptSiblingId": overlaps[0].id},
+        )
+        db.flush()
+        return None
+
+    pm = ORBlockInstance(
+        series_id=block.series_id,
+        location_id=block.location_id,
+        date=block.date,
+        session="pm",
+        start_time=SESSION_SPLIT_NOON,
+        end_time=pm_end,
+        room_text=block.room_text,
+        status=block.status or "open",
+        release_deadline=block.release_deadline,
+        notes=block.notes,
+    )
+    db.add(pm)
+    db.flush()
+
+    for assignment in list(block.assignments or []):
+        if assignment.start_time >= SESSION_SPLIT_NOON:
+            assignment.block_instance_id = pm.id
+
+    for case in list(_active_block_cases(block)):
+        if case.start_time and case.start_time >= SESSION_SPLIT_NOON:
+            case.or_block_instance_id = pm.id
+
+    block.session = "am"
+    block.start_time = am_start
+    block.end_time = SESSION_SPLIT_NOON
+    db.flush()
+    db.expire(block, ["assignments", "cases"])
+    db.expire(pm, ["assignments", "cases"])
+    block = _block_with_case_relations(db, block.id) or block
+    pm = _block_with_case_relations(db, pm.id) or pm
+
+    # Ensure each PM case has its surgeon on the PM card.
+    pm_assigned = {row.surgeon_id for row in (pm.assignments or []) if row.surgeon_id}
+    for case in _active_block_cases(pm):
+        if not case.surgeon_id or case.surgeon_id in pm_assigned:
+            continue
+        db.add(
+            ORBlockAssignment(
+                block_instance_id=pm.id,
+                surgeon_id=case.surgeon_id,
+                assigned_by_admin_id=admin_id,
+                start_time=case.start_time or SESSION_SPLIT_NOON,
+                case_count=1,
+                note="Moved with case when all-day block was split into AM/PM",
+            )
+        )
+        pm_assigned.add(case.surgeon_id)
+    db.flush()
+    db.expire(pm, ["assignments", "cases"])
+    pm = _block_with_case_relations(db, pm.id) or pm
+
+    _sync_assignment_case_counts_from_cases(db, block)
+    _sync_assignment_case_counts_from_cases(db, pm)
+    if (pm.assignments or []) or _active_block_cases(pm):
+        pm.status = "assigned"
+    elif pm.status == "assigned":
+        pm.status = "open"
+    if (block.assignments or []) or _active_block_cases(block):
+        block.status = "assigned"
+    elif block.status == "assigned":
+        block.status = "open"
+
+    audit_block(
+        db,
+        block.id,
+        admin_id,
+        "split_am_pm",
+        {
+            "amId": block.id,
+            "pmId": pm.id,
+            "am": f"{block.start_time.strftime('%H:%M')}-{block.end_time.strftime('%H:%M')}",
+            "pm": f"{pm.start_time.strftime('%H:%M')}-{pm.end_time.strftime('%H:%M')}",
+        },
+    )
+    audit_block(db, pm.id, admin_id, "created_from_split", {"sourceBlockId": block.id})
+    return pm
+
+
+def ensure_am_pm_split_for_range(db: Session, start_date: date, end_date: date) -> int:
+    """Repair day-spanning Block OR rows into AM + PM cards for the visible range."""
+    candidates = (
+        db.query(ORBlockInstance)
+        .options(
+            joinedload(ORBlockInstance.assignments),
+            joinedload(ORBlockInstance.cases),
+        )
+        .filter(ORBlockInstance.date >= start_date, ORBlockInstance.date <= end_date)
+        .order_by(ORBlockInstance.date, ORBlockInstance.id)
+        .all()
+    )
+    split_count = 0
+    for block in candidates:
+        if not spans_am_and_pm(block.start_time, block.end_time):
+            continue
+        if split_day_spanning_block(db, block) is not None or block.session == "am":
+            split_count += 1
+    if split_count:
+        db.commit()
+    return split_count
+
+
 def block_instances_for_range(db: Session, start_date: date, end_date: date) -> list[ORBlockInstance]:
+    ensure_am_pm_split_for_range(db, start_date, end_date)
     return (
         db.query(ORBlockInstance)
         .filter(ORBlockInstance.date >= start_date, ORBlockInstance.date <= end_date)
@@ -546,7 +698,12 @@ def block_instances_for_range(db: Session, start_date: date, end_date: date) -> 
             joinedload(ORBlockInstance.assignments).joinedload(ORBlockAssignment.surgeon),
             joinedload(ORBlockInstance.cases),
         )
-        .order_by(ORBlockInstance.date, ORBlockInstance.start_time, ORBlockInstance.location_id)
+        .order_by(
+            ORBlockInstance.date,
+            ORBlockInstance.start_time,
+            ORBlockInstance.location_id,
+            ORBlockInstance.id,
+        )
         .all()
     )
 
@@ -566,12 +723,12 @@ def _safe_surgeon_label(surgeon: Surgeon | None) -> str:
 
 
 def _assignment_payload(block: ORBlockInstance, assignment: ORBlockAssignment) -> dict:
-    room = (block.room_text or "").strip()
+    room = _display_room_label(block)
     cases = assignment.case_count or 0
     case_word = "Case" if cases == 1 else "Cases"
     initials = assignment.surgeon.initials if assignment.surgeon else ""
     parts = []
-    if room:
+    if room and "," not in room:
         parts.append(f"Rm {room}")
     parts.append(assignment.start_time.strftime("%H:%M"))
     parts.append(f"{cases} {case_word}")
@@ -590,26 +747,66 @@ def _assignment_payload(block: ORBlockInstance, assignment: ORBlockAssignment) -
     }
 
 
-def _surgical_case_payload(case: SurgicalCase) -> dict:
-    return {
+def _surgical_case_payload(case: SurgicalCase, *, include_details: bool = True) -> dict:
+    payload = {
         "id": case.id,
         "surgeonId": case.surgeon_id,
         "start": case.start_time.strftime("%H:%M") if case.start_time else "",
         "end": case.end_time.strftime("%H:%M") if case.end_time else "",
-        "procedure": (case.procedure or "").strip(),
-        "patientName": (case.patient_name or "").strip(),
+        "procedure": "",
+        "patientName": "",
         "room": (case.room_text or "").strip(),
     }
+    if include_details:
+        payload["procedure"] = (case.procedure or "").strip()
+        payload["patientName"] = (case.patient_name or "").strip()
+    return payload
 
 
-def block_case_payloads(block: ORBlockInstance) -> list[dict]:
+def block_case_payloads(block: ORBlockInstance, *, include_details: bool = True) -> list[dict]:
     rows = [
         case
         for case in list(block.cases or [])
         if (case.status or "").lower() != "cancelled"
     ]
     rows.sort(key=lambda row: (row.start_time or time(0, 0), row.id or 0))
-    return [_surgical_case_payload(case) for case in rows]
+    return [_surgical_case_payload(case, include_details=include_details) for case in rows]
+
+
+def _active_block_cases(block: ORBlockInstance) -> list[SurgicalCase]:
+    return [
+        case
+        for case in list(block.cases or [])
+        if (case.status or "").lower() != "cancelled"
+    ]
+
+
+def _block_with_case_relations(db: Session, block_id: int) -> ORBlockInstance | None:
+    return (
+        db.query(ORBlockInstance)
+        .options(
+            joinedload(ORBlockInstance.location),
+            joinedload(ORBlockInstance.assignments).joinedload(ORBlockAssignment.surgeon),
+            joinedload(ORBlockInstance.assigned_surgeon),
+            joinedload(ORBlockInstance.cases),
+        )
+        .filter(ORBlockInstance.id == block_id)
+        .first()
+    )
+
+
+def _sync_assignment_case_counts_from_cases(db: Session, block: ORBlockInstance) -> None:
+    """When real cases exist for a surgeon, keep assignment.case_count aligned."""
+    active = _active_block_cases(block)
+    by_surgeon: dict[int, int] = defaultdict(int)
+    for case in active:
+        if case.surgeon_id:
+            by_surgeon[case.surgeon_id] += 1
+    for assignment in list(block.assignments or []):
+        counted = by_surgeon.get(assignment.surgeon_id or 0, 0)
+        if counted > 0:
+            assignment.case_count = counted
+    _sync_legacy_assignment_fields(db, block)
 
 
 def block_assignment_payloads(block: ORBlockInstance) -> list[dict]:
@@ -633,9 +830,9 @@ def block_assignment_payloads(block: ORBlockInstance) -> list[dict]:
     return [_assignment_payload(block, legacy)]
 
 
-def serialize_block_instance(block: ORBlockInstance) -> dict:
+def serialize_block_instance(block: ORBlockInstance, *, include_case_details: bool = True) -> dict:
     assignments = block_assignment_payloads(block)
-    cases = block_case_payloads(block)
+    cases = block_case_payloads(block, include_details=include_case_details)
     first_assignment = assignments[0] if assignments else None
     assigned_start = parse_hhmm(first_assignment["start"], block.start_time) if first_assignment else (block.assigned_start_time or block.start_time)
     total_cases = len(cases) if cases else (
@@ -643,11 +840,12 @@ def serialize_block_instance(block: ORBlockInstance) -> dict:
     )
     assignment_label = first_assignment["label"] if first_assignment else ""
     status = "assigned" if assignments else (block.status or "open")
-    room = (block.room_text or "").strip()
+    room = _display_room_label(block)
+    session = infer_session_label(block.start_time, block.end_time, block.session)
     return {
         "id": block.id,
         "date": block.date.isoformat(),
-        "session": block.session or "custom",
+        "session": session,
         "start": block.start_time.strftime("%H:%M"),
         "end": block.end_time.strftime("%H:%M"),
         "status": status,
@@ -666,6 +864,217 @@ def serialize_block_instance(block: ORBlockInstance) -> dict:
         "cases": cases,
         "notes": sanitize_schedule_note_for_humans(block.notes),
     }
+
+
+def add_case_to_block(
+    db: Session,
+    block_id: int,
+    surgeon_id: int,
+    start_time: time,
+    *,
+    end_time: time | None = None,
+    procedure: str = "",
+    patient_name: str = "",
+    admin_id: int | None = None,
+) -> tuple[ORBlockInstance, list[str]]:
+    block = _block_with_case_relations(db, block_id)
+    if not block:
+        raise ValueError("Block not found")
+    assigned_ids = {row.surgeon_id for row in (block.assignments or []) if row.surgeon_id}
+    if block.assigned_surgeon_id:
+        assigned_ids.add(block.assigned_surgeon_id)
+    if surgeon_id not in assigned_ids:
+        # Adding a case places the surgeon on the block (same idea as reschedule).
+        db.add(
+            ORBlockAssignment(
+                block_instance_id=block.id,
+                surgeon_id=surgeon_id,
+                assigned_by_admin_id=admin_id,
+                start_time=start_time,
+                case_count=1,
+                note=None,
+            )
+        )
+        db.flush()
+        _sync_legacy_assignment_fields(db, block)
+        db.expire(block, ["assignments"])
+        block = _block_with_case_relations(db, block_id)
+        if not block:
+            raise ValueError("Block not found")
+    if start_time < block.start_time or start_time >= block.end_time:
+        raise ValueError("Case start must fall inside the block window")
+    if end_time is not None and end_time <= start_time:
+        raise ValueError("Case end must be after start")
+
+    case = SurgicalCase(
+        surgeon_id=surgeon_id,
+        date=block.date,
+        start_time=start_time,
+        end_time=end_time,
+        patient_name=(patient_name or "").strip() or "TBD",
+        procedure=(procedure or "").strip() or "Scheduled case",
+        location_id=block.location_id,
+        or_block_instance_id=block.id,
+        room_text=(block.room_text or "").strip() or None,
+        status="scheduled",
+    )
+    db.add(case)
+    db.flush()
+    db.expire(block, ["cases", "assignments"])
+    block = _block_with_case_relations(db, block_id)
+    if not block:
+        raise ValueError("Block not found")
+    _sync_assignment_case_counts_from_cases(db, block)
+    warnings = []
+    try:
+        from .scheduling_guardrails_service import surgical_case_warning_messages
+
+        warnings = surgical_case_warning_messages(
+            db,
+            surgeon_id,
+            block.date,
+            start_time,
+            end_time,
+            block.location_id,
+            exclude_case_id=case.id,
+        ) or []
+    except Exception:
+        warnings = []
+    log_schedule_change(
+        db,
+        event_type="surgical_case_added",
+        surgeon_id=surgeon_id,
+        admin_user_id=admin_id,
+        event_date=block.date,
+        title="Case added to Block OR",
+        body=f"{start_time.strftime('%H:%M')} · {(procedure or 'Scheduled case').strip() or 'Scheduled case'}",
+        payload={"blockId": block.id, "caseId": case.id},
+    )
+    db.commit()
+    block = _block_with_case_relations(db, block_id)
+    return block, [scheduler_safe_warning(w) for w in warnings if w]
+
+
+def update_block_case(
+    db: Session,
+    block_id: int,
+    case_id: int,
+    *,
+    start_time: time | None = None,
+    end_time: time | None = None,
+    procedure: str | None = None,
+    patient_name: str | None = None,
+    surgeon_id: int | None = None,
+    target_block_id: int | None = None,
+    admin_id: int | None = None,
+) -> tuple[ORBlockInstance, list[str]]:
+    source = _block_with_case_relations(db, block_id)
+    if not source:
+        raise ValueError("Block not found")
+    case = next((row for row in _active_block_cases(source) if row.id == case_id), None)
+    if not case:
+        raise ValueError("Case not found on this block")
+
+    dest_id = int(target_block_id) if target_block_id is not None else block_id
+    dest = source if dest_id == block_id else _block_with_case_relations(db, dest_id)
+    if not dest:
+        raise ValueError("Destination block not found")
+
+    next_surgeon = int(surgeon_id) if surgeon_id is not None else case.surgeon_id
+    if not next_surgeon:
+        raise ValueError("Surgeon is required")
+    next_start = start_time if start_time is not None else case.start_time
+    next_end = end_time if end_time is not None else case.end_time
+    if next_start is None:
+        raise ValueError("Case start is required")
+    # Cross-day reschedule is allowed (insurance / illness). Snap into dest window if needed.
+    if next_start < dest.start_time or next_start >= dest.end_time:
+        next_start = dest.start_time
+    if next_end is not None and next_end <= next_start:
+        next_end = None
+
+    assigned_ids = {row.surgeon_id for row in (dest.assignments or []) if row.surgeon_id}
+    if dest.assigned_surgeon_id:
+        assigned_ids.add(dest.assigned_surgeon_id)
+    if next_surgeon not in assigned_ids:
+        # Case placement implies the surgeon belongs on the destination block.
+        db.add(
+            ORBlockAssignment(
+                block_instance_id=dest.id,
+                surgeon_id=next_surgeon,
+                assigned_by_admin_id=admin_id,
+                start_time=next_start,
+                case_count=1,
+                note="Auto-added when case was rescheduled onto this block",
+            )
+        )
+        db.flush()
+        _sync_legacy_assignment_fields(db, dest)
+        db.expire(dest, ["assignments"])
+        dest = _block_with_case_relations(db, dest.id)
+        if not dest:
+            raise ValueError("Destination block not found")
+
+    case.surgeon_id = next_surgeon
+    case.or_block_instance_id = dest.id
+    case.location_id = dest.location_id
+    case.date = dest.date
+    case.start_time = next_start
+    if end_time is not None:
+        case.end_time = end_time
+    if procedure is not None:
+        case.procedure = procedure.strip() or case.procedure or "Scheduled case"
+    if patient_name is not None:
+        case.patient_name = patient_name.strip() or case.patient_name or "TBD"
+    if dest.room_text and not (case.room_text or "").strip():
+        case.room_text = dest.room_text
+    db.flush()
+    db.expire(source, ["cases", "assignments"])
+    db.expire(dest, ["cases", "assignments"])
+    source = _block_with_case_relations(db, block_id)
+    dest = _block_with_case_relations(db, dest.id)
+    if source:
+        _sync_assignment_case_counts_from_cases(db, source)
+    if dest and (not source or dest.id != source.id):
+        _sync_assignment_case_counts_from_cases(db, dest)
+
+    warnings = []
+    try:
+        from .scheduling_guardrails_service import surgical_case_warning_messages
+
+        warnings = surgical_case_warning_messages(
+            db,
+            next_surgeon,
+            dest.date if dest else case.date,
+            case.start_time,
+            case.end_time,
+            dest.location_id if dest else case.location_id,
+            exclude_case_id=case.id,
+        ) or []
+    except Exception:
+        warnings = []
+
+    moved = dest is not None and dest.id != block_id
+    log_schedule_change(
+        db,
+        event_type="surgical_case_moved" if moved else "surgical_case_updated",
+        surgeon_id=next_surgeon,
+        admin_user_id=admin_id,
+        event_date=case.date,
+        title="Case moved to another Block OR" if moved else "Case updated on Block OR",
+        body=f"{case.start_time.strftime('%H:%M')} · {(case.procedure or 'Case').strip()}",
+        payload={
+            "blockId": block_id,
+            "targetBlockId": dest.id if dest else block_id,
+            "caseId": case.id,
+            "fromDate": source.date.isoformat() if source else None,
+            "toDate": dest.date.isoformat() if dest else None,
+        },
+    )
+    db.commit()
+    # Always return the source block so the open editor stays on the same sheet.
+    source = _block_with_case_relations(db, block_id)
+    return source, [scheduler_safe_warning(w) for w in warnings if w]
 
 
 def copy_or_block_capacity(
@@ -734,10 +1143,10 @@ def copy_or_block_capacity(
                 source.location.abbreviation if source.location and source.location.abbreviation
                 else (source.location.name if source.location else f"location {source.location_id}")
             )
-            room_label = room or "no room"
+            room_label = room or "shared window"
             if overlaps:
                 skipped.append(
-                    f"Skipped {loc_label} room {room_label} {target_date.strftime('%a %-m/%-d')} "
+                    f"Skipped {loc_label} {room_label} {target_date.strftime('%a %-m/%-d')} "
                     f"{source.start_time.strftime('%H:%M')}-{source.end_time.strftime('%H:%M')} "
                     "(already has block time)."
                 )
@@ -1169,7 +1578,10 @@ def remove_block_assignment(
 ) -> ORBlockInstance:
     block = (
         db.query(ORBlockInstance)
-        .options(joinedload(ORBlockInstance.assignments).joinedload(ORBlockAssignment.surgeon))
+        .options(
+            joinedload(ORBlockInstance.assignments).joinedload(ORBlockAssignment.surgeon),
+            joinedload(ORBlockInstance.cases),
+        )
         .filter(ORBlockInstance.id == block_id)
         .first()
     )
@@ -1178,6 +1590,16 @@ def remove_block_assignment(
     assignment = next((row for row in (block.assignments or []) if row.id == assignment_id), None)
     if not assignment:
         raise ValueError("Assignment not found")
+    linked = [
+        case
+        for case in _active_block_cases(block)
+        if case.surgeon_id == assignment.surgeon_id
+    ]
+    if linked:
+        raise ValueError(
+            "This surgeon still has linked surgical cases on this block. "
+            "Reschedule those cases before removing the surgeon."
+        )
 
     previous_surgeon_id = assignment.surgeon_id
     previous_label = _assignment_payload(block, assignment)["label"]
@@ -1218,12 +1640,24 @@ def remove_block_assignment(
 def clear_block_assignment(db: Session, block_id: int, admin_id: int | None = None) -> ORBlockInstance:
     block = (
         db.query(ORBlockInstance)
-        .options(joinedload(ORBlockInstance.assignments))
+        .options(
+            joinedload(ORBlockInstance.assignments),
+            joinedload(ORBlockInstance.cases),
+        )
         .filter(ORBlockInstance.id == block_id)
         .first()
     )
     if not block:
         raise ValueError("Block not found")
+    active_cases = [
+        case
+        for case in list(block.cases or [])
+        if (case.status or "").lower() != "cancelled"
+    ]
+    if active_cases:
+        raise ValueError(
+            "This block still has linked surgical cases. Reschedule those cases before clearing surgeons."
+        )
     # Capture every assigned surgeon before rows are deleted.
     notify_targets: list[tuple[int, str]] = []
     for assignment in list(block.assignments or []):
@@ -1298,7 +1732,11 @@ def candidate_surgeon_rows(db: Session, block: ORBlockInstance) -> list[dict]:
 
 
 def scheduler_native_home(db: Session, start_date: date, end_date: date) -> dict:
-    blocks = [serialize_block_instance(row) for row in block_instances_for_range(db, start_date, end_date)]
+    # Week list omits case PHI; block detail returns full case rows for schedulers.
+    blocks = [
+        serialize_block_instance(row, include_case_details=False)
+        for row in block_instances_for_range(db, start_date, end_date)
+    ]
     changes = recent_schedule_changes(db)
     return {
         "range": {"start": start_date.isoformat(), "end": end_date.isoformat()},

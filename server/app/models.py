@@ -16,7 +16,7 @@ class AdminUser(Base):
     email = Column(String(255), unique=True, nullable=False)
     phone = Column(String(32))
     password_hash = Column(String(255), nullable=False)
-    role = Column(String(32), default="admin")  # admin | superadmin
+    role = Column(String(32), default="admin")  # admin | scheduler | superadmin
     notify_day_off_requests = Column(Boolean, default=True, server_default="true")
     notify_schedule_changes = Column(Boolean, default=True, server_default="true")
     sms_fallback_enabled = Column(Boolean, default=False, server_default="false")
@@ -86,7 +86,7 @@ class Surgeon(Base):
     last_name = Column(String(64), nullable=False)
     specialty = Column(String(128))
     suffix = Column(String(32))   # MD, DO, MD FACS, PA-C, NP, etc.
-    staff_type = Column(String(16), default="physician", server_default="physician")  # physician | staff
+    staff_type = Column(String(16), default="physician", server_default="physician")  # physician (surgeon) | staff (PA)
     email = Column(String(255), unique=True)
     phone = Column(String(32))
     color = Column(String(16), default="#ffffff", server_default="#ffffff")  # reserved; calendar uses facility colors only

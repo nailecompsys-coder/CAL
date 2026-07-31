@@ -288,7 +288,7 @@ def _flag_admin_schedule_issues(
     if not warnings:
         return
     body = (
-        f"{surgeon_name} · {day.isoformat()} · {location_label} "
+        f"{surgeon_name} · {day.strftime('%m-%d-%y')} · {location_label} "
         f"{block.start_time.strftime('%H:%M')}-{block.end_time.strftime('%H:%M')}: "
         + "; ".join(warnings[:5])
     )

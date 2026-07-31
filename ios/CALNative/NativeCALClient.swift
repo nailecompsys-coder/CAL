@@ -123,6 +123,57 @@ struct NativeCALClient {
     return try JSONDecoder().decode(NativeSchedulerAssignResponse.self, from: data)
   }
 
+  func addSchedulerCase(
+    token: String,
+    blockId: Int,
+    surgeonId: Int,
+    startTime: String,
+    procedure: String,
+    patientName: String
+  ) async throws -> NativeSchedulerAssignResponse {
+    let url = baseURL.appendingPathComponent("/api/native/scheduler/blocks/\(blockId)/cases")
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.httpBody = try JSONEncoder().encode(NativeSchedulerCasePayload(
+      surgeonId: surgeonId,
+      startTime: startTime,
+      endTime: nil,
+      procedure: procedure,
+      patientName: patientName
+    ))
+    let data = try await perform(request)
+    return try JSONDecoder().decode(NativeSchedulerAssignResponse.self, from: data)
+  }
+
+  func updateSchedulerCase(
+    token: String,
+    blockId: Int,
+    caseId: Int,
+    startTime: String,
+    procedure: String,
+    patientName: String,
+    surgeonId: Int?,
+    targetBlockId: Int?
+  ) async throws -> NativeSchedulerAssignResponse {
+    let url = baseURL.appendingPathComponent("/api/native/scheduler/blocks/\(blockId)/cases/\(caseId)/update")
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.httpBody = try JSONEncoder().encode(NativeSchedulerCaseUpdatePayload(
+      startTime: startTime,
+      endTime: nil,
+      procedure: procedure,
+      patientName: patientName,
+      surgeonId: surgeonId,
+      targetBlockId: targetBlockId
+    ))
+    let data = try await perform(request)
+    return try JSONDecoder().decode(NativeSchedulerAssignResponse.self, from: data)
+  }
+
   func clearSchedulerBlock(token: String, blockId: Int) async throws -> NativeSchedulerAssignResponse {
     let url = baseURL.appendingPathComponent("/api/native/scheduler/blocks/\(blockId)/clear")
     var request = URLRequest(url: url)
@@ -349,6 +400,63 @@ struct NativeCALClient {
     _ = try await perform(request)
   }
 
+  func createDayItem(
+    token: String,
+    date: String,
+    title: String,
+    notes: String,
+    startTime: String?,
+    endTime: String?
+  ) async throws {
+    let url = baseURL.appendingPathComponent("/surgeon/api/day-items")
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.setValue(token, forHTTPHeaderField: "X-CAL-Device-Token")
+    request.httpBody = try JSONEncoder().encode(DayItemWritePayload(
+      date: date,
+      title: title,
+      notes: notes,
+      startTime: startTime,
+      endTime: endTime
+    ))
+    _ = try await perform(request)
+  }
+
+  func updateDayItem(
+    token: String,
+    itemId: Int,
+    title: String,
+    notes: String,
+    startTime: String?,
+    endTime: String?
+  ) async throws {
+    let url = baseURL.appendingPathComponent("/surgeon/api/day-items/\(itemId)")
+    var request = URLRequest(url: url)
+    request.httpMethod = "PATCH"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.setValue(token, forHTTPHeaderField: "X-CAL-Device-Token")
+    request.httpBody = try JSONEncoder().encode(DayItemPatchPayload(
+      title: title,
+      notes: notes,
+      startTime: startTime,
+      endTime: endTime
+    ))
+    _ = try await perform(request)
+  }
+
+  func deleteDayItem(token: String, itemId: Int) async throws {
+    let url = baseURL.appendingPathComponent("/surgeon/api/day-items/\(itemId)")
+    var request = URLRequest(url: url)
+    request.httpMethod = "DELETE"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.setValue(token, forHTTPHeaderField: "X-CAL-Device-Token")
+    _ = try await perform(request)
+  }
+
   private func perform(_ request: URLRequest) async throws -> Data {
     let (data, response) = try await URLSession.shared.data(for: request)
     guard let http = response as? HTTPURLResponse else {
@@ -429,4 +537,31 @@ private struct NativePushTokenPayload: Encodable {
   let platform: String
   let provider: String
   let deviceName: String?
+}
+
+private struct DayItemWritePayload: Encodable {
+  let date: String
+  let title: String
+  let notes: String
+  let startTime: String?
+  let endTime: String?
+
+  enum CodingKeys: String, CodingKey {
+    case date, title, notes
+    case startTime = "start_time"
+    case endTime = "end_time"
+  }
+}
+
+private struct DayItemPatchPayload: Encodable {
+  let title: String
+  let notes: String
+  let startTime: String?
+  let endTime: String?
+
+  enum CodingKeys: String, CodingKey {
+    case title, notes
+    case startTime = "start_time"
+    case endTime = "end_time"
+  }
 }

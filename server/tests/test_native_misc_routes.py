@@ -61,6 +61,28 @@ class NativeMiscRoutesTest(unittest.TestCase):
         finally:
             db.close()
 
+    def test_push_token_accepts_fcm_provider(self):
+        db = self.Session()
+        try:
+            surgeon = self._seed_surgeon(db, "Chris", "Johnson", "chris@example.com")
+            response = native_push_token(
+                NativePushTokenBody(
+                    token="fcm-device-token-abc",
+                    platform="android",
+                    provider="fcm",
+                    deviceName="Pixel",
+                ),
+                db=db,
+                auth=(surgeon, None),
+            )
+            self.assertTrue(response["ok"])
+            token = db.query(NativePushToken).filter(NativePushToken.token == "fcm-device-token-abc").one()
+            self.assertEqual(token.provider, "fcm")
+            self.assertEqual(token.platform, "android")
+            self.assertTrue(token.is_active)
+        finally:
+            db.close()
+
     def test_push_token_rejects_empty_token(self):
         db = self.Session()
         try:

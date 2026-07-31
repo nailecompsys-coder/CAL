@@ -62,11 +62,11 @@ make deploy-cal
 
 **What `rebuild-cal-api.sh` does (default):**
 
-1. **`scripts/bump-version.sh`** — rewrites **`server/VERSION`** to `<base>+<UTC timestamp>` so every deploy gets a new **Build** badge (footer + `/health` + `X-App-Version`).
-2. **`scripts/sync-sw-cache-name.sh`** — sets `CACHE_NAME` in **`server/app/static/sw.js`** from that version so the PWA drops old static caches.
+1. **`scripts/bump-version.sh`** — keeps **`server/VERSION`** as a clean product version (e.g. `2.0`). Strips any legacy `+UTC` build suffix; does **not** append a timestamp. Edit `VERSION` manually for a new release.
+2. **`scripts/sync-sw-cache-name.sh`** — sets `CACHE_NAME` in **`server/app/static/sw.js`** from that version so the PWA drops old static caches when VERSION changes.
 3. Stops/removes `cal_api`, builds the local image, starts `cal_api`, then runs **`verify-cal-api.sh`**.
 
-**Opt out of bump** (e.g. quick rebuild same version): `NO_BUMP=1 ./scripts/rebuild-cal-api.sh`
+**Opt out of VERSION/sw sync** (e.g. quick rebuild same version): `NO_BUMP=1 ./scripts/rebuild-cal-api.sh`
 
 **Compose files:**
 
@@ -153,11 +153,11 @@ CAL/
 
 | Model | Table | Purpose |
 |-------|--------|---------|
-| AdminUser | admin_users | Portal login (username, email, password_hash). |
+| AdminUser | admin_users | Portal login (username, email, password_hash). role: admin \| scheduler \| superadmin. Users → Admins (admin/superadmin) or Schedulers (scheduler). |
 | SiteSettings | site_settings | id=1: practice_name, logo_filename. |
 | SchedulingRuleConfig | scheduling_rule_config | rule_id (unique), enabled, config (JSON text). Used by rules engine. |
 | Location | locations | name, address, city, location_type (clinic \| hospital), color. |
-| Surgeon | surgeons | first_name, last_name, specialty, suffix, staff_type (physician \| staff), email, color. full_name, initials @property. |
+| Surgeon | surgeons | first_name, last_name, specialty, suffix, staff_type (physician = Surgeon \| staff = PA), email, color. full_name, initials @property. Managed under Settings → Users. |
 | MagicLink | magic_links | Legacy table name now used to store hashed OTP login codes: surgeon_id, token_hash, expires_at, used_at. |
 | SurgeonDevice | surgeon_devices | surgeon_id, device_name, user_agent, token_hash (session). |
 | CallGroup | call_groups | name, sort_order. |

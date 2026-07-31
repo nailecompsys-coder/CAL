@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Bump repo root VERSION with a new UTC build suffix so every deploy has a unique badge.
-# Format: <base>+<YYYYMMDDTHHMMSSZ>  (base = line before first '+', or whole line if no '+')
+# Keep server/VERSION as a clean product version (no +UTC build suffix).
+# Strips any existing +build metadata; does not append a timestamp.
+# Edit VERSION manually when releasing a new product version (e.g. 2.0 → 2.1).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VF="$ROOT/VERSION"
 [[ -f "$VF" ]] || { echo "Missing $VF" >&2; exit 1; }
 line="$(head -1 "$VF" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 base="${line%%+*}"
-suffix="$(date -u +%Y%m%dT%H%M%SZ)"
-new="${base}+${suffix}"
-printf '%s\n' "$new" > "$VF"
-echo "$new"
+[[ -n "$base" ]] || { echo "VERSION is empty" >&2; exit 1; }
+printf '%s\n' "$base" > "$VF"
+echo "$base"

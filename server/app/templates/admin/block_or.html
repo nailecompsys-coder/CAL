@@ -17,7 +17,14 @@
 {% set msg = request.query_params.get('msg') %}
 {% set panel_q = (request.query_params.get('panel') or '').strip().lower() %}
 {% if selected_block %}
-  {% set default_panel = panel_q if panel_q in ['assign','edit','copy','remove'] else 'assign' %}
+  {# Hierarchy is always visible; tools open only when a pill is chosen. #}
+  {% if panel_q in ['assign','edit','copy','remove','case'] %}
+    {% set default_panel = panel_q %}
+  {% elif editing_case %}
+    {% set default_panel = 'case' %}
+  {% else %}
+    {% set default_panel = '' %}
+  {% endif %}
 {% else %}
   {# Collapsed by default so OR week stays above the fold; open only when pill clicked. #}
   {% set default_panel = panel_q if panel_q in ['create','copy'] else '' %}
@@ -39,6 +46,10 @@
   Surgeon removed from Block OR.
   {% elif msg == 'cleared' %}
   Block OR assignments cleared.
+  {% elif msg == 'case-added' %}
+  Case added to Block OR.
+  {% elif msg == 'case-updated' %}
+  Case updated.
   {% elif msg == 'deleted' %}
   Block OR removed.
   {% else %}
@@ -58,7 +69,7 @@
   <section class="clinical-panel overflow-hidden">
     <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
       <h2 class="font-extrabold text-slate-800">OR week</h2>
-      <span class="text-xs text-slate-400">Click a block to assign, edit, or copy</span>
+      <span class="text-xs text-slate-400">Click a block → surgeons → cases</span>
     </div>
     <div class="overflow-x-auto">
       <table class="w-full min-w-[980px] border-collapse text-sm">
@@ -84,7 +95,7 @@
             <td class="px-2 py-2 border border-slate-200 align-top bg-white">
               <div class="min-h-[92px] space-y-1.5">
                 {% for block in blocks %}
-                <a href="/admin/block-or?week_offset={{ week_offset }}&block_id={{ block.id }}&panel=assign"
+                <a href="/admin/block-or?week_offset={{ week_offset }}&block_id={{ block.id }}"
                    class="block rounded-lg border px-2 py-1.5 text-xs shadow-sm hover:ring-2 hover:ring-blue-300 transition
                    {% if selected_block and selected_block.id == block.id %}ring-2 ring-blue-500{% endif %}
                    {% if block.status == 'open' %}bg-teal-50 border-teal-200 text-teal-900
@@ -94,9 +105,16 @@
                     <strong>{{ block.session|upper }}</strong>
                     <span>{{ block.status.replace('_', ' ') }}</span>
                   </div>
-                  <div class="font-semibold">{{ block.start }}-{{ block.end }}{% if block.room %} · {{ block.room }}{% endif %}</div>
-                  {% if not block.room %}<div class="text-[10px] font-semibold text-amber-700">No room</div>{% endif %}
-                  <div class="truncate">{% if block.assignmentLabel %}{{ block.assignmentLabel }}{% else %}Open{% endif %}</div>
+                  <div class="font-semibold">
+                    {{ block.start }}-{{ block.end }}{% if block.room %} · Rm {{ block.room }}{% endif %}
+                  </div>
+                  {% if block.assignments %}
+                    {% for row in block.assignments %}
+                    <div class="truncate">{{ row.start }} · {{ row.caseCount }} case{{ '' if row.caseCount == 1 else 's' }} · {{ row.surgeonInitials or '—' }}</div>
+                    {% endfor %}
+                  {% else %}
+                  <div class="truncate">Open</div>
+                  {% endif %}
                 </a>
                 {% else %}
                 <div class="text-slate-300 text-xs text-center py-7">No block</div>
@@ -113,7 +131,7 @@
     </div>
   </section>
 
-  <section class="clinical-panel p-4 space-y-3" id="block-or-tools">
+  <section class="clinical-panel p-4 space-y-4" id="block-or-tools">
     {% if selected_block %}
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="min-w-0">
@@ -122,7 +140,11 @@
           {{ selected_block.date.strftime('%a %b %-d, %Y') }}
           · {{ selected_block.location.abbreviation if selected_block.location else 'OR' }}
           · {{ selected_block.start_time.strftime('%H:%M') }}-{{ selected_block.end_time.strftime('%H:%M') }}
-          · {% if selected_block.room_text %}Rm {{ selected_block.room_text }}{% else %}<span class="text-amber-600">No room</span>{% endif %}
+          {% if selected_block.room_text %} · Rm {{ selected_block.room_text }}{% endif %}
+        </p>
+        <p class="text-xs text-slate-500 mt-1">
+          {{ assignments|length }} surgeon{{ '' if assignments|length == 1 else 's' }}
+          · {{ block_cases|length }} case{{ '' if block_cases|length == 1 else 's' }}
         </p>
       </div>
       <a href="/admin/block-or?week_offset={{ week_offset }}" class="text-xs font-semibold text-slate-500 hover:text-slate-700">Clear selection</a>
@@ -139,106 +161,134 @@
               data-panel="remove">Remove</button>
     </div>
 
-    <div class="block-or-panel" data-panel="assign">
-      <form method="post" action="/admin/block-or/{{ selected_block.id }}/assign" class="grid gap-4 lg:grid-cols-2">
-        <input type="hidden" name="week_offset" value="{{ week_offset }}" />
-        <div class="space-y-3">
-          {% if assignments %}
-          <div class="space-y-2">
-            <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide">On this block</div>
-            {% for row in assignments %}
-            <div class="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-              <div class="min-w-0">
-                <div class="font-semibold text-slate-800 truncate">
-                  {{ row.surgeon.initials if row.surgeon else '—' }}
-                  <span class="font-normal text-slate-500">
-                    · {{ (row.start_time or selected_block.start_time).strftime('%H:%M') }}
-                    · {{ row.case_count or 1 }} case{{ '' if (row.case_count or 1) == 1 else 's' }}
-                  </span>
+    {# Primary: surgeons → cases (no "On this block" chrome) #}
+    <div class="rounded-xl border border-slate-200 bg-white overflow-hidden">
+      {% if cases_by_surgeon %}
+        <div class="divide-y divide-slate-100">
+          {% for group in cases_by_surgeon %}
+          {% set human_note = (group.assignment.note if group.assignment else '')|human_schedule_note %}
+          <div class="p-3 space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <div class="min-w-0 flex items-center gap-2">
+                <span class="inline-flex items-center justify-center min-w-[2.25rem] px-1.5 py-0.5 rounded-md bg-teal-700 text-white text-xs font-extrabold tracking-wide">
+                  {{ group.surgeon.initials if group.surgeon else '—' }}
+                </span>
+                <div class="min-w-0">
+                  <div class="text-sm text-slate-800 truncate">
+                    <span class="font-extrabold">{{ group.surgeon.initials if group.surgeon else '—' }}</span>
+                    {% if group.surgeon and group.surgeon.full_name %}
+                    <span class="font-semibold text-slate-600"> {{ group.surgeon.full_name }}</span>
+                    {% endif %}
+                  </div>
+                  <div class="text-xs text-slate-500">
+                    {% if group.assignment %}
+                    {{ (group.assignment.start_time or selected_block.start_time).strftime('%H:%M') }}
+                    ·
+                    {% endif %}
+                    {{ group.cases|length }} case{{ '' if group.cases|length == 1 else 's' }}
+                    {% if human_note %}
+                    · {{ human_note }}
+                    {% endif %}
+                  </div>
                 </div>
-                {% if row.note %}
-                <div class="text-xs text-slate-500 truncate">{{ row.note }}</div>
-                {% endif %}
               </div>
-              <button form="remove-assignment-{{ row.id }}" type="submit"
-                class="text-xs font-semibold text-rose-600 hover:text-rose-800 flex-shrink-0"
-                onclick="return confirm('Remove this surgeon from the block?');">
-                Remove
-              </button>
+              {% if group.assignment %}
+                {% if group.cases %}
+                <span class="text-[11px] font-semibold text-slate-400 flex-shrink-0" title="Reschedule cases first">Remove blocked</span>
+                {% else %}
+                <button form="remove-assignment-{{ group.assignment.id }}" type="submit"
+                  class="text-xs font-semibold text-rose-600 hover:text-rose-800 flex-shrink-0"
+                  onclick="return confirm('Remove {{ group.surgeon.full_name if group.surgeon else 'this surgeon' }} from this block?');">
+                  Remove
+                </button>
+                {% endif %}
+              {% endif %}
             </div>
-            {% endfor %}
-            {% if assignments|length > 0 %}
-            <button form="clear-block-{{ selected_block.id }}" type="submit"
-              class="text-xs font-semibold text-amber-700 hover:text-amber-900"
-              onclick="return confirm('Clear all surgeons from this block?');">
-              Clear all assignments
-            </button>
-            {% endif %}
-          </div>
-          {% endif %}
 
-          {% if block_cases %}
-          <div class="space-y-2">
-            <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Cases · {{ block_cases|length }}</div>
-            <div class="max-h-48 overflow-y-auto space-y-1.5 rounded-lg border border-slate-200 bg-white p-2">
-              {% for case in block_cases %}
-              <div class="rounded-md border border-slate-100 bg-slate-50 px-2.5 py-2">
-                <div class="flex gap-3 items-start">
-                  <div class="w-12 flex-shrink-0 font-mono text-xs font-semibold text-slate-800">
+            {% if group.cases %}
+              <div class="ml-1 sm:ml-10 space-y-1.5">
+                {% for case in group.cases %}
+                <a href="/admin/block-or?week_offset={{ week_offset }}&block_id={{ selected_block.id }}&panel=case&case_id={{ case.id }}"
+                   class="flex gap-3 items-start rounded-lg border px-3 py-2 transition hover:border-teal-300 hover:bg-teal-50/40
+                   {% if editing_case and editing_case.id == case.id %}border-teal-400 bg-teal-50 ring-1 ring-teal-300{% else %}border-slate-100 bg-slate-50{% endif %}">
+                  <div class="w-12 flex-shrink-0 font-mono text-xs font-bold text-teal-800">
                     {{ case.start_time.strftime('%H:%M') if case.start_time else '—' }}
                   </div>
                   <div class="min-w-0 flex-1">
                     <div class="text-sm font-semibold text-slate-900 truncate">{{ case.patient_name or 'Case' }}</div>
-                    <div class="text-xs text-slate-500 truncate">
-                      {% if case.surgeon %}{{ case.surgeon.initials or case.surgeon.full_name }} · {% endif %}
-                      {{ case.procedure or 'TBD' }}{% if case.room_text %} · {{ case.room_text }}{% endif %}
-                    </div>
+                    <div class="text-xs text-slate-600 truncate">{{ case.procedure or 'TBD' }}</div>
+                    {% if case.room_text %}
+                    <div class="text-[11px] font-semibold text-slate-500 mt-0.5">Rm {{ case.room_text }}</div>
+                    {% endif %}
                   </div>
-                </div>
+                  <span class="text-[11px] font-bold text-teal-700 flex-shrink-0 self-center">Edit</span>
+                </a>
+                {% endfor %}
               </div>
-              {% endfor %}
-            </div>
+            {% else %}
+              <p class="ml-1 sm:ml-10 text-xs text-slate-400">No cases yet — use Assign to add one.</p>
+            {% endif %}
           </div>
+          {% endfor %}
+        </div>
+        {% if assignments %}
+        <div class="px-3 py-2 border-t border-slate-100 bg-slate-50/80">
+          {% if block_cases %}
+          <p class="text-xs text-amber-800 font-semibold">
+            Clear surgeons blocked — reschedule {{ block_cases|length }} linked case{{ '' if block_cases|length == 1 else 's' }} first.
+          </p>
           {% else %}
-          <div class="rounded-lg border border-dashed border-slate-200 px-3 py-3 text-xs text-slate-500 text-center">
-            No linked cases on this block yet.
-          </div>
+          <button form="clear-block-{{ selected_block.id }}" type="submit"
+            class="text-xs font-semibold text-amber-800 hover:text-amber-950"
+            onclick="return confirm('Clear ALL surgeons from this block?\n\nOnly allowed when there are no linked cases.\n\nThis cannot be undone from here.');">
+            Clear all surgeons…
+          </button>
           {% endif %}
         </div>
+        {% endif %}
+      {% else %}
+        <p class="text-sm text-slate-500 text-center py-6 px-4">
+          No surgeons or cases on this block yet. Use <strong>Assign</strong> to add a case.
+        </p>
+      {% endif %}
+    </div>
 
-        <div class="space-y-3">
-          <div>
-            <label class="block text-xs font-semibold text-slate-500 mb-1">Surgeon</label>
-            <select name="surgeon_id" id="assign-surgeon" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
-              <option value="">Select surgeon…</option>
-              {% for row in candidates %}
-              <option value="{{ row.surgeon.id }}"
-                data-status="{{ row.status }}"
-                data-availability="{{ row.availability }}"
-                data-warnings="{{ row.warnings|join(' | ') }}">
-                {{ row.surgeon.initials }} — {{ row.surgeon.full_name }}
-                {% if row.status != 'clear' %} ({{ row.availability }}){% endif %}
-              </option>
-              {% endfor %}
-            </select>
-            <p id="assign-warning" class="hidden mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"></p>
-          </div>
-          <div class="grid grid-cols-2 gap-3">
-            <div>
-              <label class="block text-xs font-semibold text-slate-500 mb-1">Start time</label>
-              <input type="time" name="start_time" value="{{ selected_block.start_time.strftime('%H:%M') }}" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
-            </div>
-            <div>
-              <label class="block text-xs font-semibold text-slate-500 mb-1">Cases</label>
-              <input type="number" name="case_count" value="1" min="1" max="20" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
-            </div>
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-500 mb-1">Assignment note</label>
-            <input name="assignment_note" id="assign-note" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Required when surgeon shows Not Available" />
-          </div>
-          <button class="w-full bg-teal-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-teal-700">Place on block</button>
+    <div class="block-or-panel" data-panel="assign">
+      <form method="post" action="/admin/block-or/{{ selected_block.id }}/cases" class="rounded-xl border border-teal-200 bg-teal-50/40 p-4 space-y-3 max-w-xl">
+        <input type="hidden" name="week_offset" value="{{ week_offset }}" />
+        <div>
+          <h3 class="font-extrabold text-slate-800">Add case</h3>
+          <p class="text-xs text-slate-500 mt-1">Places the case on this hospital window. If the surgeon is not on the block yet, they are added automatically.</p>
         </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Surgeon</label>
+          <select name="surgeon_id" id="assign-surgeon" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+            <option value="">Select surgeon…</option>
+            {% for row in candidates %}
+            <option value="{{ row.surgeon.id }}"
+              data-status="{{ row.status }}"
+              data-availability="{{ row.availability }}"
+              data-warnings="{{ row.warnings|join(' | ') }}">
+              {{ row.surgeon.initials }} — {{ row.surgeon.full_name }}
+              {% if row.status != 'clear' %} ({{ row.availability }}){% endif %}
+            </option>
+            {% endfor %}
+          </select>
+          <p id="assign-warning" class="hidden mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"></p>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Start time</label>
+          <input type="time" name="start_time" value="{{ selected_block.start_time.strftime('%H:%M') }}" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Patient (optional)</label>
+          <input name="patient_name" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Patient name" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Procedure (optional)</label>
+          <input name="procedure" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Procedure" />
+        </div>
+        <button class="w-full bg-teal-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-teal-800">Add case</button>
       </form>
       {% for row in assignments %}
       <form id="remove-assignment-{{ row.id }}" method="post" action="/admin/block-or/{{ selected_block.id }}/assignments/{{ row.id }}/remove" class="hidden">
@@ -250,12 +300,52 @@
       </form>
     </div>
 
+    <div class="block-or-panel" data-panel="case">
+      {% if editing_case %}
+      <form method="post" action="/admin/block-or/{{ selected_block.id }}/cases/{{ editing_case.id }}/update" class="rounded-xl border border-blue-200 bg-blue-50/40 p-4 space-y-3 max-w-xl">
+        <input type="hidden" name="week_offset" value="{{ week_offset }}" />
+        <div>
+          <h3 class="font-extrabold text-slate-800">Edit case</h3>
+          <p class="text-xs text-slate-500 mt-1">Update time, surgeon, patient, or procedure on this block.</p>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Surgeon</label>
+          <select name="surgeon_id" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+            {% for row in candidates %}
+            <option value="{{ row.surgeon.id }}" {% if editing_case.surgeon_id == row.surgeon.id %}selected{% endif %}>
+              {{ row.surgeon.initials }} — {{ row.surgeon.full_name }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Start time</label>
+          <input type="time" name="start_time" value="{{ editing_case.start_time.strftime('%H:%M') if editing_case.start_time else selected_block.start_time.strftime('%H:%M') }}" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Patient</label>
+          <input name="patient_name" value="{{ editing_case.patient_name or '' }}" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Procedure</label>
+          <input name="procedure" value="{{ editing_case.procedure or '' }}" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button class="bg-blue-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-blue-700">Save case</button>
+          <a href="/admin/block-or?week_offset={{ week_offset }}&block_id={{ selected_block.id }}" class="text-sm font-semibold text-slate-600 px-3 py-2.5 hover:text-slate-800">Cancel</a>
+        </div>
+      </form>
+      {% else %}
+      <p class="text-sm text-slate-500">Select a case in the list above to edit it.</p>
+      {% endif %}
+    </div>
+
     <div class="block-or-panel" data-panel="edit">
-      <form method="post" action="/admin/block-or/{{ selected_block.id }}/edit" class="grid gap-3 md:grid-cols-2 lg:grid-cols-3 max-w-5xl">
+      <form method="post" action="/admin/block-or/{{ selected_block.id }}/edit" class="grid gap-3 md:grid-cols-2 lg:grid-cols-3 max-w-5xl rounded-xl border border-slate-200 p-4">
         <input type="hidden" name="week_offset" value="{{ week_offset }}" />
         <div class="md:col-span-2 lg:col-span-3">
-          <h3 class="font-extrabold text-slate-800">Edit capacity</h3>
-          <p class="text-xs text-slate-500 mt-1">Adjust facility/times/room. Assignments stay if start remains inside the window.</p>
+          <h3 class="font-extrabold text-slate-800">Edit hospital window</h3>
+          <p class="text-xs text-slate-500 mt-1">Facility, times, and optional OR room for this capacity row. Does not edit individual cases.</p>
         </div>
         <div>
           <label class="block text-xs font-semibold text-slate-500 mb-1">Facility</label>
@@ -272,13 +362,13 @@
           <select name="session" id="edit-session" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
             <option value="am" {% if selected_block.session == 'am' %}selected{% endif %}>AM 07:00-12:00</option>
             <option value="pm" {% if selected_block.session == 'pm' %}selected{% endif %}>PM 12:00-17:00</option>
-            <option value="both" {% if selected_block.session == 'both' %}selected{% endif %}>Both 07:00-17:00</option>
+            <option value="both" {% if selected_block.session == 'both' %}selected{% endif %}>Both → creates AM + PM cards</option>
             <option value="custom" {% if selected_block.session == 'custom' %}selected{% endif %}>Custom</option>
           </select>
         </div>
         <div>
-          <label class="block text-xs font-semibold text-slate-500 mb-1">OR room</label>
-          <input name="room_text" value="{{ selected_block.room_text or '' }}" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm {% if not selected_block.room_text %}border-amber-300{% endif %}" placeholder="e.g. S03" />
+          <label class="block text-xs font-semibold text-slate-500 mb-1">OR room (optional)</label>
+          <input name="room_text" value="{{ selected_block.room_text or '' }}" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="e.g. S03 — leave blank if rooms are on cases" />
         </div>
         <div>
           <label class="block text-xs font-semibold text-slate-500 mb-1">Start time</label>
@@ -293,18 +383,18 @@
           <input name="notes" value="{{ selected_block.notes or '' }}" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Internal scheduling note" />
         </div>
         <div class="md:col-span-2 lg:col-span-3">
-          <button class="bg-blue-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-blue-700">Save capacity</button>
+          <button class="bg-blue-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-blue-700">Save hospital window</button>
         </div>
       </form>
     </div>
 
     <div class="block-or-panel" data-panel="copy">
-      <form method="post" action="/admin/block-or/copy" class="grid gap-3 md:grid-cols-2 max-w-3xl">
+      <form method="post" action="/admin/block-or/copy" class="grid gap-3 md:grid-cols-2 max-w-3xl rounded-xl border border-slate-200 p-4">
         <input type="hidden" name="week_offset" value="{{ week_offset }}" />
         <input type="hidden" name="source_block_id" value="{{ selected_block.id }}" />
         <div class="md:col-span-2">
-          <h3 class="font-extrabold text-slate-800">Copy this capacity forward</h3>
-          <p class="text-xs text-slate-500 mt-1">Open capacity only (no surgeons). Skips days that already have the same room/time.</p>
+          <h3 class="font-extrabold text-slate-800">Copy this hospital window forward</h3>
+          <p class="text-xs text-slate-500 mt-1">Creates open capacity only (no surgeons, no cases). Skips days that already conflict.</p>
         </div>
         <div class="md:col-span-2">
           <label class="block text-xs font-semibold text-slate-500 mb-2">Weekdays</label>
@@ -324,26 +414,32 @@
         <div class="flex items-end">
           <button class="w-full bg-teal-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-teal-800"
             onclick="return confirm('Copy this open capacity forward on the selected weekdays? Existing conflicts will be skipped.');">
-            Copy capacity forward
+            Copy window forward
           </button>
         </div>
       </form>
     </div>
 
     <div class="block-or-panel" data-panel="remove">
-      <form method="post" action="/admin/block-or/{{ selected_block.id }}/delete" class="max-w-xl space-y-3"
-        onsubmit="return confirm('Remove this Block OR for {{ selected_block.date.strftime('%b %-d') }} at {{ selected_block.location.abbreviation if selected_block.location else 'OR' }}?');">
+      <form method="post" action="/admin/block-or/{{ selected_block.id }}/delete" class="max-w-xl space-y-3 rounded-xl border border-rose-200 bg-rose-50/40 p-4"
+        onsubmit="return confirm('Remove this Block OR hospital window for {{ selected_block.date.strftime('%b %-d') }} at {{ selected_block.location.abbreviation if selected_block.location else 'OR' }}?\n\nSurgeons must already be cleared.');">
         <input type="hidden" name="week_offset" value="{{ week_offset }}" />
-        <p class="text-sm text-slate-600">Removes this facility/day/room only. Does not delete the whole series.</p>
-        <button type="submit" class="bg-rose-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-rose-700">
-          <i class="fa-solid fa-trash mr-1"></i> Remove this block
+        <h3 class="font-extrabold text-slate-800">Remove hospital window</h3>
+        <p class="text-sm text-slate-600">Deletes this facility/day capacity row only. Clear surgeons first if anyone is still assigned.</p>
+        <button type="submit" class="bg-rose-600 text-white text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-rose-700" {% if assignments or block_cases %}disabled{% endif %}>
+          <i class="fa-solid fa-trash mr-1"></i> Remove this window
         </button>
+        {% if block_cases %}
+        <p class="text-xs text-rose-700 font-semibold">Reschedule linked cases before removing the window.</p>
+        {% elif assignments %}
+        <p class="text-xs text-rose-700 font-semibold">Clear all surgeons before removing the window.</p>
+        {% endif %}
       </form>
     </div>
 
     {% else %}
     <div class="flex flex-wrap items-center justify-between gap-3">
-      <p class="text-xs text-slate-500">Click a block above to assign/edit/copy, or open a tool:</p>
+      <p class="text-xs text-slate-500">Click a block above to see surgeons and cases, or open a tool:</p>
       <div class="flex flex-wrap gap-2" role="tablist" aria-label="Block OR tools">
         <button type="button" class="block-or-pill px-3.5 py-2 rounded-full text-sm font-bold border transition"
                 data-panel="create">Create</button>
@@ -400,7 +496,7 @@
           <select name="session" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
             <option value="am">AM 07:00-12:00</option>
             <option value="pm">PM 12:00-17:00</option>
-            <option value="both">Both 07:00-17:00</option>
+            <option value="both">Both → AM + PM cards</option>
             <option value="custom">Custom</option>
           </select>
         </div>
@@ -547,20 +643,17 @@
 
   var surgeonSelect = document.getElementById('assign-surgeon');
   var warningEl = document.getElementById('assign-warning');
-  var noteEl = document.getElementById('assign-note');
   if (surgeonSelect && warningEl) {
     function syncAssignWarning() {
       var opt = surgeonSelect.options[surgeonSelect.selectedIndex];
       if (!opt || !opt.value || opt.dataset.status === 'clear') {
         warningEl.classList.add('hidden');
         warningEl.textContent = '';
-        if (noteEl) noteEl.required = false;
         return;
       }
       var text = opt.dataset.warnings || opt.dataset.availability || 'Schedule warning';
       warningEl.textContent = text;
       warningEl.classList.remove('hidden');
-      if (noteEl) noteEl.required = true;
     }
     surgeonSelect.addEventListener('change', syncAssignWarning);
     syncAssignWarning();

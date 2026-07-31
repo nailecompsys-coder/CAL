@@ -133,6 +133,29 @@ struct ScheduleHomeView: View {
                 statusMessage: store.warningMessage,
                 coverAction: { assignment in
                   coveringAssignment = assignment
+                },
+                onSavePersonalItem: { existing, title, notes, start, end in
+                  if let existing {
+                    try await store.updatePersonalItem(
+                      itemId: existing.id,
+                      on: selectedDate,
+                      title: title,
+                      notes: notes,
+                      startTime: start,
+                      endTime: end
+                    )
+                  } else {
+                    try await store.createPersonalItem(
+                      on: selectedDate,
+                      title: title,
+                      notes: notes,
+                      startTime: start,
+                      endTime: end
+                    )
+                  }
+                },
+                onDeletePersonalItem: { item in
+                  try await store.deletePersonalItem(itemId: item.id, on: selectedDate)
                 }
               )
               .calReadableColumn(ClinicalLayout.contentColumn)

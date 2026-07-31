@@ -25,7 +25,17 @@ APNS_ALERT_SOUND = os.environ.get("APNS_ALERT_SOUND", "cal_alert.wav")
 STALE_WEB_PUSH_STATUSES = {404, 410}
 STALE_NATIVE_PUSH_ERRORS = {"DeviceNotRegistered", "InvalidCredentials"}
 STALE_APNS_REASONS = {"BadDeviceToken", "DeviceTokenNotForTopic", "Unregistered"}
+STALE_FCM_ERROR_CODES = {
+    "UNREGISTERED",
+    "INVALID_ARGUMENT",
+    "NOT_FOUND",
+    "SENDER_ID_MISMATCH",
+}
+FCM_PROJECT_ID = os.environ.get("FCM_PROJECT_ID", "").strip()
+FCM_SERVICE_ACCOUNT_JSON = os.environ.get("FCM_SERVICE_ACCOUNT_JSON", "").strip()
+FCM_SERVICE_ACCOUNT_PATH = os.environ.get("FCM_SERVICE_ACCOUNT_PATH", "").strip()
 _APNS_JWT: tuple[str, datetime] | None = None
+_FCM_ACCESS_TOKEN: tuple[str, datetime] | None = None
 
 
 def create_native_schedule_alert(
@@ -70,7 +80,7 @@ def send_push_to_surgeon(
 
 
 def send_native_push_to_surgeon(surgeon_id: int, title: str, body: str, db: Session, data: dict | None = None):
-    """Send Expo/APNs push notifications to active native devices."""
+    """Send Expo/APNs/FCM push notifications to active native devices."""
     tokens = db.query(NativePushToken).filter(
         NativePushToken.surgeon_id == surgeon_id,
         NativePushToken.is_active == True,  # noqa: E712
@@ -79,8 +89,10 @@ def send_native_push_to_surgeon(surgeon_id: int, title: str, body: str, db: Sess
         return
     expo_tokens = [token for token in tokens if (token.provider or "expo") == "expo"]
     apns_tokens = [token for token in tokens if token.provider == "apns"]
+    fcm_tokens = [token for token in tokens if token.provider == "fcm"]
     _send_expo_push(expo_tokens, title, body, db, data)
     _send_apns_push(apns_tokens, title, body, db, data)
+    _send_fcm_push(fcm_tokens, title, body, db, data)
 
 
 def _send_expo_push(tokens: list[NativePushToken], title: str, body: str, db: Session, data: dict | None = None):
@@ -174,6 +186,105 @@ def _send_apns_push(tokens: list[NativePushToken], title: str, body: str, db: Se
                 reason = ""
             if resp.status_code in (400, 410) and reason in STALE_APNS_REASONS:
                 token.is_active = False
+        except Exception:
+            continue
+    db.commit()
+
+
+def _load_fcm_service_account() -> dict | None:
+    raw = FCM_SERVICE_ACCOUNT_JSON
+    if not raw and FCM_SERVICE_ACCOUNT_PATH:
+        try:
+            with open(FCM_SERVICE_ACCOUNT_PATH, encoding="utf-8") as fh:
+                raw = fh.read()
+        except OSError:
+            return None
+    if not raw:
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not payload.get("client_email") or not payload.get("private_key"):
+        return None
+    return payload
+
+
+def _fcm_access_token() -> str | None:
+    global _FCM_ACCESS_TOKEN
+    sa = _load_fcm_service_account()
+    if not sa or not FCM_PROJECT_ID:
+        return None
+    now = datetime.now(timezone.utc)
+    if _FCM_ACCESS_TOKEN and _FCM_ACCESS_TOKEN[1] > now:
+        return _FCM_ACCESS_TOKEN[0]
+    assertion = jwt.encode(
+        {
+            "iss": sa["client_email"],
+            "scope": "https://www.googleapis.com/auth/firebase.messaging",
+            "aud": "https://oauth2.googleapis.com/token",
+            "iat": int(now.timestamp()),
+            "exp": int(now.timestamp()) + 3600,
+        },
+        sa["private_key"],
+        algorithm="RS256",
+    )
+    try:
+        resp = requests.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+                "assertion": assertion,
+            },
+            timeout=10,
+        )
+        payload = resp.json() if resp.ok else {}
+        token = payload.get("access_token")
+        if not token:
+            return None
+        expires_in = int(payload.get("expires_in") or 3600)
+        _FCM_ACCESS_TOKEN = (token, now + timedelta(seconds=max(60, expires_in - 60)))
+        return token
+    except Exception:
+        return None
+
+
+def _send_fcm_push(tokens: list[NativePushToken], title: str, body: str, db: Session, data: dict | None = None):
+    """FCM HTTP v1 send. No-ops when FCM_PROJECT_ID / service account are missing."""
+    if not tokens:
+        return
+    bearer = _fcm_access_token()
+    if not bearer or not FCM_PROJECT_ID:
+        return
+    url = f"https://fcm.googleapis.com/v1/projects/{FCM_PROJECT_ID}/messages:send"
+    headers = {
+        "authorization": f"Bearer {bearer}",
+        "content-type": "application/json; charset=UTF-8",
+    }
+    string_data = {str(k): str(v) for k, v in (data or {}).items()}
+    for token in tokens:
+        payload = {
+            "message": {
+                "token": token.token,
+                "notification": {"title": title, "body": body},
+                "data": string_data,
+                "android": {
+                    "priority": "HIGH",
+                    "notification": {"sound": "default"},
+                },
+            }
+        }
+        try:
+            with httpx.Client(timeout=10) as client:
+                resp = client.post(url, json=payload, headers=headers)
+            if resp.status_code in (400, 404):
+                error_code = ""
+                try:
+                    error_code = ((resp.json() or {}).get("error") or {}).get("status", "")
+                except Exception:
+                    error_code = ""
+                if error_code in STALE_FCM_ERROR_CODES:
+                    token.is_active = False
         except Exception:
             continue
     db.commit()

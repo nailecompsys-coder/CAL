@@ -43,6 +43,23 @@ data class NativeCallCoverageResponse(
 )
 
 @Serializable
+data class DayItemWritePayload(
+    val date: String,
+    val title: String,
+    val notes: String = "",
+    @SerialName("start_time") val startTime: String? = null,
+    @SerialName("end_time") val endTime: String? = null,
+)
+
+@Serializable
+data class DayItemPatchPayload(
+    val title: String,
+    val notes: String = "",
+    @SerialName("start_time") val startTime: String? = null,
+    @SerialName("end_time") val endTime: String? = null,
+)
+
+@Serializable
 data class NativePatientScheduleResponse(
     val appointments: List<NativePatientAppointment> = emptyList(),
     val warning: String? = null,

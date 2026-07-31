@@ -1,17 +1,31 @@
-# CAL Android
+# CAL Android (Compose)
 
-This is the imported Jetpack Compose target Android lane for CAL.
+Jetpack Compose surgeon client. Expo (`legacy-react-native`) remains Lucy’s bridge until cutover.
 
-Current source import: `/Users/donnaile/dev/CAL/android-compose-prototype`.
-
-Production rule:
-
-- This is not production until it uses real CAL APIs for auth, schedule, time off, on-call coverage, patient schedule, and push.
-- Expo/React Native remains the temporary Android bridge until Compose parity is approved.
-- Android screens and workflow must match the SwiftUI iOS app unless the parity ledger records a temporary gap.
-
-Verification:
+## Build
 
 ```sh
 ./gradlew :app:assembleDebug
 ```
+
+## Phase 4 notes — FCM blocker
+
+Client push registration is **blocked** until Don provides Firebase project assets:
+
+1. Place `android/app/google-services.json` (package / `applicationId` must match: debug `com.midfloridasurgical.calcompose`).
+2. Add Gradle plugin `com.google.gms.google-services` + Firebase Messaging dependency.
+3. Replace the no-op body in `push/FcmPushRegistrar.kt` with `FirebaseMessaging.getInstance().token` → `CalApiClient.registerPushToken(..., provider = "fcm", platform = "android")`.
+
+Server (additive, already wired in this tree):
+
+- `save_push_token` accepts `provider=fcm`.
+- `push.py` `_send_fcm_push` (HTTP v1) runs when `FCM_PROJECT_ID` + service account (`FCM_SERVICE_ACCOUNT_PATH` or `FCM_SERVICE_ACCOUNT_JSON`) are set; otherwise send no-ops like missing APNs keys.
+- Expo + APNs paths unchanged.
+
+Alerts inbox UI works without FCM (home `alerts` + `POST /api/native/alerts/read`).
+
+## Rules
+
+- Match iOS SwiftUI look + function (`docs/COMPOSE_MIGRATION_PLAN.md`).
+- Palette hex only in `ClinicalPalette.kt`.
+- Do not disturb Expo qemu / Expo APK workflows.

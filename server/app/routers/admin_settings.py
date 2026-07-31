@@ -25,13 +25,18 @@ from ..admin_settings_service import (
     toggle_admin_user as toggle_admin_user_service,
     unread_admin_notification_count,
 )
+from ..admin_surgeon_service import (
+    add_surgeon as add_surgeon_service,
+    surgeon_fields,
+    update_surgeon as update_surgeon_service,
+)
 from ..auth import get_current_admin, verify_password
 from ..database import get_db
 from ..jinja_env import templates
 from ..models import AdminUser, Surgeon
 from ..surgeon_visibility import visible_surgeons
 from . import admin
-from .admin import _sort_surgeons_physicians_first
+from .admin import _next_physician_sort_order, _sort_surgeons_physicians_first
 
 router = APIRouter(prefix="/admin")
 log = logging.getLogger(__name__)
@@ -82,9 +87,22 @@ def people_page(
     )
 
 
+def _users_filter_for_portal(role: str | None) -> str:
+    """Map admin_users.role → Users section filter (scheduler→schedulers, else staff/Admins)."""
+    return "schedulers" if (role or "").strip().lower() == "scheduler" else "staff"
+
+
+def _users_portal_redirect(role: str | None, msg: str | None = None) -> RedirectResponse:
+    filt = _users_filter_for_portal(role)
+    url = f"/admin/settings/people?filter={filt}"
+    if msg:
+        url = f"{url}&msg={msg}"
+    return RedirectResponse(url, status_code=303)
+
+
 @router.get("/users", response_class=HTMLResponse)
 def users_redirect():
-    return RedirectResponse("/admin/settings/people?filter=portal", status_code=303)
+    return RedirectResponse("/admin/settings/people?filter=staff", status_code=303)
 
 
 @router.get("/settings/locations", response_class=HTMLResponse)
@@ -241,16 +259,81 @@ def remove_logo(
     return RedirectResponse("/admin/settings/practice?msg=saved", status_code=303)
 
 
+@router.post("/settings/people/add")
+def add_people_user(
+    position: str = Form(...),
+    first_name: str = Form(...),
+    last_name: str = Form(...),
+    email: str = Form(""),
+    phone: str = Form(""),
+    suffix: str = Form(""),
+    sort_order: int = Form(0),
+    access_level: str = Form("admin"),
+    notify_day_off_requests: str = Form(""),
+    notify_schedule_changes: str = Form(""),
+    sms_fallback_enabled: str = Form(""),
+    db: Session = Depends(get_db),
+    current_admin=Depends(get_current_admin),
+):
+    """Unified Add user — position inside the form; OTP via email and/or phone."""
+    pos = (position or "").strip().lower()
+    email_clean = (email or "").strip()
+    phone_clean = (phone or "").strip()
+
+    if pos in {"surgeon", "pa"}:
+        if not email_clean and not phone_clean:
+            return RedirectResponse("/admin/settings/people?msg=otp_contact_required", status_code=303)
+        staff_type = "staff" if pos == "pa" else "physician"
+        fields = surgeon_fields(
+            first_name,
+            last_name,
+            suffix,
+            staff_type,
+            email_clean,
+            phone_clean,
+            sort_order,
+            lambda: _next_physician_sort_order(db),
+        )
+        add_surgeon_service(db, fields)
+        filt = "pas" if staff_type == "staff" else "surgeons"
+        return RedirectResponse(f"/admin/settings/people?filter={filt}&msg=added", status_code=303)
+
+    if pos in {"scheduler", "staff"}:
+        if not email_clean:
+            return RedirectResponse("/admin/settings/people?msg=otp_contact_required", status_code=303)
+        if pos == "scheduler":
+            role = "scheduler"
+        else:
+            level = (access_level or "admin").strip().lower()
+            role = "superadmin" if level == "superadmin" else "admin"
+        msg = add_admin_user_service(
+            db,
+            "",  # username auto-derived; OTP uses email/phone
+            email_clean,
+            "",  # password auto-generated; not used for OTP sign-in
+            role,
+            first_name,
+            last_name,
+            phone_clean,
+            notify_day_off_requests == "1",
+            notify_schedule_changes == "1",
+            sms_fallback_enabled == "1",
+        )
+        return _users_portal_redirect(role, msg)
+
+    return RedirectResponse("/admin/settings/people?msg=invalid_position", status_code=303)
+
+
 @router.post("/users/add")
 @router.post("/settings/users/add")
 @router.post("/settings/people/users/add")
 def add_admin_user(
-    username: str = Form(...),
+    username: str = Form(""),
     first_name: str = Form(""),
     last_name: str = Form(""),
-    email: str = Form(...),
+    email: str = Form(""),
     phone: str = Form(""),
-    password: str = Form(...),
+    password: str = Form(""),
     role: str = Form("admin"),
     notify_day_off_requests: str = Form(""),
     notify_schedule_changes: str = Form(""),
@@ -271,7 +354,7 @@ def add_admin_user(
         notify_schedule_changes == "1",
         sms_fallback_enabled == "1",
     )
-    return RedirectResponse(f"/admin/settings/people?filter=portal&msg={msg}", status_code=303)
+    return _users_portal_redirect(role, msg)
 
 
 @router.post("/users/{user_id}/set-password")
@@ -283,8 +366,9 @@ def set_admin_password(
     db: Session = Depends(get_db),
     current_admin=Depends(get_current_admin),
 ):
+    user = db.get(AdminUser, user_id)
     msg = set_admin_password_service(db, user_id, new_password)
-    return RedirectResponse(f"/admin/settings/people?filter=portal&msg={msg}", status_code=303)
+    return _users_portal_redirect(user.role if user else "admin", msg)
 
 
 @router.post("/users/{user_id}/toggle")
@@ -295,8 +379,10 @@ def toggle_admin_user(
     db: Session = Depends(get_db),
     current_admin=Depends(get_current_admin),
 ):
+    user = db.get(AdminUser, user_id)
+    role = user.role if user else "admin"
     msg = toggle_admin_user_service(db, user_id)
-    return RedirectResponse(f"/admin/settings/people?filter=portal&msg={msg}", status_code=303)
+    return _users_portal_redirect(role, msg)
 
 
 @router.post("/users/{user_id}/edit")
@@ -304,7 +390,7 @@ def toggle_admin_user(
 @router.post("/settings/people/users/{user_id}/edit")
 def edit_admin_user(
     user_id: int,
-    username: str = Form(...),
+    username: str = Form(""),
     first_name: str = Form(""),
     last_name: str = Form(""),
     email: str = Form(...),
@@ -317,6 +403,7 @@ def edit_admin_user(
     db: Session = Depends(get_db),
     current_admin=Depends(get_current_admin),
 ):
+    """Legacy portal-only edit (kept for /admin/users). Prefer /settings/people/edit."""
     msg = edit_admin_user_service(
         db,
         user_id,
@@ -331,7 +418,150 @@ def edit_admin_user(
         notify_schedule_changes == "1",
         sms_fallback_enabled == "1",
     )
-    return RedirectResponse(f"/admin/settings/people?filter=portal&msg={msg}", status_code=303)
+    return _users_portal_redirect(role, msg)
+
+
+@router.post("/settings/people/edit")
+def edit_people_user(
+    user_kind: str = Form(...),
+    user_id: int = Form(...),
+    position: str = Form(...),
+    first_name: str = Form(...),
+    last_name: str = Form(...),
+    email: str = Form(""),
+    phone: str = Form(""),
+    suffix: str = Form(""),
+    sort_order: int = Form(0),
+    access_level: str = Form("admin"),
+    notify_day_off_requests: str = Form(""),
+    notify_schedule_changes: str = Form(""),
+    sms_fallback_enabled: str = Form(""),
+    db: Session = Depends(get_db),
+    current_admin=Depends(get_current_admin),
+):
+    """Unified Edit user — same shape as Add; OTP via email and/or phone."""
+    kind = (user_kind or "").strip().lower()
+    pos = (position or "").strip().lower()
+    email_clean = (email or "").strip()
+    phone_clean = (phone or "").strip()
+    clinical_target = pos in {"surgeon", "pa"}
+    portal_target = pos in {"scheduler", "staff"}
+
+    if kind not in {"clinical", "portal"} or not (clinical_target or portal_target):
+        return RedirectResponse("/admin/settings/people?msg=invalid_position", status_code=303)
+
+    if clinical_target and not email_clean and not phone_clean:
+        return RedirectResponse("/admin/settings/people?msg=otp_contact_required", status_code=303)
+    if portal_target and not email_clean:
+        return RedirectResponse("/admin/settings/people?msg=otp_contact_required", status_code=303)
+
+    def _portal_role() -> str:
+        if pos == "scheduler":
+            return "scheduler"
+        level = (access_level or "admin").strip().lower()
+        return "superadmin" if level == "superadmin" else "admin"
+
+    def _clinical_staff_type() -> str:
+        return "staff" if pos == "pa" else "physician"
+
+    notify_day = notify_day_off_requests == "1"
+    notify_sched = notify_schedule_changes == "1"
+    sms_fb = sms_fallback_enabled == "1"
+
+    # Same-table updates
+    if kind == "clinical" and clinical_target:
+        row = db.get(Surgeon, user_id)
+        if not row:
+            return RedirectResponse("/admin/settings/people?msg=user_not_found", status_code=303)
+        staff_type = _clinical_staff_type()
+        fields = surgeon_fields(
+            first_name,
+            last_name,
+            suffix,
+            staff_type,
+            email_clean,
+            phone_clean,
+            sort_order,
+            lambda: _next_physician_sort_order(db),
+        )
+        update_surgeon_service(db, user_id, fields)
+        filt = "pas" if staff_type == "staff" else "surgeons"
+        return RedirectResponse(f"/admin/settings/people?filter={filt}&msg=updated", status_code=303)
+
+    if kind == "portal" and portal_target:
+        role = _portal_role()
+        msg = edit_admin_user_service(
+            db,
+            user_id,
+            "",  # keep existing username
+            email_clean,
+            "",  # password unchanged; use Password action if needed
+            role,
+            first_name,
+            last_name,
+            phone_clean,
+            notify_day,
+            notify_sched,
+            sms_fb,
+        )
+        return _users_portal_redirect(role, msg if msg != "user_edited" else "updated")
+
+    # Cross-type: deactivate old row, create new in the other table (preserves FKs).
+    if kind == "clinical" and portal_target:
+        row = db.get(Surgeon, user_id)
+        if not row:
+            return RedirectResponse("/admin/settings/people?msg=user_not_found", status_code=303)
+        role = _portal_role()
+        msg = add_admin_user_service(
+            db,
+            "",
+            email_clean,
+            "",
+            role,
+            first_name,
+            last_name,
+            phone_clean,
+            notify_day,
+            notify_sched,
+            sms_fb,
+        )
+        if msg != "user_added":
+            return _users_portal_redirect(role, msg)
+        if row.is_active:
+            row.is_active = False
+            db.commit()
+        return _users_portal_redirect(role, "position_cross_type")
+
+    if kind == "portal" and clinical_target:
+        row = db.get(AdminUser, user_id)
+        if not row:
+            return RedirectResponse("/admin/settings/people?msg=user_not_found", status_code=303)
+        if row.is_active:
+            active_count = db.query(AdminUser).filter(AdminUser.is_active == True).count()  # noqa: E712
+            if active_count <= 1:
+                return RedirectResponse("/admin/settings/people?msg=last_admin", status_code=303)
+        staff_type = _clinical_staff_type()
+        fields = surgeon_fields(
+            first_name,
+            last_name,
+            suffix,
+            staff_type,
+            email_clean,
+            phone_clean,
+            sort_order,
+            lambda: _next_physician_sort_order(db),
+        )
+        add_surgeon_service(db, fields)
+        if row.is_active:
+            row.is_active = False
+            db.commit()
+        filt = "pas" if staff_type == "staff" else "surgeons"
+        return RedirectResponse(
+            f"/admin/settings/people?filter={filt}&msg=position_cross_type",
+            status_code=303,
+        )
+
+    return RedirectResponse("/admin/settings/people?msg=invalid_position", status_code=303)
 
 
 @router.post("/users/{user_id}/delete")
@@ -342,8 +572,10 @@ def delete_admin_user(
     db: Session = Depends(get_db),
     current_admin=Depends(get_current_admin),
 ):
+    user = db.get(AdminUser, user_id)
+    role = user.role if user else "admin"
     msg = delete_admin_user_service(db, user_id)
-    return RedirectResponse(f"/admin/settings/people?filter=portal&msg={msg}", status_code=303)
+    return _users_portal_redirect(role, msg)
 
 
 @router.post("/settings/backup/run")

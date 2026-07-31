@@ -1,25 +1,38 @@
 {% extends "base_admin.html" %}
-{% block title %}People{% endblock %}
+{% block title %}Users{% endblock %}
 
 {% block content %}
 {% set _tab = request.query_params.get('tab') %}
-{% set filter = request.query_params.get('filter') or ({'clinical': 'mobile', 'portal': 'portal'}.get(_tab, 'all')) %}
+{% set _raw = request.query_params.get('filter') or ({'clinical': 'mobile', 'portal': 'portal'}.get(_tab, 'all')) %}
+{% set filter = _raw if _raw in ['all', 'surgeons', 'pas', 'schedulers', 'staff', 'mobile', 'portal'] else 'all' %}
+{% set show_clinical = filter in ['all', 'surgeons', 'pas', 'mobile'] %}
+{% set show_portal = filter in ['all', 'schedulers', 'staff', 'portal'] %}
 {% set active_admins = admin_users | selectattr('is_active') | list %}
 
 <header class="portal-header px-5 py-3 sticky top-0 z-10 flex-shrink-0 flex items-center justify-between gap-3">
   <div class="min-w-0">
-    <h1 class="font-bold">People</h1>
-    <p class="text-xs text-slate-500">Who they are, what they do, how they sign in, and whether they’re active</p>
+    <h1 class="font-bold">Users</h1>
+    <p class="text-xs text-slate-500">Surgeons, PAs, schedulers, and admins — who they are and how they sign in</p>
   </div>
-  <button type="button" onclick="openAddChooser()"
+  <button type="button" onclick="openAddUser()"
     class="bg-blue-600 text-white text-xs font-bold px-3.5 py-2 rounded-xl hover:bg-blue-700 flex items-center gap-2 flex-shrink-0">
-    <i class="fa-solid fa-plus"></i> Add person
+    <i class="fa-solid fa-plus"></i> Add user
   </button>
 </header>
 
 {% set msg = request.query_params.get('msg') %}
 {% if msg in ['added','updated','user_added','user_edited','password_updated','user_updated','user_deleted','deleted'] %}
 <div class="mx-5 mt-4 status-approved border rounded-xl px-4 py-3 text-sm font-semibold"><i class="fa-solid fa-circle-check mr-2"></i>Saved.</div>
+{% elif msg == 'otp_contact_required' %}
+<div class="mx-5 mt-4 border border-rose-200 bg-rose-50 rounded-xl px-4 py-3 text-sm text-rose-700"><i class="fa-solid fa-triangle-exclamation mr-2"></i>Email and/or phone is required for OTP sign-in.</div>
+{% elif msg == 'user_invalid' %}
+<div class="mx-5 mt-4 border border-rose-200 bg-rose-50 rounded-xl px-4 py-3 text-sm text-rose-700"><i class="fa-solid fa-triangle-exclamation mr-2"></i>Email is required for schedulers and admins (OTP).</div>
+{% elif msg == 'email_taken' %}
+<div class="mx-5 mt-4 border border-rose-200 bg-rose-50 rounded-xl px-4 py-3 text-sm text-rose-700"><i class="fa-solid fa-triangle-exclamation mr-2"></i>That email is already in use.</div>
+{% elif msg == 'position_cross_type' %}
+<div class="mx-5 mt-4 border border-amber-200 bg-amber-50 rounded-xl px-4 py-3 text-sm text-amber-800"><i class="fa-solid fa-triangle-exclamation mr-2"></i>Position moved across mobile ↔ portal: the old account was deactivated and a new one was created. Review devices and alerts.</div>
+{% elif msg == 'last_admin' %}
+<div class="mx-5 mt-4 border border-rose-200 bg-rose-50 rounded-xl px-4 py-3 text-sm text-rose-700"><i class="fa-solid fa-triangle-exclamation mr-2"></i>Cannot convert or deactivate the last active portal admin.</div>
 {% elif msg %}
 <div class="mx-5 mt-4 border border-amber-200 bg-amber-50 rounded-xl px-4 py-3 text-sm text-amber-800">{{ msg }}</div>
 {% endif %}
@@ -34,23 +47,38 @@
                 {% if filter == 'all' %}bg-slate-800 text-white border-transparent{% else %}bg-white text-slate-500 border-slate-200 hover:border-slate-400{% endif %}">
         All
       </a>
-      <a href="/admin/settings/people?filter=mobile"
+      <a href="/admin/settings/people?filter=surgeons"
          class="text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors
-                {% if filter == 'mobile' %}bg-emerald-600 text-white border-transparent{% else %}bg-white text-slate-500 border-slate-200 hover:border-slate-400{% endif %}">
-        Mobile
+                {% if filter == 'surgeons' %}bg-emerald-600 text-white border-transparent{% else %}bg-white text-slate-500 border-slate-200 hover:border-slate-400{% endif %}">
+        Surgeons
       </a>
-      <a href="/admin/settings/people?filter=portal"
+      <a href="/admin/settings/people?filter=pas"
          class="text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors
-                {% if filter == 'portal' %}bg-blue-600 text-white border-transparent{% else %}bg-white text-slate-500 border-slate-200 hover:border-slate-400{% endif %}">
-        Portal
+                {% if filter == 'pas' %}bg-teal-600 text-white border-transparent{% else %}bg-white text-slate-500 border-slate-200 hover:border-slate-400{% endif %}">
+        PAs
+      </a>
+      <a href="/admin/settings/people?filter=schedulers"
+         class="text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors
+                {% if filter == 'schedulers' %}bg-amber-600 text-white border-transparent{% else %}bg-white text-slate-500 border-slate-200 hover:border-slate-400{% endif %}">
+        Schedulers
+      </a>
+      <a href="/admin/settings/people?filter=staff"
+         class="text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors
+                {% if filter == 'staff' %}bg-blue-600 text-white border-transparent{% else %}bg-white text-slate-500 border-slate-200 hover:border-slate-400{% endif %}">
+        Admins
       </a>
       <span class="text-[11px] text-slate-400 ml-auto">Devices &amp; OTP audit live under Security → Access &amp; Devices</span>
     </div>
 
     <div class="clinical-panel overflow-hidden">
       <div class="divide-y divide-slate-100">
-        {% if filter != 'portal' %}
+        {% set ns = namespace(shown=0) %}
+        {% if show_clinical %}
         {% for s in surgeons %}
+        {% set st = s.staff_type or 'physician' %}
+        {% set is_pa = st != 'physician' %}
+        {% if filter == 'all' or filter == 'mobile' or (filter == 'surgeons' and not is_pa) or (filter == 'pas' and is_pa) %}
+        {% set ns.shown = ns.shown + 1 %}
         <div class="px-4 py-3.5 flex items-center gap-4 {% if not s.is_active %}opacity-45{% endif %} hover:bg-slate-50/70 transition-colors">
           <div class="w-11 h-11 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 shadow-sm staff-avatar">{{ s.initials }}</div>
 
@@ -60,8 +88,8 @@
                 {{ s.full_name }}{% if s.suffix %} <span class="text-[10px] font-bold text-slate-500">{{ s.suffix }}</span>{% endif %}
               </p>
               <p class="text-[11px] text-slate-400 truncate">
-                {% if (s.staff_type or 'physician') == 'physician' %}Physician{% else %}Support staff{% endif %}
-                {% if (s.staff_type or 'physician') == 'physician' and s.sort_order %} · Rank {{ s.sort_order }}{% endif %}
+                {% if is_pa %}PA{% else %}Surgeon{% endif %}
+                {% if not is_pa and s.sort_order %} · Rank {{ s.sort_order }}{% endif %}
               </p>
             </div>
 
@@ -76,8 +104,8 @@
             </div>
 
             <div class="lg:col-span-2">
-              <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Role</p>
-              <p class="text-sm text-slate-800">{% if (s.staff_type or 'physician') == 'physician' %}Surgeon{% else %}Clinical staff{% endif %}</p>
+              <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Position</p>
+              <p class="text-sm text-slate-800">{% if is_pa %}PA{% else %}Surgeon{% endif %}</p>
             </div>
 
             <div class="lg:col-span-2 flex items-center justify-between lg:justify-end gap-3">
@@ -87,14 +115,15 @@
               <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">Inactive</span>
               {% endif %}
               <div class="flex items-center gap-1">
-                <button type="button" class="edit-clinical-user text-xs font-semibold text-blue-600 hover:text-blue-800 px-2 py-1 rounded-lg hover:bg-blue-50"
+                <button type="button" class="edit-user text-xs font-semibold text-blue-600 hover:text-blue-800 px-2 py-1 rounded-lg hover:bg-blue-50"
+                  data-kind="clinical"
                   data-id="{{ s.id }}"
+                  data-position="{{ 'pa' if is_pa else 'surgeon' }}"
                   data-first-name="{{ s.first_name|e }}"
                   data-last-name="{{ s.last_name|e }}"
                   data-suffix="{{ (s.suffix or '')|e }}"
                   data-email="{{ (s.email or '')|e }}"
                   data-phone="{{ (s.phone or '')|e }}"
-                  data-staff-type="{{ (s.staff_type or 'physician')|e }}"
                   data-sort-order="{{ s.sort_order or 0 }}">Edit</button>
                 {% if s.is_active %}
                 <form method="post" action="/admin/surgeons/{{ s.id }}/preview-mobile" target="_blank" class="inline">
@@ -111,11 +140,15 @@
             </div>
           </div>
         </div>
+        {% endif %}
         {% endfor %}
         {% endif %}
 
-        {% if filter != 'mobile' %}
+        {% if show_portal %}
         {% for u in admin_users %}
+        {% set is_scheduler = (u.role or '') == 'scheduler' %}
+        {% if filter == 'all' or filter == 'portal' or (filter == 'schedulers' and is_scheduler) or (filter == 'staff' and not is_scheduler) %}
+        {% set ns.shown = ns.shown + 1 %}
         <div class="px-4 py-3.5 flex items-center gap-4 {% if not u.is_active %}opacity-45{% endif %} hover:bg-slate-50/70 transition-colors">
           <div class="w-11 h-11 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 bg-blue-50 text-blue-700 border border-blue-100">
             {{ (u.first_name or u.username)[0]|upper }}{{ (u.last_name or '')[0]|upper if u.last_name else '' }}
@@ -134,6 +167,7 @@
 
             <div class="lg:col-span-2 flex flex-wrap gap-1.5">
               <span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-100">Portal</span>
+              <span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-50 text-slate-600 border border-slate-200">OTP</span>
               {% if u.role == 'scheduler' %}
               <span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-100">Scheduler</span>
               {% elif u.role == 'superadmin' %}
@@ -144,8 +178,8 @@
             </div>
 
             <div class="lg:col-span-2">
-              <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Security</p>
-              <p class="text-sm text-slate-800 capitalize">{{ u.role }}</p>
+              <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Position</p>
+              <p class="text-sm text-slate-800">{% if is_scheduler %}Scheduler{% else %}Admin{% endif %}</p>
               <p class="text-[10px] text-slate-400 truncate">
                 {% if u.notify_day_off_requests %}Requests{% endif %}
                 {% if u.notify_schedule_changes %}{% if u.notify_day_off_requests %} · {% endif %}Schedule{% endif %}
@@ -161,14 +195,15 @@
               <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">Inactive</span>
               {% endif %}
               <div class="flex items-center gap-1">
-                <button type="button" class="edit-admin-user text-xs font-semibold text-blue-600 hover:text-blue-800 px-2 py-1 rounded-lg hover:bg-blue-50"
-                  data-user-id="{{ u.id }}"
-                  data-username="{{ u.username|e }}"
+                <button type="button" class="edit-user text-xs font-semibold text-blue-600 hover:text-blue-800 px-2 py-1 rounded-lg hover:bg-blue-50"
+                  data-kind="portal"
+                  data-id="{{ u.id }}"
+                  data-position="{{ 'scheduler' if is_scheduler else 'staff' }}"
+                  data-access-level="{{ 'superadmin' if u.role == 'superadmin' else 'admin' }}"
                   data-first-name="{{ (u.first_name or '')|e }}"
                   data-last-name="{{ (u.last_name or '')|e }}"
                   data-email="{{ u.email|e }}"
                   data-phone="{{ (u.phone or '')|e }}"
-                  data-role="{{ u.role }}"
                   data-notify-day-off="{{ '1' if u.notify_day_off_requests else '0' }}"
                   data-notify-schedule="{{ '1' if u.notify_schedule_changes else '0' }}"
                   data-sms-fallback="{{ '1' if u.sms_fallback_enabled else '0' }}">Edit</button>
@@ -186,196 +221,190 @@
             </div>
           </div>
         </div>
+        {% endif %}
         {% endfor %}
+        {% endif %}
+
+        {% if ns.shown == 0 %}
+        <div class="px-4 py-10 text-center text-sm text-slate-400">No users in this group yet.</div>
         {% endif %}
       </div>
     </div>
   </div>
 </div>
 
-{# ── Add chooser ─────────────────────────────────────────────────────────── #}
-<div id="add-chooser" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden">
-  <div class="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6">
-    <div class="flex items-center justify-between mb-4">
-      <h3 class="font-bold text-slate-800 text-lg">Add person</h3>
-      <button type="button" onclick="document.getElementById('add-chooser').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
-    </div>
-    <p class="text-sm text-slate-500 mb-4">Choose how they use CAL.</p>
-    <div class="grid gap-3">
-      <button type="button" onclick="openAddClinical()"
-        class="text-left rounded-2xl border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/40 px-4 py-4 transition-colors">
-        <p class="font-bold text-slate-800 text-sm">Mobile clinical user</p>
-        <p class="text-xs text-slate-500 mt-1">Surgeon or staff — signs in with email/phone OTP on iPhone</p>
-      </button>
-      <button type="button" onclick="openAddPortal()"
-        class="text-left rounded-2xl border border-slate-200 hover:border-blue-300 hover:bg-blue-50/40 px-4 py-4 transition-colors">
-        <p class="font-bold text-slate-800 text-sm">Portal user</p>
-        <p class="text-xs text-slate-500 mt-1">Admin or scheduler — username + password on the desktop portal</p>
-      </button>
-    </div>
-  </div>
-</div>
-
-{# ── Add clinical ────────────────────────────────────────────────────────── #}
-<div id="add-clinical-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden">
+{# ── Add user (single form) ──────────────────────────────────────────────── #}
+<div id="add-user-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden">
   <div class="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6 max-h-[90vh] overflow-y-auto">
     <div class="flex items-center justify-between mb-5">
-      <h3 class="font-bold text-slate-800 text-lg">Add mobile user</h3>
-      <button type="button" onclick="document.getElementById('add-clinical-modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+      <h3 class="font-bold text-slate-800 text-lg">Add user</h3>
+      <button type="button" onclick="document.getElementById('add-user-modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
     </div>
-    <form method="post" action="/admin/surgeons/add" class="space-y-4">
+    <form method="post" action="/admin/settings/people/add" class="space-y-4" id="add-user-form">
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Position *</label>
+        <select id="add-position" name="position" required
+          class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white"
+          onchange="syncAddUserFields()">
+          <option value="surgeon">Surgeon</option>
+          <option value="pa">PA</option>
+          <option value="scheduler">Scheduler</option>
+          <option value="staff">Admin</option>
+        </select>
+      </div>
+
       <div class="grid grid-cols-2 gap-3">
-        <div><label class="block text-xs font-medium text-slate-600 mb-1">First name *</label>
-          <input type="text" name="first_name" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
-        <div><label class="block text-xs font-medium text-slate-600 mb-1">Last name *</label>
-          <input type="text" name="last_name" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">First name *</label>
+          <input type="text" name="first_name" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Last name *</label>
+          <input type="text" name="last_name" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        </div>
       </div>
-      <div><label class="block text-xs font-medium text-slate-600 mb-1">Who / position</label>
-        <select name="staff_type" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
-          <option value="physician" selected>Physician (surgeon)</option>
-          <option value="staff">Support staff (PA, NP, APRN…)</option>
-        </select>
+
+      <div id="add-clinical-fields" class="space-y-4">
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Credentials</label>
+          <select name="suffix" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+            <option value="">— None —</option>
+            <option value="MD">MD</option>
+            <option value="DO">DO</option>
+            <option value="MD, FACS">MD, FACS</option>
+            <option value="PA-C">PA-C</option>
+            <option value="NP">NP</option>
+            <option value="APRN">APRN</option>
+          </select>
+        </div>
+        <div id="add-rank-wrap">
+          <label class="block text-xs font-medium text-slate-600 mb-1">Practice rank</label>
+          <input type="number" name="sort_order" min="0" step="10" value="0" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        </div>
       </div>
-      <div><label class="block text-xs font-medium text-slate-600 mb-1">Credentials</label>
-        <select name="suffix" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
-          <option value="">— None —</option>
-          <option value="MD">MD</option><option value="DO">DO</option><option value="MD, FACS">MD, FACS</option>
-          <option value="PA-C">PA-C</option><option value="NP">NP</option><option value="APRN">APRN</option>
-        </select>
+
+      <div class="rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-3 space-y-3">
+        <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Sign-in (OTP)</p>
+        <p class="text-xs text-slate-500 -mt-1">Email and/or phone — a 6-digit code is sent at sign-in. No username or password.</p>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Email</label>
+          <input id="add-email" type="email" name="email" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white" placeholder="name@practice.com" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Phone</label>
+          <input id="add-phone" type="tel" name="phone" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white" placeholder="(407) 555-0100" />
+        </div>
       </div>
-      <div><label class="block text-xs font-medium text-slate-600 mb-1">Email (OTP)</label>
-        <input type="email" name="email" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
-      <div><label class="block text-xs font-medium text-slate-600 mb-1">Phone (OTP)</label>
-        <input type="tel" name="phone" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="(407) 555-0100" /></div>
-      <div><label class="block text-xs font-medium text-slate-600 mb-1">Practice rank</label>
-        <input type="number" name="sort_order" min="0" step="10" value="0" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
+
+      <div id="add-portal-fields" class="space-y-4 hidden">
+        <div id="add-access-level-wrap" class="hidden">
+          <label class="block text-xs font-medium text-slate-600 mb-1">Access level</label>
+          <select name="access_level" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+            <option value="admin" selected>Admin — full portal</option>
+            <option value="superadmin">Superadmin — full portal + elevated</option>
+          </select>
+        </div>
+        <div class="grid gap-2 text-xs text-slate-600">
+          <label class="flex items-center gap-2"><input type="checkbox" name="notify_day_off_requests" value="1" checked> Day-off request alerts</label>
+          <label class="flex items-center gap-2"><input type="checkbox" name="notify_schedule_changes" value="1" checked> Schedule change alerts</label>
+          <label class="flex items-center gap-2"><input type="checkbox" name="sms_fallback_enabled" value="1"> SMS fallback</label>
+        </div>
+      </div>
+
       <div class="flex gap-2 pt-1">
-        <button type="submit" class="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">Add</button>
-        <button type="button" onclick="document.getElementById('add-clinical-modal').classList.add('hidden')" class="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-lg text-sm font-medium">Cancel</button>
+        <button type="submit" class="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">Add user</button>
+        <button type="button" onclick="document.getElementById('add-user-modal').classList.add('hidden')" class="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-lg text-sm font-medium">Cancel</button>
       </div>
     </form>
   </div>
 </div>
 
-{# ── Add portal ──────────────────────────────────────────────────────────── #}
-<div id="add-portal-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden">
-  <div class="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6 max-h-[90vh] overflow-y-auto">
-    <div class="flex items-center justify-between mb-5">
-      <h3 class="font-bold text-slate-800 text-lg">Add portal user</h3>
-      <button type="button" onclick="document.getElementById('add-portal-modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
-    </div>
-    <form method="post" action="/admin/settings/people/users/add" class="space-y-4">
-      <div><label class="block text-xs font-medium text-slate-600 mb-1">Username *</label>
-        <input type="text" name="username" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
-      <div class="grid grid-cols-2 gap-3">
-        <div><label class="block text-xs font-medium text-slate-600 mb-1">First</label>
-          <input type="text" name="first_name" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
-        <div><label class="block text-xs font-medium text-slate-600 mb-1">Last</label>
-          <input type="text" name="last_name" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
-      </div>
-      <div><label class="block text-xs font-medium text-slate-600 mb-1">Email *</label>
-        <input type="email" name="email" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
-      <div><label class="block text-xs font-medium text-slate-600 mb-1">Phone</label>
-        <input type="tel" name="phone" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
-      <div><label class="block text-xs font-medium text-slate-600 mb-1">Password *</label>
-        <input type="password" name="password" required minlength="8" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
-      <div><label class="block text-xs font-medium text-slate-600 mb-1">Security level</label>
-        <select name="role" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
-          <option value="admin">Admin — full portal</option>
-          <option value="scheduler">Scheduler — Block OR / availability</option>
-          <option value="superadmin">Superadmin — full portal + elevated</option>
-        </select>
-      </div>
-      <div class="grid gap-2 text-xs text-slate-600">
-        <label class="flex items-center gap-2"><input type="checkbox" name="notify_day_off_requests" value="1" checked> Day-off request alerts</label>
-        <label class="flex items-center gap-2"><input type="checkbox" name="notify_schedule_changes" value="1" checked> Schedule change alerts</label>
-        <label class="flex items-center gap-2"><input type="checkbox" name="sms_fallback_enabled" value="1"> SMS fallback</label>
-      </div>
-      <div class="flex gap-2 pt-1">
-        <button type="submit" class="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">Add</button>
-        <button type="button" onclick="document.getElementById('add-portal-modal').classList.add('hidden')" class="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-lg text-sm font-medium">Cancel</button>
-      </div>
-    </form>
-  </div>
-</div>
-
-{# ── Edit clinical ───────────────────────────────────────────────────────── #}
-<div id="edit-clinical-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden">
-  <div class="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6 max-h-[90vh] overflow-y-auto">
-    <div class="flex items-center justify-between mb-5">
-      <h3 class="font-bold text-slate-800 text-lg">Edit mobile user</h3>
-      <button type="button" onclick="document.getElementById('edit-clinical-modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
-    </div>
-    <form id="edit-clinical-form" method="post" action="" class="space-y-4">
-      <div class="grid grid-cols-2 gap-3">
-        <div><label class="block text-xs font-medium text-slate-600 mb-1">First name *</label>
-          <input id="edit-c-first" type="text" name="first_name" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
-        <div><label class="block text-xs font-medium text-slate-600 mb-1">Last name *</label>
-          <input id="edit-c-last" type="text" name="last_name" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
-      </div>
-      <div><label class="block text-xs font-medium text-slate-600 mb-1">Who / position</label>
-        <select id="edit-c-staff-type" name="staff_type" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
-          <option value="physician">Physician (surgeon)</option>
-          <option value="staff">Support staff</option>
-        </select>
-      </div>
-      <div><label class="block text-xs font-medium text-slate-600 mb-1">Credentials</label>
-        <select id="edit-c-suffix" name="suffix" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
-          <option value="">— None —</option>
-          <option value="MD">MD</option><option value="DO">DO</option><option value="MD, FACS">MD, FACS</option>
-          <option value="PA-C">PA-C</option><option value="NP">NP</option><option value="APRN">APRN</option>
-        </select>
-      </div>
-      <div><label class="block text-xs font-medium text-slate-600 mb-1">Email (OTP)</label>
-        <input id="edit-c-email" type="email" name="email" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
-      <div><label class="block text-xs font-medium text-slate-600 mb-1">Phone (OTP)</label>
-        <input id="edit-c-phone" type="tel" name="phone" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
-      <div><label class="block text-xs font-medium text-slate-600 mb-1">Practice rank</label>
-        <input id="edit-c-sort" type="number" name="sort_order" min="0" step="10" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
-      <div class="flex gap-2 pt-1">
-        <button type="submit" class="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">Save</button>
-        <button type="button" onclick="document.getElementById('edit-clinical-modal').classList.add('hidden')" class="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-lg text-sm font-medium">Cancel</button>
-      </div>
-    </form>
-  </div>
-</div>
-
-{# ── Edit portal ─────────────────────────────────────────────────────────── #}
+{# ── Edit user (single form — same shape as Add user) ────────────────────── #}
 <div id="edit-user-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden">
   <div class="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6 max-h-[90vh] overflow-y-auto">
-    <div class="flex items-center justify-between mb-4">
-      <h3 class="font-bold text-slate-800">Edit portal user</h3>
-      <button type="button" onclick="document.getElementById('edit-user-modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+    <div class="flex items-center justify-between mb-5">
+      <h3 class="font-bold text-slate-800 text-lg">Edit user</h3>
+      <button type="button" onclick="document.getElementById('edit-user-modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
     </div>
-    <form method="post" id="edit-user-form" action="" class="space-y-4">
-      <div><label class="block text-xs font-medium text-slate-600 mb-1">Username</label>
-        <input type="text" name="username" id="edit-user-username" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
-      <div class="grid grid-cols-2 gap-3">
-        <div><label class="block text-xs font-medium text-slate-600 mb-1">First</label>
-          <input type="text" name="first_name" id="edit-user-first-name" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
-        <div><label class="block text-xs font-medium text-slate-600 mb-1">Last</label>
-          <input type="text" name="last_name" id="edit-user-last-name" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
-      </div>
-      <div><label class="block text-xs font-medium text-slate-600 mb-1">Email</label>
-        <input type="email" name="email" id="edit-user-email" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
-      <div><label class="block text-xs font-medium text-slate-600 mb-1">Phone</label>
-        <input type="tel" name="phone" id="edit-user-phone" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
-      <div><label class="block text-xs font-medium text-slate-600 mb-1">New password <span class="text-slate-400">(optional)</span></label>
-        <input type="password" name="new_password" id="edit-user-password" minlength="8" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" /></div>
-      <div><label class="block text-xs font-medium text-slate-600 mb-1">Security level</label>
-        <select name="role" id="edit-user-role" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
-          <option value="admin">Admin — full portal</option>
-          <option value="scheduler">Scheduler — Block OR / availability</option>
-          <option value="superadmin">Superadmin — full portal + elevated</option>
+    <form method="post" action="/admin/settings/people/edit" class="space-y-4" id="edit-user-form">
+      <input type="hidden" name="user_kind" id="edit-user-kind" value="clinical" />
+      <input type="hidden" name="user_id" id="edit-user-id" value="" />
+
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">Position *</label>
+        <select id="edit-position" name="position" required
+          class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white"
+          onchange="syncEditUserFields()">
+          <option value="surgeon">Surgeon</option>
+          <option value="pa">PA</option>
+          <option value="scheduler">Scheduler</option>
+          <option value="staff">Admin</option>
         </select>
+        <p id="edit-cross-type-hint" class="text-[11px] text-amber-700 mt-1.5 hidden">
+          Changing between mobile (Surgeon/PA) and portal (Scheduler/Admin) deactivates the current account and creates a new one.
+        </p>
       </div>
-      <div class="grid gap-2 text-xs text-slate-600">
-        <label class="flex items-center gap-2"><input type="checkbox" name="notify_day_off_requests" id="edit-user-notify-day-off" value="1"> Day-off requests</label>
-        <label class="flex items-center gap-2"><input type="checkbox" name="notify_schedule_changes" id="edit-user-notify-schedule" value="1"> Schedule changes</label>
-        <label class="flex items-center gap-2"><input type="checkbox" name="sms_fallback_enabled" id="edit-user-sms-fallback" value="1"> SMS fallback</label>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">First name *</label>
+          <input id="edit-first-name" type="text" name="first_name" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Last name *</label>
+          <input id="edit-last-name" type="text" name="last_name" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        </div>
       </div>
-      <div class="flex gap-2">
-        <button type="submit" class="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium">Save</button>
+
+      <div id="edit-clinical-fields" class="space-y-4">
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Credentials</label>
+          <select id="edit-suffix" name="suffix" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+            <option value="">— None —</option>
+            <option value="MD">MD</option>
+            <option value="DO">DO</option>
+            <option value="MD, FACS">MD, FACS</option>
+            <option value="PA-C">PA-C</option>
+            <option value="NP">NP</option>
+            <option value="APRN">APRN</option>
+          </select>
+        </div>
+        <div id="edit-rank-wrap">
+          <label class="block text-xs font-medium text-slate-600 mb-1">Practice rank</label>
+          <input id="edit-sort-order" type="number" name="sort_order" min="0" step="10" value="0" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        </div>
+      </div>
+
+      <div class="rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-3 space-y-3">
+        <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Sign-in (OTP)</p>
+        <p class="text-xs text-slate-500 -mt-1">Email and/or phone — a 6-digit code is sent at sign-in. No username or password.</p>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Email</label>
+          <input id="edit-email" type="email" name="email" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white" placeholder="name@practice.com" />
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Phone</label>
+          <input id="edit-phone" type="tel" name="phone" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white" placeholder="(407) 555-0100" />
+        </div>
+      </div>
+
+      <div id="edit-portal-fields" class="space-y-4 hidden">
+        <div id="edit-access-level-wrap" class="hidden">
+          <label class="block text-xs font-medium text-slate-600 mb-1">Access level</label>
+          <select id="edit-access-level" name="access_level" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+            <option value="admin" selected>Admin — full portal</option>
+            <option value="superadmin">Superadmin — full portal + elevated</option>
+          </select>
+        </div>
+        <div class="grid gap-2 text-xs text-slate-600">
+          <label class="flex items-center gap-2"><input type="checkbox" name="notify_day_off_requests" id="edit-notify-day-off" value="1"> Day-off request alerts</label>
+          <label class="flex items-center gap-2"><input type="checkbox" name="notify_schedule_changes" id="edit-notify-schedule" value="1"> Schedule change alerts</label>
+          <label class="flex items-center gap-2"><input type="checkbox" name="sms_fallback_enabled" id="edit-sms-fallback" value="1"> SMS fallback</label>
+        </div>
+      </div>
+
+      <div class="flex gap-2 pt-1">
+        <button type="submit" class="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">Save</button>
         <button type="button" onclick="document.getElementById('edit-user-modal').classList.add('hidden')" class="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-lg text-sm font-medium">Cancel</button>
       </div>
     </form>
@@ -403,64 +432,82 @@
 {% block scripts %}
 <script>
 function hideAllPeopleModals() {
-  ['add-chooser','add-clinical-modal','add-portal-modal','edit-clinical-modal','edit-user-modal','password-modal'].forEach(function(id) {
+  ['add-user-modal','edit-user-modal','password-modal'].forEach(function(id) {
     document.getElementById(id)?.classList.add('hidden');
   });
 }
-function openAddChooser() {
+function _isClinicalPosition(pos) {
+  return pos === 'surgeon' || pos === 'pa';
+}
+function _isPortalPosition(pos) {
+  return pos === 'scheduler' || pos === 'staff';
+}
+function syncAddUserFields() {
+  var pos = document.getElementById('add-position')?.value || 'surgeon';
+  var clinical = _isClinicalPosition(pos);
+  var portal = _isPortalPosition(pos);
+  document.getElementById('add-clinical-fields')?.classList.toggle('hidden', !clinical);
+  document.getElementById('add-rank-wrap')?.classList.toggle('hidden', pos !== 'surgeon');
+  document.getElementById('add-portal-fields')?.classList.toggle('hidden', !portal);
+  document.getElementById('add-access-level-wrap')?.classList.toggle('hidden', pos !== 'staff');
+  var email = document.getElementById('add-email');
+  if (email) {
+    // Schedulers/admins OTP is email-keyed; clinical can use email and/or phone.
+    email.required = portal;
+  }
+}
+function syncEditUserFields() {
+  var pos = document.getElementById('edit-position')?.value || 'surgeon';
+  var clinical = _isClinicalPosition(pos);
+  var portal = _isPortalPosition(pos);
+  var kind = document.getElementById('edit-user-kind')?.value || 'clinical';
+  var cross = (kind === 'clinical' && portal) || (kind === 'portal' && clinical);
+  document.getElementById('edit-clinical-fields')?.classList.toggle('hidden', !clinical);
+  document.getElementById('edit-rank-wrap')?.classList.toggle('hidden', pos !== 'surgeon');
+  document.getElementById('edit-portal-fields')?.classList.toggle('hidden', !portal);
+  document.getElementById('edit-access-level-wrap')?.classList.toggle('hidden', pos !== 'staff');
+  document.getElementById('edit-cross-type-hint')?.classList.toggle('hidden', !cross);
+  var email = document.getElementById('edit-email');
+  if (email) email.required = portal;
+}
+function openAddUser() {
   hideAllPeopleModals();
-  document.getElementById('add-chooser').classList.remove('hidden');
+  var form = document.getElementById('add-user-form');
+  if (form) form.reset();
+  var pos = document.getElementById('add-position');
+  if (pos) pos.value = 'surgeon';
+  syncAddUserFields();
+  document.getElementById('add-user-modal').classList.remove('hidden');
 }
-function openAddClinical() {
+function openEditUser(btn) {
   hideAllPeopleModals();
-  document.getElementById('add-clinical-modal').classList.remove('hidden');
+  var kind = btn.dataset.kind || 'clinical';
+  var position = btn.dataset.position || (kind === 'clinical' ? 'surgeon' : 'staff');
+  document.getElementById('edit-user-kind').value = kind;
+  document.getElementById('edit-user-id').value = btn.dataset.id || '';
+  document.getElementById('edit-position').value = position;
+  document.getElementById('edit-first-name').value = btn.dataset.firstName || '';
+  document.getElementById('edit-last-name').value = btn.dataset.lastName || '';
+  document.getElementById('edit-suffix').value = btn.dataset.suffix || '';
+  document.getElementById('edit-sort-order').value = btn.dataset.sortOrder || '0';
+  document.getElementById('edit-email').value = btn.dataset.email || '';
+  document.getElementById('edit-phone').value = btn.dataset.phone || '';
+  document.getElementById('edit-access-level').value =
+    (btn.dataset.accessLevel === 'superadmin') ? 'superadmin' : 'admin';
+  document.getElementById('edit-notify-day-off').checked = btn.dataset.notifyDayOff !== '0';
+  document.getElementById('edit-notify-schedule').checked = btn.dataset.notifySchedule !== '0';
+  document.getElementById('edit-sms-fallback').checked = btn.dataset.smsFallback === '1';
+  // Clinical rows have no alert flags — default portal extras on when switching later.
+  if (kind === 'clinical') {
+    document.getElementById('edit-notify-day-off').checked = true;
+    document.getElementById('edit-notify-schedule').checked = true;
+    document.getElementById('edit-sms-fallback').checked = false;
+  }
+  syncEditUserFields();
+  document.getElementById('edit-user-modal').classList.remove('hidden');
 }
-function openAddPortal() {
-  hideAllPeopleModals();
-  document.getElementById('add-portal-modal').classList.remove('hidden');
-}
-function openEditClinical(id, first, last, suffix, email, phone, staffType, sortOrder) {
-  document.getElementById('edit-clinical-form').action = '/admin/surgeons/' + id + '/edit';
-  document.getElementById('edit-c-first').value = first || '';
-  document.getElementById('edit-c-last').value = last || '';
-  document.getElementById('edit-c-suffix').value = suffix || '';
-  document.getElementById('edit-c-email').value = email || '';
-  document.getElementById('edit-c-phone').value = phone || '';
-  document.getElementById('edit-c-staff-type').value = staffType || 'physician';
-  document.getElementById('edit-c-sort').value = sortOrder || 0;
-  document.getElementById('edit-clinical-modal').classList.remove('hidden');
-}
-document.querySelectorAll('.edit-clinical-user').forEach(function(btn) {
-  btn.addEventListener('click', function() {
-    openEditClinical(
-      parseInt(this.dataset.id, 10),
-      this.dataset.firstName || '',
-      this.dataset.lastName || '',
-      this.dataset.suffix || '',
-      this.dataset.email || '',
-      this.dataset.phone || '',
-      this.dataset.staffType || 'physician',
-      parseInt(this.dataset.sortOrder || '0', 10)
-    );
-  });
-});
-document.querySelectorAll('.edit-admin-user').forEach(function(btn) {
-  btn.addEventListener('click', function() {
-    document.getElementById('edit-user-form').action = '/admin/settings/people/users/' + this.dataset.userId + '/edit';
-    document.getElementById('edit-user-username').value = this.dataset.username || '';
-    document.getElementById('edit-user-first-name').value = this.dataset.firstName || '';
-    document.getElementById('edit-user-last-name').value = this.dataset.lastName || '';
-    document.getElementById('edit-user-email').value = this.dataset.email || '';
-    document.getElementById('edit-user-phone').value = this.dataset.phone || '';
-    var role = (this.dataset.role || 'admin').toLowerCase();
-    document.getElementById('edit-user-role').value =
-      (role === 'scheduler' || role === 'superadmin' || role === 'admin') ? role : 'admin';
-    document.getElementById('edit-user-notify-day-off').checked = this.dataset.notifyDayOff !== '0';
-    document.getElementById('edit-user-notify-schedule').checked = this.dataset.notifySchedule !== '0';
-    document.getElementById('edit-user-sms-fallback').checked = this.dataset.smsFallback === '1';
-    document.getElementById('edit-user-password').value = '';
-    document.getElementById('edit-user-modal').classList.remove('hidden');
-  });
+document.querySelectorAll('.edit-user').forEach(function(btn) {
+  btn.addEventListener('click', function() { openEditUser(this); });
 });
 function openPasswordModal(userId, username) {
   document.getElementById('password-modal-username').textContent = username;
@@ -472,7 +519,32 @@ document.querySelectorAll('.set-admin-password').forEach(function(btn) {
     openPasswordModal(parseInt(this.dataset.userId, 10), this.dataset.username || '');
   });
 });
-['add-chooser','add-clinical-modal','add-portal-modal','edit-clinical-modal','edit-user-modal','password-modal'].forEach(function(id) {
+function _validateOtpContacts(e, pos, email, phone) {
+  if (_isClinicalPosition(pos) && !email && !phone) {
+    e.preventDefault();
+    alert('Email and/or phone is required for OTP sign-in.');
+    return false;
+  }
+  if (_isPortalPosition(pos) && !email) {
+    e.preventDefault();
+    alert('Email is required for scheduler/admin OTP sign-in.');
+    return false;
+  }
+  return true;
+}
+document.getElementById('add-user-form')?.addEventListener('submit', function(e) {
+  var pos = document.getElementById('add-position')?.value || '';
+  var email = (document.getElementById('add-email')?.value || '').trim();
+  var phone = (document.getElementById('add-phone')?.value || '').trim();
+  _validateOtpContacts(e, pos, email, phone);
+});
+document.getElementById('edit-user-form')?.addEventListener('submit', function(e) {
+  var pos = document.getElementById('edit-position')?.value || '';
+  var email = (document.getElementById('edit-email')?.value || '').trim();
+  var phone = (document.getElementById('edit-phone')?.value || '').trim();
+  _validateOtpContacts(e, pos, email, phone);
+});
+['add-user-modal','edit-user-modal','password-modal'].forEach(function(id) {
   const el = document.getElementById(id);
   if (!el) return;
   el.addEventListener('click', function(e) {

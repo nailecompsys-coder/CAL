@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo as _ZoneInfo
 from fastapi.templating import Jinja2Templates
 
 from .device_names import readable_device_name
+from .or_block_service import sanitize_schedule_note_for_humans
 from .paths import TEMPLATES_DIR
 from .version_display import release_channel, release_label
 
@@ -60,3 +61,4 @@ templates.env.filters["bytes"] = _format_bytes
 templates.env.filters["device_name"] = readable_device_name
 templates.env.filters["release_label"] = release_label
 templates.env.filters["release_channel"] = release_channel
+templates.env.filters["human_schedule_note"] = sanitize_schedule_note_for_humans

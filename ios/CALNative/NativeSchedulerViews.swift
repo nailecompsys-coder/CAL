@@ -207,6 +207,20 @@ struct NativeSchedulerShell: View {
         SchedulerAssignSheet(
           block: block,
           detail: store.selectedSchedulerDetail,
+          dayBlocks: store.schedulerBlocks.filter { $0.date == block.date },
+          loadBlocksOnDate: { date in
+            try await store.fetchSchedulerBlocks(on: date)
+          },
+          createBlockOnDate: { date in
+            try await store.createSchedulerBlock(
+              date: date,
+              locationId: block.locationId,
+              session: block.session.isEmpty ? "custom" : block.session,
+              startTime: block.start,
+              endTime: block.end,
+              notes: "Created while rescheduling a case"
+            )
+          },
           isLoading: store.isLoading,
           assignAction: { surgeon, startTime, caseCount, note in
             do {
@@ -221,18 +235,32 @@ struct NativeSchedulerShell: View {
               store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't update assignment.")
             }
           },
-          updateAction: { assignmentId, surgeon, startTime, caseCount, note in
+          addCaseAction: { surgeonId, startTime, procedure, patientName in
             do {
-              _ = try await store.updateSchedulerAssignment(
+              _ = try await store.addSchedulerCase(
                 blockId: block.id,
-                assignmentId: assignmentId,
-                surgeonId: surgeon.surgeonId,
+                surgeonId: surgeonId,
                 startTime: startTime,
-                caseCount: caseCount,
-                note: note
+                procedure: procedure,
+                patientName: patientName
               )
             } catch {
-              store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't update assignment.")
+              store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't add case.")
+            }
+          },
+          updateCaseAction: { caseId, startTime, procedure, patientName, surgeonId, targetBlockId in
+            do {
+              _ = try await store.updateSchedulerCase(
+                blockId: block.id,
+                caseId: caseId,
+                startTime: startTime,
+                procedure: procedure,
+                patientName: patientName,
+                surgeonId: surgeonId,
+                targetBlockId: targetBlockId
+              )
+            } catch {
+              store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't update case.")
             }
           },
           clearAction: {
@@ -240,7 +268,7 @@ struct NativeSchedulerShell: View {
               try await store.clearSchedulerBlock(blockId: block.id)
               selectedBlock = nil
             } catch {
-              store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't clear block.")
+              store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't clear block. Reschedule linked cases first.")
             }
           },
           deleteBlockAction: {
@@ -289,7 +317,7 @@ struct NativeSchedulerShell: View {
 
   private func groupedBlocks(_ blocks: [NativeSchedulerBlock]) -> [SchedulerBlockGroup] {
     Dictionary(grouping: blocks) { block in
-      "\(block.date)|\(block.locationId)|\(block.start)|\(block.end)"
+      "\(block.date)|\(block.locationId)|\(block.session)|\(block.start)|\(block.end)"
     }
     .map { _, blocks in
       SchedulerBlockGroup(blocks: blocks)
@@ -395,6 +423,16 @@ private struct SchedulerBlockGroup: Identifiable {
 
   var sortKey: String { "\(date)|\(String(format: "%05d", locationId))|\(start)|\(end)" }
 
+  var sessionLabel: String {
+    let raw = blocks.first?.session.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+    switch raw {
+    case "am": return "AM"
+    case "pm": return "PM"
+    case "both": return "AM+PM"
+    default: return raw.isEmpty ? "" : raw.uppercased()
+    }
+  }
+
   var roomCount: Int {
     let rooms = Set(blocks.map(\.displayRoom).filter { !$0.isEmpty })
     return max(rooms.count, blocks.count)
@@ -408,7 +446,7 @@ private struct SchedulerBlockGroup: Identifiable {
       unique.append(room)
     }
     if unique.isEmpty {
-      return roomCount == 1 ? "1 room (blank)" : "\(roomCount) rooms"
+      return roomCount > 1 ? "\(roomCount) rooms" : ""
     }
     if unique.count == 1 {
       return "Rm \(unique[0])"
@@ -432,7 +470,7 @@ private struct SchedulerBlockGroup: Identifiable {
     self.location = first.displayLocation
     self.start = first.start
     self.end = first.end
-    self.id = "\(first.date)|\(first.locationId)|\(first.start)|\(first.end)"
+    self.id = "\(first.date)|\(first.locationId)|\(first.session)|\(first.start)|\(first.end)"
   }
 }
 
@@ -639,17 +677,24 @@ private struct SchedulerDayDetailView: View {
                   .foregroundStyle(ClinicalPalette.teal)
                   .lineLimit(1)
                   .minimumScaleFactor(0.8)
+                if !group.sessionLabel.isEmpty {
+                  Text(group.sessionLabel)
+                    .font(ClinicalTypography.badge)
+                    .foregroundStyle(ClinicalPalette.teal)
+                }
                 Text("\(group.start)-\(group.end)")
                   .font(ClinicalTypography.caption)
                   .foregroundStyle(.secondary)
                   .lineLimit(1)
                   .minimumScaleFactor(0.85)
                 Spacer(minLength: 0)
-                Text(group.roomSummary)
-                  .font(ClinicalTypography.badge)
-                  .foregroundStyle(ClinicalPalette.ink.opacity(0.7))
-                  .lineLimit(1)
-                  .minimumScaleFactor(0.8)
+                if !group.roomSummary.isEmpty {
+                  Text(group.roomSummary)
+                    .font(ClinicalTypography.badge)
+                    .foregroundStyle(ClinicalPalette.ink.opacity(0.7))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                }
               }
 
               ForEach(group.blocks) { block in
@@ -711,23 +756,26 @@ private struct SchedulerBlockPill: View {
     HStack(alignment: .center, spacing: 10) {
       VStack(alignment: .leading, spacing: 4) {
         HStack(spacing: 6) {
+          Text(block.session.uppercased())
+            .font(ClinicalTypography.badge)
+            .foregroundStyle(ClinicalPalette.ink)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(ClinicalPalette.tealSoft, in: Capsule())
           if !block.displayRoom.isEmpty {
-            Text("Rm \(block.displayRoom)")
+            Text(block.displayRoom.contains(",") ? block.displayRoom : "Rm \(block.displayRoom)")
               .font(ClinicalTypography.badge)
               .foregroundStyle(ClinicalPalette.teal)
               .padding(.horizontal, 6)
               .padding(.vertical, 2)
               .background(ClinicalPalette.teal.opacity(0.12), in: Capsule())
-          } else {
-            Text("No room")
-              .font(ClinicalTypography.badge)
-              .foregroundStyle(ClinicalPalette.warningText)
-              .padding(.horizontal, 6)
-              .padding(.vertical, 2)
-              .background(ClinicalPalette.amber.opacity(0.35), in: Capsule())
           }
           if !block.cases.isEmpty {
             Text("\(block.cases.count) case\(block.cases.count == 1 ? "" : "s")")
+              .font(ClinicalTypography.caption)
+              .foregroundStyle(.secondary)
+          } else if block.caseCount > 0 {
+            Text("\(block.caseCount) case\(block.caseCount == 1 ? "" : "s")")
               .font(ClinicalTypography.caption)
               .foregroundStyle(.secondary)
           }
@@ -758,28 +806,43 @@ private struct SchedulerBlockPill: View {
 private struct SchedulerAssignSheet: View {
   let block: NativeSchedulerBlock
   let detail: NativeSchedulerBlockDetailResponse?
+  let dayBlocks: [NativeSchedulerBlock]
+  let loadBlocksOnDate: (Date) async throws -> [NativeSchedulerBlock]
+  let createBlockOnDate: (Date) async throws -> NativeSchedulerBlock?
   let isLoading: Bool
   let assignAction: (NativeSchedulerCandidate, String, Int, String) async -> Void
-  let updateAction: (Int, NativeSchedulerCandidate, String, Int, String) async -> Void
+  let addCaseAction: (Int, String, String, String) async -> Void
+  let updateCaseAction: (Int, String, String, String, Int?, Int?) async -> Void
   let clearAction: () async -> Void
   let deleteBlockAction: () async throws -> Void
   @Environment(\.dismiss) private var dismiss
   @State private var mode: SheetMode = .idle
-  @State private var editingAssignmentId: Int?
+  @State private var focusedAssignmentId: Int?
+  @State private var editingCaseId: Int?
   @State private var selectedCandidate: NativeSchedulerCandidate?
   @State private var startTime: Date = Date()
   @State private var caseCount = 1
   @State private var note = ""
+  @State private var procedureText = ""
+  @State private var patientText = ""
+  @State private var caseSurgeonId: Int?
+  @State private var caseTargetBlockId: Int?
+  @State private var destinationDate: Date = Date()
+  @State private var destinationBlocks: [NativeSchedulerBlock] = []
+  @State private var isLoadingDestination = false
   @State private var showUnavailable = false
   @State private var didSeedDefaults = false
   @State private var isSaving = false
   @State private var showCancelConfirm = false
+  @State private var showClearConfirm = false
   @State private var actionError: String?
 
+  /// Block → surgeons (1:N). Surgeon → cases (1:N). Never mix both levels on one screen.
   private enum SheetMode {
     case idle
-    case editing
-    case adding
+    case addingSurgeon
+    case addingCase
+    case editingCase
   }
 
   private var liveBlock: NativeSchedulerBlock {
@@ -793,9 +856,24 @@ private struct SchedulerAssignSheet: View {
     }
   }
 
-  private var editingAssignment: NativeSchedulerBlockAssignment? {
-    guard let editingAssignmentId else { return nil }
-    return assignedRows.first { $0.id == editingAssignmentId }
+  private var focusedAssignment: NativeSchedulerBlockAssignment? {
+    guard let focusedAssignmentId else { return nil }
+    return assignedRows.first { $0.id == focusedAssignmentId }
+  }
+
+  /// True when drilled into one surgeon's case list (child of the block).
+  private var isSurgeonDrillIn: Bool {
+    focusedAssignment != nil && mode != .addingSurgeon
+  }
+
+  private var focusedCases: [NativeSchedulerCase] {
+    guard let focused = focusedAssignment else { return [] }
+    return liveBlock.cases
+      .filter { $0.surgeonId == focused.surgeonId }
+      .sorted { lhs, rhs in
+        if lhs.start != rhs.start { return lhs.start < rhs.start }
+        return lhs.id < rhs.id
+      }
   }
 
   private var candidates: [NativeSchedulerCandidate] {
@@ -812,75 +890,91 @@ private struct SchedulerAssignSheet: View {
 
   private var currentStartHHMM: String { Self.hhmm(startTime) }
 
-  private var hasDirtyChanges: Bool {
-    guard let candidate = selectedCandidate else { return false }
-    switch mode {
-    case .adding:
-      return true
-    case .editing:
-      guard let current = editingAssignment else { return false }
-      return candidate.surgeonId != current.surgeonId
-        || currentStartHHMM != current.start
-        || caseCount != current.caseCount
-        || note != current.note
-    case .idle:
-      return assignedRows.isEmpty && selectedCandidate != nil
-    }
-  }
-
-  private var primaryButtonTitle: String {
-    guard let candidate = selectedCandidate else { return "Select a surgeon" }
-    switch mode {
-    case .editing:
-      return hasDirtyChanges
-        ? "Save \(candidate.initials) · \(currentStartHHMM)"
-        : "No changes"
-    case .adding, .idle:
-      return "Add \(candidate.initials) · \(currentStartHHMM)"
-    }
-  }
-
-  private var canSave: Bool {
-    guard let candidate = selectedCandidate, !isLoading, !isSaving else { return false }
+  private var canSaveSurgeon: Bool {
+    guard mode == .addingSurgeon, let candidate = selectedCandidate, !isLoading, !isSaving else { return false }
     if !candidate.isClear && note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       return false
     }
-    return hasDirtyChanges
+    return true
+  }
+
+  private var linkedCaseCount: Int {
+    liveBlock.cases.count
+  }
+
+  private var hasLinkedCases: Bool {
+    linkedCaseCount > 0
+  }
+
+  private var canClearSurgeons: Bool {
+    !assignedRows.isEmpty && !hasLinkedCases && !isLoading && !isSaving
+  }
+
+  private var canCancelBlock: Bool {
+    assignedRows.isEmpty && !hasLinkedCases && !isLoading && !isSaving
+  }
+
+  private var canSaveCase: Bool {
+    guard !isLoading, !isSaving else { return false }
+    if mode == .addingCase { return true }
+    if mode == .editingCase {
+      return caseSurgeonId != nil && caseTargetBlockId != nil
+    }
+    return false
+  }
+
+  private var rescheduleBlocks: [NativeSchedulerBlock] {
+    let rows = destinationBlocks.isEmpty && Self.dateKey(destinationDate) == liveBlock.date
+      ? (dayBlocks.isEmpty ? [liveBlock] : dayBlocks)
+      : destinationBlocks
+    return rows.sorted { lhs, rhs in
+      if lhs.start != rhs.start { return lhs.start < rhs.start }
+      return lhs.displayLocation < rhs.displayLocation
+    }
+  }
+
+  private var caseSurgeonChoices: [(id: Int, label: String)] {
+    var seen = Set<Int>()
+    var rows: [(Int, String)] = []
+    let preferBlockId = caseTargetBlockId ?? liveBlock.id
+    let preferBlock = rescheduleBlocks.first(where: { $0.id == preferBlockId }) ?? liveBlock
+    for assignment in preferBlock.assignments {
+      if seen.insert(assignment.surgeonId).inserted {
+        let name = assignment.surgeon.isEmpty ? assignment.surgeonInitials : assignment.surgeon
+        rows.append((assignment.surgeonId, "\(assignment.surgeonInitials) — \(name)"))
+      }
+    }
+    for assignment in assignedRows {
+      if seen.insert(assignment.surgeonId).inserted {
+        let name = assignment.surgeon.isEmpty ? assignment.surgeonInitials : assignment.surgeon
+        rows.append((assignment.surgeonId, "\(assignment.surgeonInitials) — \(name)"))
+      }
+    }
+    for block in rescheduleBlocks {
+      for assignment in block.assignments where seen.insert(assignment.surgeonId).inserted {
+        let name = assignment.surgeon.isEmpty ? assignment.surgeonInitials : assignment.surgeon
+        rows.append((assignment.surgeonId, "\(assignment.surgeonInitials) — \(name)"))
+      }
+    }
+    for candidate in candidates where seen.insert(candidate.surgeonId).inserted {
+      rows.append((candidate.surgeonId, "\(candidate.initials) — \(candidate.name)"))
+    }
+    return rows
+  }
+
+  private var navigationTitle: String {
+    if let focused = focusedAssignment {
+      let name = focused.surgeon.isEmpty ? focused.surgeonInitials : focused.surgeon
+      return name.isEmpty ? "Cases" : name
+    }
+    return assignedRows.isEmpty ? "Assign Block" : "Block surgeons"
   }
 
   var body: some View {
     CalNavigation {
       ScrollView {
         VStack(alignment: .leading, spacing: 12) {
-          HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 2) {
-              Text("\(liveBlock.displayLocation)  \(liveBlock.start)-\(liveBlock.end)")
-                .font(ClinicalTypography.headlineStrong)
-                .foregroundStyle(ClinicalPalette.ink)
-              HStack(spacing: 6) {
-                Text(liveBlock.displayDate)
-                  .font(ClinicalTypography.caption)
-                  .foregroundStyle(.secondary)
-                if !liveBlock.displayRoom.isEmpty {
-                  Text("·")
-                    .foregroundStyle(.secondary)
-                  Text("Rm \(liveBlock.displayRoom)")
-                    .font(ClinicalTypography.caption)
-                    .foregroundStyle(ClinicalPalette.teal)
-                } else {
-                  Text("·")
-                    .foregroundStyle(.secondary)
-                  Text("No room set")
-                    .font(ClinicalTypography.caption)
-                    .foregroundStyle(ClinicalPalette.warningText)
-                }
-              }
-            }
-            Spacer()
-            if isLoading || isSaving {
-              ProgressView()
-            }
-          }
+          blockHeader
 
           if let actionError {
             Text(NativeSchedulerShell.friendlyWarning(actionError) ?? actionError)
@@ -889,194 +983,63 @@ private struct SchedulerAssignSheet: View {
               .fixedSize(horizontal: false, vertical: true)
           }
 
-          VStack(alignment: .leading, spacing: 8) {
-            Text("SURGEONS ON THIS ROOM")
-              .font(ClinicalTypography.sectionLabel)
-              .foregroundStyle(.secondary)
-            if assignedRows.isEmpty {
-              Text("No surgeons yet — pick one below")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-            } else {
-              ForEach(assignedRows) { assignment in
-                AssignedSurgeonPill(
-                  assignment: assignment,
-                  isSelected: editingAssignmentId == assignment.id && mode == .editing,
-                  isBusy: isLoading || isSaving,
-                  onSelect: { beginEditing(assignment) }
-                )
-              }
-              Text("Tap a surgeon to see their cases")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-            }
-
-            if let editing = editingAssignment {
-              SurgeonCasesPanel(
-                surgeonName: editing.surgeon.isEmpty ? editing.surgeonInitials : editing.surgeon,
-                cases: liveBlock.cases.filter { $0.surgeonId == editing.surgeonId }
-              )
-            }
-
-            if !assignedRows.isEmpty {
-              Button {
-                beginAdding()
-              } label: {
-                Label("Add another surgeon", systemImage: "plus.circle.fill")
-                  .font(.subheadline.weight(.bold))
-                  .frame(maxWidth: .infinity)
-                  .padding(.vertical, 8)
-              }
-              .buttonStyle(.bordered)
-              .tint(ClinicalPalette.teal)
-              .disabled(isLoading || isSaving || mode == .adding)
-            }
-          }
-          .padding(12)
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.cardStrong)
-
-          if mode != .idle || assignedRows.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-              Text(mode == .editing ? "EDIT SURGEON" : "ADD SURGEON")
-                .font(ClinicalTypography.sectionLabel)
-                .foregroundStyle(.secondary)
-              HStack(spacing: 12) {
-                DatePicker("Start", selection: $startTime, displayedComponents: .hourAndMinute)
-                  .labelsHidden()
-                  .font(.subheadline.weight(.semibold))
-                Stepper("\(caseCount) case\(caseCount == 1 ? "" : "s")", value: $caseCount, in: 1...20)
-                  .font(.subheadline.weight(.semibold))
-              }
-              TextField(
-                selectedCandidate?.isClear == false ? "Override note (required)" : "Note (optional)",
-                text: $note
-              )
-                .textFieldStyle(.roundedBorder)
-              if let candidate = selectedCandidate, !candidate.isClear {
-                Text(candidate.warnings.first ?? candidate.availability)
-                  .font(.caption2.weight(.semibold))
-                  .foregroundStyle(ClinicalPalette.warningText)
-              }
-              if mode == .editing, let editing = editingAssignment {
-                Text("Editing \(editing.surgeonInitials) at \(editing.start)")
-                  .font(.caption2.weight(.semibold))
-                  .foregroundStyle(ClinicalPalette.teal)
-              }
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.tealSoft)
-
-            VStack(alignment: .leading, spacing: 8) {
-              Text("PICK SURGEON")
-                .font(ClinicalTypography.sectionLabel)
-                .foregroundStyle(.secondary)
-
-              if candidates.isEmpty {
-                HStack(spacing: 8) {
-                  ProgressView()
-                  Text("Loading availability…")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                }
-              } else if availableCandidates.isEmpty {
-                Text("No clear surgeons for this block.")
-                  .font(.subheadline.weight(.semibold))
-                  .foregroundStyle(.secondary)
-              } else {
-                ForEach(availableCandidates) { candidate in
-                  CandidatePickRow(
-                    candidate: candidate,
-                    isSelected: selectedCandidate?.surgeonId == candidate.surgeonId
-                  ) {
-                    selectedCandidate = candidate
-                  }
-                }
-              }
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.cardStrong)
-
-            if !unavailableCandidates.isEmpty {
-              DisclosureGroup(isExpanded: $showUnavailable) {
-                ForEach(unavailableCandidates) { candidate in
-                  CandidatePickRow(
-                    candidate: candidate,
-                    isSelected: selectedCandidate?.surgeonId == candidate.surgeonId
-                  ) {
-                    selectedCandidate = candidate
-                  }
-                }
-              } label: {
-                Text("Not available (\(unavailableCandidates.count))")
-                  .font(.caption.weight(.black))
-                  .foregroundStyle(.secondary)
-              }
-              .padding(12)
-              .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.amber)
-            }
-
-            Button {
-              Task { await save() }
-            } label: {
-              Text(primaryButtonTitle)
-                .font(.headline.weight(.bold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(ClinicalPalette.teal)
-            .disabled(!canSave)
-
-            if mode == .editing || mode == .adding {
-              Button("Cancel edit") {
-                resetToIdle()
-              }
-              .font(.caption.weight(.bold))
-              .frame(maxWidth: .infinity)
-              .disabled(isSaving)
-            }
+          if isSurgeonDrillIn, let focused = focusedAssignment {
+            surgeonCasesLevel(focused)
+          } else {
+            surgeonsLevel
           }
 
-          if !assignedRows.isEmpty {
-            Button(role: .destructive) {
-              Task { await clearAction() }
-            } label: {
-              Text("Clear entire block")
-                .font(.caption.weight(.bold))
-                .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .disabled(isLoading || isSaving)
+          if mode == .addingCase || mode == .editingCase {
+            caseEditorCard
           }
 
-          Button(role: .destructive) {
-            showCancelConfirm = true
-          } label: {
-            Text(assignedRows.isEmpty ? "Cancel this block" : "Cancel block (clear surgeons first)")
-              .font(.caption.weight(.bold))
-              .frame(maxWidth: .infinity)
+          if mode == .addingSurgeon || assignedRows.isEmpty {
+            surgeonPickerCard
           }
-          .buttonStyle(.bordered)
-          .disabled(isLoading || isSaving || !assignedRows.isEmpty)
+
+          if !isSurgeonDrillIn {
+            blockDangerZone
+          }
         }
         .padding(16)
       }
       .background(ScheduleWaterBackground())
-      .navigationTitle(assignedRows.isEmpty ? "Assign Block" : "Edit Block")
+      .navigationTitle(navigationTitle)
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
-          Button("Done") { dismiss() }
+          if isSurgeonDrillIn {
+            Button {
+              backToSurgeons()
+            } label: {
+              Label("Surgeons", systemImage: "chevron.left")
+            }
+            .disabled(isSaving)
+          } else {
+            Button("Done") { dismiss() }
+          }
         }
       }
-      .confirmationDialog(
-        "Cancel this Block OR?",
-        isPresented: $showCancelConfirm,
-        titleVisibility: .visible
+      .alert(
+        "Clear all surgeons from this block?",
+        isPresented: $showClearConfirm
       ) {
+        Button("Keep surgeons", role: .cancel) {}
+        Button("Clear surgeons", role: .destructive) {
+          Task {
+            isSaving = true
+            defer { isSaving = false }
+            await clearAction()
+          }
+        }
+      } message: {
+        Text("Only allowed when this block has no linked cases. Removes every surgeon assignment on \(liveBlock.displayLocation) \(liveBlock.start)-\(liveBlock.end). This cannot be undone in the app.")
+      }
+      .alert(
+        "Cancel this Block OR window?",
+        isPresented: $showCancelConfirm
+      ) {
+        Button("Keep block", role: .cancel) {}
         Button("Cancel block", role: .destructive) {
           Task {
             isSaving = true
@@ -1089,19 +1052,15 @@ private struct SchedulerAssignSheet: View {
             }
           }
         }
-        Button("Keep block", role: .cancel) {}
       } message: {
-        Text("Removes this hospital/day window. Surgeons must already be cleared.")
+        Text("Deletes the empty hospital window \(liveBlock.displayLocation) \(liveBlock.start)-\(liveBlock.end). Only allowed when there are no surgeons and no linked cases.")
       }
       .onAppear {
         seedDefaultsIfNeeded()
       }
       .onChange(of: assignedRows.map(\.id)) { ids in
-        if let editingAssignmentId, !ids.contains(editingAssignmentId) {
+        if let focusedAssignmentId, !ids.contains(focusedAssignmentId) {
           resetToIdle()
-        } else if mode == .editing, let editing = editingAssignment {
-          // Keep form synced after a successful in-place save.
-          loadForm(from: editing)
         }
       }
       .onChange(of: detail?.candidates.count ?? 0) { _ in
@@ -1110,16 +1069,412 @@ private struct SchedulerAssignSheet: View {
     }
   }
 
-  private func seedDefaultsIfNeeded() {
-    guard !didSeedDefaults else {
-      if mode == .editing, let editing = editingAssignment, selectedCandidate == nil {
-        selectedCandidate = candidates.first { $0.surgeonId == editing.surgeonId }
+  private var blockHeader: some View {
+    HStack(alignment: .firstTextBaseline) {
+      VStack(alignment: .leading, spacing: 2) {
+        Text("\(liveBlock.displayLocation)  \(liveBlock.start)-\(liveBlock.end)")
+          .font(ClinicalTypography.headlineStrong)
+          .foregroundStyle(ClinicalPalette.ink)
+        HStack(spacing: 6) {
+          Text(liveBlock.displayDate)
+            .font(ClinicalTypography.caption)
+            .foregroundStyle(.secondary)
+          if !liveBlock.displayRoom.isEmpty {
+            Text("·")
+              .foregroundStyle(.secondary)
+            Text("Rm \(liveBlock.displayRoom)")
+              .font(ClinicalTypography.caption)
+              .foregroundStyle(ClinicalPalette.teal)
+          }
+        }
+        if isSurgeonDrillIn {
+          Text("1 surgeon · \(focusedCases.count) case\(focusedCases.count == 1 ? "" : "s")")
+            .font(ClinicalTypography.caption)
+            .foregroundStyle(.secondary)
+        } else if !assignedRows.isEmpty {
+          Text("\(assignedRows.count) surgeon\(assignedRows.count == 1 ? "" : "s") on this block")
+            .font(ClinicalTypography.caption)
+            .foregroundStyle(.secondary)
+        }
       }
-      return
+      Spacer()
+      if isLoading || isSaving {
+        ProgressView()
+      }
     }
+  }
+
+  @ViewBuilder
+  private var surgeonsLevel: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text("SURGEONS")
+        .font(ClinicalTypography.sectionLabel)
+        .foregroundStyle(.secondary)
+      Text("Each surgeon has their own cases. Tap one to open that list.")
+        .font(.caption2.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+
+      if assignedRows.isEmpty {
+        Text("No surgeons yet — pick one below")
+          .font(.subheadline.weight(.semibold))
+          .foregroundStyle(.secondary)
+      } else {
+        ForEach(assignedRows) { assignment in
+          AssignedSurgeonPill(
+            assignment: assignment,
+            caseCountOverride: {
+              let real = liveBlock.cases.filter { $0.surgeonId == assignment.surgeonId }.count
+              return real > 0 ? real : nil
+            }(),
+            isSelected: false,
+            isBusy: isLoading || isSaving,
+            onSelect: { focusSurgeon(assignment) }
+          )
+        }
+      }
+
+      if mode == .idle, !assignedRows.isEmpty {
+        Button {
+          beginAddingSurgeon()
+        } label: {
+          Label("Add another surgeon", systemImage: "plus.circle.fill")
+            .font(.subheadline.weight(.bold))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+        }
+        .buttonStyle(.bordered)
+        .tint(ClinicalPalette.teal)
+        .disabled(isLoading || isSaving)
+      }
+    }
+    .padding(12)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.cardStrong)
+  }
+
+  @ViewBuilder
+  private func surgeonCasesLevel(_ focused: NativeSchedulerBlockAssignment) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text("CASES")
+        .font(ClinicalTypography.sectionLabel)
+        .foregroundStyle(.secondary)
+
+      HStack(spacing: 10) {
+        Text(focused.surgeonInitials.isEmpty ? "—" : focused.surgeonInitials)
+          .font(ClinicalTypography.sectionLabel)
+          .foregroundStyle(.white)
+          .padding(.horizontal, 10)
+          .padding(.vertical, 6)
+          .background(ClinicalPalette.teal, in: Capsule())
+        VStack(alignment: .leading, spacing: 2) {
+          Text(focused.surgeon.isEmpty ? focused.surgeonInitials : focused.surgeon)
+            .font(ClinicalTypography.rowTitleStrong)
+            .foregroundStyle(ClinicalPalette.ink)
+          Text("On this block from \(focused.start)")
+            .font(ClinicalTypography.caption)
+            .foregroundStyle(.secondary)
+        }
+        Spacer(minLength: 0)
+      }
+
+      SurgeonCasesPanel(
+        surgeonName: focused.surgeon.isEmpty ? focused.surgeonInitials : focused.surgeon,
+        cases: focusedCases,
+        selectedCaseId: editingCaseId,
+        onSelectCase: { beginEditingCase($0) }
+      )
+
+      if mode == .idle {
+        Button {
+          beginAddingCase(for: focused)
+        } label: {
+          Label(addCaseButtonTitle(for: focused), systemImage: "plus.circle.fill")
+            .font(.subheadline.weight(.bold))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(ClinicalPalette.teal)
+        .disabled(isLoading || isSaving)
+      }
+    }
+    .padding(12)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.cardStrong)
+  }
+
+  @ViewBuilder
+  private var blockDangerZone: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text("BLOCK ACTIONS")
+        .font(ClinicalTypography.sectionLabel)
+        .foregroundStyle(.secondary)
+
+      if hasLinkedCases {
+        Text("This block has \(linkedCaseCount) linked case\(linkedCaseCount == 1 ? "" : "s"). Reschedule those cases off this block before clearing surgeons or canceling the window.")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(ClinicalPalette.warningText)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+
+      if !assignedRows.isEmpty {
+        Button(role: .destructive) {
+          showClearConfirm = true
+        } label: {
+          Text(hasLinkedCases ? "Clear surgeons (blocked — cases first)" : "Clear all surgeons…")
+            .font(.caption.weight(.bold))
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .disabled(!canClearSurgeons)
+      }
+
+      Button(role: .destructive) {
+        showCancelConfirm = true
+      } label: {
+        Text(cancelBlockButtonTitle)
+          .font(.caption.weight(.bold))
+          .frame(maxWidth: .infinity)
+      }
+      .buttonStyle(.bordered)
+      .disabled(!canCancelBlock)
+    }
+    .padding(12)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.cardStrong)
+  }
+
+  private var cancelBlockButtonTitle: String {
+    if hasLinkedCases {
+      return "Cancel block (reschedule cases first)"
+    }
+    if !assignedRows.isEmpty {
+      return "Cancel block (clear surgeons first)"
+    }
+    return "Cancel this block…"
+  }
+
+  @ViewBuilder
+  private var caseEditorCard: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text(mode == .editingCase ? "RESCHEDULE CASE" : "ADD CASE")
+        .font(ClinicalTypography.sectionLabel)
+        .foregroundStyle(.secondary)
+
+      if mode == .editingCase {
+        Text("Insurance, illness, or other cancel → pick any future day and block. Create a block on that day if none exists.")
+          .font(.caption2.weight(.semibold))
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+
+        DatePicker(
+          "New date",
+          selection: $destinationDate,
+          displayedComponents: .date
+        )
+        .font(.subheadline.weight(.semibold))
+        .onChange(of: destinationDate) { _ in
+          Task { await reloadDestinationBlocks(selectFirst: true) }
+        }
+
+        if isLoadingDestination {
+          HStack(spacing: 8) {
+            ProgressView()
+            Text("Loading blocks…")
+              .font(.caption.weight(.semibold))
+              .foregroundStyle(.secondary)
+          }
+        } else if rescheduleBlocks.isEmpty {
+          Text("No Block OR on \(Self.dateKey(destinationDate)). Create one to move this patient.")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(ClinicalPalette.warningText)
+            .fixedSize(horizontal: false, vertical: true)
+          Button {
+            Task { await createDestinationBlock() }
+          } label: {
+            Label(
+              "Create \(liveBlock.displayLocation) \(liveBlock.start)-\(liveBlock.end) on this day",
+              systemImage: "plus.circle.fill"
+            )
+            .font(.subheadline.weight(.bold))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+          }
+          .buttonStyle(.borderedProminent)
+          .tint(ClinicalPalette.teal)
+          .disabled(isSaving)
+        } else {
+          Picker("Block", selection: $caseTargetBlockId) {
+            ForEach(rescheduleBlocks) { destination in
+              Text(blockChoiceLabel(destination)).tag(Optional(destination.id))
+            }
+          }
+          .pickerStyle(.menu)
+        }
+
+        if !caseSurgeonChoices.isEmpty {
+          Picker("Surgeon", selection: $caseSurgeonId) {
+            ForEach(caseSurgeonChoices, id: \.id) { row in
+              Text(row.label).tag(Optional(row.id))
+            }
+          }
+          .pickerStyle(.menu)
+        }
+
+        if let targetId = caseTargetBlockId, targetId != liveBlock.id {
+          Text("Saving reschedules this patient off \(liveBlock.displayLocation) \(liveBlock.displayDate).")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(ClinicalPalette.warningText)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+      } else if let focused = focusedAssignment {
+        Text(focused.surgeon.isEmpty ? focused.surgeonInitials : focused.surgeon)
+          .font(.subheadline.weight(.bold))
+          .foregroundStyle(ClinicalPalette.ink)
+      }
+
+      DatePicker("Start time", selection: $startTime, displayedComponents: .hourAndMinute)
+        .labelsHidden()
+        .font(.subheadline.weight(.semibold))
+      TextField("Procedure (optional)", text: $procedureText)
+        .textFieldStyle(.roundedBorder)
+      TextField("Patient (optional)", text: $patientText)
+        .textFieldStyle(.roundedBorder)
+      Button {
+        Task { await saveCase() }
+      } label: {
+        Text(mode == .editingCase ? "Save reschedule · \(currentStartHHMM)" : "Add case · \(currentStartHHMM)")
+          .font(.headline.weight(.bold))
+          .frame(maxWidth: .infinity)
+          .padding(.vertical, 12)
+      }
+      .buttonStyle(.borderedProminent)
+      .tint(ClinicalPalette.teal)
+      .disabled(!canSaveCase)
+      Button("Cancel") {
+        mode = .idle
+        editingCaseId = nil
+        procedureText = ""
+        patientText = ""
+        caseSurgeonId = nil
+        caseTargetBlockId = nil
+      }
+      .font(.caption.weight(.bold))
+      .frame(maxWidth: .infinity)
+      .disabled(isSaving)
+    }
+    .padding(12)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.tealSoft)
+  }
+
+  private func blockChoiceLabel(_ destination: NativeSchedulerBlock) -> String {
+    let room = destination.displayRoom.isEmpty ? "" : " · Rm \(destination.displayRoom)"
+    let here = destination.id == liveBlock.id ? " (current)" : ""
+    return "\(destination.displayLocation) \(destination.start)-\(destination.end)\(room)\(here)"
+  }
+
+  @ViewBuilder
+  private var surgeonPickerCard: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text("ADD SURGEON")
+        .font(ClinicalTypography.sectionLabel)
+        .foregroundStyle(.secondary)
+      HStack(spacing: 12) {
+        DatePicker("Start", selection: $startTime, displayedComponents: .hourAndMinute)
+          .labelsHidden()
+          .font(.subheadline.weight(.semibold))
+        Stepper("\(caseCount) case\(caseCount == 1 ? "" : "s")", value: $caseCount, in: 1...20)
+          .font(.subheadline.weight(.semibold))
+      }
+      TextField(
+        selectedCandidate?.isClear == false ? "Override note (required)" : "Note (optional)",
+        text: $note
+      )
+      .textFieldStyle(.roundedBorder)
+      if let candidate = selectedCandidate, !candidate.isClear {
+        Text(candidate.warnings.first ?? candidate.availability)
+          .font(.caption2.weight(.semibold))
+          .foregroundStyle(ClinicalPalette.warningText)
+      }
+
+      Text("PICK SURGEON")
+        .font(ClinicalTypography.sectionLabel)
+        .foregroundStyle(.secondary)
+        .padding(.top, 4)
+
+      if candidates.isEmpty {
+        HStack(spacing: 8) {
+          ProgressView()
+          Text("Loading availability…")
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.secondary)
+        }
+      } else if availableCandidates.isEmpty {
+        Text("No clear surgeons for this block.")
+          .font(.subheadline.weight(.semibold))
+          .foregroundStyle(.secondary)
+      } else {
+        ForEach(availableCandidates) { candidate in
+          CandidatePickRow(
+            candidate: candidate,
+            isSelected: selectedCandidate?.surgeonId == candidate.surgeonId
+          ) {
+            selectedCandidate = candidate
+          }
+        }
+      }
+
+      if !unavailableCandidates.isEmpty {
+        DisclosureGroup(isExpanded: $showUnavailable) {
+          ForEach(unavailableCandidates) { candidate in
+            CandidatePickRow(
+              candidate: candidate,
+              isSelected: selectedCandidate?.surgeonId == candidate.surgeonId
+            ) {
+              selectedCandidate = candidate
+            }
+          }
+        } label: {
+          Text("Not available (\(unavailableCandidates.count))")
+            .font(.caption.weight(.black))
+            .foregroundStyle(.secondary)
+        }
+        .padding(.top, 4)
+      }
+
+      Button {
+        Task { await saveSurgeon() }
+      } label: {
+        Text(selectedCandidate.map { "Add \($0.initials) · \(currentStartHHMM)" } ?? "Select a surgeon")
+          .font(.headline.weight(.bold))
+          .frame(maxWidth: .infinity)
+          .padding(.vertical, 12)
+      }
+      .buttonStyle(.borderedProminent)
+      .tint(ClinicalPalette.teal)
+      .disabled(!canSaveSurgeon)
+
+      if mode == .addingSurgeon, !assignedRows.isEmpty {
+        Button("Cancel") {
+          resetToIdle()
+        }
+        .font(.caption.weight(.bold))
+        .frame(maxWidth: .infinity)
+        .disabled(isSaving)
+      }
+    }
+    .padding(12)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.cardStrong)
+  }
+
+  private func seedDefaultsIfNeeded() {
+    guard !didSeedDefaults else { return }
     didSeedDefaults = true
     if assignedRows.isEmpty {
-      mode = .adding
+      mode = .addingSurgeon
       caseCount = 1
       note = ""
       startTime = Self.dateForTime(liveBlock.start)
@@ -1128,15 +1483,29 @@ private struct SchedulerAssignSheet: View {
     }
   }
 
-  private func beginEditing(_ assignment: NativeSchedulerBlockAssignment) {
-    mode = .editing
-    editingAssignmentId = assignment.id
-    loadForm(from: assignment)
+  private func focusSurgeon(_ assignment: NativeSchedulerBlockAssignment) {
+    focusedAssignmentId = assignment.id
+    mode = .idle
+    editingCaseId = nil
+    selectedCandidate = nil
+    procedureText = ""
+    patientText = ""
+    actionError = nil
   }
 
-  private func beginAdding() {
-    mode = .adding
-    editingAssignmentId = nil
+  private func backToSurgeons() {
+    focusedAssignmentId = nil
+    editingCaseId = nil
+    mode = .idle
+    procedureText = ""
+    patientText = ""
+    actionError = nil
+  }
+
+  private func beginAddingSurgeon() {
+    mode = .addingSurgeon
+    focusedAssignmentId = nil
+    editingCaseId = nil
     selectedCandidate = nil
     caseCount = 1
     note = ""
@@ -1147,39 +1516,148 @@ private struct SchedulerAssignSheet: View {
     )
   }
 
+  private func beginAddingCase(for assignment: NativeSchedulerBlockAssignment) {
+    mode = .addingCase
+    editingCaseId = nil
+    focusedAssignmentId = assignment.id
+    procedureText = ""
+    patientText = ""
+    let anchors = focusedCases.compactMap { row -> String? in
+      row.end.isEmpty ? (row.start.isEmpty ? nil : row.start) : row.end
+    }
+    startTime = Self.suggestedStart(
+      blockStart: liveBlock.start,
+      blockEnd: liveBlock.end,
+      takenStarts: anchors.isEmpty ? [assignment.start] : anchors
+    )
+  }
+
+  private func beginEditingCase(_ surgicalCase: NativeSchedulerCase) {
+    mode = .editingCase
+    editingCaseId = surgicalCase.id
+    startTime = Self.dateForTime(surgicalCase.start.isEmpty ? liveBlock.start : surgicalCase.start)
+    procedureText = surgicalCase.procedure
+    patientText = surgicalCase.patientName
+    caseSurgeonId = surgicalCase.surgeonId ?? focusedAssignment?.surgeonId
+    caseTargetBlockId = liveBlock.id
+    destinationDate = Self.dateForDateKey(liveBlock.date) ?? Date()
+    destinationBlocks = dayBlocks.isEmpty ? [liveBlock] : dayBlocks
+    Task { await reloadDestinationBlocks(selectFirst: false) }
+  }
+
+  private func reloadDestinationBlocks(selectFirst: Bool) async {
+    isLoadingDestination = true
+    defer { isLoadingDestination = false }
+    do {
+      let rows = try await loadBlocksOnDate(destinationDate)
+      destinationBlocks = rows
+      if selectFirst {
+        caseTargetBlockId = rows.first?.id
+        if let first = rows.first?.assignments.first?.surgeonId {
+          caseSurgeonId = first
+        }
+      } else if let current = caseTargetBlockId, !rows.contains(where: { $0.id == current }) {
+        caseTargetBlockId = rows.first?.id ?? liveBlock.id
+      }
+    } catch {
+      actionError = error.localizedDescription
+      destinationBlocks = []
+      if selectFirst {
+        caseTargetBlockId = nil
+      }
+    }
+  }
+
+  private func createDestinationBlock() async {
+    isSaving = true
+    defer { isSaving = false }
+    do {
+      let created = try await createBlockOnDate(destinationDate)
+      await reloadDestinationBlocks(selectFirst: false)
+      if let created {
+        destinationBlocks = destinationBlocks.contains(where: { $0.id == created.id })
+          ? destinationBlocks
+          : destinationBlocks + [created]
+        caseTargetBlockId = created.id
+      } else {
+        caseTargetBlockId = destinationBlocks.first?.id
+      }
+    } catch {
+      actionError = error.localizedDescription
+    }
+  }
+
+  private func addCaseButtonTitle(for assignment: NativeSchedulerBlockAssignment) -> String {
+    let anchors = focusedCases.compactMap { row -> String? in
+      row.end.isEmpty ? (row.start.isEmpty ? nil : row.start) : row.end
+    }
+    let after = anchors.max() ?? assignment.start
+    if after.isEmpty {
+      return "Add another case"
+    }
+    return "Add another case after \(after)"
+  }
+
   private func resetToIdle() {
-    mode = assignedRows.isEmpty ? .adding : .idle
-    editingAssignmentId = nil
+    mode = assignedRows.isEmpty ? .addingSurgeon : .idle
+    focusedAssignmentId = nil
+    editingCaseId = nil
     selectedCandidate = nil
     caseCount = 1
     note = ""
+    procedureText = ""
+    patientText = ""
     if assignedRows.isEmpty {
       startTime = Self.dateForTime(liveBlock.start)
     }
   }
 
-  private func loadForm(from assignment: NativeSchedulerBlockAssignment) {
-    selectedCandidate = candidates.first { $0.surgeonId == assignment.surgeonId }
-    startTime = Self.dateForTime(assignment.start)
-    caseCount = max(1, assignment.caseCount)
-    note = assignment.note
-  }
-
-  private func save() async {
-    guard let candidate = selectedCandidate, canSave else { return }
+  private func saveSurgeon() async {
+    guard let candidate = selectedCandidate, canSaveSurgeon else { return }
     isSaving = true
     defer { isSaving = false }
-    let start = currentStartHHMM
+    await assignAction(candidate, currentStartHHMM, caseCount, note)
+    resetToIdle()
+  }
+
+  private func saveCase() async {
+    guard canSaveCase, let focused = focusedAssignment else { return }
+    isSaving = true
+    defer { isSaving = false }
     switch mode {
-    case .editing:
-      guard let assignmentId = editingAssignmentId else { return }
-      await updateAction(assignmentId, candidate, start, caseCount, note)
-      if let editing = assignedRows.first(where: { $0.id == assignmentId }) {
-        loadForm(from: editing)
+    case .addingCase:
+      await addCaseAction(focused.surgeonId, currentStartHHMM, procedureText, patientText)
+      mode = .idle
+      editingCaseId = nil
+      procedureText = ""
+      patientText = ""
+      caseSurgeonId = nil
+      caseTargetBlockId = nil
+    case .editingCase:
+      guard let editingCaseId else { return }
+      let nextSurgeonId = caseSurgeonId
+      let nextBlockId = caseTargetBlockId
+      await updateCaseAction(
+        editingCaseId,
+        currentStartHHMM,
+        procedureText,
+        patientText,
+        nextSurgeonId,
+        nextBlockId
+      )
+      mode = .idle
+      self.editingCaseId = nil
+      procedureText = ""
+      patientText = ""
+      caseSurgeonId = nil
+      caseTargetBlockId = nil
+      if let nextSurgeonId, nextSurgeonId != focused.surgeonId {
+        backToSurgeons()
+      } else if let nextBlockId, nextBlockId != liveBlock.id {
+        backToSurgeons()
       }
-    case .adding, .idle:
-      await assignAction(candidate, start, caseCount, note)
-      resetToIdle()
+    default:
+      break
     }
   }
 
@@ -1204,10 +1682,7 @@ private struct SchedulerAssignSheet: View {
 
     var calendar = Calendar.current
     calendar.timeZone = .current
-    let hour = calendar.component(.hour, from: latestTaken)
-    let next = calendar.date(bySettingHour: hour + 1, minute: 0, second: 0, of: latestTaken)
-      ?? calendar.date(byAdding: .hour, value: 1, to: latestTaken)
-      ?? start
+    let next = calendar.date(byAdding: .minute, value: 60, to: latestTaken) ?? start
 
     if next < start { return start }
     if next >= end {
@@ -1216,13 +1691,26 @@ private struct SchedulerAssignSheet: View {
     }
     return next
   }
+
+  private static func dateKey(_ date: Date) -> String {
+    NativeDayResponse.dateFormatter.string(from: ClinicalCalendar.mondayFirst.startOfDay(for: date))
+  }
+
+  private static func dateForDateKey(_ value: String) -> Date? {
+    NativeDayResponse.dateFormatter.date(from: value)
+  }
 }
 
 private struct AssignedSurgeonPill: View {
   let assignment: NativeSchedulerBlockAssignment
+  var caseCountOverride: Int? = nil
   let isSelected: Bool
   let isBusy: Bool
   let onSelect: () -> Void
+
+  private var caseCount: Int {
+    caseCountOverride ?? assignment.caseCount
+  }
 
   var body: some View {
     Button(action: onSelect) {
@@ -1239,7 +1727,7 @@ private struct AssignedSurgeonPill: View {
             .foregroundStyle(ClinicalPalette.ink)
             .lineLimit(1)
             .minimumScaleFactor(0.85)
-          Text("\(assignment.start) · \(assignment.caseCount) case\(assignment.caseCount == 1 ? "" : "s")")
+          Text("\(assignment.start) · \(caseCount) case\(caseCount == 1 ? "" : "s")")
             .font(ClinicalTypography.caption)
             .foregroundStyle(.secondary)
         }
@@ -1268,6 +1756,8 @@ private struct AssignedSurgeonPill: View {
 private struct SurgeonCasesPanel: View {
   let surgeonName: String
   let cases: [NativeSchedulerCase]
+  let selectedCaseId: Int?
+  let onSelectCase: (NativeSchedulerCase) -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -1275,26 +1765,39 @@ private struct SurgeonCasesPanel: View {
         .font(ClinicalTypography.caption)
         .foregroundStyle(.secondary)
       if cases.isEmpty {
-        Text("No case rows on file yet — tally only. Cases appear after fax/Aprima sync.")
+        Text("No cases yet — add the first case for this surgeon.")
           .font(.caption2)
           .foregroundStyle(.secondary)
           .fixedSize(horizontal: false, vertical: true)
       } else {
         ForEach(cases) { surgicalCase in
-          VStack(alignment: .leading, spacing: 2) {
-            Text(surgicalCase.timeLabel)
-              .font(ClinicalTypography.monoCaption)
-              .foregroundStyle(ClinicalPalette.teal)
-            Text(surgicalCase.detailLine.isEmpty ? "Case" : surgicalCase.detailLine)
-              .font(ClinicalTypography.caption)
-              .foregroundStyle(ClinicalPalette.ink)
-              .lineLimit(2)
+          Button {
+            onSelectCase(surgicalCase)
+          } label: {
+            VStack(alignment: .leading, spacing: 2) {
+              Text(surgicalCase.timeLabel)
+                .font(ClinicalTypography.monoCaption)
+                .foregroundStyle(ClinicalPalette.teal)
+              Text(surgicalCase.detailLine.isEmpty ? "Case" : surgicalCase.detailLine)
+                .font(ClinicalTypography.caption)
+                .foregroundStyle(ClinicalPalette.ink)
+                .lineLimit(2)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+              selectedCaseId == surgicalCase.id
+                ? ClinicalPalette.teal.opacity(0.14)
+                : Color.white.opacity(0.75),
+              in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
           }
-          .padding(.horizontal, 8)
-          .padding(.vertical, 6)
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .background(Color.white.opacity(0.75), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+          .buttonStyle(.plain)
         }
+        Text("Tap a case to reschedule (any day), change surgeon, or edit time")
+          .font(.caption2.weight(.semibold))
+          .foregroundStyle(.secondary)
       }
     }
     .padding(.top, 4)

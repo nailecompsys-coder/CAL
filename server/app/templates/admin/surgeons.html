@@ -128,14 +128,14 @@
       </div>
       <div><label class="block text-xs font-medium text-slate-600 mb-1">Role</label>
         <select name="staff_type" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-          <option value="physician" selected>Physician</option>
-          <option value="staff">Support Staff (PA, NP, APRN…)</option>
+          <option value="physician" selected>Surgeon</option>
+          <option value="staff">PA</option>
         </select>
       </div>
       <div><label class="block text-xs font-medium text-slate-600 mb-1">Credentials / Suffix</label>
         <select name="suffix" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
           <option value="">— None —</option>
-          <optgroup label="Physicians">
+          <optgroup label="Surgeons">
           <option value="MD">MD</option>
           <option value="DO">DO</option>
           <option value="MD, FACS">MD, FACS</option>
@@ -144,7 +144,7 @@
           <option value="MD, PhD">MD, PhD</option>
           <option value="MBBS">MBBS</option>
           </optgroup>
-          <optgroup label="Support Staff">
+          <optgroup label="PAs">
           <option value="PA-C">PA-C</option>
           <option value="NP">NP</option>
           <option value="FNP-C">FNP-C</option>
@@ -185,14 +185,14 @@
       </div>
       <div><label class="block text-xs font-medium text-slate-600 mb-1">Role</label>
         <select id="edit-staff-type" name="staff_type" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
-          <option value="physician">Physician</option>
-          <option value="staff">Support Staff (PA, NP, APRN…)</option>
+          <option value="physician">Surgeon</option>
+          <option value="staff">PA</option>
         </select>
       </div>
       <div><label class="block text-xs font-medium text-slate-600 mb-1">Credentials / Suffix</label>
         <select id="edit-suffix" name="suffix" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
           <option value="">— None —</option>
-          <optgroup label="Physicians">
+          <optgroup label="Surgeons">
           <option value="MD">MD</option>
           <option value="DO">DO</option>
           <option value="MD, FACS">MD, FACS</option>
@@ -201,7 +201,7 @@
           <option value="MD, PhD">MD, PhD</option>
           <option value="MBBS">MBBS</option>
           </optgroup>
-          <optgroup label="Support Staff">
+          <optgroup label="PAs">
           <option value="PA-C">PA-C</option>
           <option value="NP">NP</option>
           <option value="FNP-C">FNP-C</option>
@@ -216,8 +216,8 @@
         <input id="edit-phone" type="tel" name="phone" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
       <div><label class="block text-xs font-medium text-slate-600 mb-1">Practice Rank</label>
         <input id="edit-sort-order" type="number" name="sort_order" min="0" step="10" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        <p class="mt-1 text-[11px] text-slate-500">Lower numbers show first. Staff can stay at `0`.</p></div>
-      <p class="text-[11px] text-slate-500">Staff use neutral avatars; set site colors under <strong>Locations</strong>.</p>
+        <p class="mt-1 text-[11px] text-slate-500">Lower numbers show first. PAs can stay at `0`.</p></div>
+      <p class="text-[11px] text-slate-500">PAs use neutral avatars; set site colors under <strong>Locations</strong>.</p>
       <div class="flex gap-2 mt-2">
         <button type="submit" class="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">Save Changes</button>
         <button type="button" onclick="document.getElementById('edit-modal').classList.add('hidden')" class="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-lg text-sm font-medium hover:bg-slate-200">Cancel</button>

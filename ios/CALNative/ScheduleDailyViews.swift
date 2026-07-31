@@ -34,8 +34,8 @@ struct DayScheduleSections: View {
           .font(.subheadline)
           .foregroundStyle(.secondary)
       } else {
-        ForEach(day.personalItems, id: \.self) { item in
-          Label(item, systemImage: "note.text")
+        ForEach(day.personalItems) { item in
+          Label(item.displayTitle, systemImage: "note.text")
             .font(.subheadline)
         }
       }

@@ -366,7 +366,8 @@ class ORBlockServiceTest(unittest.TestCase):
 
             self.assertTrue(any("Overlaps clinic schedule" in row for row in warnings))
             self.assertTrue(any("Overlaps day off" in row for row in warnings))
-            self.assertTrue(any("Overlaps another surgical case" in row for row in warnings))
+            # Surgical cases belong inside Block OR capacity — not flagged as conflicts here.
+            self.assertFalse(any("Overlaps another surgical case" in row for row in warnings))
             self.assertNotIn("Hidden Patient", " ".join(warnings))
         finally:
             db.close()
@@ -412,8 +413,9 @@ class ORBlockServiceTest(unittest.TestCase):
             args, kwargs = push.call_args
             self.assertEqual(args[0], surgeon.id)
             self.assertEqual(args[1], "Block OR updated")
-            self.assertIn("WG", args[2])
+            self.assertRegex(args[2], r"13:00.*3 Cases.*LW")
             self.assertEqual((kwargs.get("data") or {}).get("kind"), "block_or")
+            self.assertEqual((kwargs.get("data") or {}).get("blockId"), result["instance_ids"][0])
         finally:
             db.close()
 
@@ -472,9 +474,9 @@ class ORBlockServiceTest(unittest.TestCase):
             assignments = payload["blocks"][0]["assignments"]
 
             self.assertEqual([row["label"] for row in assignments], [
-                "WG - 07:00 - 1 Case CJ",
-                "WG - 09:00 - 1 Case CJ",
-                "WG - 10:00 - 2 Cases JF",
+                "07:00 · 1 Case · CJ",
+                "09:00 · 1 Case · CJ",
+                "10:00 · 2 Cases · JF",
             ])
             self.assertEqual(payload["blocks"][0]["caseCount"], 4)
         finally:
@@ -689,7 +691,7 @@ class ORBlockServiceTest(unittest.TestCase):
             serialized = str(payload)
 
             self.assertIn("blocks", payload)
-            self.assertEqual(payload["blocks"][0]["assignmentLabel"], "LM - 07:00 - 1 Case JF")
+            self.assertEqual(payload["blocks"][0]["assignmentLabel"], "07:00 · 1 Case · JF")
             self.assertNotIn("Do Not Show", serialized)
             self.assertNotIn("patient_dob", serialized)
             self.assertNotIn("patient_phone", serialized)
@@ -741,6 +743,103 @@ class ORBlockServiceTest(unittest.TestCase):
             self.assertEqual(assigned.status, "assigned")
             self.assertTrue(any("Already assigned Block OR" in row for row in warnings))
             self.assertEqual(assigned.assignment_note, "Spoke with Chris — OK to double")
+        finally:
+            db.close()
+
+    def test_both_session_creates_am_and_pm_cards(self):
+        db = self.Session()
+        try:
+            hospital = self._location(db, "Apopka OR", "AP-OR")
+            day = date(2026, 7, 27)
+            result = create_or_blocks(
+                db,
+                BlockORCreateInput(
+                    name="Apopka day",
+                    start_date=day,
+                    end_date=day,
+                    weekdays=[day.weekday()],
+                    location_ids=[hospital.id],
+                    session="both",
+                    start_time=time(7, 15),
+                    end_time=time(16, 45),
+                    recurrence="once",
+                ),
+            )
+            self.assertEqual(result["created"], 2)
+            rows = db.query(ORBlockInstance).order_by(ORBlockInstance.start_time).all()
+            self.assertEqual([(row.session, row.start_time, row.end_time) for row in rows], [
+                ("am", time(7, 15), time(12, 0)),
+                ("pm", time(12, 0), time(16, 45)),
+            ])
+        finally:
+            db.close()
+
+    def test_day_spanning_block_splits_into_am_pm_on_home(self):
+        db = self.Session()
+        try:
+            from app.or_block_service import ensure_am_pm_split_for_range
+
+            hospital = self._location(db, "Apopka OR", "AP-OR")
+            cj = self._surgeon(db, "Christopher", "Johnson")
+            lw = self._surgeon(db, "Lucy", "Woodley")
+            day = date(2026, 7, 27)
+            block = ORBlockInstance(
+                location_id=hospital.id,
+                date=day,
+                session="am",
+                start_time=time(7, 15),
+                end_time=time(16, 45),
+                status="assigned",
+            )
+            db.add(block)
+            db.flush()
+            db.add(ORBlockAssignment(
+                block_instance_id=block.id,
+                surgeon_id=cj.id,
+                start_time=time(7, 15),
+                case_count=1,
+            ))
+            db.add(ORBlockAssignment(
+                block_instance_id=block.id,
+                surgeon_id=lw.id,
+                start_time=time(12, 30),
+                case_count=2,
+            ))
+            db.add(SurgicalCase(
+                surgeon_id=cj.id,
+                date=day,
+                start_time=time(7, 15),
+                patient_name="AM Patient",
+                procedure="AM case",
+                location_id=hospital.id,
+                or_block_instance_id=block.id,
+                room_text="APK S05",
+                status="scheduled",
+            ))
+            db.add(SurgicalCase(
+                surgeon_id=lw.id,
+                date=day,
+                start_time=time(12, 30),
+                patient_name="PM Patient",
+                procedure="PM case",
+                location_id=hospital.id,
+                or_block_instance_id=block.id,
+                room_text="APK S03",
+                status="scheduled",
+            ))
+            db.commit()
+
+            ensure_am_pm_split_for_range(db, day, day)
+            home = scheduler_native_home(db, day, day)
+            sessions = [(row["session"], row["start"], row["end"], row["caseCount"]) for row in home["blocks"]]
+            self.assertEqual(sessions, [
+                ("am", "07:15", "12:00", 1),
+                ("pm", "12:00", "16:45", 1),
+            ])
+            rooms = {row["session"]: row["room"] for row in home["blocks"]}
+            self.assertEqual(rooms["am"], "APK S05")
+            self.assertEqual(rooms["pm"], "APK S03")
+            self.assertTrue(all("No room" not in (row.get("room") or "") for row in home["blocks"]))
         finally:
             db.close()
 

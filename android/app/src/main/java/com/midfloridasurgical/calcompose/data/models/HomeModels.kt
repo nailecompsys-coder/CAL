@@ -78,6 +78,7 @@ data class NativeCallAssignment(
     val coveringInitials: String? = null,
     val coveringSurgeonId: Int? = null,
     val isCovered: Boolean? = null,
+    val coverageId: Int? = null,
 )
 
 @Serializable

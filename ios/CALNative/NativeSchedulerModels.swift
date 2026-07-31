@@ -169,6 +169,40 @@ struct NativeSchedulerAssignPayload: Encodable {
   }
 }
 
+struct NativeSchedulerCasePayload: Encodable {
+  let surgeonId: Int
+  let startTime: String
+  let endTime: String?
+  let procedure: String
+  let patientName: String
+
+  enum CodingKeys: String, CodingKey {
+    case surgeonId = "surgeon_id"
+    case startTime = "start_time"
+    case endTime = "end_time"
+    case procedure
+    case patientName = "patient_name"
+  }
+}
+
+struct NativeSchedulerCaseUpdatePayload: Encodable {
+  let startTime: String?
+  let endTime: String?
+  let procedure: String?
+  let patientName: String?
+  let surgeonId: Int?
+  let targetBlockId: Int?
+
+  enum CodingKeys: String, CodingKey {
+    case startTime = "start_time"
+    case endTime = "end_time"
+    case procedure
+    case patientName = "patient_name"
+    case surgeonId = "surgeon_id"
+    case targetBlockId = "target_block_id"
+  }
+}
+
 struct NativeSchedulerChange: Identifiable, Decodable {
   let id: Int
   let type: String

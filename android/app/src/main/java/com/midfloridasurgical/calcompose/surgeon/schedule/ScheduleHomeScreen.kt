@@ -331,8 +331,8 @@ private fun DayDashboard(
 
     if (day.personalItems.isNotEmpty()) {
         SectionCard("Personal") {
-            day.personalItems.forEach {
-                Text(it, fontSize = 13.sp)
+            day.personalItems.forEach { item ->
+                Text(item.displayTitle, fontSize = 13.sp)
             }
         }
     }

@@ -14,6 +14,7 @@ from ..jinja_env import templates
 from ..models import Location, ORBlockAssignment, ORBlockInstance, Surgeon, SurgicalCase
 from ..or_block_service import (
     BlockORCreateInput,
+    add_case_to_block,
     assign_block,
     block_workspace,
     candidate_surgeon_rows,
@@ -25,6 +26,7 @@ from ..or_block_service import (
     remove_block_assignment,
     session_default_times,
     update_block_assignment,
+    update_block_case,
     update_or_block_instance,
 )
 from ..surgeon_visibility import surgeon_is_visible
@@ -39,10 +41,13 @@ def _redirect(
     warn: str = "",
     block_id: int | None = None,
     panel: str = "",
+    case_id: int | None = None,
 ) -> RedirectResponse:
     target = f"/admin/block-or?week_offset={week_offset}"
     if block_id:
         target += f"&block_id={block_id}"
+    if case_id:
+        target += f"&case_id={case_id}"
     if panel:
         target += f"&panel={quote(panel)}"
     if msg:
@@ -64,6 +69,7 @@ def block_or_page(
     request: Request,
     week_offset: int = 0,
     block_id: int | None = None,
+    case_id: int | None = None,
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
@@ -109,6 +115,37 @@ def block_or_page(
                 .order_by(SurgicalCase.start_time, SurgicalCase.id)
                 .all()
             )
+    cases_by_surgeon: list[dict] = []
+    editing_case = None
+    if selected_block:
+        from collections import defaultdict
+
+        grouped: dict[int | None, list] = defaultdict(list)
+        for case in block_cases:
+            grouped[case.surgeon_id].append(case)
+        seen: set[int | None] = set()
+        for row in assignments:
+            sid = row.surgeon_id
+            seen.add(sid)
+            cases_by_surgeon.append(
+                {
+                    "surgeon": row.surgeon,
+                    "assignment": row,
+                    "cases": grouped.get(sid, []),
+                }
+            )
+        for sid, cases in grouped.items():
+            if sid in seen:
+                continue
+            cases_by_surgeon.append(
+                {
+                    "surgeon": cases[0].surgeon if cases else None,
+                    "assignment": None,
+                    "cases": cases,
+                }
+            )
+        if case_id:
+            editing_case = next((row for row in block_cases if row.id == case_id), None)
     locations = (
         db.query(Location)
         .filter(Location.is_active == True, Location.location_type == "hospital")  # noqa: E712
@@ -129,6 +166,8 @@ def block_or_page(
         candidates=candidates,
         assignments=assignments,
         block_cases=block_cases,
+        cases_by_surgeon=cases_by_surgeon,
+        editing_case=editing_case,
         copy_default_end=week_days[0] + timedelta(days=364),
     ))
 
@@ -323,8 +362,8 @@ def block_or_remove_assignment(
     try:
         remove_block_assignment(db, block_id, assignment_id, admin_id=admin.id)
     except ValueError as exc:
-        return _redirect(week_offset, warn=str(exc), block_id=block_id, panel="assign")
-    return _redirect(week_offset, msg="assignment-removed", block_id=block_id, panel="assign")
+        return _redirect(week_offset, warn=str(exc), block_id=block_id)
+    return _redirect(week_offset, msg="assignment-removed", block_id=block_id)
 
 
 @router.post("/block-or/{block_id:int}/clear")
@@ -337,8 +376,76 @@ def block_or_clear(
     try:
         clear_block_assignment(db, block_id, admin_id=admin.id)
     except ValueError as exc:
+        return _redirect(week_offset, warn=str(exc), block_id=block_id)
+    return _redirect(week_offset, msg="cleared", block_id=block_id)
+
+
+@router.post("/block-or/{block_id:int}/cases")
+def block_or_add_case(
+    block_id: int,
+    surgeon_id: int = Form(...),
+    start_time: str = Form(""),
+    patient_name: str = Form(""),
+    procedure: str = Form(""),
+    week_offset: int = Form(0),
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    block = db.get(ORBlockInstance, block_id)
+    if not block:
+        return _redirect(week_offset, warn="Block not found")
+    try:
+        _, warnings = add_case_to_block(
+            db,
+            block_id,
+            surgeon_id,
+            _parse_start_time(start_time, block.start_time),
+            procedure=procedure,
+            patient_name=patient_name,
+            admin_id=admin.id,
+        )
+    except ValueError as exc:
         return _redirect(week_offset, warn=str(exc), block_id=block_id, panel="assign")
-    return _redirect(week_offset, msg="cleared", block_id=block_id, panel="assign")
+    warn = "; ".join(warnings[:3]) if warnings else ""
+    return _redirect(week_offset, msg="case-added", warn=warn, block_id=block_id)
+
+
+@router.post("/block-or/{block_id:int}/cases/{case_id:int}/update")
+def block_or_update_case(
+    block_id: int,
+    case_id: int,
+    surgeon_id: int = Form(...),
+    start_time: str = Form(""),
+    patient_name: str = Form(""),
+    procedure: str = Form(""),
+    week_offset: int = Form(0),
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    block = db.get(ORBlockInstance, block_id)
+    if not block:
+        return _redirect(week_offset, warn="Block not found")
+    try:
+        _, warnings = update_block_case(
+            db,
+            block_id,
+            case_id,
+            start_time=_parse_start_time(start_time, block.start_time),
+            procedure=procedure,
+            patient_name=patient_name,
+            surgeon_id=surgeon_id,
+            admin_id=admin.id,
+        )
+    except ValueError as exc:
+        return _redirect(
+            week_offset,
+            warn=str(exc),
+            block_id=block_id,
+            panel="case",
+            case_id=case_id,
+        )
+    warn = "; ".join(warnings[:3]) if warnings else ""
+    return _redirect(week_offset, msg="case-updated", warn=warn, block_id=block_id)
 
 
 @router.post("/block-or/{block_id:int}/delete")

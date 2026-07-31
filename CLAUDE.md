@@ -52,7 +52,7 @@ Call schedule and surgical calendar management for MFSA.
 │   └── APP_REFERENCE.md     ← full route/model/rules reference — READ THIS FIRST
 ├── scripts/
 │   ├── rebuild-cal-api.sh   ← THE deploy script (see Deploy section)
-│   ├── bump-version.sh      ← bumps VERSION with UTC timestamp
+│   ├── bump-version.sh      ← keeps VERSION clean (no +UTC suffix)
 │   ├── sync-sw-cache-name.sh ← updates service worker cache name
 │   └── verify-cal-api.sh    ← confirms running version matches repo VERSION
 ├── .cursor/rules/
@@ -122,7 +122,7 @@ cd /opt/cal
 ```
 
 What this script does that `docker compose up --build` does NOT:
-1. Bumps `server/VERSION` with a UTC build timestamp
+1. Keeps `server/VERSION` clean (product version like `2.0` — no `+UTC` timestamp suffix)
 2. Syncs `sw.js` cache name (service worker — stale cache = surgeons see old UI)
 3. Stops and **removes** the old container
 4. **Removes** the `cal_api:local` Docker image (prevents BuildKit stale-tag confusion with `pull_policy: build`)
@@ -135,7 +135,7 @@ If you skip this script:
 - Docker may use a cached `cal_api:local` image and silently deploy stale code
 - Version mismatch errors on `/health`
 
-**Skip version bump (hotfix only):**
+**Skip VERSION/sw sync (hotfix only):**
 ```bash
 NO_BUMP=1 ./scripts/rebuild-cal-api.sh
 ```

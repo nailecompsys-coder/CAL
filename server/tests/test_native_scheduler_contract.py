@@ -14,10 +14,12 @@ from app.auth_tokens import ALGORITHM, SECRET_KEY
 from app.models import AdminUser, Base, Location, Surgeon, SurgicalCase
 from app.or_block_service import BlockORCreateInput, assign_block, create_or_blocks
 from app.routers.native_scheduler_api import (
+    SchedulerCaseBody,
     SchedulerCreateBlockBody,
     SchedulerOtpRequestBody,
     SchedulerOtpVerifyBody,
     SchedulerUpdateBlockBody,
+    scheduler_add_block_case,
     scheduler_clear_block_assignment,
     scheduler_create_block,
     scheduler_delete_block,
@@ -115,6 +117,52 @@ class NativeSchedulerContractTest(unittest.TestCase):
             self.assertNotIn("patient_dob", serialized)
             self.assertNotIn("patient_phone", serialized)
             self.assertNotIn("Private procedure", serialized)
+            self.assertEqual(len(payload["blocks"][0]["cases"]), 1)
+            self.assertEqual(payload["blocks"][0]["cases"][0]["start"], "07:30")
+            self.assertEqual(payload["blocks"][0]["cases"][0]["patientName"], "")
+            self.assertEqual(payload["blocks"][0]["cases"][0]["procedure"], "")
+        finally:
+            db.close()
+
+    def test_scheduler_add_case_contract(self):
+        db = self.Session()
+        try:
+            admin = AdminUser(username="admin", email="admin@example.com", password_hash="x", role="admin", is_active=True)
+            surgeon = Surgeon(first_name="Alex", last_name="Schroeder", email="alex@example.com", staff_type="physician", is_active=True)
+            hospital = Location(name="Advent Winter Garden", abbreviation="WG", location_type="hospital", is_active=True)
+            db.add_all([admin, surgeon, hospital])
+            db.flush()
+            block_day = date(2026, 7, 27)
+            block_id = create_or_blocks(db, BlockORCreateInput(
+                name="Open Block",
+                start_date=block_day,
+                end_date=block_day,
+                weekdays=[block_day.weekday()],
+                location_ids=[hospital.id],
+                session="am",
+                start_time=time(7, 15),
+                end_time=time(10, 45),
+                recurrence="once",
+            ), admin_id=admin.id)["instance_ids"][0]
+            assign_block(db, block_id, surgeon.id, admin.id, assigned_start_time=time(7, 15), case_count=1)
+
+            added = scheduler_add_block_case(
+                block_id,
+                SchedulerCaseBody(
+                    surgeon_id=surgeon.id,
+                    start_time="09:15",
+                    procedure="Hernia repair",
+                    patient_name="Test Patient",
+                ),
+                db=db,
+                admin=admin,
+            )
+            self.assertTrue(added["ok"])
+            self.assertEqual(len(added["block"]["cases"]), 1)
+            self.assertEqual(added["block"]["cases"][0]["start"], "09:15")
+            self.assertEqual(added["block"]["cases"][0]["procedure"], "Hernia repair")
+            self.assertEqual(added["block"]["cases"][0]["patientName"], "Test Patient")
+            self.assertEqual(added["block"]["assignments"][0]["caseCount"], 1)
         finally:
             db.close()
 
@@ -146,6 +194,46 @@ class NativeSchedulerContractTest(unittest.TestCase):
             self.assertEqual(payload["block"]["status"], "open")
             self.assertIsNone(payload["block"]["surgeonId"])
             self.assertEqual(payload["block"]["caseCount"], 0)
+        finally:
+            db.close()
+
+    def test_scheduler_clear_blocked_when_cases_linked(self):
+        db = self.Session()
+        try:
+            admin = AdminUser(username="admin", email="admin@example.com", password_hash="x", role="admin", is_active=True)
+            surgeon = Surgeon(first_name="Alex", last_name="Schroeder", email="alex@example.com", staff_type="physician", is_active=True)
+            hospital = Location(name="Advent Winter Garden", abbreviation="WG", location_type="hospital", is_active=True)
+            db.add_all([admin, surgeon, hospital])
+            db.flush()
+            block_day = date(2026, 7, 27)
+            block_id = create_or_blocks(db, BlockORCreateInput(
+                name="Open Block",
+                start_date=block_day,
+                end_date=block_day,
+                weekdays=[block_day.weekday()],
+                location_ids=[hospital.id],
+                session="am",
+                start_time=time(7, 15),
+                end_time=time(10, 45),
+                recurrence="once",
+            ), admin_id=admin.id)["instance_ids"][0]
+            assign_block(db, block_id, surgeon.id, admin.id, assigned_start_time=time(7, 15), case_count=1)
+            db.add(SurgicalCase(
+                surgeon_id=surgeon.id,
+                or_block_instance_id=block_id,
+                date=block_day,
+                start_time=time(7, 15),
+                patient_name="Libby, Ryan",
+                procedure="Hernia",
+                location_id=hospital.id,
+                status="scheduled",
+            ))
+            db.commit()
+
+            with self.assertRaises(HTTPException) as raised:
+                scheduler_clear_block_assignment(block_id, db=db, admin=admin)
+            self.assertEqual(raised.exception.status_code, 409)
+            self.assertIn("Reschedule", str(raised.exception.detail))
         finally:
             db.close()
 

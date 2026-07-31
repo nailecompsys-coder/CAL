@@ -1,6 +1,6 @@
 import { ActivityIndicator, FlatList, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 import type { StyleProp, ViewStyle } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import type { NativeDay, NativeDayOffRequest, NativeHome, NativeScheduleAlert, NativeScheduleItem, PatientAppointment } from "../../types/cal";
@@ -83,6 +83,8 @@ export function ScheduleScreen(props: ScheduleScreenProps) {
   const [sheetDay, setSheetDay] = useState<NativeDay | null>(null);
   const [coverageRotationId, setCoverageRotationId] = useState<number | null>(null);
   const [alertsOpen, setAlertsOpen] = useState(false);
+  const bodyScrollRef = useRef<ScrollView>(null);
+  const bodyContentRef = useRef<View>(null);
   const unreadCount = home?.alerts?.unreadCount ?? 0;
 
   return (
@@ -110,6 +112,9 @@ export function ScheduleScreen(props: ScheduleScreenProps) {
             onWeekChange={onWeekChange}
             onOpenDay={setSheetDay}
             onCoverCall={setCoverageRotationId}
+            onCreateDayItem={onCreateDayItem}
+            onUpdateDayItem={onUpdateDayItem}
+            onDeleteDayItem={onDeleteDayItem}
           />
         ) : null}
         {home && activeTab === "request" ? (
@@ -192,6 +197,10 @@ export function ScheduleScreen(props: ScheduleScreenProps) {
         <AlertsSheet
           alerts={home.alerts?.recent ?? []}
           onClose={() => setAlertsOpen(false)}
+          onMarkRead={() => {
+            onMarkAlertsRead();
+            setAlertsOpen(false);
+          }}
         />
       ) : null}
     </View>
@@ -201,24 +210,32 @@ export function ScheduleScreen(props: ScheduleScreenProps) {
 function AlertsSheet({
   alerts,
   onClose,
+  onMarkRead,
 }: {
   alerts: NativeScheduleAlert[];
   onClose: () => void;
+  onMarkRead: () => void;
 }) {
+  const allRead = alerts.length === 0 || alerts.every((alert) => alert.isRead);
   return (
     <Modal animationType="slide" presentationStyle="pageSheet" visible onRequestClose={onClose}>
       <View style={styles.alertSheet}>
         <View style={styles.sheetHandle} />
         <View style={styles.itemHeader}>
           <View>
-            <Text style={styles.detailTitle}>Schedule Alerts</Text>
+            <Text style={styles.detailTitle}>CAL Alerts</Text>
             <Text style={styles.meta}>Recent changes from the portal</Text>
           </View>
-          <Pressable onPress={onClose}>
-            <Text style={styles.sheetCloseText}>×</Text>
-          </Pressable>
+          <View style={styles.alertSheetActions}>
+            <Pressable onPress={onMarkRead} disabled={allRead}>
+              <Text style={[styles.alertMarkRead, allRead && styles.disabledText]}>Mark Read</Text>
+            </Pressable>
+            <Pressable onPress={onClose}>
+              <Text style={styles.sheetCloseText}>×</Text>
+            </Pressable>
+          </View>
         </View>
-        {alerts.length === 0 ? <Text style={styles.sheetEmpty}>No schedule alerts yet.</Text> : null}
+        {alerts.length === 0 ? <Text style={styles.sheetEmpty}>No CAL alerts.</Text> : null}
         <ScrollView contentContainerStyle={styles.alertList}>
           {alerts.map((alert) => (
             <View key={alert.id} style={[styles.alertRow, !alert.isRead && styles.alertRowUnread]}>
@@ -239,12 +256,18 @@ function ScheduleTab({
   onWeekChange,
   onOpenDay,
   onCoverCall,
+  onCreateDayItem,
+  onUpdateDayItem,
+  onDeleteDayItem,
 }: {
   home: NativeHome;
   weekOffset: number;
   onWeekChange: (weekOffset: number) => void;
   onOpenDay: (day: NativeDay) => void;
   onCoverCall: (rotationId: number) => void;
+  onCreateDayItem: (date: string, title: string, notes: string, start?: string | null, end?: string | null) => void;
+  onUpdateDayItem: (itemId: number, title: string, notes: string, start?: string | null, end?: string | null) => void;
+  onDeleteDayItem: (itemId: number) => void;
 }) {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ScheduleViewMode>("day");
@@ -298,6 +321,9 @@ function ScheduleTab({
           onPrevious={() => shiftDay(-1)}
           onNext={() => shiftDay(1)}
           onCoverCall={onCoverCall}
+          onCreateDayItem={onCreateDayItem}
+          onUpdateDayItem={onUpdateDayItem}
+          onDeleteDayItem={onDeleteDayItem}
         />
       ) : null}
 
@@ -442,13 +468,20 @@ function DailyScheduleView({
   onPrevious,
   onNext,
   onCoverCall,
+  onCreateDayItem,
+  onUpdateDayItem,
+  onDeleteDayItem,
 }: {
   day: NativeDay;
   days: NativeDay[];
   onPrevious: () => void;
   onNext: () => void;
   onCoverCall: (rotationId: number) => void;
+  onCreateDayItem: (date: string, title: string, notes: string, start?: string | null, end?: string | null) => void;
+  onUpdateDayItem: (itemId: number, title: string, notes: string, start?: string | null, end?: string | null) => void;
+  onDeleteDayItem: (itemId: number) => void;
 }) {
+  const [personalEditor, setPersonalEditor] = useState<NativeScheduleItem | null | "new">(null);
   const callAssignments = day.callAssignments ?? [];
   const offSurgeons = day.offSurgeons ?? [];
   const mySchedule = day.items.filter((item) => item.type === "clinic" || item.type === "surgery");
@@ -529,14 +562,45 @@ function DailyScheduleView({
         {nextMeeting ? <AgendaPreviewRow prefix={`${displayDayOffDate(nextMeeting.date)}:`} content={agendaSummary(nextMeeting.item)} /> : null}
       </DailySection>
 
-      <DailySection title="Personal Items" tintStyle={styles.dailyPersonalCard}>
+      <DailySection title="Personal" tintStyle={styles.dailyPersonalCard}>
         <AgendaPreviewRow
           prefix="Today:"
-          content={personal.length ? personal.map(agendaSummary).join(", ") : "none"}
+          content={personal.length ? personal.map(agendaSummary).join(", ") : "none — add a personal item"}
           muted={!personal.length}
         />
+        {personal.map((item) => (
+          <Pressable key={item.id} onPress={() => setPersonalEditor(item)} style={styles.dailyPersonalItem}>
+            <Text style={styles.dailyPersonalItemText}>{agendaSummary(item)}</Text>
+            <Text style={styles.dailyChevron}>›</Text>
+          </Pressable>
+        ))}
         {nextPersonal ? <AgendaPreviewRow prefix={`${displayDayOffDate(nextPersonal.date)}:`} content={agendaSummary(nextPersonal.item)} /> : null}
+        <Pressable style={styles.dailyAddPersonalButton} onPress={() => setPersonalEditor("new")}>
+          <Text style={styles.dailyAddPersonalText}>+ Add personal item</Text>
+        </Pressable>
       </DailySection>
+
+      {personalEditor ? (
+        <PersonalItemSheet
+          day={day}
+          item={personalEditor === "new" ? null : personalEditor}
+          onClose={() => setPersonalEditor(null)}
+          onSave={(title, notes, start, end) => {
+            if (personalEditor === "new") {
+              onCreateDayItem(day.date, title, notes, start, end);
+            } else if (personalEditor.rawId) {
+              onUpdateDayItem(personalEditor.rawId, title, notes, start, end);
+            }
+            setPersonalEditor(null);
+          }}
+          onDelete={() => {
+            if (personalEditor !== "new" && personalEditor.rawId) {
+              onDeleteDayItem(personalEditor.rawId);
+            }
+            setPersonalEditor(null);
+          }}
+        />
+      ) : null}
     </View>
   );
 }
@@ -1794,6 +1858,19 @@ const styles = StyleSheet.create({
     fontSize: 11,
     marginTop: 3,
   },
+  alertsBellButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#ffffffcc",
+    borderColor: "#d0e5e3",
+    borderWidth: 1,
+  },
+  alertsBellIcon: {
+    fontSize: 18,
+  },
   headerActions: {
     gap: 6,
     alignItems: "flex-end",
@@ -2014,6 +2091,37 @@ const styles = StyleSheet.create({
   },
   dailyPersonalCard: {
     backgroundColor: "#e9f8e9",
+  },
+  dailyPersonalItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 6,
+    borderTopColor: "#d7ecd7",
+    borderTopWidth: 1,
+    marginTop: 4,
+  },
+  dailyPersonalItemText: {
+    color: "#123034",
+    flex: 1,
+    fontSize: 13,
+    fontWeight: "700",
+    paddingRight: 8,
+  },
+  dailyAddPersonalButton: {
+    marginTop: 8,
+    borderRadius: 12,
+    backgroundColor: "#fffffb",
+    borderColor: "#b9dfb9",
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+  },
+  dailyAddPersonalText: {
+    color: "#1f6b45",
+    fontSize: 13,
+    fontWeight: "900",
   },
   dailySectionTitle: {
     color: "#60787b",
@@ -2678,6 +2786,16 @@ const styles = StyleSheet.create({
     backgroundColor: "#f7fbff",
     paddingHorizontal: 16,
     paddingTop: 12,
+  },
+  alertSheetActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+  },
+  alertMarkRead: {
+    color: "#0f6f62",
+    fontSize: 13,
+    fontWeight: "900",
   },
   alertList: {
     paddingBottom: 32,
@@ -3529,6 +3647,112 @@ const styles = StyleSheet.create({
     fontSize: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
+  },
+  whosOutCard: {
+    backgroundColor: "#fffffb",
+    borderColor: "#d0e5e3",
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 14,
+    shadowColor: "#143d3d",
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 5 },
+  },
+  whosOutTitle: {
+    color: "#60787b",
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 1.2,
+    marginBottom: 8,
+  },
+  ganttWrap: {
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  ganttLegendRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 8,
+  },
+  ganttLegendSwatch: {
+    width: 12,
+    height: 12,
+    borderRadius: 3,
+  },
+  ganttLegendText: {
+    color: "#60787b",
+    fontSize: 11,
+    fontWeight: "700",
+    marginRight: 8,
+  },
+  ganttHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderBottomColor: "#d7e5e3",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  ganttNameCell: {
+    color: "#123034",
+    fontSize: 11,
+    fontWeight: "900",
+    paddingRight: 4,
+  },
+  ganttDayHeader: {
+    color: "#758b90",
+    fontSize: 10,
+    fontWeight: "800",
+    textAlign: "center",
+    paddingVertical: 4,
+  },
+  ganttTodayHeader: {
+    color: "#0f6f62",
+    backgroundColor: "#d9f2ed",
+  },
+  ganttRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderBottomColor: "#e4eeec",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  ganttRowDimmed: {
+    opacity: 0.55,
+  },
+  ganttGridRow: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    right: 0,
+    bottom: 0,
+    flexDirection: "row",
+  },
+  ganttDayCell: {
+    borderRightColor: "#e8f0ee",
+    borderRightWidth: StyleSheet.hairlineWidth,
+  },
+  ganttTodayCell: {
+    backgroundColor: "#e7f7f3",
+  },
+  ganttBar: {
+    position: "absolute",
+    borderRadius: 4,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+    paddingHorizontal: 2,
+  },
+  ganttBarApproved: {
+    backgroundColor: "#9fd9b5",
+  },
+  ganttBarPending: {
+    backgroundColor: "#f0c674",
+  },
+  ganttBarLabel: {
+    color: "#123034",
+    fontSize: 9,
+    fontWeight: "800",
   },
   daysOffSection: {
     backgroundColor: "#fff",

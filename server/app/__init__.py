@@ -2,7 +2,8 @@
 Mid Florida Surgical Calendar — production app.
 
 Release string: root **VERSION** file (copied into the image as /app/VERSION).
-`/health` and the surgeon PWA footer read the same value. Bump VERSION and rebuild
+Clean product version (e.g. `2.0`) — no `+UTC` build suffix.
+`/health` and the surgeon PWA footer read the same value. Edit VERSION and rebuild
 the image — do not rely on environment variables for the displayed version.
 """
 

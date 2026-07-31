@@ -89,28 +89,34 @@ class CalApiClient(
         endDate: LocalDate,
         reason: String,
         notes: String = "",
+        segments: List<TimeOffSubmitSegment> = emptyList(),
     ): NativeRequestOffResponse = withContext(Dispatchers.IO) {
-        val segments = buildList {
-            var cursor = startDate
-            while (!cursor.isAfter(endDate)) {
-                add(
-                    TimeOffSubmitSegment(
-                        date = cursor.toString(),
-                        isFullDay = true,
-                        start = "07:00",
-                        end = "17:00",
-                    ),
-                )
-                cursor = cursor.plusDays(1)
+        val normalizedSegments = segments.ifEmpty {
+            buildList {
+                var cursor = startDate
+                while (!cursor.isAfter(endDate)) {
+                    add(
+                        TimeOffSubmitSegment(
+                            date = cursor.toString(),
+                            isFullDay = true,
+                            start = "07:00",
+                            end = "17:00",
+                        ),
+                    )
+                    cursor = cursor.plusDays(1)
+                }
             }
         }
+        val firstPartial = normalizedSegments.firstOrNull { !it.isFullDay }
         val payload = TimeOffSubmitRequest(
             startDate = startDate.toString(),
             endDate = endDate.toString(),
             reason = reason,
             notes = notes,
-            isFullDay = true,
-            segments = segments,
+            isFullDay = normalizedSegments.all { it.isFullDay },
+            start = firstPartial?.start,
+            end = firstPartial?.end,
+            segments = normalizedSegments,
         )
         val request = Request.Builder()
             .url("$baseUrl/api/native/request-off")
@@ -128,6 +134,20 @@ class CalApiClient(
             )
         }
         response
+    }
+
+    suspend fun markAlertsRead(
+        token: String,
+        deviceToken: String,
+    ): Unit = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("$baseUrl/api/native/alerts/read")
+            .header("Authorization", "Bearer $token")
+            .header("X-CAL-Device-Token", deviceToken)
+            .header("Content-Type", JSON_MEDIA_TYPE.toString())
+            .post("{}".jsonBody())
+            .build()
+        execute(request)
     }
 
     suspend fun submitCallCoverage(

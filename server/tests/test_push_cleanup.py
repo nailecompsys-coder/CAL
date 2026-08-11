@@ -98,6 +98,51 @@ class PushCleanupTest(unittest.TestCase):
         finally:
             db.close()
 
+    def test_schedule_change_always_texts_even_with_native_device(self):
+        db = self.Session()
+        try:
+            surgeon = Surgeon(
+                first_name="Jason",
+                last_name="Boardman",
+                email="boardman@example.com",
+                phone="4075551212",
+                is_active=True,
+            )
+            db.add(surgeon)
+            db.flush()
+            db.add(
+                NativePushToken(
+                    surgeon_id=surgeon.id,
+                    token="ExponentPushToken[active]",
+                    provider="expo",
+                    is_active=True,
+                )
+            )
+            db.commit()
+
+            with (
+                patch("app.push.send_native_push_to_surgeon") as native_push,
+                patch("app.push.send_sms") as sms,
+                patch("app.push.VAPID_PRIVATE_KEY", ""),
+            ):
+                from app.push import notify_schedule_change
+
+                notify_schedule_change(
+                    [surgeon.id],
+                    "Schedule updated",
+                    "Meeting added Mon 9:00 AM: PCP Meeting",
+                    db,
+                    payload={"type": "meeting", "meetingId": 1},
+                )
+
+            native_push.assert_called_once()
+            sms.assert_called_once_with(
+                "4075551212",
+                "Schedule updated: Meeting added Mon 9:00 AM: PCP Meeting",
+            )
+        finally:
+            db.close()
+
 
 if __name__ == "__main__":
     unittest.main()

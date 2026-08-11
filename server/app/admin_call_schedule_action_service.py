@@ -64,6 +64,14 @@ def assign_rotation(
         )
     db.commit()
 
+    if from_surgeon_id and from_surgeon_id != surgeon_id:
+        send_push_to_surgeon(
+            from_surgeon_id,
+            "Schedule Update",
+            f"Your on-call on {assignment_date.strftime('%b %d')} was removed",
+            db,
+        )
+
     surgeon = db.get(Surgeon, surgeon_id) if surgeon_id else None
     if surgeon:
         send_push_to_surgeon(
@@ -147,3 +155,10 @@ def clear_rotation(
     )
     db.delete(existing)
     db.commit()
+    if from_surgeon_id:
+        send_push_to_surgeon(
+            from_surgeon_id,
+            "Schedule Update",
+            f"Your on-call on {assignment_date.strftime('%b %d')} was removed",
+            db,
+        )

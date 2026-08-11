@@ -66,8 +66,14 @@ def send_push_to_surgeon(
     db: Session,
     url: str = "/surgeon/schedule",
     data: dict | None = None,
+    *,
+    also_sms: bool = True,
 ):
-    """Send a Web Push notification to all active devices of a surgeon."""
+    """Alert a surgeon: in-app + web/native push, and always SMS when a phone is on file.
+
+    SMS is intentional for meetings / call / clinic / schedule edits so surgeons
+    are notified immediately even when the app is closed or push is quieted.
+    """
     payload = {"url": url, "kind": "schedule"}
     if data:
         payload.update(data)
@@ -77,6 +83,10 @@ def send_push_to_surgeon(
         for sub in subs:
             _send_web_push(sub, title, body, url, db)
     send_native_push_to_surgeon(surgeon_id, title, body, db, payload)
+    if also_sms:
+        surgeon = db.get(Surgeon, surgeon_id)
+        if surgeon and surgeon.phone:
+            send_sms(surgeon.phone, f"{title}: {body}")
 
 
 def send_native_push_to_surgeon(surgeon_id: int, title: str, body: str, db: Session, data: dict | None = None):
@@ -421,19 +431,21 @@ def notify_schedule_change(
     body: str,
     db: Session,
     payload: dict | None = None,
-    urgent_sms: bool = False,
+    urgent_sms: bool = True,
 ) -> None:
+    """Notify surgeons of a schedule change. Always texts when a phone is on file."""
+    del urgent_sms  # kept for callers; SMS is always on via send_push_to_surgeon
     seen = set()
     for surgeon_id in surgeon_ids:
         if surgeon_id in seen:
             continue
         seen.add(surgeon_id)
-        has_active_native_device = db.query(NativePushToken).filter(
-            NativePushToken.surgeon_id == surgeon_id,
-            NativePushToken.is_active == True,  # noqa: E712
-        ).first() is not None
-        send_push_to_surgeon(surgeon_id, title, body, db, url="/surgeon/schedule", data=payload)
-        if urgent_sms or not has_active_native_device:
-            surgeon = db.get(Surgeon, surgeon_id)
-            if surgeon and surgeon.phone:
-                send_sms(surgeon.phone, f"{title}: {body}")
+        send_push_to_surgeon(
+            surgeon_id,
+            title,
+            body,
+            db,
+            url="/surgeon/schedule",
+            data=payload,
+            also_sms=True,
+        )

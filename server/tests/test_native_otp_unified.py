@@ -206,6 +206,29 @@ class NativeOtpUnifiedContractTest(unittest.TestCase):
         finally:
             db.close()
 
+    def test_known_account_delivery_failure_returns_clear_error(self):
+        db = self.Session()
+        try:
+            surgeon = Surgeon(
+                first_name="Geoff",
+                last_name="Yurcisin",
+                email="gyurcisin85@gmail.com",
+                phone="4075550100",
+                is_active=True,
+            )
+            db.add(surgeon)
+            db.commit()
+
+            with patch("app.routers.native_otp_api.generate_sms_otp", return_value=(False, None, "sms down")), patch(
+                "app.routers.native_otp_api.send_email", return_value=False
+            ):
+                with self.assertRaises(HTTPException) as ctx:
+                    native_otp_request(NativeOtpRequestBody(email="gyurcisin85@gmail.com"), db=db)
+            self.assertEqual(ctx.exception.status_code, 503)
+            self.assertIn("Could not send a code", str(ctx.exception.detail))
+        finally:
+            db.close()
+
     def test_local_dev_otp_works_for_dual(self):
         db = self.Session()
         try:

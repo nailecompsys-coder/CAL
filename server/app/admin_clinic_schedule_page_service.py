@@ -541,6 +541,18 @@ def page_data(db: Session, week_offset: int) -> dict:
         for day in week_days
     }
 
+    from .off_conflict_service import build_clinic_off_display
+
+    off_display = build_clinic_off_display(
+        db,
+        week_days[0],
+        week_days[6],
+        sched_map=sched_map,
+        surgical_map=surgical_map,
+        assigned_or_blocks=assigned_or_blocks,
+        or_block_overlays=or_block_overlays,
+    )
+
     return {
         "today": today,
         "week_days": week_days,
@@ -558,4 +570,12 @@ def page_data(db: Session, week_offset: int) -> dict:
         "assigned_or_blocks": assigned_or_blocks,
         "or_block_overlays": or_block_overlays,
         "clinic_fax_overlays": clinic_fax_overlays,
+        "off_map": off_display["off_map"],
+        "off_conflicts": off_display["off_conflicts"],
+        "off_conflict_dicts": off_display["off_conflict_dicts"],
+        "show_off_schedule_ids": off_display["show_off_schedule_ids"],
+        "show_off_or_keys": off_display["show_off_or_keys"],
+        "hide_empty_or_blocks": off_display["hide_empty_or_blocks"],
+        "conflict_keys": off_display["conflict_keys"],
+        "synthetic_off_days": off_display["synthetic_off_days"],
     }

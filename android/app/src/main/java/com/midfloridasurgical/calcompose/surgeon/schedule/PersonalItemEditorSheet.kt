@@ -38,6 +38,7 @@ import com.midfloridasurgical.calcompose.data.models.PersonalItemUi
 import com.midfloridasurgical.calcompose.ui.theme.ClinicalPalette
 import com.midfloridasurgical.calcompose.ui.theme.ClinicalTypography
 import com.midfloridasurgical.calcompose.ui.theme.LiquidGlassCard
+import com.midfloridasurgical.calcompose.util.onFailureUnlessCancelled
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
@@ -103,7 +104,7 @@ fun PersonalItemEditorSheet(
     ModalBottomSheet(
         onDismissRequest = { if (!isSaving) onDismiss() },
         sheetState = sheetState,
-        containerColor = ClinicalPalette.Card,
+        containerColor = ClinicalPalette.PageMiddle,
     ) {
         Column(
             modifier = Modifier
@@ -212,19 +213,22 @@ fun PersonalItemEditorSheet(
                         scope.launch {
                             isSaving = true
                             errorMessage = null
-                            runCatching {
-                                onSave(
-                                    resolvedTitle,
-                                    notes.trim(),
-                                    if (hasTime) startTime.trim().ifBlank { null } else null,
-                                    if (hasTime) endTime.trim().ifBlank { null } else null,
-                                )
-                            }.onSuccess {
-                                onDismiss()
-                            }.onFailure { error ->
-                                errorMessage = error.message ?: "Could not save personal item."
+                            try {
+                                runCatching {
+                                    onSave(
+                                        resolvedTitle,
+                                        notes.trim(),
+                                        if (hasTime) startTime.trim().ifBlank { null } else null,
+                                        if (hasTime) endTime.trim().ifBlank { null } else null,
+                                    )
+                                }.onSuccess {
+                                    onDismiss()
+                                }.onFailureUnlessCancelled { error ->
+                                    errorMessage = error.message ?: "Could not save personal item."
+                                }
+                            } finally {
+                                isSaving = false
                             }
-                            isSaving = false
                         }
                     },
                     enabled = canSave,
@@ -248,12 +252,16 @@ fun PersonalItemEditorSheet(
                         scope.launch {
                             isSaving = true
                             errorMessage = null
-                            runCatching { onDelete() }
-                                .onSuccess { onDismiss() }
-                                .onFailure { error ->
-                                    errorMessage = error.message ?: "Could not delete personal item."
-                                }
-                            isSaving = false
+                            try {
+                                runCatching { onDelete() }
+                                    .onSuccess { onDismiss() }
+                                    .onFailureUnlessCancelled { error ->
+                                        errorMessage =
+                                            error.message ?: "Could not delete personal item."
+                                    }
+                            } finally {
+                                isSaving = false
+                            }
                         }
                     },
                     enabled = !isSaving,
@@ -312,7 +320,7 @@ fun PersonalItemEditorSheet(
             text = {
                 TimePicker(state = pickerState)
             },
-            containerColor = ClinicalPalette.Card,
+            containerColor = ClinicalPalette.PageMiddle,
         )
     }
 }

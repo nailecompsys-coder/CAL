@@ -175,7 +175,7 @@ class NativeCallCoverageContractTest(unittest.TestCase):
         rotation = CallRotation(
             call_group_id=group.id,
             surgeon_id=original.id,
-            date=date(2026, 6, 15),
+            date=date.today(),
         )
         db.add(rotation)
         db.commit()

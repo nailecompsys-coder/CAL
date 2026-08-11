@@ -15,6 +15,15 @@ struct NativeCALClient {
 
     let response = try await perform(request)
     let result = try JSONDecoder().decode(OtpRequestResponse.self, from: response)
+    // Delivery failed: never show success copy (even if HTTP was 200).
+    if result.ok == false || result.sent == false {
+      let failure = result.message?.trimmingCharacters(in: .whitespacesAndNewlines)
+      throw NativeCALError.requestRejected(
+        (failure?.isEmpty == false)
+          ? failure!
+          : "Could not send a code. Try again or contact the office."
+      )
+    }
     if let devCode = result.devCode, !devCode.isEmpty {
       return "Local access code: \(devCode)"
     }
@@ -500,6 +509,10 @@ enum NativeCALError: LocalizedError {
     case .http(let status, let body):
       if status == 401 {
         return body.contains("Invalid code") ? "Invalid code. Please try again." : "For security, please sign in again."
+      }
+      if status == 503 {
+        return NativeCALError.readableMessage(from: body)
+          ?? "Could not send a code. Try again or contact the office."
       }
       return NativeCALError.readableMessage(from: body) ?? "CAL request failed. Please try again."
     case .keychain(let status):

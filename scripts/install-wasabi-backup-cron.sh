@@ -5,15 +5,21 @@
 # Schedule: 02:00 America/New_York every day
 # Install:  CONFIRM=1 ./scripts/install-wasabi-backup-cron.sh
 #
+# Runner script is tracked in git (scripts/run-wasabi-backup-cron.sh).
+# Install only ensures it is executable and installs the crontab line —
+# it does NOT regenerate the runner from a heredoc.
+#
 # Prod host: cal-prod-vm (192.168.5.62), app path /opt/cal
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_ROOT="${CAL_APP_ROOT:-/opt/cal}"
 LOG_FILE="${CAL_WASABI_BACKUP_LOG:-/var/log/cal-wasabi-backup.log}"
 CRON_TAG="# cal-wasabi-backup"
 CONTAINER="${CAL_API_CONTAINER:-cal_api}"
 RUNNER="${APP_ROOT}/scripts/run-wasabi-backup-cron.sh"
+SOURCE_RUNNER="${SCRIPT_DIR}/run-wasabi-backup-cron.sh"
 
 CRON_LINE="0 2 * * * TZ=America/New_York ${RUNNER} >> ${LOG_FILE} 2>&1 ${CRON_TAG}"
 
@@ -42,24 +48,23 @@ if [[ ! -d "${APP_ROOT}/server" ]]; then
   exit 1
 fi
 
-mkdir -p "${APP_ROOT}/scripts"
-cat > "${RUNNER}" <<'RUNNER'
-#!/usr/bin/env bash
-set -euo pipefail
-CONTAINER="${CAL_API_CONTAINER:-cal_api}"
-if docker ps >/dev/null 2>&1; then
-  DOCKER=(docker)
-else
-  DOCKER=(sudo docker)
-fi
-if ! "${DOCKER[@]}" ps --format '{{.Names}}' | grep -qx "${CONTAINER}"; then
-  echo "ERROR: container ${CONTAINER} is not running" >&2
+if [[ ! -f "${SOURCE_RUNNER}" ]]; then
+  echo "ERROR: tracked runner missing: ${SOURCE_RUNNER}" >&2
+  echo "  Restore scripts/run-wasabi-backup-cron.sh from git — do not regenerate via heredoc." >&2
   exit 1
 fi
-"${DOCKER[@]}" exec -w /app -e PYTHONPATH=/app "${CONTAINER}" \
-  python -c 'from app.wasabi_backup import run_backup; import json,sys; r=run_backup(); print(json.dumps(r, indent=2, default=str)); sys.exit(0 if r.get("success") and r.get("wasabi_ok", True) else 1)'
-RUNNER
+
+mkdir -p "${APP_ROOT}/scripts"
+if [[ "$(cd "$(dirname "${SOURCE_RUNNER}")" && pwd)/$(basename "${SOURCE_RUNNER}")" != \
+      "$(cd "$(dirname "${RUNNER}")" 2>/dev/null && pwd)/$(basename "${RUNNER}")" ]]; then
+  cp -f "${SOURCE_RUNNER}" "${RUNNER}"
+fi
 chmod +x "${RUNNER}"
+
+if [[ ! -x "${RUNNER}" ]]; then
+  echo "ERROR: runner not executable: ${RUNNER}" >&2
+  exit 1
+fi
 
 if [[ ! -f "${LOG_FILE}" ]]; then
   if sudo -n touch "${LOG_FILE}" 2>/dev/null; then

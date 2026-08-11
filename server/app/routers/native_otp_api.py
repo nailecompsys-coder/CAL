@@ -242,15 +242,24 @@ def native_otp_request(body: NativeOtpRequestBody, db: Session = Depends(get_db)
             sent = _send_access_email(email_to, code) or sent
 
     db.commit()
+
+    # Unknown accounts stay vague above (anti-enumeration). Known account + delivery
+    # failure must not pretend a code was sent.
+    if not sent:
+        raise HTTPException(
+            status_code=503,
+            detail="Could not send a code. Try again or contact the office.",
+        )
+
     message = (
         f"Local access code: {local_dev_code}"
         if local_dev_code
-        else "If that account is registered, a code was sent."
+        else "Check your email or iPhone for the CAL access code."
     )
     return {
         "ok": True,
         "message": message,
-        "sent": sent,
+        "sent": True,
         "roles": roles,
         "devCode": local_dev_code,
     }

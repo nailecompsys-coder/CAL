@@ -12,9 +12,11 @@ import com.midfloridasurgical.calcompose.data.models.ScheduleDayUi
 import com.midfloridasurgical.calcompose.data.models.TimeOffSubmitSegment
 import com.midfloridasurgical.calcompose.data.models.emptyScheduleDay
 import com.midfloridasurgical.calcompose.data.models.toUi
+import com.midfloridasurgical.calcompose.util.isBenignCancel
+import com.midfloridasurgical.calcompose.util.onFailureUnlessCancelled
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.temporal.TemporalAdjusters
-import java.time.DayOfWeek
 
 class SurgeonHomeStore(
     private val apiClient: CalApiClient,
@@ -23,7 +25,14 @@ class SurgeonHomeStore(
 ) {
     var isLoading by mutableStateOf(false)
         private set
-    var warningMessage by mutableStateOf<String?>(null)
+    private val warningMessageState = mutableStateOf<String?>(null)
+    var warningMessage: String?
+        get() = warningMessageState.value
+        set(value) {
+            // Never persist composition-leave cancel text as a user-visible banner.
+            if (value != null && value == "The coroutine scope left the composition") return
+            warningMessageState.value = value
+        }
     var currentSurgeon by mutableStateOf<NativeSurgeon?>(null)
         private set
     var surgeons by mutableStateOf<List<NativeSurgeon>>(emptyList())
@@ -35,27 +44,40 @@ class SurgeonHomeStore(
     var alerts by mutableStateOf(NativeAlertSummary())
         private set
 
+    /** Union of successfully fetched windows — used to skip redundant home reloads. */
+    private var coveredStart: LocalDate? = null
+    private var coveredEnd: LocalDate? = null
+    private var inFlightKey: String? = null
+
     private val daysByDate: Map<LocalDate, ScheduleDayUi>
         get() = days.associateBy { it.date }
 
-    suspend fun refresh(containing: LocalDate = LocalDate.now(), daysAhead: Long = 45) {
-        isLoading = true
-        warningMessage = null
-        runCatching {
-            apiClient.fetchHome(
-                token = token,
-                deviceToken = deviceToken,
-                start = containing.minusDays(7),
-                end = containing.plusDays(daysAhead),
-            )
-        }.onSuccess { applyHome(it) }
-            .onFailure { warningMessage = it.message ?: "Could not load CAL schedule." }
-        isLoading = false
+    /**
+     * Scope-style refresh with a padded window. Merges incoming days by date so a
+     * narrower Schedule fetch does not wipe a wider Time Off lookahead.
+     */
+    suspend fun refresh(
+        containing: LocalDate = LocalDate.now(),
+        daysAhead: Long = 45,
+        force: Boolean = false,
+    ) {
+        val start = containing.minusDays(7)
+        val end = containing.plusDays(daysAhead)
+        fetchAndMerge(start = start, end = end, force = force)
     }
 
-    /** Time-off / Gantt lookahead — same fetch as [refresh], wider window (iOS TimeOffHomeView). */
-    suspend fun loadLookahead(containing: LocalDate = LocalDate.now(), daysAhead: Long = 365) {
-        refresh(containing = containing, daysAhead = daysAhead)
+    /**
+     * iOS `loadLookahead`: start-of-day [containing] through [daysAhead] days ahead.
+     * Default 30 for Schedule bootstrap; Time Off uses 365 / 62.
+     */
+    suspend fun loadLookahead(
+        containing: LocalDate = LocalDate.now(),
+        daysAhead: Long = 30,
+        force: Boolean = false,
+    ) {
+        val start = containing
+        val end = containing.plusDays(daysAhead)
+        fetchAndMerge(start = start, end = end, force = force)
     }
 
     suspend fun submitTimeOff(
@@ -74,7 +96,7 @@ class SurgeonHomeStore(
             notes = notes,
             segments = segments,
         )
-        refresh(containing = start)
+        loadLookahead(containing = start.withDayOfMonth(1), daysAhead = 62)
         return response.warnings
     }
 
@@ -85,7 +107,64 @@ class SurgeonHomeStore(
             rotationId = rotationId,
             coveringSurgeonId = coveringSurgeonId,
         )
-        refresh()
+        loadLookahead(containing = LocalDate.now(), daysAhead = 30)
+    }
+
+    suspend fun cancelCallCoverage(coverageId: Int) {
+        apiClient.cancelCallCoverage(
+            token = token,
+            deviceToken = deviceToken,
+            coverageId = coverageId,
+        )
+        loadLookahead(containing = LocalDate.now(), daysAhead = 30)
+    }
+
+    suspend fun createPersonalItem(
+        date: LocalDate,
+        title: String,
+        notes: String,
+        startTime: String?,
+        endTime: String?,
+    ) {
+        apiClient.createDayItem(
+            token = token,
+            deviceToken = deviceToken,
+            date = date,
+            title = title,
+            notes = notes,
+            startTime = startTime,
+            endTime = endTime,
+        )
+        loadLookahead(containing = date, daysAhead = 30)
+    }
+
+    suspend fun updatePersonalItem(
+        itemId: Int,
+        date: LocalDate,
+        title: String,
+        notes: String,
+        startTime: String?,
+        endTime: String?,
+    ) {
+        apiClient.updateDayItem(
+            token = token,
+            deviceToken = deviceToken,
+            itemId = itemId,
+            title = title,
+            notes = notes,
+            startTime = startTime,
+            endTime = endTime,
+        )
+        loadLookahead(containing = date, daysAhead = 30)
+    }
+
+    suspend fun deletePersonalItem(itemId: Int, date: LocalDate) {
+        apiClient.deleteDayItem(
+            token = token,
+            deviceToken = deviceToken,
+            itemId = itemId,
+        )
+        loadLookahead(containing = date, daysAhead = 30)
     }
 
     suspend fun markAlertsRead() {
@@ -104,15 +183,19 @@ class SurgeonHomeStore(
                     )
                 },
             )
-        }.onFailure { warningMessage = it.message ?: "Could not mark alerts read." }
+        }.onFailureUnlessCancelled { e ->
+            if (e.isBenignCancel()) return@onFailureUnlessCancelled
+            warningMessage = e.message ?: "Could not mark alerts read."
+        }
         loadLookahead(containing = LocalDate.now(), daysAhead = 30)
     }
 
     fun day(forDate: LocalDate): ScheduleDayUi =
         daysByDate[forDate] ?: emptyScheduleDay(forDate)
 
+    /** Monday-first week — matches iOS `ClinicalCalendar.mondayFirst`. */
     fun week(containing: LocalDate): List<ScheduleDayUi> {
-        val start = containing.with(TemporalAdjusters.previousOrSame(DayOfWeek.SUNDAY))
+        val start = containing.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
         return (0..6).map { day(start.plusDays(it.toLong())) }
     }
 
@@ -126,11 +209,69 @@ class SurgeonHomeStore(
             .sortedWith(compareBy({ it.sortOrder ?: Int.MAX_VALUE }, { it.initials }))
     }
 
-    private fun applyHome(home: NativeHomeResponse) {
+    private suspend fun fetchAndMerge(
+        start: LocalDate,
+        end: LocalDate,
+        force: Boolean = false,
+    ) {
+        val key = "$start|$end"
+        if (!force && covers(start, end)) return
+        if (!force && inFlightKey == key) return
+
+        inFlightKey = key
+        isLoading = true
+        warningMessage = null
+        try {
+            runCatching {
+                apiClient.fetchHome(
+                    token = token,
+                    deviceToken = deviceToken,
+                    start = start,
+                    end = end,
+                )
+            }.onSuccess {
+                applyHome(it, fetchStart = start, fetchEnd = end)
+                expandCoverage(start, end)
+            }.onFailureUnlessCancelled { e ->
+                if (e.isBenignCancel()) return@onFailureUnlessCancelled
+                warningMessage = e.message ?: "Could not load CAL schedule."
+            }
+        } finally {
+            if (inFlightKey == key) inFlightKey = null
+            isLoading = false
+        }
+    }
+
+    private fun covers(start: LocalDate, end: LocalDate): Boolean {
+        val cs = coveredStart ?: return false
+        val ce = coveredEnd ?: return false
+        return days.isNotEmpty() && !start.isBefore(cs) && !end.isAfter(ce)
+    }
+
+    private fun expandCoverage(start: LocalDate, end: LocalDate) {
+        coveredStart = coveredStart?.let { minOf(it, start) } ?: start
+        coveredEnd = coveredEnd?.let { maxOf(it, end) } ?: end
+    }
+
+    /** Merge-by-date: replace days in [fetchStart, fetchEnd], keep the rest. */
+    private fun applyHome(
+        home: NativeHomeResponse,
+        fetchStart: LocalDate,
+        fetchEnd: LocalDate,
+    ) {
         currentSurgeon = home.surgeon
         surgeons = home.surgeons
-        days = home.days.map { it.toUi() }.sortedBy { it.date }
-        requests = home.requests.sortedWith(compareBy({ it.startDate }, { it.id }))
+        val incoming = home.days.map { it.toUi() }.associateBy { it.date }
+        val kept = days.filter { it.date.isBefore(fetchStart) || it.date.isAfter(fetchEnd) }
+        days = (kept + incoming.values).distinctBy { it.date }.sortedBy { it.date }
+        requests = mergeRequests(home.requests)
         alerts = home.alerts ?: NativeAlertSummary()
+    }
+
+    private fun mergeRequests(incoming: List<NativeDayOffRequest>): List<NativeDayOffRequest> {
+        if (incoming.isEmpty()) return requests
+        val byId = requests.associateBy { it.id }.toMutableMap()
+        incoming.forEach { byId[it.id] = it }
+        return byId.values.sortedWith(compareBy({ it.startDate }, { it.id }))
     }
 }

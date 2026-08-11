@@ -1,6 +1,6 @@
 # Aprima Hourly Sync
 
-Last updated: 2026-07-16
+Last updated: 2026-08-10
 
 ## Goal
 
@@ -30,24 +30,32 @@ CAL Postgres cache
 - Worker / logs / pushes never include PHI (push copy is generic: “Clinic schedule updated”).
 - After a successful sync, phones and portal prefer CAL cache (not a live Aprima hit on every open).
 
+## Cron
+
+```text
+5 * * * * TZ=America/New_York /opt/cal/scripts/run-aprima-sync-cron.sh >> /var/log/cal-aprima-sync.log 2>&1 # cal-aprima-sync
+```
+
+Hourly at `:05` America/New_York (meets daily-minimum requirement). Host runner is **tracked in git** (`scripts/run-aprima-sync-cron.sh`) and docker-execs into `cal_api`. Do not regenerate it via heredoc — rsync/deploys wiped the old untracked file and left cron 422× not-found.
+
 ## Commands
 
 ```sh
-# Status only
-cd /opt/cal/server && PYTHONPATH=. python3 scripts/sync_aprima.py --dry-run
+# Status only (via host runner → cal_api)
+CAL_APRIMA_SYNC_ARGS='--dry-run' /opt/cal/scripts/run-aprima-sync-cron.sh
 
 # First seed (no push spam)
-cd /opt/cal/server && PYTHONPATH=. python3 scripts/sync_aprima.py --no-notify
+CAL_APRIMA_SYNC_ARGS='--no-notify' /opt/cal/scripts/run-aprima-sync-cron.sh
 
 # Normal hourly run
-cd /opt/cal/server && PYTHONPATH=. python3 scripts/sync_aprima.py
+/opt/cal/scripts/run-aprima-sync-cron.sh
 
-# Install cron (print by default; CONFIRM=1 to write crontab)
+# Install cron (print by default; CONFIRM=1 to write crontab + ensure runner executable)
 ./scripts/install-aprima-sync-cron.sh
 CONFIRM=1 ./scripts/install-aprima-sync-cron.sh
 ```
 
-Requires `APRIMA_CONNECTION_STRING` in the environment used by the host Python process (same read-only account as the portal).
+Requires `APRIMA_CONNECTION_STRING` in the `cal_api` container env (same read-only account as the portal).
 
 ## Portal soft-refresh
 
@@ -61,4 +69,4 @@ Dashboard and Meetings poll `GET /admin/aprima-sync-status` every 60s. When `fin
 
 ## Deploy note
 
-Do **not** auto-deploy. After code lands on `cal-prod-vm`, run one `--no-notify` seed, confirm `/admin/aprima-sync-status`, then install the cron with Don’s OK.
+Do **not** auto-deploy. After the tracked runner + `aprima_cache_service` land on `cal-prod-vm`, run one `--no-notify` seed and confirm `/admin/aprima-sync-status`. Cron install: `CONFIRM=1 ./scripts/install-aprima-sync-cron.sh`. A full `rebuild-cal-api` is only required when baking the StaleDataError fix into the image (host/`docker cp` hot-patch is enough until then).

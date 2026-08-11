@@ -10,6 +10,7 @@ struct OtpVerifyPayload: Encodable {
 }
 
 struct OtpRequestResponse: Decodable {
+  let ok: Bool?
   let message: String?
   let sent: Bool?
   let scheduler: Bool?

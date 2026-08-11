@@ -19,13 +19,26 @@ from .surgeon_visibility import surgeon_is_visible
 
 
 def day_off_event(day, pairs: list[tuple]) -> dict:
+    """pairs: (surgeon, reason, status) — status is approved|pending."""
     initials_list = []
     surgeon_ids = []
     names_for_modal = []
-    for surgeon, _reason in pairs:
-        initials_list.append(surgeon_initials(surgeon))
+    statuses = []
+    for item in pairs:
+        surgeon = item[0]
+        reason = item[1] if len(item) > 1 else None
+        status = item[2] if len(item) > 2 else "approved"
+        ini = surgeon_initials(surgeon)
+        if status == "pending":
+            initials_list.append(f"{ini}?")
+        else:
+            initials_list.append(ini)
         surgeon_ids.append(surgeon.id)
-        names_for_modal.append(surgeon.full_name)
+        names_for_modal.append(
+            f"{surgeon.full_name} (requested)" if status == "pending" else surgeon.full_name
+        )
+        statuses.append(status)
+        _ = reason
     return {
         "id": f"off-{day.isoformat()}",
         "title": " ".join(initials_list) + " OFF",
@@ -37,6 +50,8 @@ def day_off_event(day, pairs: list[tuple]) -> dict:
             "surgeon_ids": surgeon_ids,
             "surgeon": ", ".join(names_for_modal),
             "reason": pairs[0][1] if pairs else None,
+            "statuses": statuses,
+            "has_pending": any(s == "pending" for s in statuses),
             "sort_key": SORT_DAYOFF,
         },
     }

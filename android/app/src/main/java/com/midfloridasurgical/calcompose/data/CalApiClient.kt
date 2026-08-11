@@ -2,6 +2,8 @@ package com.midfloridasurgical.calcompose.data
 
 import com.midfloridasurgical.calcompose.BuildConfig
 import com.midfloridasurgical.calcompose.data.models.CallCoverageRequest
+import com.midfloridasurgical.calcompose.data.models.DayItemPatchPayload
+import com.midfloridasurgical.calcompose.data.models.DayItemWritePayload
 import com.midfloridasurgical.calcompose.data.models.NativeCallCoverageResponse
 import com.midfloridasurgical.calcompose.data.models.NativeHomeResponse
 import com.midfloridasurgical.calcompose.data.models.NativePatientScheduleResponse
@@ -39,7 +41,7 @@ class CalApiClient(
 ) {
     suspend fun requestOtp(email: String): OtpRequestResponse = withContext(Dispatchers.IO) {
         val request = Request.Builder()
-            .url("$baseUrl/api/surgeon/otp/request")
+            .url("$baseUrl/api/native/otp/request")
             .post(json.encodeToString(OtpRequest(email)).jsonBody())
             .build()
         json.decodeFromString(execute(request))
@@ -48,7 +50,7 @@ class CalApiClient(
     suspend fun verifyOtp(email: String, code: String): OtpVerifyResponse =
         withContext(Dispatchers.IO) {
             val request = Request.Builder()
-                .url("$baseUrl/api/surgeon/otp/verify")
+                .url("$baseUrl/api/native/otp/verify")
                 .post(json.encodeToString(OtpVerifyRequest(email, code)).jsonBody())
                 .build()
             json.decodeFromString(execute(request))
@@ -169,6 +171,84 @@ class CalApiClient(
             .post(json.encodeToString(payload).jsonBody())
             .build()
         json.decodeFromString(execute(request))
+    }
+
+    suspend fun cancelCallCoverage(
+        token: String,
+        deviceToken: String,
+        coverageId: Int,
+    ): NativeCallCoverageResponse = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("$baseUrl/api/native/call-coverage/$coverageId/cancel")
+            .header("Authorization", "Bearer $token")
+            .header("X-CAL-Device-Token", deviceToken)
+            .header("Content-Type", JSON_MEDIA_TYPE.toString())
+            .post("{}".jsonBody())
+            .build()
+        json.decodeFromString(execute(request))
+    }
+
+    suspend fun createDayItem(
+        token: String,
+        deviceToken: String,
+        date: LocalDate,
+        title: String,
+        notes: String = "",
+        startTime: String? = null,
+        endTime: String? = null,
+    ): Unit = withContext(Dispatchers.IO) {
+        val payload = DayItemWritePayload(
+            date = date.toString(),
+            title = title,
+            notes = notes,
+            startTime = startTime,
+            endTime = endTime,
+        )
+        val request = Request.Builder()
+            .url("$baseUrl/surgeon/api/day-items")
+            .header("Authorization", "Bearer $token")
+            .header("X-CAL-Device-Token", deviceToken)
+            .post(json.encodeToString(payload).jsonBody())
+            .build()
+        execute(request)
+    }
+
+    suspend fun updateDayItem(
+        token: String,
+        deviceToken: String,
+        itemId: Int,
+        title: String,
+        notes: String = "",
+        startTime: String? = null,
+        endTime: String? = null,
+    ): Unit = withContext(Dispatchers.IO) {
+        val payload = DayItemPatchPayload(
+            title = title,
+            notes = notes,
+            startTime = startTime,
+            endTime = endTime,
+        )
+        val request = Request.Builder()
+            .url("$baseUrl/surgeon/api/day-items/$itemId")
+            .header("Authorization", "Bearer $token")
+            .header("X-CAL-Device-Token", deviceToken)
+            .patch(json.encodeToString(payload).jsonBody())
+            .build()
+        execute(request)
+    }
+
+    suspend fun deleteDayItem(
+        token: String,
+        deviceToken: String,
+        itemId: Int,
+    ): Unit = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("$baseUrl/surgeon/api/day-items/$itemId")
+            .header("Authorization", "Bearer $token")
+            .header("X-CAL-Device-Token", deviceToken)
+            .delete()
+            .build()
+        execute(request)
     }
 
     private fun authenticatedGet(path: String, token: String, deviceToken: String): Request =

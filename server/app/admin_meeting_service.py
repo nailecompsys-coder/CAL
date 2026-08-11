@@ -15,22 +15,50 @@ from .push import notify_schedule_change
 from .surgeon_visibility import surgeon_is_visible
 
 
-def month_schedule_days(month_offset: int) -> dict:
-    today = date.today()
+def _month_from_offset(month_offset: int, today: date | None = None) -> date:
+    today = today or date.today()
     total_months = today.year * 12 + (today.month - 1) + month_offset
     year = total_months // 12
     month = total_months % 12 + 1
-    first_day = date(year, month, 1)
-    days_in_month = calendar_lib.monthrange(year, month)[1]
-    schedule_days = [date(year, month, day) for day in range(1, days_in_month + 1)]
+    return date(year, month, 1)
+
+
+def month_schedule_days(month_offset: int) -> dict:
+    today = date.today()
+    first_day = _month_from_offset(month_offset, today)
+    days_in_month = calendar_lib.monthrange(first_day.year, first_day.month)[1]
+    schedule_days = [
+        date(first_day.year, first_day.month, day) for day in range(1, days_in_month + 1)
+    ]
     return {
         "today": today,
         "schedule_days": schedule_days,
         "month_label": first_day.strftime("%B %Y"),
         "month_start": first_day,
-        "month_end": date(year, month, days_in_month),
+        "month_end": date(first_day.year, first_day.month, days_in_month),
         "pad_start": (first_day.weekday() + 1) % 7,
     }
+
+
+def month_picker_options(
+    current_offset: int,
+    *,
+    past: int = 12,
+    future: int = 12,
+) -> list[dict]:
+    """Offsets and labels for a month jump dropdown (past N + next N relative to today)."""
+    today = date.today()
+    offsets = list(range(-past, future + 1))
+    if current_offset not in offsets:
+        offsets.append(current_offset)
+        offsets.sort()
+    return [
+        {
+            "offset": offset,
+            "label": _month_from_offset(offset, today).strftime("%B %Y"),
+        }
+        for offset in offsets
+    ]
 
 
 def _parse_meeting_date(value) -> date | None:

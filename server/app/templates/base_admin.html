@@ -98,7 +98,7 @@
       <a href="/admin/clinic-schedule" onclick="closeSidebar()" class="sidebar-link {% if '/clinic-schedule' in request.url.path %}active{% endif %}">
         <i class="fa-solid fa-calendar-check" style="width:1rem;text-align:center"></i> Clinics / OR
       </a>
-      <a href="/admin/call-schedule" onclick="closeSidebar()" class="sidebar-link {% if '/call-schedule' in request.url.path %}active{% endif %}">
+      <a href="/admin/call-schedule" onclick="closeSidebar()" class="sidebar-link {% if '/call-schedule' in request.url.path or '/call-audit' in request.url.path %}active{% endif %}">
         <i class="fa-solid fa-bell" style="width:1rem;text-align:center"></i> Call
       </a>
       <a href="/admin/daysoff" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/daysoff' %}active{% endif %}">

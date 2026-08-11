@@ -4,13 +4,24 @@ from datetime import UTC, datetime
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
 
+from .call_schedule_audit_service import (
+    actor_label_for_admin,
+    actor_label_for_surgeon,
+    log_call_schedule_change,
+)
 from .conflicts import check_conflicts_structured
-from .models import CallCoverage, CallRotation, Surgeon
+from .models import AdminUser, CallCoverage, CallRotation, Surgeon
 from .native_support import serialize_call_assignment
 from .or_block_service import log_schedule_change
 from .push import notify_admins, send_native_push_to_surgeon
 from .scheduling_gate_service import clip_window_to_now, practice_today
 from .surgeon_visibility import surgeon_is_visible
+
+
+def _coverage_from_surgeon_id(existing: CallCoverage | None, rotation: CallRotation) -> int | None:
+    if existing and existing.covering_surgeon_id:
+        return existing.covering_surgeon_id
+    return rotation.surgeon_id
 
 
 def assign_native_call_coverage(
@@ -41,6 +52,7 @@ def assign_native_call_coverage(
         CallCoverage.call_rotation_id == rotation.id,
         CallCoverage.status == "active",
     ).first()
+    from_surgeon_id = _coverage_from_surgeon_id(existing, rotation)
     if existing:
         existing.status = "canceled"
         existing.canceled_at = _utc_now()
@@ -56,6 +68,22 @@ def assign_native_call_coverage(
         status="active",
     )
     db.add(coverage)
+    db.flush()
+    log_call_schedule_change(
+        db,
+        action="cover",
+        event_date=rotation.date,
+        source="native",
+        call_group_id=rotation.call_group_id,
+        call_group_name=rotation.call_group.name if rotation.call_group else None,
+        rotation_id=rotation.id,
+        coverage_id=coverage.id,
+        from_surgeon_id=from_surgeon_id,
+        to_surgeon_id=covering.id,
+        actor_surgeon_id=requesting_surgeon.id,
+        actor_label=actor_label_for_surgeon(requesting_surgeon),
+        notes=notes.strip() or None,
+    )
     db.commit()
     db.refresh(coverage)
     log_schedule_change(
@@ -110,6 +138,8 @@ def assign_admin_call_coverage(
     rotation_id: int,
     covering_surgeon_id: int,
     notes: str = "",
+    *,
+    admin: AdminUser | None = None,
 ) -> list[str]:
     """Desk/portal coverage assign — same rules as native; returns warning strings."""
     rotation = _call_rotation_for_response(db, rotation_id)
@@ -133,6 +163,7 @@ def assign_admin_call_coverage(
         CallCoverage.call_rotation_id == rotation.id,
         CallCoverage.status == "active",
     ).first()
+    from_surgeon_id = _coverage_from_surgeon_id(existing, rotation)
     if existing:
         existing.status = "canceled"
         existing.canceled_at = _utc_now()
@@ -147,6 +178,22 @@ def assign_admin_call_coverage(
         status="active",
     )
     db.add(coverage)
+    db.flush()
+    log_call_schedule_change(
+        db,
+        action="cover",
+        event_date=rotation.date,
+        source="portal",
+        call_group_id=rotation.call_group_id,
+        call_group_name=rotation.call_group.name if rotation.call_group else None,
+        rotation_id=rotation.id,
+        coverage_id=coverage.id,
+        from_surgeon_id=from_surgeon_id,
+        to_surgeon_id=covering.id,
+        actor_admin_id=admin.id if admin else None,
+        actor_label=actor_label_for_admin(admin),
+        notes=notes.strip() or "Assigned by portal",
+    )
     db.commit()
     log_schedule_change(
         db,
@@ -177,17 +224,38 @@ def assign_admin_call_coverage(
     return warnings
 
 
-def cancel_admin_call_coverage(db: Session, coverage_id: int) -> None:
+def cancel_admin_call_coverage(
+    db: Session,
+    coverage_id: int,
+    *,
+    admin: AdminUser | None = None,
+) -> None:
     coverage = db.get(CallCoverage, coverage_id)
     if not coverage or coverage.status != "active":
         raise HTTPException(404, "Coverage not found")
+    rotation = coverage.rotation or db.get(CallRotation, coverage.call_rotation_id)
     coverage.status = "canceled"
     coverage.canceled_at = _utc_now()
+    log_call_schedule_change(
+        db,
+        action="cover_clear",
+        event_date=rotation.date if rotation else practice_today(),
+        source="portal",
+        call_group_id=rotation.call_group_id if rotation else None,
+        call_group_name=rotation.call_group.name if rotation and rotation.call_group else None,
+        rotation_id=coverage.call_rotation_id,
+        coverage_id=coverage.id,
+        from_surgeon_id=coverage.covering_surgeon_id,
+        to_surgeon_id=coverage.original_surgeon_id or (rotation.surgeon_id if rotation else None),
+        actor_admin_id=admin.id if admin else None,
+        actor_label=actor_label_for_admin(admin),
+        notes="Coverage swap canceled (portal)",
+    )
     log_schedule_change(
         db,
         event_type="call_coverage_canceled",
         surgeon_id=coverage.covering_surgeon_id,
-        event_date=coverage.rotation.date if coverage.rotation else None,
+        event_date=rotation.date if rotation else None,
         title="Call coverage canceled",
         body="Coverage swap canceled (portal)",
         payload={"source": "portal"},
@@ -200,13 +268,29 @@ def cancel_native_call_coverage(db: Session, requesting_surgeon: Surgeon, covera
     if not coverage or coverage.status != "active":
         raise HTTPException(404, "Coverage not found")
 
+    rotation = coverage.rotation or db.get(CallRotation, coverage.call_rotation_id)
     coverage.status = "canceled"
     coverage.canceled_at = _utc_now()
+    log_call_schedule_change(
+        db,
+        action="cover_clear",
+        event_date=rotation.date if rotation else practice_today(),
+        source="native",
+        call_group_id=rotation.call_group_id if rotation else None,
+        call_group_name=rotation.call_group.name if rotation and rotation.call_group else None,
+        rotation_id=coverage.call_rotation_id,
+        coverage_id=coverage.id,
+        from_surgeon_id=coverage.covering_surgeon_id,
+        to_surgeon_id=coverage.original_surgeon_id or (rotation.surgeon_id if rotation else None),
+        actor_surgeon_id=requesting_surgeon.id,
+        actor_label=actor_label_for_surgeon(requesting_surgeon),
+        notes="Coverage swap canceled",
+    )
     log_schedule_change(
         db,
         event_type="call_coverage_canceled",
         surgeon_id=coverage.covering_surgeon_id,
-        event_date=coverage.rotation.date if coverage.rotation else None,
+        event_date=rotation.date if rotation else None,
         title="Call coverage canceled",
         body="Coverage swap canceled",
     )

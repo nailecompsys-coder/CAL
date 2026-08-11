@@ -1,13 +1,17 @@
 package com.midfloridasurgical.calcompose.surgeon.schedule
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material3.Icon
@@ -20,13 +24,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.midfloridasurgical.calcompose.data.models.ScheduleItemUi
 import com.midfloridasurgical.calcompose.ui.theme.ClinicalPalette
+import com.midfloridasurgical.calcompose.ui.theme.ClinicalTypography
 import java.util.Locale
 
 /** Mirrors iOS `ClinicOrFacilityGroup`. */
@@ -327,7 +330,11 @@ fun ClinicOrScheduleList(
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         if (groups.isEmpty()) {
-            Text("No clinic or hospital schedule", color = ClinicalPalette.Muted, fontSize = 13.sp)
+            Text(
+                "No clinic or hospital schedule",
+                style = ClinicalTypography.caption,
+                color = ClinicalPalette.Muted,
+            )
         } else {
             groups.forEach { group ->
                 ClinicOrFacilityBlock(
@@ -352,26 +359,42 @@ private fun ClinicOrFacilityBlock(
     isExpanded: Boolean,
     onToggle: () -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
+    val rail = if (group.countStyle == ClinicOrFacilityGroup.CountStyle.Cases) {
+        ClinicalPalette.RailClinic
+    } else {
+        ClinicalPalette.Teal
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(ClinicalPalette.SurfaceQuiet)
+            .padding(vertical = 4.dp),
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(min = 48.dp)
                 .clickable(onClick = onToggle)
-                .padding(vertical = 8.dp),
+                .padding(horizontal = 8.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.Top,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            Box(
+                modifier = Modifier
+                    .width(5.dp)
+                    .heightIn(min = 28.dp)
+                    .background(rail, RoundedCornerShape(2.dp)),
+            )
             Text(
                 group.timeRange.ifBlank { "—" },
-                fontFamily = FontFamily.Monospace,
-                fontSize = 12.sp,
-                color = ClinicalPalette.Ink,
-                modifier = Modifier.width(96.dp),
+                style = ClinicalTypography.monoCaption,
+                color = ClinicalPalette.Teal,
+                modifier = Modifier.width(88.dp),
             )
             Text(
                 group.headerTitle,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 14.sp,
+                style = ClinicalTypography.rowTitleStrong,
                 color = ClinicalPalette.Ink,
                 modifier = Modifier.weight(1f),
             )
@@ -387,13 +410,13 @@ private fun ClinicOrFacilityBlock(
             if (group.details.isEmpty()) {
                 Text(
                     "No cases or visits listed",
+                    style = ClinicalTypography.caption,
                     color = ClinicalPalette.Muted,
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(start = 106.dp, bottom = 8.dp),
+                    modifier = Modifier.padding(start = 24.dp, bottom = 8.dp),
                 )
             } else {
                 Column(
-                    modifier = Modifier.padding(bottom = 8.dp),
+                    modifier = Modifier.padding(start = 16.dp, end = 8.dp, bottom = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     group.details.forEach { row ->
@@ -408,29 +431,31 @@ private fun ClinicOrFacilityBlock(
 @Composable
 private fun ClinicOrDetailLine(row: ClinicOrDetailRow) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .background(ClinicalPalette.CardStrong)
+            .padding(horizontal = 8.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.Top,
     ) {
         Text(
             row.time.ifBlank { "—" },
-            fontFamily = FontFamily.Monospace,
-            fontSize = 12.sp,
+            style = ClinicalTypography.monoCaption,
             color = ClinicalPalette.Ink,
-            modifier = Modifier.width(96.dp),
+            modifier = Modifier.width(72.dp),
         )
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 row.primary,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 14.sp,
+                style = ClinicalTypography.rowTitle,
                 color = ClinicalPalette.Ink,
             )
             if (row.secondary.isNotEmpty()) {
                 Text(
                     row.secondary,
+                    style = ClinicalTypography.captionEmphasized,
                     color = ClinicalPalette.Muted,
-                    fontSize = 11.sp,
                     maxLines = 1,
                 )
             }

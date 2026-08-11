@@ -6,7 +6,11 @@ from types import SimpleNamespace
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SECRET_KEY", "test-secret")
 
-from app.admin_meeting_service import calendar_events_by_day, month_schedule_days
+from app.admin_meeting_service import (
+    calendar_events_by_day,
+    month_picker_options,
+    month_schedule_days,
+)
 
 
 class AdminMeetingsCalendarTest(unittest.TestCase):
@@ -17,6 +21,20 @@ class AdminMeetingsCalendarTest(unittest.TestCase):
         self.assertIn("schedule_days", data)
         self.assertTrue(1 <= len(data["schedule_days"]) <= 31)
         self.assertEqual(data["pad_start"], (data["schedule_days"][0].weekday() + 1) % 7)
+
+    def test_month_picker_options_span_and_include_current(self):
+        options = month_picker_options(0)
+        self.assertEqual(len(options), 25)  # past 12 + current + next 12
+        self.assertEqual(options[12]["offset"], 0)
+        self.assertEqual(options[0]["offset"], -12)
+        self.assertEqual(options[-1]["offset"], 12)
+        labels = [opt["label"] for opt in options]
+        self.assertEqual(len(labels), len(set(labels)))
+
+        far = month_picker_options(24)
+        offsets = [opt["offset"] for opt in far]
+        self.assertIn(24, offsets)
+        self.assertEqual(len(far), 26)
 
     def test_calendar_events_merge_cal_and_aprima_by_day(self):
         day = date(2026, 7, 15)

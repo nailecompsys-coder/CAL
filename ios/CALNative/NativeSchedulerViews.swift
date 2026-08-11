@@ -204,84 +204,7 @@ struct NativeSchedulerShell: View {
         }
       }
       .sheet(item: $selectedBlock) { block in
-        SchedulerAssignSheet(
-          block: block,
-          detail: store.selectedSchedulerDetail,
-          dayBlocks: store.schedulerBlocks.filter { $0.date == block.date },
-          loadBlocksOnDate: { date in
-            try await store.fetchSchedulerBlocks(on: date)
-          },
-          createBlockOnDate: { date in
-            try await store.createSchedulerBlock(
-              date: date,
-              locationId: block.locationId,
-              session: block.session.isEmpty ? "custom" : block.session,
-              startTime: block.start,
-              endTime: block.end,
-              notes: "Created while rescheduling a case"
-            )
-          },
-          isLoading: store.isLoading,
-          assignAction: { surgeon, startTime, caseCount, note in
-            do {
-              _ = try await store.assignSchedulerBlock(
-                blockId: block.id,
-                surgeonId: surgeon.surgeonId,
-                startTime: startTime,
-                caseCount: caseCount,
-                note: note
-              )
-            } catch {
-              store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't update assignment.")
-            }
-          },
-          addCaseAction: { surgeonId, startTime, procedure, patientName in
-            do {
-              _ = try await store.addSchedulerCase(
-                blockId: block.id,
-                surgeonId: surgeonId,
-                startTime: startTime,
-                procedure: procedure,
-                patientName: patientName
-              )
-            } catch {
-              store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't add case.")
-            }
-          },
-          updateCaseAction: { caseId, startTime, procedure, patientName, surgeonId, targetBlockId in
-            do {
-              _ = try await store.updateSchedulerCase(
-                blockId: block.id,
-                caseId: caseId,
-                startTime: startTime,
-                procedure: procedure,
-                patientName: patientName,
-                surgeonId: surgeonId,
-                targetBlockId: targetBlockId
-              )
-            } catch {
-              store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't update case.")
-            }
-          },
-          clearAction: {
-            do {
-              try await store.clearSchedulerBlock(blockId: block.id)
-              selectedBlock = nil
-            } catch {
-              store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't clear block. Reschedule linked cases first.")
-            }
-          },
-          deleteBlockAction: {
-            do {
-              let containing = NativeDayResponse.dateFormatter.date(from: block.date) ?? selectedDate
-              try await store.deleteSchedulerBlock(blockId: block.id, containing: containing)
-              selectedBlock = nil
-            } catch {
-              store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't cancel block.")
-              throw error
-            }
-          }
-        )
+        assignSheet(for: block)
       }
       .sheet(isPresented: $showCreateBlock) {
         SchedulerCreateBlockSheet(
@@ -308,6 +231,88 @@ struct NativeSchedulerShell: View {
     .onChange(of: selectedDate) { newValue in
       Task { await store.loadScheduler(containing: newValue) }
     }
+  }
+
+  @ViewBuilder
+  private func assignSheet(for block: NativeSchedulerBlock) -> some View {
+    SchedulerAssignSheet(
+      block: block,
+      detail: store.selectedSchedulerDetail,
+      dayBlocks: store.schedulerBlocks.filter { $0.date == block.date },
+      loadBlocksOnDate: { date in
+        try await store.fetchSchedulerBlocks(on: date)
+      },
+      createBlockOnDate: { date in
+        try await store.createSchedulerBlock(
+          date: date,
+          locationId: block.locationId,
+          session: block.session.isEmpty ? "custom" : block.session,
+          startTime: block.start,
+          endTime: block.end,
+          notes: "Created while rescheduling a case"
+        )
+      },
+      isLoading: store.isLoading,
+      assignAction: { surgeon, startTime, caseCount, note in
+        do {
+          _ = try await store.assignSchedulerBlock(
+            blockId: block.id,
+            surgeonId: surgeon.surgeonId,
+            startTime: startTime,
+            caseCount: caseCount,
+            note: note
+          )
+        } catch {
+          store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't update assignment.")
+        }
+      },
+      addCaseAction: { surgeonId, startTime, procedure, patientName in
+        do {
+          try await store.addSchedulerCase(
+            blockId: block.id,
+            surgeonId: surgeonId,
+            startTime: startTime,
+            procedure: procedure,
+            patientName: patientName
+          )
+        } catch {
+          store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't add case.")
+        }
+      },
+      updateCaseAction: { caseId, startTime, procedure, patientName, surgeonId, targetBlockId in
+        do {
+          try await store.updateSchedulerCase(
+            blockId: block.id,
+            caseId: caseId,
+            startTime: startTime,
+            procedure: procedure,
+            patientName: patientName,
+            surgeonId: surgeonId,
+            targetBlockId: targetBlockId
+          )
+        } catch {
+          store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't update case.")
+        }
+      },
+      clearAction: {
+        do {
+          try await store.clearSchedulerBlock(blockId: block.id)
+          selectedBlock = nil
+        } catch {
+          store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't clear block. Reschedule linked cases first.")
+        }
+      },
+      deleteBlockAction: {
+        do {
+          let containing = NativeDayResponse.dateFormatter.date(from: block.date) ?? selectedDate
+          try await store.deleteSchedulerBlock(blockId: block.id, containing: containing)
+          selectedBlock = nil
+        } catch {
+          store.setWarningMessage(Self.friendlyWarning(error.localizedDescription) ?? "Couldn't cancel block.")
+          throw error
+        }
+      }
+    )
   }
 
   private func blocks(on date: Date) -> [NativeSchedulerBlock] {

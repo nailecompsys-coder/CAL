@@ -163,6 +163,8 @@ CAL/
 | CallGroup | call_groups | name, sort_order. |
 | CallGroupLocation | call_group_locations | call_group_id, location_id (M2M). |
 | CallRotation | call_rotations | call_group_id, surgeon_id (null = NO call), date, rotation_type (primary \| backup). |
+| CallCoverage | call_coverages | One-day coverage overlay; original assignee stays visible. |
+| CallScheduleAuditLog | call_schedule_audit_logs | Who changed on-call (assign/clear/cover); portal + native. Shannon: `/admin/call-audit`. |
 | Availability | availability | surgeon_id, date, is_available, start_time, end_time. |
 | DayOff | days_off | surgeon_id, start_date, end_date, reason, status (pending \| approved \| denied), notes, admin_note. |
 | Meeting | meetings | title, date, start_time, end_time, location_id, location_text, recurrence_rule. |
@@ -183,7 +185,8 @@ All require `get_current_admin` unless noted.
 | GET | /dashboard | Dashboard (on-call today, pending days off, meetings, surgeons). |
 | GET | /calendar | FullCalendar view; events from /api/events. |
 | GET | /surgeons | List surgeons; add/edit/delete, OTP/device management, revoke device. |
-| GET | /call-schedule | Call rotation grid by week; assign, reclaim-orphans, copy-week, clear. |
+| GET | /call-schedule | Call rotation grid by week; assign, reclaim-orphans, copy-week, clear, cover. |
+| GET | /call-audit | Call schedule change log (who assigned/cleared/swapped on-call). |
 | GET | /call-groups | Call groups CRUD, attach locations. |
 | GET | /daysoff | Days off list; add, approve, deny, edit, delete. Passes pending_count for sidebar badge. |
 | GET | /meetings | Meetings list; add, delete. |

@@ -87,6 +87,34 @@ class AprimaCacheServiceTest(unittest.TestCase):
     @patch("app.aprima_cache_service.fetch_aprima_meetings")
     @patch("app.aprima_cache_service.fetch_patient_appointments")
     @patch("app.aprima_cache_service.practice_today", return_value=date(2026, 7, 9))
+    def test_sync_moves_cached_row_from_outside_window(self, _today, fetch_patients, fetch_meetings, push):
+        """Appointment previously cached outside the sliding window must not StaleDataError."""
+        self.db.add(
+            AprimaCachedAppointment(
+                appointment_id="moved1",
+                kind="patient",
+                date=date(2026, 6, 1),  # outside Jul 9..Jul 30 window
+                surgeon_initials="JB",
+                content_hash="old",
+                payload_json="{}",
+                synced_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            )
+        )
+        self.db.commit()
+        fetch_patients.return_value = [_row("moved1", "2026-07-10")]
+        fetch_meetings.return_value = {"meetings": [], "warning": None}
+
+        result = run_aprima_sync(self.db, notify=False)
+        self.assertTrue(result["ok"])
+        row = self.db.get(AprimaCachedAppointment, "moved1")
+        self.assertIsNotNone(row)
+        self.assertEqual(row.date, date(2026, 7, 10))
+        push.assert_not_called()
+
+    @patch("app.aprima_cache_service.send_native_push_to_surgeon")
+    @patch("app.aprima_cache_service.fetch_aprima_meetings")
+    @patch("app.aprima_cache_service.fetch_patient_appointments")
+    @patch("app.aprima_cache_service.practice_today", return_value=date(2026, 7, 9))
     def test_sync_detects_cancel_and_notifies(self, _today, fetch_patients, fetch_meetings, push):
         fetch_patients.return_value = [_row("a1", "2026-07-09")]
         fetch_meetings.return_value = {"meetings": [], "warning": None}

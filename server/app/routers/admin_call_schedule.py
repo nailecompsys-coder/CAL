@@ -1,7 +1,7 @@
 """Admin call-schedule routes."""
 from datetime import date
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,7 @@ from ..admin_call_schedule_service import (
     parse_call_group_id,
 )
 from ..auth import get_current_admin
+from ..call_schedule_audit_service import recent_call_schedule_audit_logs, surgeon_label
 from ..database import get_db
 from ..jinja_env import templates
 from ..models import Surgeon
@@ -74,7 +75,9 @@ def assign_rotation(
     assignment_date = date.fromisoformat(rotation_date)
     assigned_surgeon_id = int(surgeon_id) if surgeon_id and surgeon_id.strip() else None
     call_group_id_value = parse_call_group_id(call_group_id)
-    conflicts = assign_rotation_service(db, assignment_date, assigned_surgeon_id, call_group_id_value)
+    conflicts = assign_rotation_service(
+        db, assignment_date, assigned_surgeon_id, call_group_id_value, admin=admin,
+    )
     return _warn_redirect(f"/admin/call-schedule?{_call_schedule_qs(month_offset)}", conflicts)
 
 
@@ -128,7 +131,7 @@ def clear_rotation(
 ):
     assignment_date = date.fromisoformat(rotation_date)
     call_group_id_value = parse_call_group_id(call_group_id)
-    clear_rotation_service(db, assignment_date, call_group_id_value)
+    clear_rotation_service(db, assignment_date, call_group_id_value, admin=admin)
     return RedirectResponse(f"/admin/call-schedule?{_call_schedule_qs(month_offset)}", status_code=303)
 
 
@@ -145,7 +148,9 @@ def assign_coverage(
     from fastapi import HTTPException
 
     try:
-        warnings = assign_admin_call_coverage(db, rotation_id, covering_surgeon_id, notes=notes)
+        warnings = assign_admin_call_coverage(
+            db, rotation_id, covering_surgeon_id, notes=notes, admin=admin,
+        )
     except HTTPException as exc:
         return _warn_redirect(
             f"/admin/call-schedule?{_call_schedule_qs(month_offset)}",
@@ -165,10 +170,28 @@ def clear_coverage(
     from fastapi import HTTPException
 
     try:
-        cancel_admin_call_coverage(db, coverage_id)
+        cancel_admin_call_coverage(db, coverage_id, admin=admin)
     except HTTPException as exc:
         return _warn_redirect(
             f"/admin/call-schedule?{_call_schedule_qs(month_offset)}",
             [str(exc.detail)],
         )
     return RedirectResponse(f"/admin/call-schedule?{_call_schedule_qs(month_offset)}", status_code=303)
+
+
+@router.get("/call-audit", response_class=HTMLResponse)
+def call_audit_page(
+    request: Request,
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    rows = recent_call_schedule_audit_logs(db, limit=limit)
+    return templates.TemplateResponse("admin/call_audit.html", _base(
+        request,
+        admin,
+        db=db,
+        audit_logs=rows,
+        surgeon_label=surgeon_label,
+        limit=limit,
+    ))

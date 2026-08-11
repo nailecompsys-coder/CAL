@@ -5,23 +5,19 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -36,19 +32,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.midfloridasurgical.calcompose.data.SurgeonHomeStore
 import com.midfloridasurgical.calcompose.data.models.NativeDayOffRequest
 import com.midfloridasurgical.calcompose.ui.theme.ClinicalPalette
+import com.midfloridasurgical.calcompose.ui.theme.ClinicalPrimaryButton
 import com.midfloridasurgical.calcompose.ui.theme.ClinicalTypography
-import com.midfloridasurgical.calcompose.ui.theme.LiquidGlassCard
+import com.midfloridasurgical.calcompose.ui.theme.WhiteboardCard
+import com.midfloridasurgical.calcompose.ui.theme.clinicalPageBackground
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 @Composable
 fun TimeOffScreen(store: SurgeonHomeStore) {
@@ -66,8 +64,9 @@ fun TimeOffScreen(store: SurgeonHomeStore) {
         store.loadLookahead(containing = todayMonth.atDay(1), daysAhead = 365)
     }
 
-    // Month change: containing month start + 62
+    // Month change: debounce + skip if already covered by the 365-day fetch.
     LaunchedEffect(selectedMonth) {
+        delay(120)
         store.loadLookahead(containing = selectedMonth.atDay(1), daysAhead = 62)
     }
 
@@ -97,109 +96,100 @@ fun TimeOffScreen(store: SurgeonHomeStore) {
     val monthWide = selectedMonth.month.getDisplayName(TextStyle.FULL, Locale.US) +
         " ${selectedMonth.year}"
 
-    Column(
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.linearGradient(
-                    listOf(
-                        ClinicalPalette.PageTop,
-                        ClinicalPalette.PageMiddle,
-                        ClinicalPalette.PageBottom,
-                    ),
-                ),
-            )
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .clinicalPageBackground()
+            .padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 18.dp),
     ) {
-        Button(
-            onClick = { showRequestSheet = true },
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = ClinicalPalette.Teal,
-                contentColor = ClinicalPalette.OnTeal,
-            ),
-            shape = RoundedCornerShape(12.dp),
-        ) {
-            Icon(Icons.Rounded.Add, contentDescription = null)
-            Spacer(modifier = Modifier.size(6.dp))
-            Text("Request Time Off", style = ClinicalTypography.rowTitle)
+        item(key = "request-cta") {
+            ClinicalPrimaryButton(
+                text = "Request Time Off",
+                onClick = { showRequestSheet = true },
+            )
         }
 
-        store.warningMessage?.let {
-            LiquidGlassCard(tint = ClinicalPalette.Amber, cornerRadius = 14.dp) {
-                Text(
-                    it,
-                    color = ClinicalPalette.Muted,
-                    style = ClinicalTypography.caption,
-                    modifier = Modifier.padding(12.dp),
-                )
+        store.warningMessage?.let { message ->
+            item(key = "warning") {
+                WhiteboardCard(tint = ClinicalPalette.Amber, cornerRadius = 12.dp) {
+                    Text(
+                        message,
+                        color = ClinicalPalette.Ink,
+                        style = ClinicalTypography.caption,
+                        modifier = Modifier.padding(14.dp),
+                    )
+                }
             }
         }
 
-        LiquidGlassCard(tint = ClinicalPalette.TealSoft, cornerRadius = 16.dp) {
-            Column(
-                modifier = Modifier.padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    "WHO'S OUT",
-                    style = ClinicalTypography.sectionLabel,
-                    color = ClinicalPalette.Muted,
-                )
+        item(key = "gantt-$selectedMonth") {
+            WhiteboardCard(tint = ClinicalPalette.CardStrong, cornerRadius = 12.dp) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        "WHO'S OUT",
+                        style = ClinicalTypography.sectionLabel,
+                        color = ClinicalPalette.Muted,
+                    )
 
-                MonthStepper(
-                    title = monthWide,
-                    subtitle = "Practice coverage",
-                    onPrevious = { selectedMonth = selectedMonth.minusMonths(1) },
-                    onNext = { selectedMonth = selectedMonth.plusMonths(1) },
-                    onTitleTap = { showingMonthMenu = true },
-                    menuExpanded = showingMonthMenu,
-                    onDismissMenu = { showingMonthMenu = false },
-                    months = months,
-                    onSelectMonth = {
-                        selectedMonth = it
-                        showingMonthMenu = false
-                    },
-                )
+                    MonthStepper(
+                        title = monthWide,
+                        subtitle = "Practice coverage",
+                        onPrevious = { selectedMonth = selectedMonth.minusMonths(1) },
+                        onNext = { selectedMonth = selectedMonth.plusMonths(1) },
+                        onTitleTap = { showingMonthMenu = true },
+                        menuExpanded = showingMonthMenu,
+                        onDismissMenu = { showingMonthMenu = false },
+                        months = months,
+                        onSelectMonth = {
+                            selectedMonth = it
+                            showingMonthMenu = false
+                        },
+                    )
 
-                if (store.isLoading && store.days.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(80.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        CircularProgressIndicator(color = ClinicalPalette.Teal)
+                    if (store.isLoading && store.days.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(80.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CircularProgressIndicator(color = ClinicalPalette.Teal)
+                        }
+                    } else {
+                        TimeOffGanttView(model = ganttModel, selectedMonth = selectedMonth)
                     }
-                } else {
-                    TimeOffGanttView(model = ganttModel, selectedMonth = selectedMonth)
-                }
 
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
                         "MY REQUESTS · ${monthLabel.uppercase(Locale.US)}",
                         style = ClinicalTypography.sectionLabel,
                         color = ClinicalPalette.Muted,
                     )
-                    if (monthRequests.isEmpty()) {
-                        Text(
-                            "No requests in $monthLabel.",
-                            color = ClinicalPalette.Muted,
-                            style = ClinicalTypography.caption,
-                            modifier = Modifier.padding(vertical = 4.dp),
-                        )
-                    } else {
-                        monthRequests.forEach { request ->
-                            TimeOffRequestRow(request)
-                        }
-                    }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(18.dp))
+        if (monthRequests.isEmpty()) {
+            item(key = "requests-empty") {
+                Text(
+                    "No requests in $monthLabel.",
+                    color = ClinicalPalette.Muted,
+                    style = ClinicalTypography.caption,
+                    modifier = Modifier.padding(vertical = 4.dp),
+                )
+            }
+        } else {
+            items(
+                items = monthRequests,
+                key = { it.id },
+            ) { request ->
+                TimeOffRequestRow(request)
+            }
+        }
     }
 
     if (showRequestSheet) {
@@ -230,7 +220,7 @@ private fun MonthStepper(
     months: List<YearMonth>,
     onSelectMonth: (YearMonth) -> Unit,
 ) {
-    LiquidGlassCard(tint = ClinicalPalette.Card, cornerRadius = 16.dp) {
+    WhiteboardCard(tint = ClinicalPalette.SurfaceQuiet, cornerRadius = 12.dp) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()

@@ -12,17 +12,16 @@
       class="bg-slate-100 text-slate-600 text-sm px-3 py-2 rounded-lg hover:bg-slate-200 flex items-center gap-1.5">
       <i class="fa-solid fa-plus"></i> Schedule
     </button>
-    <a href="/admin/meetings?month_offset={{ month_offset - 1 }}"
-       class="w-9 h-9 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 flex items-center justify-center">
-      <i class="fa-solid fa-chevron-left text-xs"></i>
-    </a>
-    <span class="text-sm font-extrabold text-slate-800 min-w-[9rem] text-center px-3 py-2 rounded-lg border border-slate-200 bg-slate-50">{{ month_label }}</span>
+    <label class="sr-only" for="month-picker">Month</label>
+    <select id="month-picker"
+      class="h-9 text-sm font-extrabold text-slate-800 rounded-lg border border-slate-200 bg-slate-50 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+      onchange="window.location='/admin/meetings?month_offset='+encodeURIComponent(this.value)">
+      {% for opt in month_options %}
+      <option value="{{ opt.offset }}" {% if opt.offset == month_offset %}selected{% endif %}>{{ opt.label }}</option>
+      {% endfor %}
+    </select>
     <a href="/admin/meetings?month_offset=0"
        class="bg-blue-600 text-white text-sm px-3 py-2 rounded-lg hover:bg-blue-700">Today</a>
-    <a href="/admin/meetings?month_offset={{ month_offset + 1 }}"
-       class="w-9 h-9 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 flex items-center justify-center">
-      <i class="fa-solid fa-chevron-right text-xs"></i>
-    </a>
   </div>
 </header>
 

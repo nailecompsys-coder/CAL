@@ -3,18 +3,17 @@ package com.midfloridasurgical.calcompose.surgeon.patients
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -27,14 +26,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.midfloridasurgical.calcompose.data.CalApiClient
 import com.midfloridasurgical.calcompose.data.models.NativePatientAppointment
 import com.midfloridasurgical.calcompose.data.models.NativeSurgeon
 import com.midfloridasurgical.calcompose.ui.theme.ClinicalPalette
+import com.midfloridasurgical.calcompose.ui.theme.ClinicalTypography
+import com.midfloridasurgical.calcompose.ui.theme.LiquidGlassCard
+import com.midfloridasurgical.calcompose.ui.theme.clinicalPageBackground
+import com.midfloridasurgical.calcompose.util.onFailureUnlessCancelled
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -53,125 +53,173 @@ fun PatientScheduleScreen(
     var isLoading by remember { mutableStateOf(true) }
 
     LaunchedEffect(anchorDate, token, deviceToken) {
+        delay(120) // debounce week stepper
         while (true) {
             isLoading = appointments.isEmpty()
             warning = null
             val start = anchorDate
             val end = anchorDate.plusDays(6)
-            runCatching {
-                apiClient.fetchPatientSchedule(token, deviceToken, start, end)
-            }.onSuccess { response ->
-                appointments = filterMyAppointments(response.appointments, currentSurgeon)
-                warning = response.warning
-            }.onFailure {
-                if (appointments.isEmpty()) {
-                    warning = it.message ?: "Could not load patient schedule."
+            try {
+                runCatching {
+                    apiClient.fetchPatientSchedule(token, deviceToken, start, end)
+                }.onSuccess { response ->
+                    appointments = filterMyAppointments(response.appointments, currentSurgeon)
+                    warning = response.warning
+                }.onFailureUnlessCancelled {
+                    if (appointments.isEmpty()) {
+                        warning = it.message ?: "Could not load patient schedule."
+                    }
                 }
+            } finally {
+                isLoading = false
             }
-            isLoading = false
             delay(5 * 60 * 1000L)
         }
     }
 
-    val byDay = appointments
-        .groupBy { it.date }
-        .toSortedMap()
-        .mapValues { (_, rows) ->
-            rows.sortedWith(compareBy({ it.start }, { it.patientName }))
-        }
+    val dayEntries = remember(appointments) {
+        appointments
+            .groupBy { it.date }
+            .toSortedMap()
+            .map { (date, rows) ->
+                date to rows.sortedWith(compareBy({ it.start }, { it.patientName }))
+            }
+    }
 
-    Column(
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.linearGradient(
-                    listOf(ClinicalPalette.PageTop, ClinicalPalette.PageBottom),
-                ),
-            )
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
+            .clinicalPageBackground()
+            .padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(vertical = 16.dp),
     ) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = ClinicalPalette.Card),
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = { anchorDate = anchorDate.minusDays(7) }) {
-                    Icon(Icons.Rounded.ChevronLeft, contentDescription = "Previous week")
-                }
-                Column(
-                    modifier = Modifier.weight(1f),
-                    horizontalAlignment = Alignment.CenterHorizontally,
+        item(key = "header") {
+            LiquidGlassCard(tint = ClinicalPalette.CardStrong, cornerRadius = 16.dp) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Patient schedule", fontWeight = FontWeight.Bold)
-                    Text(
-                        "${anchorDate.format(monthDay)} – ${anchorDate.plusDays(6).format(monthDay)}",
-                        color = ClinicalPalette.Muted,
-                        fontSize = 12.sp,
-                    )
-                }
-                IconButton(onClick = { anchorDate = anchorDate.plusDays(7) }) {
-                    Icon(Icons.Rounded.ChevronRight, contentDescription = "Next week")
+                    IconButton(onClick = { anchorDate = anchorDate.minusDays(7) }) {
+                        Icon(
+                            Icons.Rounded.ChevronLeft,
+                            contentDescription = "Previous week",
+                            tint = ClinicalPalette.Ink,
+                        )
+                    }
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            "Patient schedule",
+                            style = ClinicalTypography.rowTitleStrong,
+                            color = ClinicalPalette.Ink,
+                        )
+                        Text(
+                            "${anchorDate.format(monthDay)} – ${anchorDate.plusDays(6).format(monthDay)}",
+                            style = ClinicalTypography.caption,
+                            color = ClinicalPalette.Muted,
+                        )
+                    }
+                    IconButton(onClick = { anchorDate = anchorDate.plusDays(7) }) {
+                        Icon(
+                            Icons.Rounded.ChevronRight,
+                            contentDescription = "Next week",
+                            tint = ClinicalPalette.Ink,
+                        )
+                    }
                 }
             }
         }
 
-        warning?.let {
-            Text(
-                it,
-                color = ClinicalPalette.Muted,
-                fontSize = 13.sp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(ClinicalPalette.Mint, RoundedCornerShape(12.dp))
-                    .padding(12.dp),
-            )
+        warning?.let { message ->
+            item(key = "warning") {
+                LiquidGlassCard(tint = ClinicalPalette.Amber, cornerRadius = 14.dp) {
+                    Text(
+                        message,
+                        style = ClinicalTypography.caption,
+                        color = ClinicalPalette.Muted,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                    )
+                }
+            }
         }
 
         when {
-            isLoading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
-            byDay.isEmpty() -> Text("No patient appointments in this range.", color = ClinicalPalette.Muted)
-            else -> byDay.forEach { (date, rows) ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = ClinicalPalette.Card),
-                ) {
-                    Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(date, fontWeight = FontWeight.Bold)
-                        rows.forEach { appt ->
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(ClinicalPalette.TealSoft.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
-                                    .padding(10.dp),
-                            ) {
-                                Text(
-                                    "${appt.start}–${appt.end} · ${appt.patientName}",
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 14.sp,
-                                )
-                                val detail = listOfNotNull(
-                                    appt.appointmentType.takeIf { it.isNotBlank() },
-                                    appt.serviceSite.takeIf { it.isNotBlank() },
-                                    appt.room.takeIf { it.isNotBlank() },
-                                    appt.status.takeIf { it.isNotBlank() },
-                                ).joinToString(" · ")
-                                if (detail.isNotBlank()) {
-                                    Text(detail, color = ClinicalPalette.Muted, fontSize = 12.sp)
-                                }
-                                if (appt.reason.isNotBlank()) {
-                                    Text(appt.reason, color = ClinicalPalette.Muted, fontSize = 12.sp)
+            isLoading -> {
+                item(key = "loading") {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        color = ClinicalPalette.Teal,
+                    )
+                }
+            }
+            dayEntries.isEmpty() -> {
+                item(key = "empty") {
+                    Text(
+                        "No patient appointments in this range.",
+                        style = ClinicalTypography.caption,
+                        color = ClinicalPalette.Muted,
+                    )
+                }
+            }
+            else -> {
+                items(
+                    items = dayEntries,
+                    key = { it.first },
+                ) { (date, rows) ->
+                    LiquidGlassCard(tint = ClinicalPalette.Card, cornerRadius = 16.dp) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                date,
+                                style = ClinicalTypography.rowTitleStrong,
+                                color = ClinicalPalette.Ink,
+                            )
+                            rows.forEach { appt ->
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(
+                                            ClinicalPalette.TealSoft.copy(alpha = 0.4f),
+                                            RoundedCornerShape(12.dp),
+                                        )
+                                        .padding(10.dp),
+                                ) {
+                                    Text(
+                                        "${appt.start}–${appt.end} · ${appt.patientName}",
+                                        style = ClinicalTypography.rowTitle,
+                                        color = ClinicalPalette.Ink,
+                                    )
+                                    val detail = listOfNotNull(
+                                        appt.appointmentType.takeIf { it.isNotBlank() },
+                                        appt.serviceSite.takeIf { it.isNotBlank() },
+                                        appt.room.takeIf { it.isNotBlank() },
+                                        appt.status.takeIf { it.isNotBlank() },
+                                    ).joinToString(" · ")
+                                    if (detail.isNotBlank()) {
+                                        Text(
+                                            detail,
+                                            style = ClinicalTypography.caption,
+                                            color = ClinicalPalette.Muted,
+                                        )
+                                    }
+                                    if (appt.reason.isNotBlank()) {
+                                        Text(
+                                            appt.reason,
+                                            style = ClinicalTypography.caption,
+                                            color = ClinicalPalette.Muted,
+                                        )
+                                    }
                                 }
                             }
                         }

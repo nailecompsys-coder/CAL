@@ -97,7 +97,13 @@ export default function App() {
     setMessage('');
     try {
       const data = await requestOtp(email);
-      setMessage(data.message ?? 'If that email is registered, a code was sent.');
+      if (data.ok === false || data.sent === false) {
+        setMessage(data.message || 'Could not send a code. Try again or contact the office.');
+      } else if (data.devCode) {
+        setMessage(`Local access code: ${data.devCode}`);
+      } else {
+        setMessage(data.message ?? 'Check your email or iPhone for the CAL access code.');
+      }
     } catch (err) {
       const detail = err instanceof Error ? err.message : 'request error';
       setMessage(`OTP request failed (${API_BASE_URL}): ${detail}`);

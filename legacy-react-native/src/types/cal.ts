@@ -16,6 +16,8 @@ export type CalEvent = {
 export type OtpRequestResponse = {
   ok?: boolean;
   message?: string;
+  sent?: boolean;
+  devCode?: string;
 };
 
 export type OtpVerifyResponse = {

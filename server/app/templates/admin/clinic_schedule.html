@@ -72,6 +72,27 @@
   <div><strong>Scheduling conflict:</strong> {{ request.query_params.get('warn') }}</div>
 </div>
 {% endif %}
+{% if off_conflicts %}
+<div class="mx-6 mt-4 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3 text-rose-800 text-sm">
+  <div class="flex items-start gap-2">
+    <i class="fa-solid fa-triangle-exclamation text-rose-500 mt-0.5 flex-shrink-0"></i>
+    <div class="min-w-0">
+      <strong>OFF conflicts this week</strong>
+      <p class="text-xs text-rose-700/90 mt-0.5">Approved or requested time off with clinic patients or surgical cases — review before leaving as-is.</p>
+      <ul class="mt-2 space-y-1 text-xs">
+        {% for c in off_conflicts[:12] %}
+        <li>
+          <a href="/admin/daysoff?focus={{ c.day_off_id }}" class="font-semibold underline hover:no-underline">{{ c.message }}</a>
+        </li>
+        {% endfor %}
+        {% if off_conflicts|length > 12 %}
+        <li class="text-rose-600">+ {{ off_conflicts|length - 12 }} more</li>
+        {% endif %}
+      </ul>
+    </div>
+  </div>
+</div>
+{% endif %}
 
 {% if not all_locations %}
 <div class="p-6">
@@ -165,18 +186,39 @@
         {% set full_entries = day_entries|rejectattr('session', 'equalto', 'am')|rejectattr('session', 'equalto', 'pm')|list %}
         {% set day_surgeries = surgical_map.get(surgeon.id, {}).get(day, []) %}
         {% set day_block_assignments = assigned_or_blocks.get(surgeon.id, {}).get(day, []) %}
-        {% set am_blocks = day_block_assignments|selectattr('session', 'equalto', 'am')|list %}
-        {% set pm_blocks = day_block_assignments|selectattr('session', 'equalto', 'pm')|list %}
+        {% set hide_or_for_off = hide_empty_or_blocks.get((surgeon.id, day), false) if hide_empty_or_blocks is defined else false %}
+        {% set am_blocks = [] if hide_or_for_off else day_block_assignments|selectattr('session', 'equalto', 'am')|list %}
+        {% set pm_blocks = [] if hide_or_for_off else day_block_assignments|selectattr('session', 'equalto', 'pm')|list %}
+        {% set day_off_info = off_map.get((surgeon.id, day)) if off_map is defined else none %}
+        {% set day_has_off_conflict = conflict_keys and (surgeon.id, day) in conflict_keys %}
+        {% set show_synthetic_off = synthetic_off_days and (surgeon.id, day) in synthetic_off_days and not day_entries and (hide_or_for_off or not day_block_assignments) %}
         {% set day_has_hospital_clinic = (day_entries|selectattr('assignment_type', 'equalto', 'assigned')|map(attribute='location')|selectattr('location_type', 'equalto', 'hospital')|list|length > 0) %}
         {# Cases chip when surgeries exist and nothing else already surfaces them (OR pills / hospital grid). #}
-        {% set day_has_hospital = day_surgeries|length > 0 and not day_has_hospital_clinic and not day_block_assignments %}
+        {% set day_has_hospital = day_surgeries|length > 0 and not day_has_hospital_clinic and not day_block_assignments and not day_has_off_conflict %}
         <td class="px-1.5 py-1.5 border border-slate-200 align-top
-          {% if is_today %}bg-blue-50/30{% else %}bg-white{% endif %}
+          {% if day_has_off_conflict %}bg-rose-50/50{% elif is_today %}bg-blue-50/30{% else %}bg-white{% endif %}
           {% if selected_surgeon_id == surgeon.id and day_entries %}ring-2 ring-inset ring-teal-300 bg-teal-50/30{% endif %}
           cursor-pointer hover:bg-slate-50 group/cell"
           onclick='openAssignModal({"surgeonId": {{ surgeon.id }}, "date": {{ day.isoformat()|tojson }}, "surgeonName": {{ surgeon.full_name|tojson }}, "dateLabel": {{ day.strftime("%a, %b %-d")|tojson }}})'>
 
           <div class="min-h-[52px] space-y-0.5">
+            {% if day_has_off_conflict %}
+            <div class="flex items-center gap-1 text-[10px] font-bold text-rose-700 px-1">
+              <i class="fa-solid fa-triangle-exclamation text-[9px]"></i>
+              <span>OFF conflict</span>
+              {% if day_off_info and day_off_info.status == 'pending' %}<span class="font-semibold text-amber-700">(pending)</span>{% endif %}
+            </div>
+            {% elif show_synthetic_off or (day_off_info and not day_entries and hide_or_for_off) %}
+            <div class="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-md bg-slate-200 text-slate-700 shadow-sm w-full">
+              <i class="fa-solid fa-bed text-[8px] opacity-90 flex-shrink-0"></i>
+              <span>OFF{% if day_off_info and day_off_info.status == 'pending' %}?{% endif %}</span>
+            </div>
+            {% elif day_off_info and not day_entries and not day_block_assignments %}
+            <div class="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-md bg-slate-200 text-slate-700 shadow-sm w-full">
+              <i class="fa-solid fa-bed text-[8px] opacity-90 flex-shrink-0"></i>
+              <span>OFF{% if day_off_info.status == 'pending' %}?{% endif %}</span>
+            </div>
+            {% endif %}
             {% for slot in [
               {'label': 'AM', 'entries': am_entries, 'blocks': am_blocks},
               {'label': 'PM', 'entries': pm_entries, 'blocks': pm_blocks},
@@ -185,29 +227,31 @@
             {% if slot.entries or slot.blocks %}
             <div class="min-h-[18px] space-y-0.5">
               {% for entry in slot.entries %}
-              {% set entry_location_choice = '__off__' if entry.assignment_type == 'off' else entry.location_id|string %}
-              {% set or_overlay = or_block_overlays.get(entry.id) if or_block_overlays is defined else none %}
-              {% set clinic_overlay = clinic_fax_overlays.get(entry.id) if clinic_fax_overlays is defined else none %}
+              {% set force_off = show_off_schedule_ids is defined and entry.id in show_off_schedule_ids %}
+              {% set entry_is_off = entry.assignment_type == 'off' or force_off %}
+              {% set entry_location_choice = '__off__' if entry_is_off else entry.location_id|string %}
+              {% set or_overlay = none if force_off else (or_block_overlays.get(entry.id) if or_block_overlays is defined else none) %}
+              {% set clinic_overlay = none if force_off else (clinic_fax_overlays.get(entry.id) if clinic_fax_overlays is defined else none) %}
               {% set pill_overlay = or_overlay or clinic_overlay %}
               <div class="flex items-center gap-1 group/entry relative w-full">
-                <span class="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-md leading-tight w-full min-w-0 truncate cursor-pointer hover:opacity-90 {% if entry.assignment_type == 'off' %}bg-slate-200 text-slate-700 shadow-sm{% else %}block-gradient shadow-sm{% endif %}"
-                  style="{% if entry.assignment_type == 'assigned' %}--block-c: {{ entry.location.color or '#0ea5e9' }};color:#1e293b{% endif %}"
-                  title="{% if entry.assignment_type == 'off' %}OFF{% else %}{{ entry.location.name }} — {{ entry.session }}{% endif %}{% if pill_overlay %} · {{ pill_overlay.assignedStart }} · {{ pill_overlay.caseCount }}{% endif %}{% if entry.notes %} · {{ entry.notes }}{% endif %}"
+                <span class="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-md leading-tight w-full min-w-0 truncate cursor-pointer hover:opacity-90 {% if entry_is_off %}bg-slate-200 text-slate-700 shadow-sm{% else %}block-gradient shadow-sm{% endif %}"
+                  style="{% if not entry_is_off and entry.assignment_type == 'assigned' %}--block-c: {{ entry.location.color or '#0ea5e9' }};color:#1e293b{% endif %}"
+                  title="{% if entry_is_off %}OFF{% if day_off_info and day_off_info.status == 'pending' %} (requested){% endif %}{% else %}{{ entry.location.name }} — {{ entry.session }}{% endif %}{% if pill_overlay %} · {{ pill_overlay.assignedStart }} · {{ pill_overlay.caseCount }}{% endif %}{% if entry.notes %} · {{ entry.notes }}{% endif %}"
                   {% if pill_overlay %}
                   onclick='event.stopPropagation(); event.preventDefault(); openPillDetailModal({{ {"kind": pill_overlay.kind or ("or" if or_overlay else "clinic"), "title": pill_overlay.location or pill_overlay.locationAbbreviation or entry.location.name, "abbr": pill_overlay.locationAbbreviation or entry.location.abbreviation or "", "session": (pill_overlay.session or entry.session or "")|upper, "earliest": pill_overlay.assignedStart or "", "count": pill_overlay.caseCount or 0, "countLabel": pill_overlay.countLabel or ("Cases" if or_overlay else "Visits"), "pillLabel": pill_overlay.pillLabel or "", "segments": pill_overlay.segments or [], "surgeonId": surgeon.id, "date": day.isoformat(), "locationId": pill_overlay.locationId or entry.location_id, "edit": {"scheduleId": entry.id, "surgeonId": surgeon.id, "date": day.isoformat(), "surgeonName": surgeon.full_name, "dateLabel": day.strftime("%a, %b %-d"), "locationChoice": entry_location_choice, "session": entry.session or "full", "notes": entry.notes or ""}} | tojson }})'
-                  {% elif entry.assignment_type == 'assigned' and entry.location and (entry.location.location_type == 'hospital' or (entry.location.abbreviation or '')[-3:] == '-OR') and day_surgeries %}
+                  {% elif not entry_is_off and entry.assignment_type == 'assigned' and entry.location and (entry.location.location_type == 'hospital' or (entry.location.abbreviation or '')[-3:] == '-OR') and day_surgeries %}
                   onclick='event.stopPropagation(); event.preventDefault(); openPillDetailModal({{ {"kind": "or", "title": entry.location.name, "abbr": entry.location.abbreviation or "", "session": (entry.session or "")|upper, "earliest": "", "count": day_surgeries|length, "countLabel": "Cases", "pillLabel": entry.location.abbreviation or entry.location.name, "segments": [], "surgeonId": surgeon.id, "date": day.isoformat(), "locationId": entry.location_id, "edit": {"scheduleId": entry.id, "surgeonId": surgeon.id, "date": day.isoformat(), "surgeonName": surgeon.full_name, "dateLabel": day.strftime("%a, %b %-d"), "locationChoice": entry_location_choice, "session": entry.session or "full", "notes": entry.notes or ""}} | tojson }})'
                   {% else %}
                   onclick='event.stopPropagation(); event.preventDefault(); openAssignModal({"scheduleId": {{ entry.id }}, "surgeonId": {{ surgeon.id }}, "date": {{ day.isoformat()|tojson }}, "surgeonName": {{ surgeon.full_name|tojson }}, "dateLabel": {{ day.strftime("%a, %b %-d")|tojson }}, "locationChoice": {{ entry_location_choice|tojson }}, "session": {{ (entry.session or "full")|tojson }}, "notes": {{ (entry.notes or "")|tojson }}});'
                   {% endif %}>
-                  {% if entry.assignment_type == 'off' %}<i class="fa-solid fa-bed text-[8px] opacity-90 flex-shrink-0"></i>
+                  {% if entry_is_off %}<i class="fa-solid fa-bed text-[8px] opacity-90 flex-shrink-0"></i>
                   {% elif entry.location.location_type == 'hospital' %}<i class="fa-solid fa-hospital text-[8px] opacity-90 flex-shrink-0"></i>
                   {% else %}<i class="fa-solid fa-clinic-medical text-[8px] opacity-90 flex-shrink-0"></i>
                   {% endif %}
                   {% if entry.session == 'am' %}<i class="fa-solid fa-sun text-[8px] opacity-80 flex-shrink-0"></i>
                   {% elif entry.session == 'pm' %}<i class="fa-solid fa-moon text-[8px] opacity-80 flex-shrink-0"></i>
                   {% endif %}
-                  <span class="truncate min-w-0 flex-1">{% if entry.assignment_type == 'off' %}OFF{% elif pill_overlay %}{{ pill_overlay.pillLabel }}{% else %}{{ entry.location.abbreviation or entry.location.name }}{% endif %}</span>
+                  <span class="truncate min-w-0 flex-1">{% if entry_is_off %}OFF{% if day_off_info and day_off_info.status == 'pending' %}?{% endif %}{% elif pill_overlay %}{{ pill_overlay.pillLabel }}{% else %}{{ entry.location.abbreviation or entry.location.name }}{% endif %}</span>
                 </span>
                 <form method="post" action="/admin/clinic-schedule/clear" class="js-preserve-scroll absolute right-0.5 top-1/2 -translate-y-1/2 z-10" onclick="event.stopPropagation()">
                   <input type="hidden" name="schedule_id" value="{{ entry.id }}" />

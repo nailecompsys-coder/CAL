@@ -42,6 +42,7 @@
   .master-row strong { font-weight:800; letter-spacing:.01em; }
   .master-row s { color:rgba(74,96,128,.68); text-decoration-thickness:2px; }
   .master-row--off { background:rgba(223,245,234,.72); border-color:rgba(31,107,78,.14); color:#1f6b4e; }
+  .master-row--conflict { background:rgba(254,226,226,.85); border-color:rgba(190,24,93,.18); color:#9f1239; font-weight:700; }
   .master-row--call { background:rgba(214,235,255,.72); border-color:rgba(0,122,255,.14); color:#1e3a8a; }
   .master-row--clinic { background:rgba(255,255,255,.78); border-color:rgba(148,163,184,.16); }
   .master-row--meeting { background:rgba(235,228,255,.72); border-color:rgba(109,40,217,.12); color:#5b21b6; }
@@ -481,9 +482,17 @@ function renderMasterMonthCells() {
 function buildMasterCellHtml(events) {
   const byType = type => events.filter(ev => ev.extendedProps?.type === type);
   const off = byType('dayoff');
+  const offConflicts = byType('off_conflict');
   const offInitials = off.map(ev => String(ev.title || '').replace(/\s*OFF\s*$/i, '').trim()).filter(Boolean).join(' ');
   const offId = off[0]?.id || '';
   let html = `<div class="master-row master-row--off ${offId ? 'master-click' : ''}" ${offId ? `data-master-event-id="${escapeHtml(offId)}"` : ''}><strong>OFF:</strong>${offInitials ? ` ${escapeHtml(offInitials)}` : ''}</div>`;
+  if (offConflicts.length) {
+    const conflictLabel = offConflicts.map(ev => {
+      const ini = surgeonInitialsFromEvent(ev) || String(ev.title || '').replace(/^⚠\s*/, '').replace(/\s*OFF conflict.*/i, '').trim();
+      return ini;
+    }).filter(Boolean).join(' ');
+    html += `<div class="master-row master-row--conflict master-click" data-master-event-id="${escapeHtml(offConflicts[0].id)}"><strong>⚠ OFF conflict:</strong>${conflictLabel ? ` ${escapeHtml(conflictLabel)}` : ''}</div>`;
+  }
 
   const callPriority = ev => {
     const group = callGroupLabel(ev);
@@ -530,9 +539,10 @@ function buildMasterCellHtml(events) {
 
 function showModal(event) {
   const p = event.extendedProps || {};
-  const typeLabels = { oncall: 'Call (hospital group)', dayoff: 'Days off', meeting: 'Meeting', clinic: 'Clinic', surgery: 'Surgery', unavailable: 'Unavailable' };
+  const typeLabels = { oncall: 'Call (hospital group)', dayoff: 'Days off', off_conflict: 'OFF conflict', meeting: 'Meeting', clinic: 'Clinic', surgery: 'Surgery', unavailable: 'Unavailable' };
   let title = event.title || '';
   if (p.type === 'dayoff') title = 'Days off';
+  else if (p.type === 'off_conflict') title = 'OFF scheduling conflict';
   else if (p.type === 'oncall' && p.role === 'nc') title = 'No call';
   else if (p.type === 'meeting') title = p.meeting_title || title.replace(/^MTG\s*/, '') || 'Meeting';
   document.getElementById('modal-title').textContent = title;
@@ -546,6 +556,8 @@ function showModal(event) {
   if (p.procedure) body += `<p><i class="fa-solid fa-syringe mr-2 text-slate-400"></i>${p.procedure}</p>`;
   if (p.patient_name) body += `<p><i class="fa-solid fa-user mr-2 text-slate-400"></i>${p.patient_name}</p>`;
   if (p.reason) body += `<p><i class="fa-solid fa-note-sticky mr-2 text-slate-400"></i>${p.reason}</p>`;
+  if (p.message) body += `<p><i class="fa-solid fa-triangle-exclamation mr-2 text-rose-500"></i>${p.message}</p>`;
+  if (p.off_conflict) body += `<p><i class="fa-solid fa-triangle-exclamation mr-2 text-rose-500"></i>Conflicts with approved or requested time off</p>`;
   document.getElementById('modal-body').innerHTML = body;
   document.getElementById('modal').classList.remove('hidden');
 }

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
+from .call_schedule_audit_service import actor_label_for_admin, log_call_schedule_change
 from .conflicts import check_conflicts
-from .models import CallRotation, Surgeon
+from .models import AdminUser, CallGroup, CallRotation, Surgeon
 from .push import send_push_to_surgeon
 
 
@@ -16,13 +17,23 @@ def rotation_query_for_assignment(db: Session, assignment_date: date, call_group
     return query.filter(CallRotation.call_group_id.is_(None))
 
 
+def _group_name(db: Session, call_group_id: int | None) -> str | None:
+    if call_group_id is None:
+        return None
+    group = db.get(CallGroup, call_group_id)
+    return group.name if group else None
+
+
 def assign_rotation(
     db: Session,
     assignment_date: date,
     surgeon_id: int | None,
     call_group_id: int | None,
+    *,
+    admin: AdminUser | None = None,
 ) -> list[str]:
     existing = rotation_query_for_assignment(db, assignment_date, call_group_id).first()
+    from_surgeon_id = existing.surgeon_id if existing else None
     if existing:
         existing.surgeon_id = surgeon_id
         rotation_id = existing.id
@@ -36,6 +47,21 @@ def assign_rotation(
         db.add(rotation)
         db.flush()
         rotation_id = rotation.id
+
+    if from_surgeon_id != surgeon_id:
+        log_call_schedule_change(
+            db,
+            action="assign" if surgeon_id else "clear",
+            event_date=assignment_date,
+            source="portal",
+            call_group_id=call_group_id,
+            call_group_name=_group_name(db, call_group_id),
+            rotation_id=rotation_id,
+            from_surgeon_id=from_surgeon_id,
+            to_surgeon_id=surgeon_id,
+            actor_admin_id=admin.id if admin else None,
+            actor_label=actor_label_for_admin(admin),
+        )
     db.commit()
 
     surgeon = db.get(Surgeon, surgeon_id) if surgeon_id else None
@@ -89,6 +115,35 @@ def copy_call_week(db: Session, source_offset: int) -> int:
     return copied
 
 
-def clear_rotation(db: Session, assignment_date: date, call_group_id: int | None) -> None:
-    rotation_query_for_assignment(db, assignment_date, call_group_id).delete()
+def clear_rotation(
+    db: Session,
+    assignment_date: date,
+    call_group_id: int | None,
+    *,
+    admin: AdminUser | None = None,
+) -> None:
+    existing = (
+        rotation_query_for_assignment(db, assignment_date, call_group_id)
+        .options(joinedload(CallRotation.call_group))
+        .first()
+    )
+    if not existing:
+        return
+    from_surgeon_id = existing.surgeon_id
+    rotation_id = existing.id
+    group_name = existing.call_group.name if existing.call_group else _group_name(db, call_group_id)
+    log_call_schedule_change(
+        db,
+        action="clear",
+        event_date=assignment_date,
+        source="portal",
+        call_group_id=call_group_id,
+        call_group_name=group_name,
+        rotation_id=rotation_id,
+        from_surgeon_id=from_surgeon_id,
+        to_surgeon_id=None,
+        actor_admin_id=admin.id if admin else None,
+        actor_label=actor_label_for_admin(admin),
+    )
+    db.delete(existing)
     db.commit()

@@ -61,7 +61,7 @@ fun CallCoverageSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
-        containerColor = ClinicalPalette.Card,
+        containerColor = ClinicalPalette.PageMiddle,
     ) {
         Column(
             modifier = Modifier

@@ -293,6 +293,32 @@ class CallCoverage(Base):
     requested_by_surgeon = relationship("Surgeon", foreign_keys=[requested_by_surgeon_id])
 
 
+class CallScheduleAuditLog(Base):
+    """Who changed on-call assignments/swaps — portal audit for Shannon."""
+    __tablename__ = "call_schedule_audit_logs"
+    id = Column(Integer, primary_key=True)
+    action = Column(String(32), nullable=False)  # assign | clear | cover | cover_clear
+    source = Column(String(16), nullable=False, default="portal", server_default="portal")  # portal | native
+    event_date = Column(Date, nullable=False)
+    call_group_id = Column(Integer, ForeignKey("call_groups.id"), nullable=True)
+    call_group_name = Column(String(128))
+    rotation_id = Column(Integer)
+    coverage_id = Column(Integer)
+    from_surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=True)
+    to_surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=True)
+    actor_admin_id = Column(Integer, ForeignKey("admin_users.id"), nullable=True)
+    actor_surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=True)
+    actor_label = Column(String(255), nullable=False, default="unknown")
+    notes = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+
+    call_group = relationship("CallGroup")
+    from_surgeon = relationship("Surgeon", foreign_keys=[from_surgeon_id])
+    to_surgeon = relationship("Surgeon", foreign_keys=[to_surgeon_id])
+    actor_admin = relationship("AdminUser", foreign_keys=[actor_admin_id])
+    actor_surgeon = relationship("Surgeon", foreign_keys=[actor_surgeon_id])
+
+
 class Availability(Base):
     __tablename__ = "availability"
     id = Column(Integer, primary_key=True)

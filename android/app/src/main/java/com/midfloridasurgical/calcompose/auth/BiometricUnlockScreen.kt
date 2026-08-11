@@ -3,17 +3,14 @@ package com.midfloridasurgical.calcompose.auth
 import android.content.Context
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,16 +21,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.midfloridasurgical.calcompose.BuildConfig
 import com.midfloridasurgical.calcompose.data.CalSessionStore
+import com.midfloridasurgical.calcompose.ui.theme.ClinicalAuthBackground
 import com.midfloridasurgical.calcompose.ui.theme.ClinicalPalette
+import com.midfloridasurgical.calcompose.ui.theme.ClinicalPrimaryButton
 import com.midfloridasurgical.calcompose.ui.theme.ClinicalTypography
-import com.midfloridasurgical.calcompose.ui.theme.LiquidGlassCard
+import com.midfloridasurgical.calcompose.ui.theme.WhiteboardCard
 
 /**
  * Mirrors iOS `NativeBiometricService` + unlock-before-session-token.
@@ -115,46 +113,36 @@ fun BiometricUnlockScreen(
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Brush.linearGradient(
-                    listOf(ClinicalPalette.PageTop, ClinicalPalette.PageMiddle, ClinicalPalette.PageBottom),
-                ),
-            )
-            .padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        LiquidGlassCard(tint = ClinicalPalette.TealSoft, cornerRadius = 18.dp) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text("CAL", style = ClinicalTypography.largeTitle, color = ClinicalPalette.Ink)
-                Text(status, style = ClinicalTypography.caption, color = ClinicalPalette.Muted)
-                Spacer(modifier = Modifier.height(4.dp))
-                Button(
-                    onClick = { promptBiometric() },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = ClinicalPalette.Teal,
-                        contentColor = ClinicalPalette.OnTeal,
-                    ),
-                    shape = RoundedCornerShape(12.dp),
+    Box(modifier = Modifier.fillMaxSize()) {
+        ClinicalAuthBackground()
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            WhiteboardCard(tint = ClinicalPalette.CardStrong, cornerRadius = 16.dp) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(22.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Text("Unlock", style = ClinicalTypography.headline)
-                }
-                OutlinedButton(
-                    onClick = onUseOtp,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                ) {
-                    Text("Use OTP", color = ClinicalPalette.Teal, style = ClinicalTypography.rowTitle)
+                    Text("CAL", style = ClinicalTypography.largeTitle, color = ClinicalPalette.Ink)
+                    Text(status, style = ClinicalTypography.bodyMedium, color = ClinicalPalette.Muted)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    ClinicalPrimaryButton(
+                        text = "Unlock",
+                        onClick = { promptBiometric() },
+                    )
+                    OutlinedButton(
+                        onClick = onUseOtp,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Use OTP", color = ClinicalPalette.Teal, style = ClinicalTypography.rowTitle)
+                    }
                 }
             }
         }

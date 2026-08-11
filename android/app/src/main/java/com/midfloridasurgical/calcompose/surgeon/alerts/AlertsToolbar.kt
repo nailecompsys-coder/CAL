@@ -38,6 +38,7 @@ import com.midfloridasurgical.calcompose.data.SurgeonHomeStore
 import com.midfloridasurgical.calcompose.data.models.NativeScheduleAlert
 import com.midfloridasurgical.calcompose.ui.theme.ClinicalPalette
 import com.midfloridasurgical.calcompose.ui.theme.ClinicalTypography
+import com.midfloridasurgical.calcompose.ui.theme.WhiteboardCard
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
@@ -65,7 +66,7 @@ fun NativeAlertsToolbarButton(store: SurgeonHomeStore) {
                 } else {
                     "Alerts"
                 },
-                tint = if (unreadCount > 0) ClinicalPalette.Teal else ClinicalPalette.Ink,
+                tint = ClinicalPalette.OnTeal,
             )
         }
         if (unreadCount > 0) {
@@ -76,7 +77,7 @@ fun NativeAlertsToolbarButton(store: SurgeonHomeStore) {
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(top = 6.dp, end = 4.dp)
-                    .background(ClinicalPalette.Teal, RoundedCornerShape(50))
+                    .background(ClinicalPalette.Urgency, RoundedCornerShape(50))
                     .padding(horizontal = 4.dp, vertical = 1.dp),
             )
         }
@@ -86,7 +87,7 @@ fun NativeAlertsToolbarButton(store: SurgeonHomeStore) {
         ModalBottomSheet(
             onDismissRequest = { showingAlerts = false },
             sheetState = sheetState,
-            containerColor = ClinicalPalette.Card,
+            containerColor = ClinicalPalette.PageMiddle,
         ) {
             AlertInbox(
                 alerts = store.alerts.recent,
@@ -164,36 +165,45 @@ private fun AlertInbox(
 
 @Composable
 private fun AlertRow(alert: NativeScheduleAlert) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(
-                if (alert.isRead) ClinicalPalette.Card else ClinicalPalette.TealSoft.copy(alpha = 0.35f),
-                RoundedCornerShape(12.dp),
-            )
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+    WhiteboardCard(
+        tint = if (alert.isRead) ClinicalPalette.CardStrong else ClinicalPalette.TealSoft,
+        cornerRadius = 12.dp,
     ) {
-        Row(verticalAlignment = Alignment.Top) {
-            if (!alert.isRead) {
-                Box(
-                    modifier = Modifier
-                        .padding(top = 5.dp, end = 8.dp)
-                        .size(7.dp)
-                        .background(ClinicalPalette.Teal, CircleShape),
-                )
-            }
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    alert.title,
-                    style = if (alert.isRead) ClinicalTypography.rowTitle else ClinicalTypography.rowTitleStrong,
-                    color = ClinicalPalette.Ink,
-                )
-                Text(alert.body, style = ClinicalTypography.caption, color = ClinicalPalette.Muted)
-            }
-            val display = alertDisplayTime(alert.createdAt)
-            if (display.isNotEmpty()) {
-                Text(display, style = ClinicalTypography.captionEmphasized, color = ClinicalPalette.Muted)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(verticalAlignment = Alignment.Top) {
+                if (!alert.isRead) {
+                    Box(
+                        modifier = Modifier
+                            .padding(top = 5.dp, end = 8.dp)
+                            .size(7.dp)
+                            .background(ClinicalPalette.Teal, CircleShape),
+                    )
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        alert.title,
+                        style = if (alert.isRead) {
+                            ClinicalTypography.rowTitle
+                        } else {
+                            ClinicalTypography.rowTitleStrong
+                        },
+                        color = ClinicalPalette.Ink,
+                    )
+                    Text(alert.body, style = ClinicalTypography.caption, color = ClinicalPalette.Muted)
+                }
+                val display = alertDisplayTime(alert.createdAt)
+                if (display.isNotEmpty()) {
+                    Text(
+                        display,
+                        style = ClinicalTypography.captionEmphasized,
+                        color = ClinicalPalette.Muted,
+                    )
+                }
             }
         }
     }

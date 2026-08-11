@@ -179,8 +179,8 @@ private struct CALAuthCard: View {
       if let message = store.authMessage, !message.isEmpty {
         Text(message)
           .font(.caption.weight(.medium))
-          .foregroundStyle(.secondary)
-          .lineLimit(3)
+          .foregroundStyle(store.authMessageIsError ? Color.red : .secondary)
+          .lineLimit(4)
       }
     }
     .padding(9)

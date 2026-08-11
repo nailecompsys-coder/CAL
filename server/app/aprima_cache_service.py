@@ -416,6 +416,9 @@ def run_aprima_sync(
 
     upsert(CACHE_KIND_PATIENT, patients)
     upsert(CACHE_KIND_MEETING, meeting_rows)
+    # Flush date moves before out-of-window SQL delete. Otherwise synchronize_session=False
+    # deletes the old DB row while the session still holds a dirty UPDATE → StaleDataError.
+    db.flush()
 
     window_rows = (
         db.query(AprimaCachedAppointment)
@@ -429,9 +432,14 @@ def run_aprima_sync(
         if row.appointment_id not in seen_ids:
             db.delete(row)
 
-    db.query(AprimaCachedAppointment).filter(
+    stale_outside = db.query(AprimaCachedAppointment).filter(
         (AprimaCachedAppointment.date < window_start) | (AprimaCachedAppointment.date > window_end)
-    ).delete(synchronize_session=False)
+    )
+    if seen_ids:
+        stale_outside = stale_outside.filter(
+            ~AprimaCachedAppointment.appointment_id.in_(list(seen_ids))
+        )
+    stale_outside.delete(synchronize_session=False)
 
     all_fp = fingerprint_rows(patients + meeting_rows)
     state.last_finished_at = now

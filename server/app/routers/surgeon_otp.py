@@ -332,9 +332,20 @@ def otp_request(body: OtpRequestBody, request: Request, db: Session = Depends(ge
         return {
             "ok": True,
             "message": f"Local surgeon code: {local_dev_code}",
+            "sent": True,
             "devCode": local_dev_code,
         }
-    return {"ok": True, "message": "If that email or phone is registered, a code was sent."}
+    if not delivery_success:
+        # Account resolved but SMS+email failed — do not pretend success.
+        raise HTTPException(
+            status_code=503,
+            detail="Could not send a code. Try again or contact the office.",
+        )
+    return {
+        "ok": True,
+        "message": "Check your email or iPhone for the CAL access code.",
+        "sent": True,
+    }
 
 
 @router.post("/otp/verify")

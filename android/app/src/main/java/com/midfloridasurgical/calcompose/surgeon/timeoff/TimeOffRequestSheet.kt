@@ -42,6 +42,7 @@ import com.midfloridasurgical.calcompose.data.models.TimeOffSubmitSegment
 import com.midfloridasurgical.calcompose.ui.theme.ClinicalPalette
 import com.midfloridasurgical.calcompose.ui.theme.ClinicalTypography
 import com.midfloridasurgical.calcompose.ui.theme.LiquidGlassCard
+import com.midfloridasurgical.calcompose.util.onFailureUnlessCancelled
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -138,7 +139,7 @@ fun TimeOffRequestSheet(
     ModalBottomSheet(
         onDismissRequest = { if (!isSubmitting) onDismiss() },
         sheetState = sheetState,
-        containerColor = ClinicalPalette.Card,
+        containerColor = ClinicalPalette.PageMiddle,
     ) {
         Column(
             modifier = Modifier
@@ -238,20 +239,23 @@ fun TimeOffRequestSheet(
                         scope.launch {
                             isSubmitting = true
                             message = null
-                            runCatching {
-                                onSubmit(
-                                    startDate,
-                                    endDate,
-                                    reason,
-                                    notes.trim(),
-                                    segments.map { it.toSubmit() },
-                                )
-                            }.onSuccess { warnings ->
-                                message = submissionMessage(startDate, endDate, warnings)
-                            }.onFailure { error ->
-                                message = error.message ?: "Could not submit time off."
+                            try {
+                                runCatching {
+                                    onSubmit(
+                                        startDate,
+                                        endDate,
+                                        reason,
+                                        notes.trim(),
+                                        segments.map { it.toSubmit() },
+                                    )
+                                }.onSuccess { warnings ->
+                                    message = submissionMessage(startDate, endDate, warnings)
+                                }.onFailureUnlessCancelled { error ->
+                                    message = error.message ?: "Could not submit time off."
+                                }
+                            } finally {
+                                isSubmitting = false
                             }
-                            isSubmitting = false
                         }
                     },
                     enabled = !isSubmitting,

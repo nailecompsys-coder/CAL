@@ -11,8 +11,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.admin_dayoff_service import approve_dayoff, deny_dayoff
-from app.admin_settings_page_service import recent_admin_notifications, reconcile_stale_dayoff_notifications
-from app.models import AdminNotification, AdminUser, Base, DayOff, Surgeon
+from app.admin_settings_page_service import (
+    recent_admin_notifications,
+    reconcile_stale_dayoff_notifications,
+    reconcile_stale_schedule_flag_notifications,
+)
+from app.models import AdminNotification, AdminUser, Base, DayOff, ScheduleChangeEvent, Surgeon
 from app.scheduling_gate_service import (
     purge_newer_duplicates_for_request,
     reject_if_duplicate_day_off,
@@ -113,6 +117,7 @@ class DayOffPendingBugsTest(unittest.TestCase):
         with unittest.mock.patch("app.native_request_off_service.send_native_push_to_surgeon"), \
              unittest.mock.patch("app.native_request_off_service.notify_admins"), \
              unittest.mock.patch("app.native_request_off_service.log_schedule_change"), \
+             unittest.mock.patch("app.time_off_email_service.send_email", return_value=True), \
              unittest.mock.patch("app.native_request_off_service.store_dayoff_findings", return_value=[]):
             result = create_native_request_off(
                 self.db,
@@ -252,10 +257,83 @@ class DayOffPendingBugsTest(unittest.TestCase):
 
         with unittest.mock.patch("app.admin_dayoff_service.store_dayoff_findings"), \
              unittest.mock.patch("app.admin_dayoff_service.send_push_to_surgeon"), \
-             unittest.mock.patch("app.admin_dayoff_service.log_schedule_change"):
+             unittest.mock.patch("app.admin_dayoff_service.log_schedule_change"), \
+             unittest.mock.patch("app.time_off_email_service.send_email", return_value=True):
             approve_dayoff(self.db, dayoff.id, self.admin.id)
 
         self.assertIsNone(self.db.get(AdminNotification, note_id))
+
+    def test_approve_and_deny_email_the_surgeon(self):
+        dayoff = DayOff(
+            surgeon_id=self.surgeon.id,
+            start_date=date(2026, 10, 1),
+            end_date=date(2026, 10, 2),
+            status="pending",
+            reason="Vacation",
+        )
+        self.db.add(dayoff)
+        self.db.commit()
+        self.db.refresh(dayoff)
+
+        with unittest.mock.patch("app.admin_dayoff_service.store_dayoff_findings"), \
+             unittest.mock.patch("app.admin_dayoff_service.send_push_to_surgeon"), \
+             unittest.mock.patch("app.admin_dayoff_service.log_schedule_change"), \
+             unittest.mock.patch("app.time_off_email_service.send_email", return_value=True) as emailed:
+            approve_dayoff(self.db, dayoff.id, self.admin.id)
+
+        emailed.assert_called_once()
+        self.assertEqual(emailed.call_args.kwargs["to_email"], "boardman@example.com")
+        self.assertIn("Time off approved:", emailed.call_args.kwargs["subject"])
+        self.assertIn("approved", emailed.call_args.kwargs["html_body"].lower())
+
+        denied = DayOff(
+            surgeon_id=self.surgeon.id,
+            start_date=date(2026, 11, 1),
+            end_date=date(2026, 11, 1),
+            status="pending",
+            reason="CME",
+            admin_note="Coverage gap",
+        )
+        self.db.add(denied)
+        self.db.commit()
+        self.db.refresh(denied)
+
+        with unittest.mock.patch("app.admin_dayoff_service.send_push_to_surgeon"), \
+             unittest.mock.patch("app.admin_dayoff_service.log_schedule_change"), \
+             unittest.mock.patch("app.time_off_email_service.send_email", return_value=True) as emailed:
+            deny_dayoff(self.db, denied.id, "Coverage gap", self.admin.id)
+
+        emailed.assert_called_once()
+        self.assertEqual(emailed.call_args.kwargs["to_email"], "boardman@example.com")
+        self.assertIn("Time off denied:", emailed.call_args.kwargs["subject"])
+        self.assertIn("Coverage gap", emailed.call_args.kwargs["html_body"])
+
+    def test_past_schedule_flags_are_dropped(self):
+        note = AdminNotification(
+            admin_user_id=self.admin.id,
+            title="Scheduling flag · Block OR",
+            body="Owen Kieran · 08-10-26 · AP-OR 07:15-09:55: Already assigned Block OR",
+            kind="schedule_flag",
+            payload=json.dumps({"blockId": 1, "surgeonId": 1, "date": "2026-08-10"}),
+        )
+        event = ScheduleChangeEvent(
+            event_type="desk_or_schedule_flag",
+            title="Desk OR schedule flag",
+            body="Nadia Froehling · 08-11-26 · MN-OR: Already assigned Block OR",
+            date=date(2026, 8, 11),
+            payload=json.dumps({"blockId": 2, "date": "2026-08-11"}),
+        )
+        self.db.add_all([note, event])
+        self.db.commit()
+        note_id, event_id = note.id, event.id
+        with unittest.mock.patch(
+            "app.scheduling_gate_service.practice_today",
+            return_value=date(2026, 8, 14),
+        ):
+            removed = reconcile_stale_schedule_flag_notifications(self.db, self.admin.id)
+        self.assertGreaterEqual(removed, 2)
+        self.assertIsNone(self.db.get(AdminNotification, note_id))
+        self.assertIsNone(self.db.get(ScheduleChangeEvent, event_id))
 
 
 # late import for patch in approve test

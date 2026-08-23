@@ -32,4 +32,23 @@ struct TimeOffSubmitSegment: Encodable {
 struct NativeRequestOffResponse: Decodable {
   let ok: Bool
   let warnings: [String]
+  let emailed: Bool
+
+  enum CodingKeys: String, CodingKey {
+    case ok
+    case warnings
+    case emailed
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    ok = try container.decode(Bool.self, forKey: .ok)
+    warnings = try container.decodeIfPresent([String].self, forKey: .warnings) ?? []
+    emailed = try container.decodeIfPresent(Bool.self, forKey: .emailed) ?? false
+  }
+}
+
+struct TimeOffSubmitResult {
+  let warnings: [String]
+  let emailed: Bool
 }

@@ -6,6 +6,7 @@ import androidx.compose.runtime.setValue
 import com.midfloridasurgical.calcompose.data.models.NativeAlertSummary
 import com.midfloridasurgical.calcompose.data.models.NativeDayOffRequest
 import com.midfloridasurgical.calcompose.data.models.NativeHomeResponse
+import com.midfloridasurgical.calcompose.data.models.NativeRequestOffResponse
 import com.midfloridasurgical.calcompose.data.models.NativeScheduleAlert
 import com.midfloridasurgical.calcompose.data.models.NativeSurgeon
 import com.midfloridasurgical.calcompose.data.models.ScheduleDayUi
@@ -86,7 +87,7 @@ class SurgeonHomeStore(
         reason: String,
         notes: String = "",
         segments: List<TimeOffSubmitSegment> = emptyList(),
-    ): List<String> {
+    ): NativeRequestOffResponse {
         val response = apiClient.submitRequestOff(
             token = token,
             deviceToken = deviceToken,
@@ -97,7 +98,38 @@ class SurgeonHomeStore(
             segments = segments,
         )
         loadLookahead(containing = start.withDayOfMonth(1), daysAhead = 62)
-        return response.warnings
+        return response
+    }
+
+    suspend fun updateTimeOff(
+        requestId: Int,
+        start: LocalDate,
+        end: LocalDate,
+        reason: String,
+        notes: String = "",
+        segments: List<TimeOffSubmitSegment> = emptyList(),
+    ): NativeRequestOffResponse {
+        val response = apiClient.updateRequestOff(
+            token = token,
+            deviceToken = deviceToken,
+            requestId = requestId,
+            startDate = start,
+            endDate = end,
+            reason = reason,
+            notes = notes,
+            segments = segments,
+        )
+        loadLookahead(containing = start.withDayOfMonth(1), daysAhead = 62)
+        return response
+    }
+
+    suspend fun cancelTimeOff(requestId: Int, containing: LocalDate) {
+        apiClient.cancelRequestOff(
+            token = token,
+            deviceToken = deviceToken,
+            requestId = requestId,
+        )
+        loadLookahead(containing = containing.withDayOfMonth(1), daysAhead = 62)
     }
 
     suspend fun submitCallCoverage(rotationId: Int, coveringSurgeonId: Int) {

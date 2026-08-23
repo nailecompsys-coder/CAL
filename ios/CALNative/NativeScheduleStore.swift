@@ -307,12 +307,12 @@ final class NativeScheduleStore: ObservableObject {
     availableRoles = verified.availableRoles
   }
 
-  func submitTimeOffRequest(startDate: Date, endDate: Date, reason: String, notes: String, segments: [RequestSegment]) async throws -> [String] {
+  func submitTimeOffRequest(startDate: Date, endDate: Date, reason: String, notes: String, segments: [RequestSegment]) async throws -> TimeOffSubmitResult {
     guard let token = sessionToken, !token.isEmpty else {
       throw NativeCALError.missingSession
     }
 
-    let warnings = try await actions.submitTimeOffRequest(
+    let result = try await actions.submitTimeOffRequest(
       token: token,
       startDate: startDate,
       endDate: endDate,
@@ -321,7 +321,34 @@ final class NativeScheduleStore: ObservableObject {
       segments: segments
     )
     await load(containing: startDate, scope: .month)
-    return warnings
+    return result
+  }
+
+  func updateTimeOffRequest(id: Int, startDate: Date, endDate: Date, reason: String, notes: String, segments: [RequestSegment]) async throws -> TimeOffSubmitResult {
+    guard let token = sessionToken, !token.isEmpty else {
+      throw NativeCALError.missingSession
+    }
+
+    let result = try await actions.updateTimeOffRequest(
+      token: token,
+      requestId: id,
+      startDate: startDate,
+      endDate: endDate,
+      reason: reason,
+      notes: notes,
+      segments: segments
+    )
+    await load(containing: startDate, scope: .month)
+    return result
+  }
+
+  func cancelTimeOffRequest(id: Int, containing: Date) async throws {
+    guard let token = sessionToken, !token.isEmpty else {
+      throw NativeCALError.missingSession
+    }
+
+    try await actions.cancelTimeOffRequest(token: token, requestId: id)
+    await load(containing: containing, scope: .month)
   }
 
   func submitCallCoverage(assignment: ScheduleAssignment, coveringSurgeon: NativeSurgeon, selectedDate: Date, scope: ScheduleScope) async throws {

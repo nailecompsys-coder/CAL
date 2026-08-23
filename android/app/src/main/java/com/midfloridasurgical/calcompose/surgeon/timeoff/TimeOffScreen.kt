@@ -18,12 +18,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -41,7 +44,9 @@ import com.midfloridasurgical.calcompose.ui.theme.ClinicalPrimaryButton
 import com.midfloridasurgical.calcompose.ui.theme.ClinicalTypography
 import com.midfloridasurgical.calcompose.ui.theme.WhiteboardCard
 import com.midfloridasurgical.calcompose.ui.theme.clinicalPageBackground
+import com.midfloridasurgical.calcompose.util.onFailureUnlessCancelled
 import java.time.LocalDate
+import kotlinx.coroutines.launch
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
@@ -53,7 +58,12 @@ fun TimeOffScreen(store: SurgeonHomeStore) {
     val todayMonth = remember { YearMonth.now() }
     var selectedMonth by remember { mutableStateOf(todayMonth) }
     var showRequestSheet by remember { mutableStateOf(false) }
+    var editingRequest by remember { mutableStateOf<NativeDayOffRequest?>(null) }
+    var selectedRequest by remember { mutableStateOf<NativeDayOffRequest?>(null) }
+    var cancelTarget by remember { mutableStateOf<NativeDayOffRequest?>(null) }
+    var actionMessage by remember { mutableStateOf<String?>(null) }
     var showingMonthMenu by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     val months = remember {
         (-1 until 12).map { todayMonth.plusMonths(it.toLong()) }
@@ -187,13 +197,17 @@ fun TimeOffScreen(store: SurgeonHomeStore) {
                 items = monthRequests,
                 key = { it.id },
             ) { request ->
-                TimeOffRequestRow(request)
+                TimeOffRequestRow(
+                    request = request,
+                    onClick = { if (request.canManage) selectedRequest = request },
+                )
             }
         }
     }
 
     if (showRequestSheet) {
         TimeOffRequestSheet(
+            defaultDate = selectedMonth.atDay(1),
             onDismiss = { showRequestSheet = false },
             onSubmit = { start, end, reason, notes, segments ->
                 store.submitTimeOff(
@@ -203,6 +217,112 @@ fun TimeOffScreen(store: SurgeonHomeStore) {
                     notes = notes,
                     segments = segments,
                 )
+            },
+        )
+    }
+
+    editingRequest?.let { request ->
+        TimeOffRequestSheet(
+            existing = request,
+            onDismiss = { editingRequest = null },
+            onSubmit = { start, end, reason, notes, segments ->
+                store.updateTimeOff(
+                    requestId = request.id,
+                    start = start,
+                    end = end,
+                    reason = reason,
+                    notes = notes,
+                    segments = segments,
+                )
+            },
+        )
+    }
+
+    selectedRequest?.let { request ->
+        AlertDialog(
+            onDismissRequest = { selectedRequest = null },
+            title = {
+                Text("${formatShortDate(request.startDate)} · ${request.reason.ifBlank { "Time off" }}")
+            },
+            text = {
+                Text(
+                    if (request.status.equals("approved", ignoreCase = true)) {
+                        "Approved time off can be canceled, or changed and sent back for approval."
+                    } else {
+                        "This request is pending. You can change it or cancel it."
+                    },
+                    color = ClinicalPalette.Ink,
+                    style = ClinicalTypography.caption,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        editingRequest = request
+                        selectedRequest = null
+                    },
+                ) {
+                    Text("Modify", color = ClinicalPalette.Teal)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        cancelTarget = request
+                        selectedRequest = null
+                    },
+                ) {
+                    Text("Cancel Time Off", color = ClinicalPalette.Denied)
+                }
+            },
+        )
+    }
+
+    cancelTarget?.let { request ->
+        AlertDialog(
+            onDismissRequest = { cancelTarget = null },
+            title = { Text("Cancel this time off?") },
+            text = {
+                Text(
+                    "This removes it from your schedule.",
+                    color = ClinicalPalette.Ink,
+                    style = ClinicalTypography.caption,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val target = request
+                        cancelTarget = null
+                        scope.launch {
+                            runCatching {
+                                store.cancelTimeOff(target.id, selectedMonth.atDay(1))
+                            }.onFailureUnlessCancelled { error ->
+                                actionMessage = error.message ?: "Could not cancel time off."
+                            }
+                        }
+                    },
+                ) {
+                    Text("Cancel Time Off", color = ClinicalPalette.Denied)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { cancelTarget = null }) {
+                    Text("Keep", color = ClinicalPalette.Muted)
+                }
+            },
+        )
+    }
+
+    actionMessage?.let { message ->
+        AlertDialog(
+            onDismissRequest = { actionMessage = null },
+            title = { Text("Time Off") },
+            text = { Text(message, color = ClinicalPalette.Ink, style = ClinicalTypography.caption) },
+            confirmButton = {
+                TextButton(onClick = { actionMessage = null }) {
+                    Text("OK", color = ClinicalPalette.Teal)
+                }
             },
         )
     }
@@ -276,7 +396,7 @@ private fun MonthStepper(
 }
 
 @Composable
-private fun TimeOffRequestRow(request: NativeDayOffRequest) {
+private fun TimeOffRequestRow(request: NativeDayOffRequest, onClick: () -> Unit) {
     val status = request.status.ifBlank { "pending" }
     val statusColor = when (status.lowercase(Locale.US)) {
         "approved" -> ClinicalPalette.Teal
@@ -290,7 +410,9 @@ private fun TimeOffRequestRow(request: NativeDayOffRequest) {
     }
 
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (request.canManage) Modifier.clickable(onClick = onClick) else Modifier),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -318,6 +440,14 @@ private fun TimeOffRequestRow(request: NativeDayOffRequest) {
             style = ClinicalTypography.badge,
             color = statusColor,
         )
+        if (request.canManage) {
+            Icon(
+                Icons.Rounded.ChevronRight,
+                contentDescription = "Manage time off",
+                tint = ClinicalPalette.Muted,
+                modifier = Modifier.size(16.dp),
+            )
+        }
     }
 }
 

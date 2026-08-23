@@ -15,6 +15,7 @@ from .scheduling_guardrails_service import (
     finding_dicts,
     store_dayoff_findings,
 )
+from .time_off_email_service import send_time_off_decision_email
 
 
 def resolved_months(resolved: list[DayOff]) -> list[dict]:
@@ -209,6 +210,8 @@ def add_approved_dayoff(
         f"Admin added approved time off: {start.strftime('%b %d')}–{end.strftime('%b %d')}.",
         db,
     )
+    if surgeon:
+        send_time_off_decision_email(surgeon, dayoff, decision="approved")
     return advisories + [f["message"] for f in finding_dicts(findings)] + conflict_messages_for_dayoff(db, dayoff)
 
 
@@ -238,6 +241,8 @@ def approve_dayoff(db: Session, dayoff_id: int, approved_by: int) -> list[str] |
         f"Your request for {dayoff.start_date.strftime('%b %d')}–{dayoff.end_date.strftime('%b %d')} was approved.",
         db,
     )
+    if surgeon:
+        send_time_off_decision_email(surgeon, dayoff, decision="approved")
     return conflict_messages_for_dayoff(db, dayoff)
 
 
@@ -270,6 +275,8 @@ def deny_dayoff(db: Session, dayoff_id: int, admin_note: str, approved_by: int) 
         clear_dayoff_request_notifications(db, dayoff_id)
         msg = admin_note if admin_note else f"Your request for {dayoff.start_date.strftime('%b %d')}–{dayoff.end_date.strftime('%b %d')} was not approved."
         send_push_to_surgeon(dayoff.surgeon_id, "Days Off Request", msg, db)
+        if surgeon:
+            send_time_off_decision_email(surgeon, dayoff, decision="denied")
 
 
 def edit_dayoff(db: Session, dayoff_id: int, start: date, end: date, reason: str, notes: str) -> None:

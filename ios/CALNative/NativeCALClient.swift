@@ -318,12 +318,57 @@ struct NativeCALClient {
     return try JSONDecoder().decode(NativePatientScheduleResponse.self, from: data)
   }
 
-  func submitRequestOff(token: String, startDate: Date, endDate: Date, reason: String, notes: String, segments: [RequestSegment]) async throws -> [String] {
-    let url = baseURL.appendingPathComponent("/api/native/request-off")
+  func submitRequestOff(token: String, startDate: Date, endDate: Date, reason: String, notes: String, segments: [RequestSegment]) async throws -> TimeOffSubmitResult {
+    try await sendRequestOff(
+      token: token,
+      method: "POST",
+      path: "/api/native/request-off",
+      startDate: startDate,
+      endDate: endDate,
+      reason: reason,
+      notes: notes,
+      segments: segments
+    )
+  }
+
+  func updateRequestOff(token: String, requestId: Int, startDate: Date, endDate: Date, reason: String, notes: String, segments: [RequestSegment]) async throws -> TimeOffSubmitResult {
+    try await sendRequestOff(
+      token: token,
+      method: "PUT",
+      path: "/api/native/request-off/\(requestId)",
+      startDate: startDate,
+      endDate: endDate,
+      reason: reason,
+      notes: notes,
+      segments: segments
+    )
+  }
+
+  func cancelRequestOff(token: String, requestId: Int) async throws {
+    let url = baseURL.appendingPathComponent("/api/native/request-off/\(requestId)")
+    var request = URLRequest(url: url)
+    request.httpMethod = "DELETE"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.setValue(token, forHTTPHeaderField: "X-CAL-Device-Token")
+    _ = try await perform(request)
+  }
+
+  private func sendRequestOff(
+    token: String,
+    method: String,
+    path: String,
+    startDate: Date,
+    endDate: Date,
+    reason: String,
+    notes: String,
+    segments: [RequestSegment]
+  ) async throws -> TimeOffSubmitResult {
+    let url = baseURL.appendingPathComponent(path)
     let normalizedSegments = segments.isEmpty ? [RequestSegment(date: startDate, isFullDay: true, start: "07:00", end: "17:00")] : segments
     let firstPartial = normalizedSegments.first { !$0.isFullDay }
     var request = URLRequest(url: url)
-    request.httpMethod = "POST"
+    request.httpMethod = method
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
     request.setValue(token, forHTTPHeaderField: "X-CAL-Device-Token")
@@ -350,7 +395,7 @@ struct NativeCALClient {
     if !result.ok {
       throw NativeCALError.requestRejected(result.warnings.joined(separator: " "))
     }
-    return result.warnings
+    return TimeOffSubmitResult(warnings: result.warnings, emailed: result.emailed)
   }
 
   func submitCallCoverage(token: String, rotationId: Int, coveringSurgeonId: Int, notes: String = "") async throws -> NativeCallAssignmentResponse {

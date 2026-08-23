@@ -262,13 +262,36 @@ struct ScheduleDay: Identifiable {
   }
 }
 
-struct TimeOffRequest: Identifiable {
+struct TimeOffRequest: Identifiable, Equatable {
   let id: Int
   let surgeonInitials: String
   let startDate: String
   let endDate: String
   let reason: String
+  let notes: String
   let status: String
+  let segments: [TimeOffSegmentDraft]
+
+  var canManage: Bool {
+    switch status.lowercased() {
+    case "pending", "approved":
+      return true
+    default:
+      return false
+    }
+  }
+
+  var parsedStartDate: Date? {
+    NativeDayResponse.dateFormatter.date(from: startDate)
+  }
+
+  var parsedEndDate: Date? {
+    NativeDayResponse.dateFormatter.date(from: endDate)
+  }
+
+  var requestSegments: [RequestSegment] {
+    segments.compactMap(\.requestSegment)
+  }
 
   var dateRange: String {
     if startDate == endDate {
@@ -320,6 +343,27 @@ struct PatientAppointment: Identifiable {
     }
     let minute = parts.count > 1 ? String(parts[1]) : "00"
     return "\(String(format: "%02d", hour24)):\(minute)"
+  }
+}
+
+struct TimeOffSegmentDraft: Identifiable, Equatable {
+  let date: String
+  let isFullDay: Bool
+  let start: String
+  let end: String
+
+  var id: String { date }
+
+  var requestSegment: RequestSegment? {
+    guard let parsed = NativeDayResponse.dateFormatter.date(from: date) else {
+      return nil
+    }
+    return RequestSegment(
+      date: parsed,
+      isFullDay: isFullDay,
+      start: start.isEmpty ? "07:00" : start,
+      end: end.isEmpty ? "17:00" : end
+    )
   }
 }
 

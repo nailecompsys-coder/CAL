@@ -38,7 +38,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.midfloridasurgical.calcompose.data.models.NativeDayOffRequest
+import com.midfloridasurgical.calcompose.data.models.NativeRequestOffResponse
 import com.midfloridasurgical.calcompose.data.models.TimeOffSubmitSegment
+import com.midfloridasurgical.calcompose.ui.theme.ClinicalPrimaryButton
 import com.midfloridasurgical.calcompose.ui.theme.ClinicalPalette
 import com.midfloridasurgical.calcompose.ui.theme.ClinicalTypography
 import com.midfloridasurgical.calcompose.ui.theme.LiquidGlassCard
@@ -96,11 +99,12 @@ data class RequestSegment(
 private val Reasons = listOf("Day Off", "No Call", "Vacation", "CME", "Partial Day", "Medical")
 private val DisplayDate = DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.US)
 private val SegmentDate = DateTimeFormatter.ofPattern("MM/dd", Locale.US)
-private val ShortLabel = DateTimeFormatter.ofPattern("MMM d", Locale.US)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TimeOffRequestSheet(
+    existing: NativeDayOffRequest? = null,
+    defaultDate: LocalDate = LocalDate.now(),
     onDismiss: () -> Unit,
     onSubmit: suspend (
         start: LocalDate,
@@ -108,18 +112,29 @@ fun TimeOffRequestSheet(
         reason: String,
         notes: String,
         segments: List<TimeOffSubmitSegment>,
-    ) -> List<String>,
+    ) -> NativeRequestOffResponse,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
 
-    var startDate by remember { mutableStateOf(LocalDate.now()) }
-    var endDate by remember { mutableStateOf(LocalDate.now()) }
-    var segments by remember { mutableStateOf(listOf(RequestSegment.fromPreset(LocalDate.now(), RequestSegmentPreset.Full))) }
-    var reason by remember { mutableStateOf(Reasons.first()) }
-    var notes by remember { mutableStateOf("") }
+    val isEditing = existing != null
+    val seedDate = if (defaultDate.isBefore(LocalDate.now())) LocalDate.now() else defaultDate
+    var startDate by remember(existing, seedDate) {
+        mutableStateOf(existing?.startDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: seedDate)
+    }
+    var endDate by remember(existing, seedDate) {
+        mutableStateOf(existing?.endDate?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: seedDate)
+    }
+    var segments by remember(existing, seedDate) {
+        mutableStateOf(existing?.toRequestSegments() ?: listOf(RequestSegment.fromPreset(seedDate, RequestSegmentPreset.Full)))
+    }
+    var reason by remember(existing) {
+        mutableStateOf(existing?.reason?.takeIf { Reasons.contains(it) } ?: Reasons.first())
+    }
+    var notes by remember(existing) { mutableStateOf(existing?.notes.orEmpty()) }
     var message by remember { mutableStateOf<String?>(null) }
     var isSubmitting by remember { mutableStateOf(false) }
+    var receipt by remember { mutableStateOf<TimeOffReceipt?>(null) }
     var editingField by remember { mutableStateOf<DateField?>(null) }
 
     fun normalizeSegments() {
@@ -148,11 +163,21 @@ fun TimeOffRequestSheet(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            receipt?.let { sent ->
+                TimeOffReceiptContent(receipt = sent, isUpdate = isEditing, onOk = onDismiss)
+            } ?: run {
             Text(
-                "Request Time Off",
+                if (isEditing) "Modify Time Off" else "Request Time Off",
                 style = ClinicalTypography.headlineStrong,
                 color = ClinicalPalette.Ink,
             )
+            if (existing?.status.equals("approved", ignoreCase = true)) {
+                Text(
+                    "Changing this sends it back for approval.",
+                    color = ClinicalPalette.WarningText,
+                    style = ClinicalTypography.caption,
+                )
+            }
 
             SectionLabel("Range")
             RequestDateButton("Start", startDate) { editingField = DateField.Start }
@@ -248,8 +273,15 @@ fun TimeOffRequestSheet(
                                         notes.trim(),
                                         segments.map { it.toSubmit() },
                                     )
-                                }.onSuccess { warnings ->
-                                    message = submissionMessage(startDate, endDate, warnings)
+                                }.onSuccess { result ->
+                                    receipt = TimeOffReceipt(
+                                        startDate = startDate,
+                                        endDate = endDate,
+                                        reason = reason,
+                                        notes = notes.trim(),
+                                        segments = segments,
+                                        warnings = result.warnings,
+                                    )
                                 }.onFailureUnlessCancelled { error ->
                                     message = error.message ?: "Could not submit time off."
                                 }
@@ -267,10 +299,11 @@ fun TimeOffRequestSheet(
                     shape = RoundedCornerShape(12.dp),
                 ) {
                     Text(
-                        if (isSubmitting) "Submitting" else "Submit",
+                        if (isSubmitting) "Saving" else if (isEditing) "Save" else "Submit",
                         style = ClinicalTypography.rowTitleStrong,
                     )
                 }
+            }
             }
 
             Spacer(modifier = Modifier.height(20.dp))
@@ -317,6 +350,95 @@ fun TimeOffRequestSheet(
         ) {
             DatePicker(state = pickerState)
         }
+    }
+}
+
+private data class TimeOffReceipt(
+    val startDate: LocalDate,
+    val endDate: LocalDate,
+    val reason: String,
+    val notes: String,
+    val segments: List<RequestSegment>,
+    val warnings: List<String>,
+) {
+    val rangeLabel: String
+        get() {
+            val start = startDate.format(DisplayDate)
+            if (startDate == endDate) return start
+            return "$start – ${endDate.format(DisplayDate)}"
+        }
+}
+
+@Composable
+private fun TimeOffReceiptContent(
+    receipt: TimeOffReceipt,
+    isUpdate: Boolean,
+    onOk: () -> Unit,
+) {
+    Text(
+        if (isUpdate) "Request Updated" else "Request Sent",
+        style = ClinicalTypography.headlineStrong,
+        color = ClinicalPalette.Ink,
+    )
+    SectionLabel("Sent")
+    LiquidGlassCard(tint = ClinicalPalette.CardStrong, cornerRadius = 12.dp) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            ReceiptRow("Dates", receipt.rangeLabel)
+            ReceiptRow("Type", receipt.reason)
+            if (receipt.notes.isNotBlank()) {
+                ReceiptRow("Note", receipt.notes)
+            }
+            ReceiptRow("Status", "Pending approval")
+        }
+    }
+    SectionLabel("Days")
+    receipt.segments.forEach { segment ->
+        LiquidGlassCard(tint = ClinicalPalette.PorcelainChip, cornerRadius = 12.dp) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    segment.date.format(SegmentDate),
+                    style = ClinicalTypography.rowTitle,
+                    color = ClinicalPalette.Ink,
+                )
+                Text(
+                    segment.summary,
+                    style = ClinicalTypography.captionEmphasized,
+                    color = ClinicalPalette.Muted,
+                )
+            }
+        }
+    }
+    primaryWarning(receipt.warnings)?.let { warning ->
+        LiquidGlassCard(tint = ClinicalPalette.Amber, cornerRadius = 12.dp) {
+            Text(
+                cleanWarning(warning),
+                color = ClinicalPalette.WarningText,
+                style = ClinicalTypography.caption,
+                modifier = Modifier.padding(10.dp),
+            )
+        }
+    }
+    ClinicalPrimaryButton(text = "OK", onClick = onOk)
+}
+
+@Composable
+private fun ReceiptRow(title: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(title, style = ClinicalTypography.rowTitle, color = ClinicalPalette.Ink)
+        Text(value, style = ClinicalTypography.rowTitle, color = ClinicalPalette.Teal)
     }
 }
 
@@ -410,6 +532,31 @@ private fun RequestSegmentRow(
     }
 }
 
+private fun NativeDayOffRequest.toRequestSegments(): List<RequestSegment> {
+    if (segments.isNotEmpty()) {
+        return segments.mapNotNull { segment ->
+            val date = runCatching { LocalDate.parse(segment.date) }.getOrNull() ?: return@mapNotNull null
+            if (segment.isFullDay) {
+                RequestSegment.fromPreset(date, RequestSegmentPreset.Full)
+            } else if (segment.start == "07:00" && segment.end == "12:00") {
+                RequestSegment.fromPreset(date, RequestSegmentPreset.Am)
+            } else if (segment.start == "12:00" && segment.end == "17:00") {
+                RequestSegment.fromPreset(date, RequestSegmentPreset.Pm)
+            } else {
+                RequestSegment(
+                    date = date,
+                    isFullDay = false,
+                    start = segment.start ?: "07:00",
+                    end = segment.end ?: "17:00",
+                )
+            }
+        }
+    }
+    val start = runCatching { LocalDate.parse(startDate) }.getOrNull() ?: return emptyList()
+    val end = runCatching { LocalDate.parse(endDate) }.getOrNull() ?: start
+    return datesBetween(start, end).map { RequestSegment.fromPreset(it, RequestSegmentPreset.Full) }
+}
+
 private fun datesBetween(start: LocalDate, end: LocalDate): List<LocalDate> {
     val dates = mutableListOf<LocalDate>()
     var cursor = start
@@ -418,16 +565,6 @@ private fun datesBetween(start: LocalDate, end: LocalDate): List<LocalDate> {
         cursor = cursor.plusDays(1)
     }
     return dates
-}
-
-private fun submissionMessage(
-    start: LocalDate,
-    end: LocalDate,
-    warnings: List<String>,
-): String {
-    val rangeLine = "Request for ${start.format(ShortLabel)} to ${end.format(ShortLabel)}"
-    val warning = primaryWarning(warnings) ?: return "$rangeLine\nNo conflicts noted, submitted for approval."
-    return "$rangeLine\n${cleanWarning(warning)}"
 }
 
 private fun primaryWarning(warnings: List<String>): String? =

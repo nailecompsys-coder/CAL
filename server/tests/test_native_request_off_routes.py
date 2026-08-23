@@ -49,8 +49,17 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
                 ],
             )
 
-            with patch("app.native_request_off_service.send_native_push_to_surgeon"):
+            with patch("app.native_request_off_service.send_native_push_to_surgeon"), \
+                 patch("app.time_off_email_service.send_email", return_value=True) as emailed:
                 create_response = native_request_off(create_body, db=db, auth=(surgeon, "token"))
+
+            self.assertTrue(create_response["emailed"])
+            emailed.assert_called_once()
+            self.assertEqual(emailed.call_args.kwargs["to_email"], "chris@example.com")
+            self.assertIn("Time off request:", emailed.call_args.kwargs["subject"])
+            self.assertIn("Vacation", emailed.call_args.kwargs["html_body"])
+            self.assertIn("Family trip", emailed.call_args.kwargs["html_body"])
+            self.assertIn("approved or denied", emailed.call_args.kwargs["html_body"])
 
             self.assertTrue(create_response["ok"])
             created = create_response["request"]
@@ -82,7 +91,8 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
                 segments=[{"date": updated_start.isoformat(), "isFullDay": True}],
             )
 
-            with patch("app.native_request_off_service.send_native_push_to_surgeon"):
+            with patch("app.native_request_off_service.send_native_push_to_surgeon"), \
+                 patch("app.time_off_email_service.send_email", return_value=True):
                 update_response = native_update_request_off(row.id, update_body, db=db, auth=(surgeon, "token"))
 
             self.assertTrue(update_response["ok"])
@@ -100,7 +110,8 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
             self.assertEqual(refreshed.status, "pending")
             self.assertIsNone(refreshed.admin_note)
 
-            with patch("app.native_request_off_service.send_native_push_to_surgeon"):
+            with patch("app.native_request_off_service.send_native_push_to_surgeon"), \
+                 patch("app.time_off_email_service.send_email", return_value=True):
                 delete_response = native_cancel_request_off(row.id, db=db, auth=(surgeon, "token"))
 
             self.assertTrue(delete_response["ok"])
@@ -121,10 +132,12 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
                 is_full_day=True,
             )
 
-            with patch("app.native_request_off_service.send_native_push_to_surgeon"):
+            with patch("app.native_request_off_service.send_native_push_to_surgeon"), \
+                 patch("app.time_off_email_service.send_email", return_value=True):
                 response = native_request_off(body, db=db, auth=(surgeon, "token"))
 
             self.assertTrue(response["ok"])
+            self.assertTrue(response["emailed"])
             self.assertIsNotNone(response["request"])
             self.assertEqual(response["warnings"], [])
             self.assertEqual(db.query(DayOff).count(), 1)
@@ -158,7 +171,9 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
             start = date.today() + timedelta(days=11)
             body = NativeRequestOffBody(start_date=start, end_date=start, reason="Day Off", is_full_day=True)
 
-            with patch("app.native_request_off_service.send_native_push_to_surgeon"), patch("app.push.send_sms"):
+            with patch("app.native_request_off_service.send_native_push_to_surgeon"), \
+                 patch("app.time_off_email_service.send_email", return_value=True), \
+                 patch("app.push.send_sms"):
                 response = native_request_off(body, db=db, auth=(surgeon, "token"))
 
             self.assertTrue(response["ok"])
@@ -199,7 +214,8 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
             start = date.today() + timedelta(days=9)
             body = NativeRequestOffBody(start_date=start, end_date=start, reason="Day Off", is_full_day=True)
 
-            with patch("app.native_request_off_service.send_native_push_to_surgeon"):
+            with patch("app.native_request_off_service.send_native_push_to_surgeon"), \
+                 patch("app.time_off_email_service.send_email", return_value=True):
                 response = native_request_off(body, db=db, auth=(requester, "token"))
 
             self.assertTrue(response["ok"])
@@ -207,6 +223,55 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
             row = db.get(DayOff, response["request"]["id"])
             self.assertIsNotNone(row.review_findings)
             self.assertIn("clinic_group_capacity", row.review_findings)
+        finally:
+            db.close()
+
+    def test_create_request_still_succeeds_when_email_fails(self):
+        db = self.Session()
+        try:
+            surgeon = self._seed_surgeon(db, email="")
+            start = date.today() + timedelta(days=3)
+            body = NativeRequestOffBody(start_date=start, end_date=start, reason="Day Off", is_full_day=True)
+
+            with patch("app.native_request_off_service.send_native_push_to_surgeon"), \
+                 patch("app.time_off_email_service.send_email", return_value=True) as emailed:
+                response = native_request_off(body, db=db, auth=(surgeon, "token"))
+
+            self.assertTrue(response["ok"])
+            self.assertFalse(response["emailed"])
+            emailed.assert_not_called()
+            self.assertEqual(db.query(DayOff).count(), 1)
+        finally:
+            db.close()
+
+    def test_cancel_approved_request_emails_surgeon(self):
+        db = self.Session()
+        try:
+            surgeon = self._seed_surgeon(db)
+            start = date.today() + timedelta(days=4)
+            row = DayOff(
+                surgeon_id=surgeon.id,
+                start_date=start,
+                end_date=start,
+                reason="Vacation",
+                status="approved",
+                is_full_day=True,
+            )
+            db.add(row)
+            db.commit()
+            dayoff_id = row.id
+
+            with patch("app.native_request_off_service.send_native_push_to_surgeon"), \
+                 patch("app.native_request_off_service.notify_admins"), \
+                 patch("app.time_off_email_service.send_email", return_value=True) as emailed:
+                response = native_cancel_request_off(dayoff_id, db=db, auth=(surgeon, "token"))
+
+            self.assertTrue(response["ok"])
+            self.assertIsNone(db.get(DayOff, dayoff_id))
+            emailed.assert_called_once()
+            self.assertEqual(emailed.call_args.kwargs["to_email"], "chris@example.com")
+            self.assertIn("Time off canceled:", emailed.call_args.kwargs["subject"])
+            self.assertIn("approved", emailed.call_args.kwargs["html_body"].lower())
         finally:
             db.close()
 

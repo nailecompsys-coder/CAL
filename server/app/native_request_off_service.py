@@ -20,6 +20,7 @@ from .scheduling_gate_service import (
     surgeon_friendly_conflict_message,
 )
 from .scheduling_guardrails_service import store_dayoff_findings
+from .time_off_email_service import send_time_off_canceled_email, send_time_off_request_copy
 
 
 def create_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequestOffInput) -> dict:
@@ -41,7 +42,13 @@ def create_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequ
         )
         if overlap_note:
             warnings.append(overlap_note)
-        return {"ok": True, "request": serialize_day_off(existing), "warnings": warnings[:3]}
+        emailed = send_time_off_request_copy(surgeon, payload, segments, warnings, updated=False)
+        return {
+            "ok": True,
+            "request": serialize_day_off(existing),
+            "warnings": warnings[:3],
+            "emailed": emailed,
+        }
 
     overlap_note = day_off_overlap_advisory(
         db,
@@ -112,7 +119,13 @@ def create_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequ
         db,
         {"type": "day_off", "requestId": row.id},
     )
-    return {"ok": True, "request": serialize_day_off(row), "warnings": warnings[:3]}
+    emailed = send_time_off_request_copy(surgeon, payload, segments, warnings, updated=False)
+    return {
+        "ok": True,
+        "request": serialize_day_off(row),
+        "warnings": warnings[:3],
+        "emailed": emailed,
+    }
 
 
 def update_native_request_off(db: Session, surgeon: Surgeon, dayoff_id: int, payload: NativeRequestOffInput) -> dict:
@@ -178,21 +191,54 @@ def update_native_request_off(db: Session, surgeon: Surgeon, dayoff_id: int, pay
         db,
         {"type": "day_off", "requestId": row.id},
     )
-    return {"ok": True, "request": serialize_day_off(row), "warnings": warnings[:3]}
+    emailed = send_time_off_request_copy(surgeon, payload, segments, warnings, updated=True)
+    return {
+        "ok": True,
+        "request": serialize_day_off(row),
+        "warnings": warnings[:3],
+        "emailed": emailed,
+    }
 
 
 def cancel_native_request_off(db: Session, surgeon: Surgeon, dayoff_id: int) -> dict:
     row = db.get(DayOff, dayoff_id)
     if not row or row.surgeon_id != surgeon.id:
         raise HTTPException(404, "Days off request not found")
+    start_date = row.start_date
+    end_date = row.end_date
+    reason = row.reason or "Time off"
+    was_approved = (row.status or "").lower() == "approved"
+    log_schedule_change(
+        db,
+        event_type="day_off_canceled",
+        surgeon_id=surgeon.id,
+        event_date=start_date,
+        title="Time off canceled",
+        body=f"{surgeon.initials}: {start_date.strftime('%b %-d')} to {end_date.strftime('%b %-d')}",
+    )
     db.delete(row)
     db.commit()
+    notify_admins(
+        "Time off canceled",
+        f"{surgeon.full_name} canceled {start_date.strftime('%b %-d')} to {end_date.strftime('%b %-d')}.",
+        db,
+        kind="day_off_request",
+        payload={"dayOffId": dayoff_id, "surgeonId": surgeon.id, "status": "canceled"},
+        require_dayoff_opt_in=True,
+    )
     send_native_push_to_surgeon(
         surgeon.id,
         "Days off canceled",
         "Your schedule has been restored for the canceled days.",
         db,
         {"type": "day_off", "requestId": dayoff_id, "status": "canceled"},
+    )
+    send_time_off_canceled_email(
+        surgeon,
+        start_date=start_date,
+        end_date=end_date,
+        reason=reason,
+        was_approved=was_approved,
     )
     return {"ok": True}
 

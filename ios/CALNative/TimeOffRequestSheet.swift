@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TimeOffRequestForm: View {
   @ObservedObject var store: NativeScheduleStore
+  var existing: TimeOffRequest? = nil
   @Environment(\.dismiss) private var dismiss
 
   @State private var startDate = Date()
@@ -11,9 +12,35 @@ struct TimeOffRequestForm: View {
   @State private var notes = ""
   @State private var message: String?
   @State private var isSubmitting = false
+  @State private var receipt: TimeOffReceipt?
   @State private var editingDate: RequestDateField?
 
   private let reasons = ["Day Off", "No Call", "Vacation", "CME", "Partial Day", "Medical"]
+  private var isEditing: Bool { existing != nil }
+
+  init(store: NativeScheduleStore, existing: TimeOffRequest? = nil, defaultDate: Date = Date()) {
+    self.store = store
+    self.existing = existing
+    if let existing {
+      let knownReasons = ["Day Off", "No Call", "Vacation", "CME", "Partial Day", "Medical"]
+      _startDate = State(initialValue: existing.parsedStartDate ?? Date())
+      _endDate = State(initialValue: existing.parsedEndDate ?? Date())
+      _reason = State(initialValue: knownReasons.contains(existing.reason) ? existing.reason : (existing.reason.isEmpty ? "Day Off" : existing.reason))
+      _notes = State(initialValue: existing.notes)
+      _segments = State(initialValue: existing.requestSegments)
+    } else {
+      let seed = Self.clampedRequestDate(defaultDate)
+      _startDate = State(initialValue: seed)
+      _endDate = State(initialValue: seed)
+    }
+  }
+
+  private static func clampedRequestDate(_ date: Date) -> Date {
+    let calendar = Calendar.current
+    let monthStart = calendar.dateInterval(of: .month, for: date)?.start ?? calendar.startOfDay(for: date)
+    let today = calendar.startOfDay(for: Date())
+    return monthStart < today ? today : monthStart
+  }
 
   var body: some View {
     CalNavigation {
@@ -21,101 +48,38 @@ struct TimeOffRequestForm: View {
         ScheduleWaterBackground()
 
         ScrollView {
-          VStack(alignment: .leading, spacing: 8) {
-            DashboardSection(title: "Range") {
-              RequestDateButton(title: "Start", date: startDate) {
-                editingDate = .start
-              }
-
-              Divider().opacity(0.45)
-
-              RequestDateButton(title: "End", date: endDate) {
-                editingDate = .end
-              }
-
-              if let message {
-                Text(message)
-                  .font(.caption)
-                  .foregroundStyle(.secondary)
-                  .padding(.horizontal, 10)
-                  .padding(.vertical, 8)
-                  .frame(maxWidth: .infinity, alignment: .leading)
-                  .liquidGlassCard(cornerRadius: 12, tint: ClinicalPalette.amber)
-              }
-
-              Text(rangeSummary)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            }
-            .sheet(item: $editingDate) { field in
-              RequestDatePickerSheet(title: field.title, date: dateBinding(for: field))
-            }
-            .onChange(of: startDate) { newValue in
-              if endDate < newValue {
-                endDate = newValue
-              }
-              normalizeSegments()
-            }
-            .onChange(of: endDate) { newValue in
-              if newValue < startDate {
-                startDate = newValue
-              }
-              normalizeSegments()
-            }
-
-            DashboardSection(title: "Days") {
-              ForEach(segments) { segment in
-                RequestSegmentRow(segment: segment) { preset in
-                  setSegment(segment.date, preset: preset)
-                }
-              }
-            }
-
-            DashboardSection(title: "Details") {
-              Picker("Type", selection: $reason) {
-                ForEach(reasons, id: \.self) { item in
-                  Text(item).tag(item)
-                }
-              }
-              .font(.subheadline)
-
-              TextEditor(text: $notes)
-                .frame(minHeight: 76)
-                .font(.subheadline)
-                .scrollContentBackgroundHiddenIfAvailable()
-                .overlay(alignment: .topLeading) {
-                  if notes.isEmpty {
-                    Text("Optional note")
-                      .font(.subheadline)
-                      .foregroundStyle(.secondary)
-                      .padding(.top, 8)
-                      .padding(.leading, 5)
-                  }
-                }
-            }
-
+          if let receipt {
+            confirmationContent(receipt)
+          } else {
+            requestFormContent
           }
-          .padding(.horizontal, 16)
-          .padding(.top, 8)
-          .padding(.bottom, 18)
         }
       }
-      .navigationTitle("Request Time Off")
+      .navigationTitle(receipt == nil ? (isEditing ? "Modify Time Off" : "Request Time Off") : (isEditing ? "Request Updated" : "Request Sent"))
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
-          Button("Cancel") {
-            dismiss()
+          if receipt == nil {
+            Button("Cancel") {
+              dismiss()
+            }
           }
         }
 
         ToolbarItem(placement: .confirmationAction) {
-          Button(isSubmitting ? "Submitting" : "Submit") {
-            Task {
-              await submit()
+          if receipt != nil {
+            Button("OK") {
+              dismiss()
             }
+            .font(.body.weight(.semibold))
+          } else {
+            Button(isSubmitting ? "Saving" : (isEditing ? "Save" : "Submit")) {
+              Task {
+                await submit()
+              }
+            }
+            .disabled(isSubmitting || store.sessionToken == nil)
           }
-          .disabled(isSubmitting || store.sessionToken == nil)
         }
       }
       .onAppear {
@@ -125,6 +89,164 @@ struct TimeOffRequestForm: View {
         }
       }
     }
+  }
+
+  private var requestFormContent: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      DashboardSection(title: "Range") {
+        RequestDateButton(title: "Start", date: startDate) {
+          editingDate = .start
+        }
+
+        Divider().opacity(0.45)
+
+        RequestDateButton(title: "End", date: endDate) {
+          editingDate = .end
+        }
+
+        if existing?.status.lowercased() == "approved" {
+          Text("Changing this sends it back for approval.")
+            .font(.caption)
+            .foregroundStyle(ClinicalPalette.warningText)
+        }
+
+        if let message {
+          Text(message)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .liquidGlassCard(cornerRadius: 12, tint: ClinicalPalette.amber)
+        }
+
+        Text(rangeSummary)
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+      }
+      .sheet(item: $editingDate) { field in
+        RequestDatePickerSheet(title: field.title, date: dateBinding(for: field))
+      }
+      .onChange(of: startDate) { newValue in
+        if endDate < newValue {
+          endDate = newValue
+        }
+        normalizeSegments()
+      }
+      .onChange(of: endDate) { newValue in
+        if newValue < startDate {
+          startDate = newValue
+        }
+        normalizeSegments()
+      }
+
+      DashboardSection(title: "Days") {
+        ForEach(segments) { segment in
+          RequestSegmentRow(segment: segment) { preset in
+            setSegment(segment.date, preset: preset)
+          }
+        }
+      }
+
+      DashboardSection(title: "Details") {
+        Picker("Type", selection: $reason) {
+          ForEach(reasons, id: \.self) { item in
+            Text(item).tag(item)
+          }
+        }
+        .font(.subheadline)
+
+        TextEditor(text: $notes)
+          .frame(minHeight: 76)
+          .font(.subheadline)
+          .scrollContentBackgroundHiddenIfAvailable()
+          .overlay(alignment: .topLeading) {
+            if notes.isEmpty {
+              Text("Optional note")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .padding(.top, 8)
+                .padding(.leading, 5)
+            }
+          }
+      }
+    }
+    .padding(.horizontal, 16)
+    .padding(.top, 8)
+    .padding(.bottom, 18)
+  }
+
+  private func confirmationContent(_ receipt: TimeOffReceipt) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      DashboardSection(title: "Sent") {
+        confirmationRow(title: "Dates", value: receipt.rangeLabel)
+        Divider().opacity(0.45)
+        confirmationRow(title: "Type", value: receipt.reason)
+        if !receipt.notes.isEmpty {
+          Divider().opacity(0.45)
+          confirmationRow(title: "Note", value: receipt.notes)
+        }
+        Divider().opacity(0.45)
+        confirmationRow(title: "Status", value: "Pending approval")
+      }
+
+      DashboardSection(title: "Days") {
+        ForEach(receipt.segments) { segment in
+          HStack {
+            Text(segment.date.formatted(.dateTime.month(.twoDigits).day(.twoDigits)))
+              .font(.subheadline.weight(.semibold))
+              .foregroundStyle(ClinicalPalette.ink)
+            Spacer()
+            Text(segment.summary)
+              .font(.caption2.weight(.semibold))
+              .foregroundStyle(.secondary)
+          }
+          .padding(.vertical, 2)
+        }
+      }
+
+      if let warning = primaryWarning(from: receipt.warnings) {
+        DashboardSection(title: "Review note") {
+          Text(cleanWarning(warning))
+            .font(.caption)
+            .foregroundStyle(ClinicalPalette.warningText)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .liquidGlassCard(cornerRadius: 12, tint: ClinicalPalette.amber)
+        }
+      }
+
+      Button {
+        dismiss()
+      } label: {
+        Text("OK")
+          .font(.headline.weight(.semibold))
+          .foregroundStyle(.white)
+          .frame(maxWidth: .infinity)
+          .padding(.vertical, 14)
+          .background(ClinicalPalette.teal, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+      }
+      .buttonStyle(.plain)
+      .padding(.top, 8)
+    }
+    .padding(.horizontal, 16)
+    .padding(.top, 8)
+    .padding(.bottom, 18)
+  }
+
+  private func confirmationRow(title: String, value: String) -> some View {
+    HStack(alignment: .top, spacing: 10) {
+      Text(title)
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(ClinicalPalette.ink)
+      Spacer()
+      Text(value)
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(ClinicalPalette.teal)
+        .multilineTextAlignment(.trailing)
+    }
+    .padding(.vertical, 4)
   }
 
   private var rangeSummary: String {
@@ -140,15 +262,34 @@ struct TimeOffRequestForm: View {
     message = nil
 
     do {
-      let warnings = try await store.submitTimeOffRequest(
+      let result: TimeOffSubmitResult
+      if let existing {
+        result = try await store.updateTimeOffRequest(
+          id: existing.id,
+          startDate: startDate,
+          endDate: endDate,
+          reason: reason,
+          notes: notes,
+          segments: segments
+        )
+      } else {
+        result = try await store.submitTimeOffRequest(
+          startDate: startDate,
+          endDate: endDate,
+          reason: reason,
+          notes: notes,
+          segments: segments
+        )
+      }
+      isSubmitting = false
+      receipt = TimeOffReceipt(
         startDate: startDate,
         endDate: endDate,
         reason: reason,
-        notes: notes,
-        segments: segments
+        notes: notes.trimmingCharacters(in: .whitespacesAndNewlines),
+        segments: segments,
+        warnings: result.warnings
       )
-      isSubmitting = false
-      message = submissionMessage(warnings: warnings)
     } catch {
       isSubmitting = false
       message = error.localizedDescription
@@ -179,14 +320,6 @@ struct TimeOffRequestForm: View {
     }
   }
 
-  private func submissionMessage(warnings: [String]) -> String {
-    let rangeLine = "Request for \(requestDateLabel(startDate)) to \(requestDateLabel(endDate))"
-    guard let warning = primaryWarning(from: warnings) else {
-      return "\(rangeLine)\nNo conflicts noted, submitted for approval."
-    }
-    return "\(rangeLine)\n\(cleanWarning(warning))"
-  }
-
   private func primaryWarning(from warnings: [String]) -> String? {
     warnings.first { warning in
       warning.localizedCaseInsensitiveContains("already has")
@@ -203,10 +336,6 @@ struct TimeOffRequestForm: View {
       cleaned += "."
     }
     return cleaned
-  }
-
-  private func requestDateLabel(_ date: Date) -> String {
-    date.formatted(.dateTime.month(.abbreviated).day())
   }
 
   private func datesBetween(_ start: Date, _ end: Date) -> [Date] {
@@ -249,6 +378,24 @@ struct TimeOffRequestForm: View {
         normalizeSegments()
       }
     )
+  }
+}
+
+private struct TimeOffReceipt {
+  let startDate: Date
+  let endDate: Date
+  let reason: String
+  let notes: String
+  let segments: [RequestSegment]
+  let warnings: [String]
+
+  var rangeLabel: String {
+    let start = startDate.formatted(.dateTime.month(.abbreviated).day().year())
+    if Calendar.current.isDate(startDate, inSameDayAs: endDate) {
+      return start
+    }
+    let end = endDate.formatted(.dateTime.month(.abbreviated).day().year())
+    return "\(start) – \(end)"
   }
 }
 

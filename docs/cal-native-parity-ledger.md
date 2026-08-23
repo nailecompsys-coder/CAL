@@ -1,8 +1,10 @@
 # CAL Native Parity Ledger
 
-Last updated: 2026-07-23
+Last updated: 2026-08-23
 
-iOS test build target: `1.0.1 (18)` from the SwiftUI `ios/` lane.
+iOS test build target: `2.0 (22)` from the SwiftUI `ios/` lane.
+
+Time off manage (2026-08-23): pending and approved rows in My Requests are tappable. Modify reuses the request form; changing an approved row returns it to pending. Cancel deletes the row and emails the surgeon. Request, approve, deny, and cancel each send email. New requests opened from a future month seed Start/End to the 1st of that month (today if the viewed month is current or past). Who’s Out shows the full roster; rows with no time off stay visible and dimmed.
 
 Desk fax re-ingest (2026-07-23): identity is surgeon + date + normalized patient name. Identical rows stay `unchanged` (no note overlay); time/room/procedure/facility changes update; missing desk-sourced cases in the day window cancel. Same-fax duplicate lines and cross-surgeon same patient+day skip. Block OR assign from fax uses `notify=False`.
 
@@ -31,7 +33,7 @@ Current tracked lane imports:
 | Daily Schedule | `GET /api/native/home` | Production | Temporary Android bridge | Debug lane (functional; UI thinner than iOS) | iOS + Expo Android | Shared date stepper + Day\|Week\|Month chrome. Day: On Call \| Off half-width pills; Clinic/OR + Personal sections; Cover from On Call |
 | Week | `GET /api/native/home` | Production | Temporary Android bridge | Debug lane (functional; UI thinner than iOS) | iOS + Expo Android | Cliff-note rows (ON/OFF/Clinic·OR + meeting); tap opens Day. Shared date-range stepper |
 | Month | `GET /api/native/home` | Production | Temporary Android bridge | Debug lane (letter marks; no heatmap yet) | iOS + Expo Android | Heatmap dots (call/off/clinic) + selected-day agenda below grid; Cover only from agenda; Open Day jumps to Day scope. Not a cramped 7-col text grid |
-| Time Off | `/api/native/request-off*`, `GET /api/native/home` | Production | Temporary Android bridge | Debug lane (list + full-day request; no Who’s Out gantt) | iOS + Expo Android | Multi-day/half-day request form. Who’s Out is portal-style month Gantt (surgeon × days, mint approved / amber pending) with month stepper. Clinic-group warning on submit is non-blocking |
+| Time Off | `/api/native/request-off*` POST/PUT/DELETE, `GET /api/native/home` | Production | Temporary Android bridge | Debug lane (list + request/edit/cancel; Who’s Out gantt) | iOS + Expo Android | Multi-day/half-day request form. After submit: summary + OK. Pending and approved My Requests rows open Modify or Cancel. Editing approved time off returns it to pending. Surgeon is emailed on request, update, approve, deny, and cancel. Who’s Out is portal-style month Gantt with the full roster (empty rows dimmed) and a month stepper. Clinic-group warning on submit is non-blocking |
 | On Call Coverage | `POST /api/native/call-coverage`, `POST /api/native/call-coverage/{id}/cancel`, portal `/admin/call-schedule/cover*` | Production (+ cancel) | Temporary Android bridge | Debug lane (submit only; cancel pending) | iOS + Expo Android | Cover sheet defaults to no surgeon selected; Save disabled until pick. Coverage shows original crossed out and covering initials. Portal can assign/clear. |
 | Meetings | `GET /api/native/home` | Production | Temporary Android bridge | Debug lane | iOS + Expo Android | Today and next item display are required |
 | Personal Items | `GET /api/native/home` (display today + next) | Production (display-only) | Temporary Android bridge | Debug lane (display) | iOS + Expo Android | iOS shows today + next personal items from home payload; no day-items CRUD in SwiftUI today. Legacy RN bridge has CRUD via `/surgeon/api/day-items*` but that is not the iOS spec. |

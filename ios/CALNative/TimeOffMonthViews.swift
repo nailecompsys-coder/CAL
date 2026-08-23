@@ -118,12 +118,7 @@ struct TimeOffGanttModel {
       let map = statusBySurgeon[initials] ?? [:]
       let bars = coalesceBars(dayStatuses: map, daysInMonth: daysInMonth)
       let surgeon = surgeonByInitials[initials]
-      // Show surgeons with bars; also show known surgeons even if empty (dimmed in UI)
       if bars.isEmpty && surgeon == nil { return nil }
-      if bars.isEmpty && surgeon != nil {
-        // Skip empty rows to keep phone Gantt scannable — only people who are out
-        return nil
-      }
       return TimeOffGanttRow(
         id: initials,
         initials: initials,
@@ -187,7 +182,7 @@ struct TimeOffGanttView: View {
         .font(.caption)
         .foregroundStyle(.secondary)
     } else if model.rows.isEmpty {
-      Text("No requested or approved time off this month.")
+      Text("No surgeons to show.")
         .font(.caption)
         .foregroundStyle(.secondary)
         .padding(.vertical, 6)
@@ -250,6 +245,7 @@ struct TimeOffGanttView: View {
         Text(row.initials)
           .font(.caption2.weight(.bold))
           .foregroundStyle(ClinicalPalette.ink)
+          .opacity(row.hasBars ? 1 : 0.55)
           .lineLimit(1)
           .minimumScaleFactor(0.7)
           .frame(width: labelWidth, height: rowHeight, alignment: .leading)
@@ -320,6 +316,7 @@ struct TimeOffGanttView: View {
       }
     }
     .frame(width: CGFloat(model.daysInMonth) * dayWidth, height: rowHeight, alignment: .leading)
+    .opacity(row.hasBars ? 1 : 0.55)
     .overlay(alignment: .bottom) {
       Rectangle().fill(rowRule).frame(height: 0.5)
     }

@@ -14,7 +14,7 @@ struct NativeScheduleActions {
     reason: String,
     notes: String,
     segments: [RequestSegment]
-  ) async throws -> [String] {
+  ) async throws -> TimeOffSubmitResult {
     guard !token.isEmpty else {
       throw NativeCALError.missingSession
     }
@@ -27,6 +27,38 @@ struct NativeScheduleActions {
       notes: notes,
       segments: segments
     )
+  }
+
+  func updateTimeOffRequest(
+    token: String,
+    requestId: Int,
+    startDate: Date,
+    endDate: Date,
+    reason: String,
+    notes: String,
+    segments: [RequestSegment]
+  ) async throws -> TimeOffSubmitResult {
+    guard !token.isEmpty else {
+      throw NativeCALError.missingSession
+    }
+
+    return try await client.updateRequestOff(
+      token: token,
+      requestId: requestId,
+      startDate: startDate,
+      endDate: endDate,
+      reason: reason,
+      notes: notes,
+      segments: segments
+    )
+  }
+
+  func cancelTimeOffRequest(token: String, requestId: Int) async throws {
+    guard !token.isEmpty else {
+      throw NativeCALError.missingSession
+    }
+
+    try await client.cancelRequestOff(token: token, requestId: requestId)
   }
 
   func submitCallCoverage(

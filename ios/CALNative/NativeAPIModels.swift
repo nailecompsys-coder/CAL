@@ -91,13 +91,31 @@ struct NativeDayResponse: Decodable {
   }()
 }
 
+struct NativeDayOffSegmentResponse: Decodable {
+  let date: String
+  let isFullDay: Bool?
+  let start: String?
+  let end: String?
+
+  var draft: TimeOffSegmentDraft {
+    TimeOffSegmentDraft(
+      date: date,
+      isFullDay: isFullDay ?? true,
+      start: start ?? "07:00",
+      end: end ?? "17:00"
+    )
+  }
+}
+
 struct NativeDayOffRequestResponse: Decodable {
   let id: Int
   let surgeonInitials: String?
   let startDate: String
   let endDate: String
   let reason: String
+  let notes: String?
   let status: String
+  let segments: [NativeDayOffSegmentResponse]?
 
   var timeOffRequest: TimeOffRequest {
     TimeOffRequest(
@@ -106,7 +124,9 @@ struct NativeDayOffRequestResponse: Decodable {
       startDate: startDate,
       endDate: endDate,
       reason: reason,
-      status: status
+      notes: notes ?? "",
+      status: status,
+      segments: segments?.map(\.draft) ?? []
     )
   }
 }

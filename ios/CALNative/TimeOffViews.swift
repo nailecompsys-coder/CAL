@@ -5,6 +5,10 @@ struct TimeOffHomeView: View {
   @Binding var selectedSection: CALNativeSection
   @State private var showingRequestSheet = false
   @State private var showingMonthMenu = false
+  @State private var selectedRequest: TimeOffRequest?
+  @State private var editingRequest: TimeOffRequest?
+  @State private var cancelTarget: TimeOffRequest?
+  @State private var actionMessage: String?
   @State private var selectedMonth = Calendar.current.dateInterval(of: .month, for: Date())?.start ?? Date()
 
   private var months: [Date] {
@@ -99,7 +103,13 @@ struct TimeOffHomeView: View {
                     .padding(.vertical, 4)
                 } else {
                   ForEach(monthRequests) { request in
-                    TimeOffRequestRow(request: request)
+                    Button {
+                      selectedRequest = request
+                    } label: {
+                      TimeOffRequestRow(request: request)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!request.canManage)
                   }
                 }
               }
@@ -140,7 +150,60 @@ struct TimeOffHomeView: View {
         }
       }
       .sheet(isPresented: $showingRequestSheet) {
-        TimeOffRequestForm(store: store)
+        TimeOffRequestForm(store: store, defaultDate: selectedMonth)
+      }
+      .sheet(item: $editingRequest) { request in
+        TimeOffRequestForm(store: store, existing: request)
+      }
+      .confirmationDialog(
+        selectedRequest.map { "\($0.dateRange) · \($0.reason.isEmpty ? "Time off" : $0.reason)" } ?? "Time Off",
+        isPresented: Binding(
+          get: { selectedRequest != nil },
+          set: { if !$0 { selectedRequest = nil } }
+        ),
+        titleVisibility: .visible
+      ) {
+        Button("Modify") {
+          editingRequest = selectedRequest
+        }
+        Button("Cancel Time Off", role: .destructive) {
+          cancelTarget = selectedRequest
+        }
+        Button("Close", role: .cancel) {}
+      } message: {
+        if let selectedRequest {
+          Text(selectedRequest.status.lowercased() == "approved"
+            ? "Approved time off can be canceled, or changed and sent back for approval."
+            : "This request is pending. You can change it or cancel it.")
+        }
+      }
+      .alert(
+        "Cancel this time off?",
+        isPresented: Binding(
+          get: { cancelTarget != nil },
+          set: { if !$0 { cancelTarget = nil } }
+        )
+      ) {
+        Button("Keep", role: .cancel) {}
+        Button("Cancel Time Off", role: .destructive) {
+          if let cancelTarget {
+            Task {
+              await cancelRequest(cancelTarget)
+            }
+          }
+        }
+      } message: {
+        Text("This removes it from your schedule.")
+      }
+      .alert("Time Off", isPresented: Binding(
+        get: { actionMessage != nil },
+        set: { if !$0 { actionMessage = nil } }
+      )) {
+        Button("OK", role: .cancel) {}
+      } message: {
+        if let actionMessage {
+          Text(actionMessage)
+        }
       }
       .task {
         let firstMonth = Calendar.current.dateInterval(of: .month, for: Date())?.start ?? Date()
@@ -151,6 +214,14 @@ struct TimeOffHomeView: View {
           await store.loadLookahead(containing: selectedMonth, daysAhead: 62)
         }
       }
+    }
+  }
+
+  private func cancelRequest(_ request: TimeOffRequest) async {
+    do {
+      try await store.cancelTimeOffRequest(id: request.id, containing: selectedMonth)
+    } catch {
+      actionMessage = error.localizedDescription
     }
   }
 
@@ -188,6 +259,12 @@ private struct TimeOffRequestRow: View {
         .font(ClinicalTypography.badge)
         .foregroundStyle(statusColor(request.status))
         .fixedSize(horizontal: true, vertical: false)
+
+      if request.canManage {
+        Image(systemName: "chevron.right")
+          .font(.caption2.weight(.semibold))
+          .foregroundStyle(.secondary)
+      }
     }
   }
 

@@ -93,33 +93,7 @@ class CalApiClient(
         notes: String = "",
         segments: List<TimeOffSubmitSegment> = emptyList(),
     ): NativeRequestOffResponse = withContext(Dispatchers.IO) {
-        val normalizedSegments = segments.ifEmpty {
-            buildList {
-                var cursor = startDate
-                while (!cursor.isAfter(endDate)) {
-                    add(
-                        TimeOffSubmitSegment(
-                            date = cursor.toString(),
-                            isFullDay = true,
-                            start = "07:00",
-                            end = "17:00",
-                        ),
-                    )
-                    cursor = cursor.plusDays(1)
-                }
-            }
-        }
-        val firstPartial = normalizedSegments.firstOrNull { !it.isFullDay }
-        val payload = TimeOffSubmitRequest(
-            startDate = startDate.toString(),
-            endDate = endDate.toString(),
-            reason = reason,
-            notes = notes,
-            isFullDay = normalizedSegments.all { it.isFullDay },
-            start = firstPartial?.start,
-            end = firstPartial?.end,
-            segments = normalizedSegments,
-        )
+        val payload = timeOffPayload(startDate, endDate, reason, notes, segments)
         val request = Request.Builder()
             .url("$baseUrl/api/native/request-off")
             .header("Authorization", "Bearer $token")
@@ -136,6 +110,49 @@ class CalApiClient(
             )
         }
         response
+    }
+
+    suspend fun updateRequestOff(
+        token: String,
+        deviceToken: String,
+        requestId: Int,
+        startDate: LocalDate,
+        endDate: LocalDate,
+        reason: String,
+        notes: String = "",
+        segments: List<TimeOffSubmitSegment> = emptyList(),
+    ): NativeRequestOffResponse = withContext(Dispatchers.IO) {
+        val payload = timeOffPayload(startDate, endDate, reason, notes, segments)
+        val request = Request.Builder()
+            .url("$baseUrl/api/native/request-off/$requestId")
+            .header("Authorization", "Bearer $token")
+            .header("X-CAL-Device-Token", deviceToken)
+            .put(json.encodeToString(payload).jsonBody())
+            .build()
+        val response = json.decodeFromString<NativeRequestOffResponse>(execute(request))
+        if (!response.ok) {
+            throw CalApiException(
+                statusCode = 400,
+                message = response.warnings.joinToString(" ").ifBlank {
+                    "Request was not updated."
+                },
+            )
+        }
+        response
+    }
+
+    suspend fun cancelRequestOff(
+        token: String,
+        deviceToken: String,
+        requestId: Int,
+    ): Unit = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("$baseUrl/api/native/request-off/$requestId")
+            .header("Authorization", "Bearer $token")
+            .header("X-CAL-Device-Token", deviceToken)
+            .delete()
+            .build()
+        execute(request)
     }
 
     suspend fun markAlertsRead(
@@ -249,6 +266,42 @@ class CalApiClient(
             .delete()
             .build()
         execute(request)
+    }
+
+    private fun timeOffPayload(
+        startDate: LocalDate,
+        endDate: LocalDate,
+        reason: String,
+        notes: String,
+        segments: List<TimeOffSubmitSegment>,
+    ): TimeOffSubmitRequest {
+        val normalizedSegments = segments.ifEmpty {
+            buildList {
+                var cursor = startDate
+                while (!cursor.isAfter(endDate)) {
+                    add(
+                        TimeOffSubmitSegment(
+                            date = cursor.toString(),
+                            isFullDay = true,
+                            start = "07:00",
+                            end = "17:00",
+                        ),
+                    )
+                    cursor = cursor.plusDays(1)
+                }
+            }
+        }
+        val firstPartial = normalizedSegments.firstOrNull { !it.isFullDay }
+        return TimeOffSubmitRequest(
+            startDate = startDate.toString(),
+            endDate = endDate.toString(),
+            reason = reason,
+            notes = notes,
+            isFullDay = normalizedSegments.all { it.isFullDay },
+            start = firstPartial?.start,
+            end = firstPartial?.end,
+            segments = normalizedSegments,
+        )
     }
 
     private fun authenticatedGet(path: String, token: String, deviceToken: String): Request =

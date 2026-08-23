@@ -88,5 +88,19 @@ data class NativeDayOffRequest(
     val startDate: String,
     val endDate: String,
     val reason: String = "",
+    val notes: String = "",
     val status: String = "",
+    val segments: List<NativeDayOffSegment> = emptyList(),
+) {
+    val canManage: Boolean
+        get() = status.equals("pending", ignoreCase = true) ||
+            status.equals("approved", ignoreCase = true)
+}
+
+@Serializable
+data class NativeDayOffSegment(
+    val date: String,
+    val isFullDay: Boolean = true,
+    val start: String? = null,
+    val end: String? = null,
 )

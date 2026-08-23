@@ -27,6 +27,7 @@ data class TimeOffSubmitSegment(
 data class NativeRequestOffResponse(
     val ok: Boolean = false,
     val warnings: List<String> = emptyList(),
+    val emailed: Boolean = false,
 )
 
 @Serializable

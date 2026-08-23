@@ -106,7 +106,7 @@ class Surgeon(Base):
     location_schedules = relationship("SurgeonLocationSchedule", back_populates="surgeon", cascade="all, delete-orphan")
     location_overrides = relationship("LocationOverride", back_populates="surgeon", cascade="all, delete-orphan")
     clinic_schedules = relationship("ClinicSchedule", back_populates="surgeon", cascade="all, delete-orphan")
-    surgical_cases = relationship("SurgicalCase", back_populates="surgeon", cascade="all, delete-orphan")
+    surgical_cases = relationship("SurgicalCase", foreign_keys="SurgicalCase.surgeon_id", back_populates="surgeon", cascade="all, delete-orphan")
     day_items = relationship("SurgeonDayItem", back_populates="surgeon", cascade="all, delete-orphan")
     clinic_group_memberships = relationship("ClinicGroupMember", back_populates="surgeon", cascade="all, delete-orphan")
     surgical_blocks = relationship("SurgicalBlock", back_populates="surgeon", cascade="all, delete-orphan")
@@ -431,15 +431,40 @@ class SurgicalCase(Base):
     location_id = Column(Integer, ForeignKey("locations.id"))
     or_block_instance_id = Column(Integer, ForeignKey("or_block_instances.id"))
     room_text = Column(String(64))
+    # Co-surgeon: when a case is shared (e.g. one surgeon assisting another),
+    # `surgeon_id` is the primary and this is the assisting surgeon.
+    assisting_surgeon_id = Column(Integer, ForeignKey("surgeons.id"))
     status = Column(String(16), default="scheduled", server_default="scheduled")  # scheduled | confirmed | completed | cancelled
     notes = Column(Text)  # scheduler notes
     surgeon_notes = Column(Text)  # surgeon's own notes (add from mobile)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
 
-    surgeon = relationship("Surgeon", back_populates="surgical_cases")
+    surgeon = relationship("Surgeon", foreign_keys=[surgeon_id], back_populates="surgical_cases")
+    assisting_surgeon = relationship("Surgeon", foreign_keys=[assisting_surgeon_id])
     location = relationship("Location")
     or_block_instance = relationship("ORBlockInstance", back_populates="cases")
+
+
+class CoSurgeonPair(Base):
+    """Directional co-surgeon rule.
+
+    Advent daily faxes reprint a shared case under BOTH surgeons' sections. When
+    the two surgeons on such a case match a pair here, the case is attached to
+    `primary_surgeon` and `assisting_surgeon` is recorded as the assist — instead
+    of creating a duplicate row / double-booking the room.
+    """
+    __tablename__ = "co_surgeon_pairs"
+    __table_args__ = (UniqueConstraint("primary_surgeon_id", "assisting_surgeon_id"),)
+    id = Column(Integer, primary_key=True)
+    primary_surgeon_id = Column(Integer, ForeignKey("surgeons.id", ondelete="CASCADE"), nullable=False)
+    assisting_surgeon_id = Column(Integer, ForeignKey("surgeons.id", ondelete="CASCADE"), nullable=False)
+    is_active = Column(Boolean, default=True, server_default="true", nullable=False)
+    note = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+
+    primary_surgeon = relationship("Surgeon", foreign_keys=[primary_surgeon_id])
+    assisting_surgeon = relationship("Surgeon", foreign_keys=[assisting_surgeon_id])
 
 
 class ClinicGroup(Base):

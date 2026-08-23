@@ -207,9 +207,13 @@ def block_or_create(
     except ValueError as exc:
         return _redirect(week_offset, warn=str(exc))
     warn = ""
-    if not (room_text or "").strip():
+    if not (room_text or "").strip() and result.get("created"):
         warn = "Created without OR room — flagged for immediate follow-up."
-    return _redirect(week_offset, msg=f"created:{result['created']}", warn=warn, panel="create")
+    if result.get("created"):
+        return _redirect(week_offset, msg=f"created:{result['created']}", warn=warn, panel="create")
+    if result.get("updated"):
+        return _redirect(week_offset, msg="updated", panel="create")
+    return _redirect(week_offset, warn="No Block OR windows were saved.", panel="create")
 
 
 @router.post("/block-or/copy")

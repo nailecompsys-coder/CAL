@@ -77,6 +77,7 @@ def serialize_schedule_day(
                 "procedure": sc.procedure or "",
                 "room": (sc.location.name if sc.location else None) or sc.room_text or "",
                 "status": sc.status or "scheduled",
+                "assistingSurgeon": sc.assisting_surgeon.full_name if sc.assisting_surgeon else "",
                 "surgeonNotes": sc.surgeon_notes or "",
                 "color": (sc.location.color or None) if sc.location else None,
                 "source": getattr(sc, "source", None) or "cal",

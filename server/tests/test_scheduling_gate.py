@@ -150,12 +150,22 @@ class CallCoverageOverlapTest(unittest.TestCase):
         self.assertIn("Covering on-call", covering[0].message)
         self.assertEqual(original, [])
 
-    def test_or_block_at_on_call_hospital_is_not_a_conflict(self):
+    def test_on_call_never_conflicts_with_or_block(self):
+        """On call + a Block OR is fine at any hospital; day-off still conflicts."""
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
 
-        from app.models import Base, CallGroup, CallGroupLocation, CallRotation, Location, Surgeon
-        from app.rules_engine.overlap_checkers import check_overlap_call
+        from app.models import (
+            Base,
+            CallGroup,
+            CallGroupLocation,
+            CallRotation,
+            Location,
+            ORBlockAssignment,
+            ORBlockInstance,
+            Surgeon,
+        )
+        from app.rules_engine.overlap_checkers import check_overlap_call, check_overlap_or_block
 
         engine = create_engine("sqlite:///:memory:")
         Base.metadata.create_all(engine)
@@ -225,9 +235,39 @@ class CallCoverageOverlapTest(unittest.TestCase):
                     {"type": "day_off", "start_date": day, "end_date": day, "is_full_day": True, "segments": []},
                 )
             )
+            block = ORBlockInstance(
+                location_id=al.id,
+                date=day,
+                session="am",
+                start_time=time(7, 15),
+                end_time=time(10, 15),
+                status="assigned",
+            )
+            db.add(block)
+            db.flush()
+            db.add(ORBlockAssignment(
+                block_instance_id=block.id,
+                surgeon_id=surgeon.id,
+                start_time=time(7, 15),
+            ))
+            db.commit()
+            assign_call = list(
+                check_overlap_or_block(
+                    surgeon.id,
+                    day,
+                    day,
+                    db,
+                    {},
+                    None,
+                    {"type": "call_rotation", "date": day},
+                )
+            )
+            # Block OR at the on-call hospital OR a different hospital: both fine.
             self.assertEqual(same, [])
-            self.assertEqual(len(other), 1)
-            self.assertIn("Assigned on-call", other[0].message)
+            self.assertEqual(other, [])
+            # Assigning call when they already have a block at another hospital: also fine.
+            self.assertEqual(assign_call, [])
+            # Day off while on call is still a real conflict worth surfacing.
             self.assertEqual(len(day_off), 1)
         finally:
             db.close()

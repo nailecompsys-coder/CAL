@@ -33,7 +33,13 @@
             <td class="px-4 py-3 font-semibold text-slate-800">
               {% if row.title == 'CAL request pending' %}Pending Request{% else %}{{ row.title }}{% endif %}
             </td>
-            <td class="px-4 py-3 text-slate-600">{{ row.body }}</td>
+            <td class="px-4 py-3 text-slate-600">
+              {{ row.body }}
+              {% set payload = (row.payload|from_json) if row.payload else {} %}
+              {% if payload.get('href') %}
+              <a class="block mt-1 text-xs font-bold text-blue-700 hover:underline" href="{{ payload.get('href') }}">Open to correct</a>
+              {% endif %}
+            </td>
             <td class="px-4 py-3">
               {% if row.read_at %}
               <span class="text-xs text-slate-400">Read</span>

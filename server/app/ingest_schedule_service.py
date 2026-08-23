@@ -19,11 +19,12 @@ from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
-from .admin_surgical_schedule_service import add_surgical_case
+from .admin_surgical_schedule_service import add_surgical_case, week_offset_for_date
 from .ingest_resolve import resolve_clinic_location, resolve_or_location, resolve_surgeon
-from .models import ClinicSchedule, ORBlockAssignment, ORBlockInstance, SurgicalCase
+from .models import ClinicSchedule, CoSurgeonPair, ORBlockAssignment, ORBlockInstance, SurgicalCase
 from .or_block_service import (
     ACTIVE_BLOCK_STATUSES,
     BlockORCreateInput,
@@ -42,6 +43,9 @@ _PATIENT_NOISE_RE = re.compile(
     r"\b(md|do|jr|sr|ii|iii|iv|femoral|incart|of|es|stolar|gensrg|wgdgs|ahmggensrg)\b",
     re.IGNORECASE,
 )
+# Advent OCR dumps the clock into Procedure: "0715 FOREIGN BODY…" / "07:15 EXCISION…"
+_LEADING_HHMM_RE = re.compile(r"^([01]\d|2[0-3])[0-5]\d(?=\s|[A-Za-z]|$)")
+_LEADING_H_COLON_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)(?=\s|[A-Za-z]|$)")
 
 
 def _parse_date(raw: str | None) -> date | None:
@@ -60,7 +64,167 @@ def _parse_time(raw: str | None, fallback: time | None = None) -> time | None:
     try:
         return parse_hhmm(s)
     except ValueError:
+        digits = re.sub(r"\D", "", s)
+        if len(digits) == 4:
+            try:
+                return parse_hhmm(f"{digits[:2]}:{digits[2:]}")
+            except ValueError:
+                return fallback
         return fallback
+
+
+def _salvage_start_time(case: dict) -> None:
+    """If Time column is empty, pull a leading military clock out of Procedure.
+
+    Rule: never invent a window; recover the clock that is already on the fax.
+    Mutates the case so upsert also gets the recovered time.
+    """
+    if _parse_time(case.get("start_time")):
+        proc = (case.get("procedure") or "").strip()
+        glued = _LEADING_HHMM_RE.match(proc) or _LEADING_H_COLON_RE.match(proc)
+        if glued:
+            recovered = _parse_time(glued.group(0))
+            existing = _parse_time(case.get("start_time"))
+            if recovered == existing:
+                case["procedure"] = proc[len(glued.group(0)) :].strip()
+        return
+    proc = (case.get("procedure") or "").strip()
+    if not proc:
+        return
+    glued = _LEADING_HHMM_RE.match(proc) or _LEADING_H_COLON_RE.match(proc)
+    if not glued:
+        return
+    recovered = _parse_time(glued.group(0))
+    if recovered is None:
+        return
+    case["start_time"] = recovered.strftime("%H:%M")
+    case["procedure"] = proc[len(glued.group(0)) :].strip() or case.get("procedure")
+
+
+def _correction_fingerprint(
+    *,
+    source_fax_id: int | None,
+    reason: str,
+    surgeon_id: int | None,
+    day: date | None,
+    patient_name: str | None,
+    extra: str | None = None,
+) -> str:
+    return "|".join(
+        [
+            str(source_fax_id or ""),
+            reason,
+            str(surgeon_id or ""),
+            day.isoformat() if day else "",
+            (patient_name or "").strip().lower(),
+            (extra or "").strip().lower(),
+        ]
+    )
+
+
+def _queue_ingest_correction(
+    db: Session,
+    *,
+    corrections: list[dict[str, Any]],
+    reason: str,
+    title: str,
+    body: str,
+    href: str,
+    source_fax_id: int | None,
+    surgeon_id: int | None = None,
+    day: date | None = None,
+    patient_name: str | None = None,
+    extra: str | None = None,
+    case_id: int | None = None,
+) -> dict[str, Any]:
+    """Park missing Desk fields on the admin portal instead of failing the fax."""
+    fingerprint = _correction_fingerprint(
+        source_fax_id=source_fax_id,
+        reason=reason,
+        surgeon_id=surgeon_id,
+        day=day,
+        patient_name=patient_name,
+        extra=extra,
+    )
+    payload = {
+        "flagType": "ingest_correction",
+        "reason": reason,
+        "fingerprint": fingerprint,
+        "href": href,
+        "sourceFaxId": source_fax_id,
+        "surgeonId": surgeon_id,
+        "date": day.isoformat() if day else None,
+        "patientName": patient_name,
+        "caseId": case_id,
+    }
+    from .models import AdminNotification
+
+    existing = (
+        db.query(AdminNotification)
+        .filter(AdminNotification.kind == "ingest_correction")
+        .all()
+    )
+    updated = False
+    for row in existing:
+        try:
+            data = json.loads(row.payload or "{}") if row.payload else {}
+        except (TypeError, ValueError):
+            data = {}
+        if data.get("fingerprint") != fingerprint:
+            continue
+        row.title = title
+        row.body = body
+        row.payload = json.dumps(payload)
+        row.read_at = None
+        updated = True
+    if updated:
+        db.commit()
+    else:
+        notify_admins(
+            title=title,
+            body=body,
+            db=db,
+            kind="ingest_correction",
+            payload=payload,
+        )
+    item = {
+        "reason": reason,
+        "body": body,
+        "href": href,
+        "date": day.isoformat() if day else None,
+        "patient_name": patient_name,
+        "case_id": case_id,
+    }
+    corrections.append(item)
+    return item
+
+
+def _clinic_href(day: date | None, surgeon_id: int | None = None, case_id: int | None = None) -> str:
+    offset = week_offset_for_date(day) if day else 0
+    href = f"/admin/clinic-schedule?week_offset={offset}"
+    if surgeon_id:
+        href += f"&surgeon_id={surgeon_id}"
+    if case_id:
+        href += f"&edit_case={case_id}"
+    return href
+
+
+def _session_from_slots(slots: list[dict], fallback: str) -> str:
+    """Clinic slot clocks are SSOT for am/pm.
+
+    The fax stamps a single session on the whole surgeon block (usually "pm"),
+    which mislabels morning clinics and lets the clinic lane overwrite that
+    surgeon's real OR assignment for the other half of the day.
+    """
+    times = [t for t in (_parse_time(s.get("start_time")) for s in slots) if t is not None]
+    if not times:
+        return fallback
+    noon = time(12, 0)
+    if max(times) < noon:
+        return "am"
+    if min(times) >= noon:
+        return "pm"
+    return "full"
 
 
 def _block_window_for_cases(
@@ -69,7 +233,13 @@ def _block_window_for_cases(
     explicit_start: str | None = None,
     explicit_end: str | None = None,
 ) -> tuple[time, time]:
-    """Fax times are SSOT. Do not invent AM/PM defaults when case clocks exist."""
+    """Fax times are SSOT. Do not invent AM/PM defaults when case clocks exist.
+
+    Recover a clock glued onto procedure text before giving up. Still refuse to
+    invent 07:00–12:00 when the fax truly has no times.
+    """
+    for case in cases:
+        _salvage_start_time(case)
     start = _parse_time(explicit_start)
     end = _parse_time(explicit_end)
     times = [t for t in (_parse_time(c.get("start_time")) for c in cases) if t is not None]
@@ -95,9 +265,20 @@ def _same_day_facility_block(
     block_date: date,
     location_id: int,
     room_text: str | None = None,
+    start_time: time | None = None,
+    end_time: time | None = None,
+    allow_widen: bool = True,
 ) -> ORBlockInstance | None:
-    """Prefer existing Block OR on that date/facility/room (dual rooms stay separate)."""
-    from .or_block_service import normalize_room_text, rooms_collide
+    """Prefer existing Block OR on that date/facility/room (dual rooms stay separate).
+
+    When the faxed window is known, pick the row that already covers it. A room can
+    hold several windows in one day, and widening the earliest one over a window a
+    later row already owns trips the duplicate guard and rejects the whole block.
+
+    allow_widen=False keeps an AM/PM half from swallowing its sibling: the caller
+    wants a card per half, not one card stretched across noon.
+    """
+    from .or_block_service import block_times_overlap, normalize_room_text, rooms_collide
 
     rows = (
         db.query(ORBlockInstance)
@@ -110,13 +291,91 @@ def _same_day_facility_block(
         .all()
     )
     room = normalize_room_text(room_text)
-    for row in rows:
-        if rooms_collide(row.room_text, room):
+    candidates = [row for row in rows if rooms_collide(row.room_text, room)]
+    if not candidates:
+        return None
+    if start_time is None or end_time is None:
+        return candidates[0]
+
+    for row in candidates:
+        if row.start_time == start_time and row.end_time == end_time:
             return row
-    return None
+    for row in candidates:
+        if row.start_time <= start_time and row.end_time >= end_time:
+            return row
+    if not allow_widen:
+        return None
+    # Only widen a row when the wider window stays clear of the other rows.
+    for row in candidates:
+        wide_start = min(row.start_time, start_time)
+        wide_end = max(row.end_time, end_time)
+        if not any(
+            block_times_overlap(other.start_time, other.end_time, wide_start, wide_end)
+            for other in candidates
+            if other.id != row.id
+        ):
+            return row
+    return candidates[0]
 
 
-def _ensure_or_block_for_fax(
+def _ensure_or_blocks_for_fax(
+    db: Session,
+    *,
+    block_date: date,
+    location_id: int,
+    case_times: list[time],
+    start_time: time,
+    end_time: time,
+    session: str,
+    notes: str,
+    room_text: str | None = None,
+) -> list[tuple[ORBlockInstance, str]]:
+    """Cover the faxed window with CAL's AM/PM cards, newest fax winning.
+
+    CAL models a window crossing noon as two cards. Taking only the first left the
+    afternoon card unassigned, so afternoon cases hung off a block that ended at
+    noon and every re-send of the fax collided with the orphan.
+
+    Halves with no case are skipped: the block end is padded past the last case,
+    so keeping them would invent afternoon OR time the fax never claimed.
+    """
+    from .or_block_service import am_pm_windows
+
+    out: list[tuple[ORBlockInstance, str]] = []
+    windows = am_pm_windows(start_time, end_time)
+    for win_session, win_start, win_end in windows:
+        if len(windows) > 1 and not any(win_start <= t < win_end for t in case_times):
+            continue
+        out.append(
+            _ensure_or_block_window(
+                db,
+                block_date=block_date,
+                location_id=location_id,
+                start_time=win_start,
+                end_time=win_end,
+                session=win_session or session,
+                notes=notes,
+                room_text=room_text,
+                allow_widen=len(windows) == 1,
+            )
+        )
+    if not out:
+        out.append(
+            _ensure_or_block_window(
+                db,
+                block_date=block_date,
+                location_id=location_id,
+                start_time=start_time,
+                end_time=end_time,
+                session=session,
+                notes=notes,
+                room_text=room_text,
+            )
+        )
+    return out
+
+
+def _ensure_or_block_window(
     db: Session,
     *,
     block_date: date,
@@ -126,6 +385,7 @@ def _ensure_or_block_for_fax(
     session: str,
     notes: str,
     room_text: str | None = None,
+    allow_widen: bool = True,
 ) -> tuple[ORBlockInstance, str]:
     """Create missing Block OR, or expand an existing one to fit fax SSOT times.
 
@@ -139,7 +399,13 @@ def _ensure_or_block_for_fax(
 
     room = normalize_room_text(room_text)
     existing = _same_day_facility_block(
-        db, block_date=block_date, location_id=location_id, room_text=room
+        db,
+        block_date=block_date,
+        location_id=location_id,
+        room_text=room,
+        start_time=start_time,
+        end_time=end_time,
+        allow_widen=allow_widen,
     )
     if existing:
         new_start = min(existing.start_time, start_time)
@@ -285,6 +551,9 @@ def _flag_admin_schedule_issues(
     # Always replace prior flags for this placement. Fixed ⇒ gone.
     clear_block_or_schedule_flag_notifications(db, block.id, surgeon_id)
     _clear_desk_or_schedule_flag_events(db, block_id=block.id, surgeon_id=surgeon_id)
+    from .scheduling_gate_service import practice_today
+    if day < practice_today():
+        return
     if not warnings:
         return
     body = (
@@ -378,6 +647,32 @@ def _prefer_patient_name(existing: str | None, incoming: str | None) -> str:
     if len(b) > len(a) and _patient_identity_match(a, b):
         return b
     return a
+
+
+def _co_surgeon_role(db: Session, a_id: int, b_id: int) -> tuple[int, int] | None:
+    """If surgeons a & b form a co-surgeon pair, return (primary_id, assisting_id)."""
+    if not a_id or not b_id or a_id == b_id:
+        return None
+    pair = (
+        db.query(CoSurgeonPair)
+        .filter(
+            CoSurgeonPair.is_active.is_(True),
+            or_(
+                and_(
+                    CoSurgeonPair.primary_surgeon_id == a_id,
+                    CoSurgeonPair.assisting_surgeon_id == b_id,
+                ),
+                and_(
+                    CoSurgeonPair.primary_surgeon_id == b_id,
+                    CoSurgeonPair.assisting_surgeon_id == a_id,
+                ),
+            ),
+        )
+        .first()
+    )
+    if not pair:
+        return None
+    return (pair.primary_surgeon_id, pair.assisting_surgeon_id)
 
 
 def _find_matching_case(
@@ -506,6 +801,40 @@ def _upsert_surgical_case(
         None,
     )
     if other_hit is not None:
+        # Advent reprints a shared case under both surgeons. If this pair is a
+        # known co-surgeon pairing, keep ONE row under the primary and record the
+        # assisting surgeon — never a second row / double-booked room.
+        role = _co_surgeon_role(db, surgeon_id, other_hit.surgeon_id)
+        if role is not None:
+            primary_id, assist_id = role
+            changed = False
+            if other_hit.surgeon_id != primary_id:
+                # Existing row sat under the assistant — move it to the primary.
+                other_hit.surgeon_id = primary_id
+                if location_id and other_hit.location_id != location_id:
+                    other_hit.location_id = location_id
+                if incoming_room is not None and _norm_room(other_hit.room_text) != _norm_room(incoming_room):
+                    other_hit.room_text = incoming_room
+                if or_block_instance_id and other_hit.or_block_instance_id != or_block_instance_id:
+                    other_hit.or_block_instance_id = or_block_instance_id
+                changed = True
+            if other_hit.assisting_surgeon_id != assist_id:
+                other_hit.assisting_surgeon_id = assist_id
+                changed = True
+            if changed:
+                db.commit()
+            claimed_ids.add(other_hit.id)
+            if other_hit not in day_candidates:
+                day_candidates.append(other_hit)
+            return {
+                "id": other_hit.id,
+                "action": "co_surgeon",
+                "case_date": case_date.isoformat(),
+                "patient_name": other_hit.patient_name,
+                "start_time": (other_hit.start_time or start_time).strftime("%H:%M"),
+                "primary_surgeon_id": primary_id,
+                "assisting_surgeon_id": assist_id,
+            }
         return {
             "id": other_hit.id,
             "action": "skipped_duplicate",
@@ -686,6 +1015,7 @@ def ingest_surgeon_schedule(
     created_clinics: list[dict] = []
     flags: list[dict] = []
     errors: list[dict] = []
+    corrections: list[dict] = []
 
     note_bits = []
     # Keep fax provenance in audit/flags only — not in human-facing OR notes.
@@ -697,10 +1027,17 @@ def ingest_surgeon_schedule(
     for idx, block in enumerate(surgeons):
         surgeon = resolve_surgeon(db, block.get("surgeon_name") or block.get("surgeon_raw"))
         if not surgeon:
-            errors.append({
-                "index": idx,
-                "error": f"surgeon not found: {block.get('surgeon_name') or block.get('surgeon_raw')}",
-            })
+            raw = block.get("surgeon_name") or block.get("surgeon_raw") or "unknown"
+            _queue_ingest_correction(
+                db,
+                corrections=corrections,
+                reason="surgeon_not_found",
+                title="Desk ingest · surgeon missing",
+                body=f"Fax #{source_fax_id or '?'} · surgeon not in CAL: {raw}",
+                href="/admin/surgeons",
+                source_fax_id=source_fax_id,
+                extra=str(raw),
+            )
             continue
 
         or_block = block.get("or_block") or {}
@@ -770,12 +1107,50 @@ def ingest_surgeon_schedule(
                 session=session,
             )
             if not loc:
-                errors.append({
-                    "index": idx,
-                    "date": day.isoformat(),
-                    "error": f"OR location not found for room: {room}",
-                })
+                _queue_ingest_correction(
+                    db,
+                    corrections=corrections,
+                    reason="or_location_not_found",
+                    title="Desk ingest · OR location missing",
+                    body=(
+                        f"{surgeon.full_name} · {day.strftime('%m-%d-%y')} · "
+                        f"OR location not found for room: {room}"
+                    ),
+                    href="/admin/locations",
+                    source_fax_id=source_fax_id,
+                    surgeon_id=surgeon.id,
+                    day=day,
+                    extra=str(room or ""),
+                )
                 continue
+
+            timed: list[dict] = []
+            for case in day_cases:
+                _salvage_start_time(case)
+                if _parse_time(case.get("start_time")):
+                    timed.append(case)
+                else:
+                    _queue_ingest_correction(
+                        db,
+                        corrections=corrections,
+                        reason="missing_time",
+                        title="Desk ingest · case time missing",
+                        body=(
+                            f"{surgeon.full_name} · {day.strftime('%m-%d-%y')} · "
+                            f"{(case.get('patient_name') or 'Unknown').strip()} · "
+                            f"no start time on fax row"
+                            + (f" · {(case.get('procedure') or '')[:60]}" if case.get("procedure") else "")
+                        ),
+                        href=_clinic_href(day, surgeon.id),
+                        source_fax_id=source_fax_id,
+                        surgeon_id=surgeon.id,
+                        day=day,
+                        patient_name=case.get("patient_name"),
+                        extra=case.get("procedure") or "",
+                    )
+            if not timed:
+                continue
+            day_cases = timed
 
             try:
                 start_t, end_t = _block_window_for_cases(
@@ -784,78 +1159,89 @@ def ingest_surgeon_schedule(
                     or_block.get("block_start") or or_block.get("start_time"),
                     or_block.get("block_end") or or_block.get("end_time"),
                 )
-                instance, block_action = _ensure_or_block_for_fax(
+                parsed_starts = [_parse_time(c.get("start_time"), start_t) for c in day_cases]
+                case_times = [t for t in parsed_starts if t is not None]
+                earliest = min(case_times, default=start_t)
+                blocks = _ensure_or_blocks_for_fax(
                     db,
                     block_date=day,
                     location_id=loc.id,
+                    case_times=case_times,
                     start_time=start_t,
                     end_time=end_t,
                     session=session,
                     notes=base_note,
                     room_text=room,
                 )
-                # Re-read window after possible expansion (fax SSOT fitted into inventory).
-                start_t, end_t = instance.start_time, instance.end_time
-                parsed_starts = [_parse_time(c.get("start_time"), start_t) for c in day_cases]
-                earliest = min([t for t in parsed_starts if t is not None], default=start_t)
-                warnings = _assign_surgeon_to_block(
-                    db,
-                    block=instance,
-                    surgeon_id=surgeon.id,
-                    assigned_start=earliest,
-                    case_count=len(day_cases),
-                    base_note=base_note,
-                )
-                if warnings:
-                    flags.append({
-                        "surgeon_id": surgeon.id,
-                        "date": day.isoformat(),
+
+                def _block_for(when: time, blocks=blocks) -> ORBlockInstance:
+                    for inst, _action in blocks:
+                        if inst.start_time <= when < inst.end_time:
+                            return inst
+                    return blocks[0][0]
+
+                for instance, block_action in blocks:
+                    half_starts = [
+                        t for t in case_times
+                        if instance.start_time <= t < instance.end_time
+                    ]
+                    warnings = _assign_surgeon_to_block(
+                        db,
+                        block=instance,
+                        surgeon_id=surgeon.id,
+                        assigned_start=min(half_starts, default=instance.start_time),
+                        case_count=len(half_starts) or len(day_cases),
+                        base_note=base_note,
+                    )
+                    if warnings:
+                        flags.append({
+                            "surgeon_id": surgeon.id,
+                            "date": day.isoformat(),
+                            "block_id": instance.id,
+                            "location": loc.abbreviation or loc.name,
+                            "warnings": warnings,
+                        })
+                    _flag_admin_schedule_issues(
+                        db,
+                        surgeon_id=surgeon.id,
+                        surgeon_name=surgeon.full_name,
+                        day=day,
+                        block=instance,
+                        location_label=loc.abbreviation or loc.name or "OR",
+                        warnings=warnings,
+                        fax_note=base_note,
+                    )
+                    created_blocks.append({
                         "block_id": instance.id,
+                        "action": block_action,
+                        "date": day.isoformat(),
                         "location": loc.abbreviation or loc.name,
+                        "start": instance.start_time.strftime("%H:%M"),
+                        "end": instance.end_time.strftime("%H:%M"),
+                        "surgeon_id": surgeon.id,
+                        "case_count": len(half_starts) or len(day_cases),
                         "warnings": warnings,
                     })
-                _flag_admin_schedule_issues(
-                    db,
-                    surgeon_id=surgeon.id,
-                    surgeon_name=surgeon.full_name,
-                    day=day,
-                    block=instance,
-                    location_label=loc.abbreviation or loc.name or "OR",
-                    warnings=warnings,
-                    fax_note=base_note,
-                )
-                created_blocks.append({
-                    "block_id": instance.id,
-                    "action": block_action,
-                    "date": day.isoformat(),
-                    "location": loc.abbreviation or loc.name,
-                    "start": start_t.strftime("%H:%M"),
-                    "end": end_t.strftime("%H:%M"),
-                    "surgeon_id": surgeon.id,
-                    "case_count": len(day_cases),
-                    "warnings": warnings,
-                })
                 for case in day_cases:
                     st = _parse_time(case.get("start_time"), earliest)
                     if st is None:
                         continue
-                    case_results.append(
-                        _upsert_surgical_case(
-                            db,
-                            surgeon_id=surgeon.id,
-                            case_date=day,
-                            start_time=st,
-                            patient_name=case["patient_name"],
-                            procedure=case.get("procedure") or "TBD",
-                            location_id=loc.id,
-                            room_text=case.get("room") or room or "",
-                            notes=base_note,
-                            or_block_instance_id=instance.id,
-                            notify=notify,
-                            day_candidates=day_candidates,
-                            claimed_ids=claimed_ids,
-                        )
+                    result = _upsert_surgical_case(
+                        db,
+                        surgeon_id=surgeon.id,
+                        case_date=day,
+                        start_time=st,
+                        patient_name=case["patient_name"],
+                        procedure=case.get("procedure") or "TBD",
+                        location_id=loc.id,
+                        room_text=case.get("room") or room or "",
+                        notes=base_note,
+                        or_block_instance_id=_block_for(st).id,
+                        notify=notify,
+                        day_candidates=day_candidates,
+                        claimed_ids=claimed_ids,
                     )
+                    case_results.append(result)
                 case_results.extend(
                     _cancel_missing_desk_cases(
                         db,
@@ -863,6 +1249,19 @@ def ingest_surgeon_schedule(
                         case_date=day,
                         claimed_ids=claimed_ids,
                     )
+                )
+            except ValueError as exc:
+                _queue_ingest_correction(
+                    db,
+                    corrections=corrections,
+                    reason="missing_block_window",
+                    title="Desk ingest · OR times missing",
+                    body=f"{surgeon.full_name} · {day.strftime('%m-%d-%y')} · {exc}",
+                    href=_clinic_href(day, surgeon.id),
+                    source_fax_id=source_fax_id,
+                    surgeon_id=surgeon.id,
+                    day=day,
+                    extra="window",
                 )
             except Exception as exc:  # noqa: BLE001 — per-day isolation
                 errors.append({
@@ -889,19 +1288,30 @@ def ingest_surgeon_schedule(
 
         for day, day_slots in sorted(clinic_by_date.items()):
             site_for_day = (day_slots[0].get("site_raw") if day_slots else None) or site
+            day_session = _session_from_slots(day_slots, clinic_session)
             loc = resolve_clinic_location(
                 db,
                 site_for_day,
                 surgeon_id=surgeon.id,
                 day=day,
-                session=clinic_session,
+                session=day_session,
             )
             if not loc:
-                errors.append({
-                    "index": idx,
-                    "date": day.isoformat(),
-                    "error": f"clinic location not found for site: {site_for_day}",
-                })
+                _queue_ingest_correction(
+                    db,
+                    corrections=corrections,
+                    reason="clinic_location_not_found",
+                    title="Desk ingest · clinic location missing",
+                    body=(
+                        f"{surgeon.full_name} · {day.strftime('%m-%d-%y')} · "
+                        f"clinic location not found for site: {site_for_day}"
+                    ),
+                    href="/admin/locations",
+                    source_fax_id=source_fax_id,
+                    surgeon_id=surgeon.id,
+                    day=day,
+                    extra=str(site_for_day or ""),
+                )
                 continue
             time_bits = []
             for slot in sorted(day_slots, key=lambda s: s.get("start_time") or ""):
@@ -918,7 +1328,7 @@ def ingest_surgeon_schedule(
                         db,
                         surgeon_id=surgeon.id,
                         day=day,
-                        session=clinic_session,
+                        session=day_session,
                         location_id=loc.id,
                         notes=notes,
                     )
@@ -943,10 +1353,13 @@ def ingest_surgeon_schedule(
         "cases_updated": _count("updated"),
         "cases_unchanged": _count("unchanged"),
         "cases_removed": _count("removed"),
+        "cases_co_surgeon": _count("co_surgeon"),
         "clinics": created_clinics,
         "clinics_count": len(created_clinics),
         "flags": flags,
         "flags_count": len(flags),
+        "corrections": corrections,
+        "corrections_count": len(corrections),
         # created_count kept for Desk handoff UI; now means net new cases only.
         "created_count": _count("created"),
         "error_count": len(errors),

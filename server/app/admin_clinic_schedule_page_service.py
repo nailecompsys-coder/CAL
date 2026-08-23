@@ -370,6 +370,8 @@ def surgical_case_json(cases: list[SurgicalCase]) -> list[dict]:
             "room_text": case.room_text or "",
             "status": case.status or "scheduled",
             "notes": case.notes or "",
+            "assisting_surgeon_id": case.assisting_surgeon_id or "",
+            "assisting_surgeon": case.assisting_surgeon.full_name if case.assisting_surgeon else "",
         }
         for case in cases
     ]

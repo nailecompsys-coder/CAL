@@ -92,7 +92,8 @@ def _build_rules() -> list[RuleDef]:
             category="overlap",
             description=(
                 "Effective on-call (including coverage swaps) vs clinic/day off/other commitments. "
-                "Surgery or Block OR at a hospital in the same call group is allowed."
+                "Surgery or Block OR at any hospital is allowed — surgeons work more than one "
+                "hospital in an area."
             ),
             default_config={},
             config_schema=[],

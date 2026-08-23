@@ -16,6 +16,7 @@ _CRED_RE = re.compile(
 # Common Advent fax OCR misspellings → CAL last-name tokens
 _SURGEON_TOKEN_ALIASES = {
     "wocdley": "woodley",
+    "woedley": "woodley",
     "woodely": "woodley",
 }
 
@@ -188,6 +189,11 @@ def schedule_location_for_day(
     for row in pool:
         if _is_clinic_location(row.location):
             return row.location
+    # A surgeon in the OR this session is still at the clinic named on the other
+    # half of the day, so fall back across sessions for the facility name only.
+    for row in rows:
+        if _is_clinic_location(row.location):
+            return row.location
     return None
 
 
@@ -309,7 +315,8 @@ def resolve_clinic_location(
         ("CLMMFLGS", "CL-OV"),
         ("CLMM", "CL-OV"),
         ("HEALTHPARK", "HP-OV"),
-        ("AHMGGEN", "HP-OV"),
+        # AHMGGENSRG is the practice-wide "AdventHealth Medical Group General
+        # Surgery" code, not a facility — only the grid can place that day.
         ("DRPHILLIPS", "DP-OV"),
         ("DP-OV", "DP-OV"),
         # Legacy aliases still accepted if present in a DB

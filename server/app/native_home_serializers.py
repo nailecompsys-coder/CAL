@@ -150,6 +150,7 @@ def surgical_item_payload(row) -> dict:
         "room": row.room_text or "",
         "status": row.status or "scheduled",
         "notes": row.notes or "",
+        "assistingSurgeon": row.assisting_surgeon.full_name if getattr(row, "assisting_surgeon", None) else "",
         "surgeonNotes": row.surgeon_notes or "",
         "color": (row.location.color if row.location else None) or "#e0f2fe",
     }

@@ -115,6 +115,11 @@ def settings_clinic_groups_redirect():
     return RedirectResponse("/admin/clinic-groups", status_code=303)
 
 
+@router.get("/settings/co-surgeon-pairs", response_class=HTMLResponse)
+def settings_co_surgeon_pairs_redirect():
+    return RedirectResponse("/admin/co-surgeon-pairs", status_code=303)
+
+
 @router.get("/settings/scheduling-rules", response_class=HTMLResponse)
 @router.get("/scheduling-rules", response_class=HTMLResponse)
 def scheduling_rules_page(

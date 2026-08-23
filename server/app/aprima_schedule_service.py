@@ -154,8 +154,8 @@ def main_office_site_tokens() -> list[str]:
     Override with comma-separated APRIMA_MAIN_OFFICE_SITE, e.g.
     ``Winter Garden,Main Office``.
     """
-    # Live Aprima ListServiceSite names observed for MFSA office clinics include
-    # "Clermont Office" (Friday Surgery One / main clinic patients on the master calendar).
+    # Used only to map CBO-style site names onto the "Surgery One" facility label.
+    # Surgery One *membership* is not location-gated — see is_surgical_one_dashboard_appointment.
     raw = os.environ.get(
         "APRIMA_MAIN_OFFICE_SITE",
         "Clermont Office,Winter Garden Clinic,Winter Garden,Main Office,Main Clinic",
@@ -257,10 +257,15 @@ def is_surgical_one_dashboard_appointment(
     office_tokens: list[str] | None = None,
     surgery_tokens: list[str] | None = None,
 ) -> bool:
-    """Dashboard Surgery One pills: main-office clinic patients + Aprima Surgery bookings."""
-    return is_main_office_site(row.get("serviceSite", ""), office_tokens) or is_surgery_appointment(
-        row, surgery_tokens
-    )
+    """Any harvested Aprima patient appointment is Surgery One.
+
+    Location does not matter (CBO, Lake Mary, HealthPark, hospital outpt, …).
+    The patient SQL already excludes DR OUT / FYI / MEETING / waitlist / recall.
+    """
+    del office_tokens, surgery_tokens
+    if not row:
+        return False
+    return bool(str(row.get("id") or row.get("date") or "").strip())
 
 
 def monday_of(day: date) -> date:
@@ -323,7 +328,7 @@ def fetch_patient_appointments(start_date: date, end_date: date) -> list[dict]:
 
 
 def fetch_main_office_patients_by_weekday(anchor: date | None = None) -> dict:
-    """Mon–Fri Surgery One buckets: main-office clinic + Aprima Surgery appointments."""
+    """Mon–Fri Surgery One buckets: Aprima patients at any clinic or hospital site."""
     week_start, week_end = weekday_range(anchor)
     tokens = main_office_site_tokens()
     try:

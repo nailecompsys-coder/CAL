@@ -77,39 +77,30 @@ def _day_off_row_range(row, day: date) -> tuple[datetime, datetime]:
     return datetime.combine(day, start_t), datetime.combine(day, end_t)
 
 
-def _call_group_location_ids(db: Session, call_group_id: int | None) -> set[int]:
-    if not call_group_id:
-        return set()
-    from ..models import CallGroupLocation
-
-    rows = (
-        db.query(CallGroupLocation.location_id)
-        .filter(CallGroupLocation.call_group_id == call_group_id)
-        .all()
-    )
-    return {row[0] for row in rows if row[0] is not None}
+_OPERATING_TYPES = frozenset({"or_block", "surgical_case"})
+_CALL_TYPES = frozenset({"call_rotation", "call_coverage"})
 
 
-def _surgery_at_on_call_facility(
-    *,
-    target_entity: Optional[dict],
-    covered_location_ids: set[int],
-) -> bool:
-    """True when OR/surgery is at a hospital covered by this call group.
+def _target_type(target_entity: Optional[dict]) -> str:
+    if not target_entity:
+        return ""
+    return (target_entity.get("type") or "").strip().lower()
 
-    On-call + operating at the same Advent campus is expected, not a conflict.
+
+def _operating_while_on_call(target_entity: Optional[dict]) -> bool:
+    """Operating (OR block or surgical case) while on call is expected, not a conflict.
+
+    On call is an availability/coverage state, not a time-occupying commitment.
+    Surgeons work more than one hospital in an area, so a block at any facility
+    while on call is expected — not a scheduling flag. Day-off, clinic, and
+    meeting overlaps with call are still surfaced.
     """
-    if not target_entity or not covered_location_ids:
-        return False
-    target_type = (target_entity.get("type") or "").strip().lower()
-    if target_type not in {"or_block", "surgical_case"}:
-        return False
-    location_id = target_entity.get("location_id")
-    try:
-        location_id = int(location_id) if location_id is not None else None
-    except (TypeError, ValueError):
-        return False
-    return location_id in covered_location_ids
+    return _target_type(target_entity) in _OPERATING_TYPES
+
+
+def _on_call_target(target_entity: Optional[dict]) -> bool:
+    """True when the thing being saved is on-call (rotation or coverage)."""
+    return _target_type(target_entity) in _CALL_TYPES
 
 
 def check_overlap_call(
@@ -123,7 +114,8 @@ def check_overlap_call(
 ) -> Iterator[Conflict]:
     """Effective on-call: original rotation unless covered; covering surgeon is on-call.
 
-    Surgery / Block OR at a hospital in the call group is allowed (same-facility call).
+    On-call does not conflict with an OR block or a surgical case — operating while on
+    call is expected. Overlaps with day-off / clinic / meeting are still surfaced.
     """
     from ..models import CallCoverage, CallRotation
 
@@ -158,11 +150,7 @@ def check_overlap_call(
             {"day_off", "clinic_schedule", "surgical_case", "meeting", "or_block", "call_rotation"},
         ):
             continue
-        covered_ids = _call_group_location_ids(db, r.call_group_id)
-        if _surgery_at_on_call_facility(
-            target_entity=target_entity,
-            covered_location_ids=covered_ids,
-        ):
+        if _operating_while_on_call(target_entity):
             continue
         group = r.call_group.name if r.call_group else "call"
         if active and active.covering_surgeon_id == surgeon_id:
@@ -303,6 +291,9 @@ def check_overlap_surgery(
     if exclude_entity and exclude_entity[0] == "surgical_case":
         q = q.filter(SurgicalCase.id != exclude_entity[1])
     for sc in q.all():
+        # On-call + operating is expected at any hospital — not a scheduling flag.
+        if _on_call_target(target_entity):
+            continue
         # Cases under this Block OR are inventory under the block — not a conflict.
         if target.kind == "or_block":
             block_id = (target.entity or {}).get("or_block_instance_id") or (target.entity or {}).get("block_id")
@@ -399,6 +390,9 @@ def check_overlap_or_block(
         if _exclude_entity(exclude_entity, "or_block_assignment", assignment.id):
             continue
         if _exclude_entity(exclude_entity, "or_block", instance.id):
+            continue
+        # On-call + a block at any hospital is expected — not a scheduling flag.
+        if _on_call_target(target_entity):
             continue
         # Surgical cases are expected to live inside Block OR capacity.
         if target.kind == "surgical_case":

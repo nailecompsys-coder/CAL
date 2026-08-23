@@ -1037,5 +1037,35 @@ document.getElementById('surgical-add-modal').addEventListener('click', function
 document.getElementById('surgical-edit-modal').addEventListener('click', function(e) {
   if (e.target === this) closeCaseEditModal();
 });
+
+(function openEditCaseFromQuery() {
+  var params = new URLSearchParams(window.location.search);
+  var editId = params.get('edit_case');
+  if (!editId) return;
+  var found = null;
+  Object.keys(SCHEDULE_DATA || {}).forEach(function(key) {
+    (SCHEDULE_DATA[key] || []).forEach(function(c) {
+      if (String(c.id) === String(editId)) found = c;
+    });
+  });
+  if (!found) return;
+  openCaseEditFromRow({
+    dataset: {
+      caseId: String(found.id),
+      surgeonId: String(found.surgeon_id || ''),
+      date: found.date || '',
+      startTime: found.start || '08:00',
+      endTime: found.end || '',
+      patientName: found.patient || '',
+      patientDob: found.patient_dob || '',
+      patientPhone: found.patient_phone || '',
+      procedure: found.procedure || '',
+      locationId: found.location_id || '',
+      roomText: found.room_text || '',
+      status: found.status || 'scheduled',
+      notes: found.notes || '',
+    },
+  });
+})();
 </script>
 {% endblock %}

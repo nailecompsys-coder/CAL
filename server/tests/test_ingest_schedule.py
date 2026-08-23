@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.ingest_resolve import resolve_clinic_location, resolve_or_location, resolve_surgeon
 from app.ingest_schedule_service import _block_window_for_cases, ingest_surgeon_schedule
-from app.models import Base, ClinicSchedule, Location, ORBlockAssignment, ORBlockInstance, Surgeon, SurgicalCase
+from app.models import Base, ClinicSchedule, CoSurgeonPair, Location, ORBlockAssignment, ORBlockInstance, Surgeon, SurgicalCase
 
 
 class IngestScheduleTest(unittest.TestCase):
@@ -41,7 +41,24 @@ class IngestScheduleTest(unittest.TestCase):
         self.assertEqual(resolve_surgeon(self.db, "Jorge Luis Florin, MD").id, self.surgeon.id)
         self.assertEqual(resolve_or_location(self.db, "APK S03").abbreviation, "AP-OR")
         self.assertNotEqual(resolve_or_location(self.db, "APK S03").id, self.hp_cl.id)
-        self.assertEqual(resolve_clinic_location(self.db, "AHMGGENSRG").abbreviation, "HP-CL")
+
+    def test_group_wide_site_code_alone_names_no_clinic(self):
+        """AHMGGENSRG is the practice-wide general-surgery code, not a facility."""
+        self.assertIsNone(resolve_clinic_location(self.db, "AHMGGENSRG"))
+
+    def test_ocr_misspelled_surgeon_still_resolves(self):
+        woodley = Surgeon(
+            first_name="Lucy",
+            last_name="Woodley",
+            email="lw@example.com",
+            is_active=True,
+            staff_type="physician",
+        )
+        self.db.add(woodley)
+        self.db.commit()
+        self.assertEqual(
+            resolve_surgeon(self.db, "Lucille Eugenie Woedley, MD").id, woodley.id
+        )
 
     def test_clinic_prefers_surgeon_schedule_over_fax_site(self):
         day = date(2026, 7, 27)
@@ -88,6 +105,91 @@ class IngestScheduleTest(unittest.TestCase):
         self.assertEqual(end, time(11, 15))
         with self.assertRaises(ValueError):
             _block_window_for_cases([], "am")
+
+    def test_block_window_salvages_time_glued_to_procedure(self):
+        """Advent OCR dumps 0715 into Procedure — recover it, don't fail ingest."""
+        cases = [
+            {"start_time": None, "procedure": "0715 FOREIGN BODY WGD REMOVAL LEFT LOWER"},
+            {"start_time": "", "procedure": "0815 EXCISION SOFTTISSUE WGD MASS"},
+        ]
+        start, end = _block_window_for_cases(cases, "am")
+        self.assertEqual(start, time(7, 15))
+        self.assertEqual(end, time(9, 45))  # 08:15 + 90m
+        self.assertEqual(cases[0]["start_time"], "07:15")
+        self.assertEqual(cases[1]["start_time"], "08:15")
+        self.assertTrue(cases[0]["procedure"].startswith("FOREIGN BODY"))
+        self.assertTrue(cases[1]["procedure"].startswith("EXCISION"))
+
+    def test_missing_time_goes_to_admin_correction_not_error(self):
+        result = ingest_surgeon_schedule(
+            self.db,
+            source_fax_id=79,
+            surgeons=[{
+                "surgeon_name": "Jorge Luis Florin, MD",
+                "start_date": "2026-08-20",
+                "or_block": {
+                    "session": "am",
+                    "room": "APK S03",
+                    "cases": [{
+                        "case_date": "2026-08-20",
+                        "start_time": None,
+                        "patient_name": "Mercer, Kurt",
+                        "procedure": "OPEN UMBILICAL HERNIA REPAIR",
+                        "room": "APK S03",
+                    }],
+                },
+            }],
+        )
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["error_count"], 0)
+        self.assertGreaterEqual(result["corrections_count"], 1)
+        self.assertEqual(result["corrections"][0]["reason"], "missing_time")
+        self.assertEqual(self.db.query(SurgicalCase).count(), 0)
+
+    def test_ocr_name_is_not_an_admin_correction(self):
+        """Garbled / truncated names are a parser problem — do not dump them on Shannon."""
+        result = ingest_surgeon_schedule(
+            self.db,
+            source_fax_id=79,
+            surgeons=[{
+                "surgeon_name": "Jorge Luis Florin, MD",
+                "start_date": "2026-08-17",
+                "or_block": {
+                    "session": "am",
+                    "room": "APK S03",
+                    "cases": [{
+                        "case_date": "2026-08-17",
+                        "start_time": "08:15",
+                        "patient_name": "Da Silva Ferreira,",
+                        "procedure": "EXCISION SOFTTISSUE",
+                        "room": "APK S03",
+                    }],
+                },
+            }],
+        )
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["error_count"], 0)
+        self.assertEqual(self.db.query(SurgicalCase).count(), 1)
+        reasons = {row["reason"] for row in result["corrections"]}
+        self.assertNotIn("truncated_name", reasons)
+
+    def test_clinic_location_missing_is_correction_not_error(self):
+        result = ingest_surgeon_schedule(
+            self.db,
+            source_fax_id=79,
+            surgeons=[{
+                "surgeon_name": "Jorge Luis Florin, MD",
+                "start_date": "2026-08-17",
+                "clinic_rotation": {
+                    "session": "pm",
+                    "site_raw": "NO_SUCH_SITE",
+                    "slots": [{"case_date": "2026-08-17", "patient_name": "X"}],
+                },
+            }],
+        )
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["error_count"], 0)
+        self.assertEqual(result["corrections"][0]["reason"], "clinic_location_not_found")
 
     def test_ingest_creates_block_cases_and_clinic(self):
         day = date(2026, 7, 27)
@@ -221,6 +323,181 @@ class IngestScheduleTest(unittest.TestCase):
         self.assertEqual(block.start_time, time(7, 0))
         self.assertEqual(block.end_time, time(12, 0))  # 10:30 + 90m
         self.assertEqual(self.db.query(ORBlockAssignment).count(), 1)
+
+    def _co_surgeon_payload(self, surgeon_name, patient="Davenport, Keith"):
+        return {
+            "surgeon_name": surgeon_name,
+            "start_date": "2026-08-10",
+            "or_block": {
+                "session": "am",
+                "room": "APK S04",
+                "cases": [
+                    {
+                        "case_date": "2026-08-10",
+                        "start_time": "08:00",
+                        "patient_name": patient,
+                        "procedure": "Robotic Ventral Hernia Repair",
+                        "room": "APK S04",
+                    },
+                ],
+            },
+        }
+
+    def _add_froehling_and_pair(self):
+        froehling = Surgeon(
+            first_name="Nadia",
+            last_name="Froehling",
+            email="nf@example.com",
+            is_active=True,
+            staff_type="physician",
+        )
+        self.db.add(froehling)
+        self.db.commit()
+        self.db.add(CoSurgeonPair(
+            primary_surgeon_id=self.surgeon.id,   # Florin
+            assisting_surgeon_id=froehling.id,    # Froehling assists
+            is_active=True,
+        ))
+        self.db.commit()
+        return froehling
+
+    def test_co_surgeon_collapses_to_one_case_under_primary(self):
+        """Same case under both surgeons → one row under Florin, Froehling as assist."""
+        froehling = self._add_froehling_and_pair()
+        result = ingest_surgeon_schedule(
+            self.db,
+            source_fax_id=61,
+            surgeons=[
+                self._co_surgeon_payload("Jorge Luis Florin, MD"),   # primary first
+                self._co_surgeon_payload("Nadia Marie Froehling, MD"),
+            ],
+        )
+        self.assertTrue(result["ok"], result)
+        active = self.db.query(SurgicalCase).filter(SurgicalCase.status != "cancelled").all()
+        self.assertEqual(len(active), 1, [(c.patient_name, c.surgeon_id) for c in active])
+        case = active[0]
+        self.assertEqual(case.surgeon_id, self.surgeon.id)          # primary = Florin
+        self.assertEqual(case.assisting_surgeon_id, froehling.id)    # assist = Froehling
+        self.assertGreaterEqual(result["cases_co_surgeon"], 1)
+
+    def test_co_surgeon_primary_wins_regardless_of_order(self):
+        """Even if the assistant's block is ingested first, the case ends under Florin."""
+        froehling = self._add_froehling_and_pair()
+        result = ingest_surgeon_schedule(
+            self.db,
+            source_fax_id=61,
+            surgeons=[
+                self._co_surgeon_payload("Nadia Marie Froehling, MD"),  # assistant first
+                self._co_surgeon_payload("Jorge Luis Florin, MD"),
+            ],
+        )
+        self.assertTrue(result["ok"], result)
+        active = self.db.query(SurgicalCase).filter(SurgicalCase.status != "cancelled").all()
+        self.assertEqual(len(active), 1, [(c.patient_name, c.surgeon_id) for c in active])
+        case = active[0]
+        self.assertEqual(case.surgeon_id, self.surgeon.id)
+        self.assertEqual(case.assisting_surgeon_id, froehling.id)
+
+    def test_cross_surgeon_without_pair_still_skips_duplicate(self):
+        """No pairing configured → keep the legacy skip (no second row, no assist)."""
+        froehling = Surgeon(
+            first_name="Nadia", last_name="Froehling", email="nf2@example.com",
+            is_active=True, staff_type="physician",
+        )
+        self.db.add(froehling)
+        self.db.commit()
+        result = ingest_surgeon_schedule(
+            self.db,
+            source_fax_id=61,
+            surgeons=[
+                self._co_surgeon_payload("Jorge Luis Florin, MD"),
+                self._co_surgeon_payload("Nadia Marie Froehling, MD"),
+            ],
+        )
+        self.assertTrue(result["ok"], result)
+        active = self.db.query(SurgicalCase).filter(SurgicalCase.status != "cancelled").all()
+        self.assertEqual(len(active), 1)
+        self.assertIsNone(active[0].assisting_surgeon_id)
+
+    def test_noon_spanning_block_assigns_both_cards(self):
+        """An afternoon case must land on the PM card, not a block that ended at noon."""
+        result = ingest_surgeon_schedule(
+            self.db,
+            source_fax_id=4,
+            surgeons=[
+                {
+                    "surgeon_name": "Jorge Luis Florin, MD",
+                    "start_date": "2026-07-27",
+                    "or_block": {
+                        "session": "am",
+                        "room": "APK S02",
+                        "cases": [
+                            {
+                                "case_date": "2026-07-27",
+                                "start_time": "11:45",
+                                "patient_name": "Morning Pt, A",
+                                "procedure": "Hernia",
+                                "room": "APK S02",
+                            },
+                            {
+                                "case_date": "2026-07-27",
+                                "start_time": "13:30",
+                                "patient_name": "Afternoon Pt, B",
+                                "procedure": "Robotic",
+                                "room": "APK S02",
+                            },
+                        ],
+                    },
+                }
+            ],
+        )
+        self.assertTrue(result["ok"], result)
+
+        blocks = self.db.query(ORBlockInstance).order_by(ORBlockInstance.start_time).all()
+        self.assertEqual([b.session for b in blocks], ["am", "pm"])
+        # Every card the fax claims carries the surgeon; none is left open.
+        self.assertEqual(self.db.query(ORBlockAssignment).count(), 2)
+        self.assertEqual({b.status for b in blocks}, {"assigned"})
+
+        pm_block = blocks[1]
+        afternoon = (
+            self.db.query(SurgicalCase)
+            .filter(SurgicalCase.start_time == time(13, 30))
+            .one()
+        )
+        self.assertEqual(afternoon.or_block_instance_id, pm_block.id)
+        self.assertLessEqual(pm_block.start_time, afternoon.start_time)
+        self.assertGreater(pm_block.end_time, afternoon.start_time)
+
+    def test_padded_block_tail_does_not_invent_afternoon_card(self):
+        """Block end is padded past the last case; padding alone is not OR time."""
+        result = ingest_surgeon_schedule(
+            self.db,
+            source_fax_id=5,
+            surgeons=[
+                {
+                    "surgeon_name": "Jorge Luis Florin, MD",
+                    "start_date": "2026-07-27",
+                    "or_block": {
+                        "session": "am",
+                        "room": "APK S05",
+                        "cases": [
+                            {
+                                "case_date": "2026-07-27",
+                                "start_time": "11:45",
+                                "patient_name": "Only Pt, C",
+                                "procedure": "Chole",
+                                "room": "APK S05",
+                            }
+                        ],
+                    },
+                }
+            ],
+        )
+        self.assertTrue(result["ok"], result)
+        blocks = self.db.query(ORBlockInstance).all()
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(blocks[0].end_time, time(12, 0))
 
     def _florin_payload(self, cases, *, start="2026-07-27", end="2026-07-27", clinic=False):
         block = {

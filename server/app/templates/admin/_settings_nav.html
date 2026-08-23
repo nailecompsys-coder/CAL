@@ -4,6 +4,7 @@
 {% set practice_active = path in ['/admin/settings', '/admin/settings/practice', '/admin/branding'] %}
 {% set locations_active = path.startswith('/admin/settings/locations') or path.startswith('/admin/locations') %}
 {% set groups_active = path.startswith('/admin/settings/clinic-groups') or path.startswith('/admin/clinic-groups') %}
+{% set cosurgeon_active = path.startswith('/admin/settings/co-surgeon-pairs') or path.startswith('/admin/co-surgeon-pairs') %}
 {% set rules_active = path.startswith('/admin/settings/scheduling-rules') or path.startswith('/admin/scheduling-rules') %}
 {% set access_active = path.startswith('/admin/settings/access') or path.startswith('/admin/mobile-devices') or path.startswith('/admin/otp-sign-in') %}
 {% set notes_active = path.startswith('/admin/settings/notifications') or path.startswith('/admin/notifications') %}
@@ -23,6 +24,9 @@
     </a>
     <a href="/admin/settings/clinic-groups" class="settings-rail-link {% if groups_active %}active{% endif %}">
       <i class="fa-solid fa-layer-group"></i> Clinic Groups
+    </a>
+    <a href="/admin/settings/co-surgeon-pairs" class="settings-rail-link {% if cosurgeon_active %}active{% endif %}">
+      <i class="fa-solid fa-user-doctor"></i> Co-Surgeon Pairs
     </a>
     <a href="/admin/settings/scheduling-rules" class="settings-rail-link {% if rules_active %}active{% endif %}">
       <i class="fa-solid fa-scale-balanced"></i> Scheduling Rules

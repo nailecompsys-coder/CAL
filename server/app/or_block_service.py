@@ -304,6 +304,40 @@ def log_schedule_change(
     ))
 
 
+def _overlapping_upsert_target(
+    db: Session,
+    *,
+    block_date: date,
+    location_id: int,
+    start_time: time,
+    end_time: time,
+    room_text: str | None,
+) -> ORBlockInstance | None:
+    """One existing same-room window can take the new times. Two+ is a real collision."""
+    overlaps = overlapping_or_blocks(
+        db,
+        block_date=block_date,
+        location_id=location_id,
+        start_time=start_time,
+        end_time=end_time,
+        room_text=room_text,
+    )
+    if not overlaps:
+        return None
+    if len(overlaps) == 1:
+        return overlaps[0]
+    raise ValueError(
+        "Duplicate Block OR time: " + " ".join(
+            f"{(row.location.name if row.location else 'OR')} "
+            f"{normalize_room_text(row.room_text) or 'shared window'} already has "
+            f"{row.status.replace('_', ' ')} block time "
+            f"{block_date.strftime('%a %-m/%-d')} "
+            f"{row.start_time.strftime('%H:%M')}-{row.end_time.strftime('%H:%M')}."
+            for row in overlaps[:3]
+        )
+    )
+
+
 def create_or_blocks(db: Session, payload: BlockORCreateInput, admin_id: int | None = None) -> dict:
     if payload.start_date > payload.end_date:
         raise ValueError("Start date must be before end date")
@@ -313,31 +347,37 @@ def create_or_blocks(db: Session, payload: BlockORCreateInput, admin_id: int | N
     location_ids = list(dict.fromkeys(payload.location_ids))
     if not location_ids:
         raise ValueError("At least one OR location is required")
-    duplicates = duplicate_block_messages(db, payload)
-    if duplicates:
-        raise ValueError("Duplicate Block OR time: " + " ".join(duplicates[:4]))
-
-    series = ORBlockSeries(
-        name=payload.name.strip() or "Open Block",
-        recurrence=payload.recurrence if payload.recurrence in {"weekly", "once"} else "weekly",
-        weekday=next(iter(sorted(weekdays))) if len(weekdays) == 1 else None,
-        start_date=payload.start_date,
-        end_date=payload.end_date,
-        session=normalize_session(payload.session),
-        start_time=payload.start_time,
-        end_time=payload.end_time,
-        owner_type=payload.owner_type if payload.owner_type in {"practice", "surgeon"} else "practice",
-        owner_surgeon_id=payload.owner_surgeon_id,
-        release_policy_days=payload.release_policy_days,
-        notes=(payload.notes or "").strip() or None,
-        created_by_admin_id=admin_id,
-    )
-    db.add(series)
-    db.flush()
 
     room = normalize_room_text(payload.room_text)
     windows = am_pm_windows(payload.start_time, payload.end_time)
+    notes = (payload.notes or "").strip() or None
+    series: ORBlockSeries | None = None
     created: list[ORBlockInstance] = []
+    updated: list[ORBlockInstance] = []
+
+    def ensure_series() -> ORBlockSeries:
+        nonlocal series
+        if series is not None:
+            return series
+        series = ORBlockSeries(
+            name=payload.name.strip() or "Open Block",
+            recurrence=payload.recurrence if payload.recurrence in {"weekly", "once"} else "weekly",
+            weekday=next(iter(sorted(weekdays))) if len(weekdays) == 1 else None,
+            start_date=payload.start_date,
+            end_date=payload.end_date,
+            session=normalize_session(payload.session),
+            start_time=payload.start_time,
+            end_time=payload.end_time,
+            owner_type=payload.owner_type if payload.owner_type in {"practice", "surgeon"} else "practice",
+            owner_surgeon_id=payload.owner_surgeon_id,
+            release_policy_days=payload.release_policy_days,
+            notes=notes,
+            created_by_admin_id=admin_id,
+        )
+        db.add(series)
+        db.flush()
+        return series
+
     for block_date in daterange(payload.start_date, payload.end_date):
         if payload.recurrence == "once" and block_date != payload.start_date:
             continue
@@ -345,8 +385,31 @@ def create_or_blocks(db: Session, payload: BlockORCreateInput, admin_id: int | N
             continue
         for location_id in location_ids:
             for session_label, win_start, win_end in windows:
+                existing = _overlapping_upsert_target(
+                    db,
+                    block_date=block_date,
+                    location_id=location_id,
+                    start_time=win_start,
+                    end_time=win_end,
+                    room_text=room,
+                )
+                if existing is not None:
+                    updated.append(
+                        update_or_block_instance(
+                            db,
+                            existing.id,
+                            session=session_label,
+                            start_time=win_start,
+                            end_time=win_end,
+                            notes=notes,
+                            room_text=payload.room_text if room else None,
+                            admin_id=admin_id,
+                        )
+                    )
+                    continue
+                series_row = ensure_series()
                 instance = ORBlockInstance(
-                    series_id=series.id,
+                    series_id=series_row.id,
                     location_id=location_id,
                     date=block_date,
                     session=session_label,
@@ -355,12 +418,12 @@ def create_or_blocks(db: Session, payload: BlockORCreateInput, admin_id: int | N
                     room_text=room,
                     status="open",
                     release_deadline=_block_release_deadline(block_date, payload.release_policy_days),
-                    notes=series.notes,
+                    notes=notes,
                 )
                 db.add(instance)
                 db.flush()
                 audit_block(db, instance.id, admin_id, "created", {
-                    "seriesId": series.id,
+                    "seriesId": series_row.id,
                     "locationId": location_id,
                     "date": block_date.isoformat(),
                     "session": session_label,
@@ -369,8 +432,15 @@ def create_or_blocks(db: Session, payload: BlockORCreateInput, admin_id: int | N
                 if not room:
                     flag_block_missing_room(db, instance, admin_id=admin_id)
                 created.append(instance)
-    db.commit()
-    return {"series_id": series.id, "created": len(created), "instance_ids": [row.id for row in created]}
+    if created:
+        db.commit()
+    saved = created + updated
+    return {
+        "series_id": series.id if series else (saved[0].series_id if saved else None),
+        "created": len(created),
+        "updated": len(updated),
+        "instance_ids": [row.id for row in saved],
+    }
 
 
 def update_or_block_instance(
@@ -1236,6 +1306,9 @@ def block_assignment_warnings(
         # Surgical cases belong inside this Block OR — not a conflict for Shannon.
         if conflict.rule_id == "OVERLAP_SURGERY":
             continue
+        # On-call + Block OR is expected at any hospital — not a scheduling flag.
+        if conflict.rule_id == "OVERLAP_CALL":
+            continue
         # Do not flag this block against itself.
         if conflict.rule_id == "OVERLAP_OR_BLOCK" and conflict.conflicting_entity_id == block.id:
             continue
@@ -1245,7 +1318,6 @@ def block_assignment_warnings(
             "OVERLAP_DAY_OFF": "Overlaps day off",
             "OVERLAP_MEETING": "Overlaps assigned meeting",
             "OVERLAP_UNAVAILABLE": "Overlaps unavailable time",
-            "OVERLAP_CALL": "Surgeon is on call",
             "OVERLAP_OR_BLOCK": "Overlaps another OR block assignment",
         }.get(conflict.rule_id, "Schedule warning")
         warnings.append(scheduler_safe_warning(f"{label}: {conflict.message}"))

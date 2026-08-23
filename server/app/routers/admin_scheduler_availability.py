@@ -1,5 +1,6 @@
 """Scheduler board: Block OR capacity + non-PHI case warnings."""
 
+import json
 from datetime import date, timedelta
 from typing import Optional
 
@@ -77,6 +78,8 @@ def scheduler_availability_page(
         row for row in scheduler_safe_rows(db, start_date, end_date, selected_surgeon_id)
         if row.get("warnings")
     ]
+    from ..admin_settings_page_service import reconcile_stale_schedule_flag_notifications
+    reconcile_stale_schedule_flag_notifications(db)
     schedule_flags = []
     for row in recent_schedule_changes(db, hours=24 * 90):
         if row.get("type") != "desk_or_schedule_flag":
@@ -92,7 +95,31 @@ def scheduler_availability_page(
             selected = next((s for s in surgeons if s.id == selected_surgeon_id), None)
             if selected and row.get("surgeon") != selected.full_name:
                 continue
-        schedule_flags.append(row)
+    schedule_flags.append(row)
+    from ..models import AdminNotification
+    ingest_fixes = []
+    for note in (
+        db.query(AdminNotification)
+        .filter(AdminNotification.kind == "ingest_correction", AdminNotification.read_at.is_(None))
+        .order_by(AdminNotification.created_at.asc())
+        .all()
+    ):
+        try:
+            payload = json.loads(note.payload or "{}") if note.payload else {}
+        except (TypeError, ValueError):
+            payload = {}
+        if selected_surgeon_id and payload.get("surgeonId") not in (None, selected_surgeon_id, str(selected_surgeon_id)):
+            try:
+                if int(payload.get("surgeonId")) != selected_surgeon_id:
+                    continue
+            except (TypeError, ValueError):
+                continue
+        ingest_fixes.append({
+            "date": payload.get("date") or (note.created_at.date().isoformat() if note.created_at else None),
+            "body": note.body,
+            "href": payload.get("href") or "/admin/clinic-schedule",
+            "title": note.title,
+        })
     return templates.TemplateResponse("admin/scheduler_availability.html", _base(
         request,
         admin,
@@ -106,4 +133,5 @@ def scheduler_availability_page(
         assigned_blocks=assigned_blocks,
         rows=case_rows,
         schedule_flags=schedule_flags,
+        ingest_fixes=ingest_fixes,
     ))

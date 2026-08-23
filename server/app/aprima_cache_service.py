@@ -220,7 +220,7 @@ def patient_appointments_for_api(
 
 
 def main_office_patients_by_weekday(db: Session, anchor: date | None = None) -> dict:
-    """Dashboard Surgical One week — cache-first (office clinic + Aprima Surgery)."""
+    """Dashboard Surgery One week — cache-first, any clinic/hospital site."""
     week_start, week_end = weekday_range(anchor)
     tokens = main_office_site_tokens()
     payload = patient_appointments_for_api(db, week_start, week_end, surgeon=None)

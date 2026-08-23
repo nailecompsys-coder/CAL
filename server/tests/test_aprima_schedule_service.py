@@ -43,16 +43,20 @@ class AprimaScheduleServiceTest(unittest.TestCase):
         self.assertFalse(is_surgery_appointment({"appointmentType": "Post Op"}))
         self.assertTrue(
             is_surgical_one_dashboard_appointment(
-                {"appointmentType": "Surgery", "serviceSite": "AHWG-Outpt"},
-                office_tokens=["Clermont Office"],
+                {"id": "sx1", "appointmentType": "Surgery", "serviceSite": "AHWG-Outpt"},
             )
         )
-        self.assertFalse(
+        self.assertTrue(
             is_surgical_one_dashboard_appointment(
-                {"appointmentType": "Office Visit", "serviceSite": "AHWG-Outpt"},
-                office_tokens=["Clermont Office"],
+                {"id": "lm1", "appointmentType": "Post Op", "serviceSite": "Lake Mary Clinic"},
             )
         )
+        self.assertTrue(
+            is_surgical_one_dashboard_appointment(
+                {"id": "ov1", "appointmentType": "Office Visit", "serviceSite": "AHWG-Outpt"},
+            )
+        )
+        self.assertFalse(is_surgical_one_dashboard_appointment({}))
 
     def test_dashboard_buckets_include_office_and_surgery(self):
         rows = [
@@ -125,19 +129,19 @@ class AprimaScheduleServiceTest(unittest.TestCase):
             with patch.dict(os.environ, {"APRIMA_MAIN_OFFICE_SITE": "Winter Garden,Main Office"}, clear=False):
                 payload = fetch_main_office_patients_by_weekday(date(2026, 7, 9))
 
-        self.assertEqual(payload["total"], 3)
+        self.assertEqual(payload["total"], 4)
         self.assertEqual(payload["days"][0]["count"], 1)  # Mon office
         self.assertEqual(payload["days"][0]["clinicLabel"], "Winter Garden")
         self.assertEqual(payload["days"][0]["surgeonLabel"], "JB")
-        self.assertEqual(payload["days"][1]["count"], 1)  # Tue Surgery @ AHWG (office visit Lake Mary still out)
-        self.assertEqual(payload["days"][1]["clinicLabel"], "AHWG-Outpt")
-        self.assertEqual(payload["days"][1]["appointments"][0]["appointmentType"], "Surgery")
+        self.assertEqual(payload["days"][1]["count"], 2)  # Tue Lake Mary office + AHWG Surgery
+        self.assertIn("Lake Mary", payload["days"][1]["clinicLabel"])
+        self.assertIn("AHWG-Outpt", payload["days"][1]["clinicLabel"])
         self.assertEqual(payload["days"][2]["count"], 1)  # Wed
         self.assertEqual(payload["days"][2]["clinicLabel"], "Main Office")
         self.assertEqual(payload["days"][2]["surgeonLabel"], "CJ")
         self.assertIsNone(payload["warning"])
 
-    def test_dashboard_buckets_filter_main_office_and_group_by_day(self):
+    def test_dashboard_buckets_include_any_clinic_and_group_by_day(self):
         rows = [
             {
                 "id": "1",
@@ -192,11 +196,12 @@ class AprimaScheduleServiceTest(unittest.TestCase):
             with patch.dict(os.environ, {"APRIMA_MAIN_OFFICE_SITE": "Winter Garden,Main Office"}, clear=False):
                 payload = fetch_main_office_patients_by_weekday(date(2026, 7, 9))
 
-        self.assertEqual(payload["total"], 2)
+        self.assertEqual(payload["total"], 3)
         self.assertEqual(payload["days"][0]["count"], 1)  # Mon
         self.assertEqual(payload["days"][0]["clinicLabel"], "Winter Garden")
         self.assertEqual(payload["days"][0]["surgeonLabel"], "JB")
-        self.assertEqual(payload["days"][1]["count"], 0)  # Tue (Lake Mary filtered out)
+        self.assertEqual(payload["days"][1]["count"], 1)  # Tue Lake Mary
+        self.assertEqual(payload["days"][1]["clinicLabel"], "Lake Mary")
         self.assertEqual(payload["days"][2]["count"], 1)  # Wed
         self.assertEqual(payload["days"][2]["clinicLabel"], "Main Office")
         self.assertEqual(payload["days"][2]["surgeonLabel"], "CJ")

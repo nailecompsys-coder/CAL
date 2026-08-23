@@ -11,6 +11,9 @@ from sqlalchemy.orm import sessionmaker
 
 from app.models import (
     Base,
+    CallGroup,
+    CallGroupLocation,
+    CallRotation,
     ClinicSchedule,
     DayOff,
     Location,
@@ -90,13 +93,49 @@ class ORBlockServiceTest(unittest.TestCase):
                 recurrence="once",
                 room_text="S03",
             )
-            create_or_blocks(db, payload)
+            first = create_or_blocks(db, payload)
+            again = create_or_blocks(db, payload)
 
-            with self.assertRaises(ValueError) as ctx:
-                create_or_blocks(db, payload)
-
-            self.assertIn("Duplicate Block OR time", str(ctx.exception))
             self.assertEqual(db.query(ORBlockInstance).count(), 1)
+            self.assertEqual(again["created"], 0)
+            self.assertEqual(again["updated"], 1)
+            self.assertEqual(again["instance_ids"], first["instance_ids"])
+        finally:
+            db.close()
+
+    def test_overlapping_create_updates_existing_open_times(self):
+        db = self.Session()
+        try:
+            hospital = self._location(db, "Advent Winter Garden", "WG")
+            monday = date(2026, 8, 17)
+            create_or_blocks(db, BlockORCreateInput(
+                name="Template AM",
+                start_date=monday,
+                end_date=monday,
+                weekdays=[monday.weekday()],
+                location_ids=[hospital.id],
+                session="am",
+                start_time=time(7, 0),
+                end_time=time(12, 0),
+                recurrence="once",
+            ))
+            result = create_or_blocks(db, BlockORCreateInput(
+                name="Real Advent window",
+                start_date=monday,
+                end_date=monday,
+                weekdays=[monday.weekday()],
+                location_ids=[hospital.id],
+                session="am",
+                start_time=time(7, 15),
+                end_time=time(11, 0),
+                recurrence="once",
+            ))
+            rows = db.query(ORBlockInstance).all()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(result["created"], 0)
+            self.assertEqual(result["updated"], 1)
+            self.assertEqual(rows[0].start_time, time(7, 15))
+            self.assertEqual(rows[0].end_time, time(11, 0))
         finally:
             db.close()
 
@@ -293,7 +332,7 @@ class ORBlockServiceTest(unittest.TestCase):
         finally:
             db.close()
 
-    def test_overlapping_block_time_for_same_location_is_rejected(self):
+    def test_overlapping_block_time_updates_the_existing_window(self):
         db = self.Session()
         try:
             hospital = self._location(db, "Advent Winter Garden", "WG")
@@ -310,18 +349,21 @@ class ORBlockServiceTest(unittest.TestCase):
                 recurrence="once",
             ))
 
-            with self.assertRaises(ValueError):
-                create_or_blocks(db, BlockORCreateInput(
-                    name="Competing Block",
-                    start_date=monday,
-                    end_date=monday,
-                    weekdays=[monday.weekday()],
-                    location_ids=[hospital.id],
-                    session="custom",
-                    start_time=time(8, 0),
-                    end_time=time(11, 0),
-                    recurrence="once",
-                ))
+            create_or_blocks(db, BlockORCreateInput(
+                name="Competing Block",
+                start_date=monday,
+                end_date=monday,
+                weekdays=[monday.weekday()],
+                location_ids=[hospital.id],
+                session="custom",
+                start_time=time(8, 0),
+                end_time=time(11, 0),
+                recurrence="once",
+            ))
+            rows = db.query(ORBlockInstance).all()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].start_time, time(8, 0))
+            self.assertEqual(rows[0].end_time, time(11, 0))
         finally:
             db.close()
 
@@ -369,6 +411,46 @@ class ORBlockServiceTest(unittest.TestCase):
             # Surgical cases belong inside Block OR capacity — not flagged as conflicts here.
             self.assertFalse(any("Overlaps another surgical case" in row for row in warnings))
             self.assertNotIn("Hidden Patient", " ".join(warnings))
+        finally:
+            db.close()
+
+    def test_on_call_at_any_hospital_is_not_a_block_warning(self):
+        """Docs work more than one hospital in an area — on-call + block is not a flag."""
+        db = self.Session()
+        try:
+            surgeon = self._surgeon(db, "Alex", "Schroeder")
+            apopka = self._location(db, "Advent Apopka", "AP")
+            altamonte = self._location(db, "Advent Altamonte", "AL")
+            group = CallGroup(name="Winter Garden / Apopka / Minneola Hospital")
+            db.add(group)
+            db.flush()
+            db.add(CallGroupLocation(call_group_id=group.id, location_id=apopka.id))
+            block_day = date.today() + timedelta(days=21)
+            while block_day.weekday() != 2:
+                block_day += timedelta(days=1)
+            db.add(CallRotation(
+                surgeon_id=surgeon.id,
+                call_group_id=group.id,
+                date=block_day,
+            ))
+            block_id = create_or_blocks(db, BlockORCreateInput(
+                name="Open AM Block",
+                start_date=block_day,
+                end_date=block_day,
+                weekdays=[block_day.weekday()],
+                location_ids=[altamonte.id],
+                session="am",
+                start_time=time(7, 0),
+                end_time=time(12, 0),
+                recurrence="once",
+            ))["instance_ids"][0]
+            db.commit()
+
+            block = db.get(ORBlockInstance, block_id)
+            warnings = block_assignment_warnings(db, block, surgeon.id)
+            joined = " ".join(warnings).lower()
+            self.assertFalse(any("on call" in row.lower() for row in warnings), warnings)
+            self.assertNotIn("on-call", joined)
         finally:
             db.close()
 

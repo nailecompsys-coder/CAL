@@ -22,9 +22,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
-# Download Tailwind CSS standalone CLI (v3, no Node.js required)
-RUN curl -sLo /tmp/tailwindcss \
-    https://github.com/tailwindlabs/tailwindcss/releases/download/v3.4.17/tailwindcss-linux-x64 \
+# Download Tailwind CSS standalone CLI (v3, no Node.js required).
+# uname is used because classic docker build does not always set TARGETARCH.
+RUN ARCH="$(uname -m)" \
+    && if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then TW=tailwindcss-linux-arm64; else TW=tailwindcss-linux-x64; fi \
+    && curl -sLo /tmp/tailwindcss \
+    "https://github.com/tailwindlabs/tailwindcss/releases/download/v3.4.17/${TW}" \
     && chmod +x /tmp/tailwindcss
 
 COPY VERSION ./VERSION

@@ -196,6 +196,9 @@ function closeSidebar() {
   document.getElementById('sidebar-overlay').classList.add('hidden');
 }
 </script>
+{% if admin.role != 'scheduler' %}
+<script src="/static/cal_assistant.js?v={{ app_version|default('dev')|urlencode }}" defer></script>
+{% endif %}
 {% block scripts %}{% endblock %}
 </body>
 </html>

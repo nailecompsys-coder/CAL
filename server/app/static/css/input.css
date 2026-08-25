@@ -24,6 +24,10 @@
   --cal-lavender: #ebe4ff;
   --cal-stroke: rgba(180, 196, 220, 0.55);
   --cal-shadow: rgba(28, 48, 80, 0.08);
+  /* Cal assistant — purple accent (single named token; not scattered hex) */
+  --cal-purple: #6d28d9;
+  --cal-purple-mid: #8b5cf6;
+  --cal-purple-soft: #ede9fe;
 }
 
 html {

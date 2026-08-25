@@ -7,6 +7,14 @@
  *
  * No React. No build step. Jinja2 + plain JS only.
  * Uses Clinical Trust CSS tokens from input.css :root.
+ *
+ * Drag: pointer events on #cal-btn; #cal-assist repositioned via left/top.
+ *   Position persisted in localStorage (DRAG_KEY). Clamped to viewport.
+ *   Real drag (≥ DRAG_THRESHOLD px) suppresses the click-to-think handler.
+ *
+ * Notif focus: clicking any [data-cal-notif] card on the dashboard focuses
+ *   that issue — eyes track it, comet fires briefly, bubble restates it.
+ *   A second click on the same focused card follows the data-cal-href.
  */
 (function () {
   'use strict';
@@ -23,14 +31,21 @@
     '/admin/daysoff',
   ];
 
-  var SEEN_KEY    = 'cal-seen-v1';
-  var MAX_SEEN    = 200;
-  var IDLE_MS     = 2800;    // ms still before idle grid-scan kicks in
-  var MAX_OFFSET  = 6.2;     // max pupil translation in SVG units (face is 64×64)
+  var SEEN_KEY       = 'cal-seen-v1';
+  var MAX_SEEN       = 200;
+  var IDLE_MS        = 2800;   // ms still before idle grid-scan kicks in
+  var MAX_OFFSET     = 6.2;    // max pupil translation in SVG units (face is 64×64)
+  var DRAG_KEY       = 'cal-bot-pos-v1';
+  var DRAG_THRESHOLD = 5;      // px — minimum move to count as a real drag
 
   var idleTimer = null;
   var isIdle    = true;
   var pulseTO   = null;
+
+  // Drag state
+  var dragState         = null;  // {startX,startY,startLeft,startTop,moved}
+  var suppressNextClick = false; // suppresses fetchConflicts after a real drag
+  var focusedNotif      = null;  // the DOM element of the currently-focused notif card
 
   // ─── Bootstrap ────────────────────────────────────────────────────────────
   function init() {
@@ -42,6 +57,7 @@
 
     injectStyles();
     document.body.appendChild(buildWidget());
+    initPosition();
     setMood('ok');
     bindEvents();
     setTimeout(fetchConflicts, 900);
@@ -56,12 +72,14 @@
       '  position:fixed;top:1.1rem;right:1.1rem;',
       '  z-index:9999;display:flex;flex-direction:column;',
       '  align-items:flex-end;gap:.5rem;pointer-events:none;',
+      '  touch-action:none;user-select:none;',
       '}',
       '#cal-btn{',
       '  width:88px;height:88px;background:none;border:none;padding:0;',
-      '  cursor:pointer;pointer-events:all;display:block;position:relative;',
+      '  cursor:grab;pointer-events:all;display:block;position:relative;',
       '  perspective:260px;filter:drop-shadow(0 6px 16px rgba(109,40,217,.38));',
       '}',
+      '#cal-btn.cal-dragging{cursor:grabbing;}',
       '#cal-comet-svg{',
       '  position:absolute;inset:0;width:88px;height:88px;',
       '  overflow:visible;pointer-events:none;opacity:0;',
@@ -233,13 +251,125 @@
     );
   }
 
+  // ─── Drag positioning ─────────────────────────────────────────────────────
+  function loadDragPos() {
+    try {
+      var v = JSON.parse(localStorage.getItem(DRAG_KEY) || 'null');
+      if (v && typeof v.left === 'number' && typeof v.top === 'number') return v;
+    } catch (e) {}
+    return null;
+  }
+
+  function saveDragPos(left, top) {
+    try { localStorage.setItem(DRAG_KEY, JSON.stringify({ left: left, top: top })); } catch (e) {}
+  }
+
+  function clampPos(left, top) {
+    // Clamp so the 88×88 button is always fully on-screen.
+    var btnW = 88;
+    var btnH = 88;
+    var maxL = Math.max(0, window.innerWidth  - btnW);
+    var maxT = Math.max(0, window.innerHeight - btnH);
+    return {
+      left: Math.max(0, Math.min(left, maxL)),
+      top:  Math.max(0, Math.min(top,  maxT)),
+    };
+  }
+
+  function applyPos(assist, left, top) {
+    var c = clampPos(left, top);
+    assist.style.left  = c.left + 'px';
+    assist.style.top   = c.top  + 'px';
+    assist.style.right = '';  // clear the CSS default right:1.1rem
+  }
+
+  function initPosition() {
+    var assist = document.getElementById('cal-assist');
+    if (!assist) return;
+    var saved = loadDragPos();
+    if (saved) {
+      applyPos(assist, saved.left, saved.top);
+    } else {
+      // Default: upper-right, mirroring the CSS right:1.1rem / top:1.1rem.
+      var margin = Math.round(1.1 * 16); // 1.1rem ≈ 18px
+      applyPos(assist, window.innerWidth - 88 - margin, margin);
+    }
+  }
+
+  // ─── Drag handlers ────────────────────────────────────────────────────────
+  function onBtnPointerDown(e) {
+    if (e.button !== 0 && e.pointerType !== 'touch') return;
+    var assist = document.getElementById('cal-assist');
+    var btn    = document.getElementById('cal-btn');
+    if (!assist || !btn) return;
+
+    dragState = {
+      startX:    e.clientX,
+      startY:    e.clientY,
+      startLeft: assist.offsetLeft,
+      startTop:  assist.offsetTop,
+      moved:     false,
+    };
+
+    btn.setPointerCapture(e.pointerId);
+    btn.addEventListener('pointermove',   onBtnPointerMove);
+    btn.addEventListener('pointerup',     onBtnPointerUp);
+    btn.addEventListener('pointercancel', onBtnPointerUp);
+    btn.classList.add('cal-dragging');
+  }
+
+  function onBtnPointerMove(e) {
+    if (!dragState) return;
+    var dx = e.clientX - dragState.startX;
+    var dy = e.clientY - dragState.startY;
+
+    if (!dragState.moved && Math.sqrt(dx * dx + dy * dy) > DRAG_THRESHOLD) {
+      dragState.moved = true;
+    }
+    if (!dragState.moved) return;
+
+    var assist = document.getElementById('cal-assist');
+    if (assist) applyPos(assist, dragState.startLeft + dx, dragState.startTop + dy);
+  }
+
+  function onBtnPointerUp(e) {
+    if (!dragState) return;
+    var moved = dragState.moved;
+    dragState = null;
+
+    var btn = document.getElementById('cal-btn');
+    if (btn) {
+      btn.removeEventListener('pointermove',   onBtnPointerMove);
+      btn.removeEventListener('pointerup',     onBtnPointerUp);
+      btn.removeEventListener('pointercancel', onBtnPointerUp);
+      btn.classList.remove('cal-dragging');
+    }
+
+    if (moved) {
+      var assist = document.getElementById('cal-assist');
+      if (assist) saveDragPos(assist.offsetLeft, assist.offsetTop);
+      // Suppress the click event that always fires after pointerup.
+      suppressNextClick = true;
+    }
+  }
+
   // ─── Events ───────────────────────────────────────────────────────────────
   function bindEvents() {
     document.addEventListener('mousemove', onMouseMove, { passive: true });
     document.addEventListener('mousedown', onMouseDown, { passive: true });
-    document.addEventListener('focusin', onFocusIn, { passive: true });
+    document.addEventListener('focusin',   onFocusIn,   { passive: true });
+
     var btn = document.getElementById('cal-btn');
-    if (btn) btn.addEventListener('click', function () { fetchConflicts(); });
+    if (btn) {
+      btn.addEventListener('pointerdown', onBtnPointerDown);
+      btn.addEventListener('click', function () {
+        if (suppressNextClick) { suppressNextClick = false; return; }
+        fetchConflicts();
+      });
+    }
+
+    // Notif card focus: first click focuses, second click on same card navigates.
+    document.addEventListener('click', onNotifCardClick);
   }
 
   function onMouseMove(e) {
@@ -266,6 +396,74 @@
         resetIdleTimer();
       }
     }
+  }
+
+  // ─── Admin Notification card focus ────────────────────────────────────────
+  function onNotifCardClick(e) {
+    // Walk up to the nearest [data-cal-notif] ancestor (handles clicks on child elements).
+    var card = e.target && e.target.closest ? e.target.closest('[data-cal-notif]') : null;
+    if (!card) return;
+
+    if (card === focusedNotif) {
+      // Second click on the same focused card — follow the href.
+      var href = card.getAttribute('data-cal-href') || '';
+      if (href) {
+        window.location.href = href;
+      }
+      return;
+    }
+
+    // First click (or click on a different card): focus it.
+    e.preventDefault();
+    focusedNotif = card;
+
+    // Eyes look at the card.
+    var r = card.getBoundingClientRect();
+    setIdle(false);
+    trackPoint(r.left + r.width / 2, r.top + r.height / 2);
+    resetIdleTimer();
+
+    // Brief thinking comet fires.
+    setThinking(true);
+    var thinkNotifTO = setTimeout(function () { setThinking(false); }, 850);
+    void thinkNotifTO; // reference avoids linter warning
+
+    // Render the bubble with notif content.
+    showNotifBubble(card);
+  }
+
+  function showNotifBubble(card) {
+    var bubble = document.getElementById('cal-bubble');
+    if (!bubble) return;
+
+    var title = card.getAttribute('data-cal-title') || 'Notification';
+    var body  = card.getAttribute('data-cal-body')  || '';
+    var href  = card.getAttribute('data-cal-href')  || '';
+
+    setMood('alert');
+
+    var goHtml = href
+      ? '<div class="cal-actions">' +
+          '<a href="' + esc(href) + '" class="cal-link">Go there \u2192</a>' +
+        '</div>'
+      : '';
+
+    bubble.innerHTML =
+      '<div class="cal-bubble-top">' +
+        '<span class="cal-bot-name">Cal-BOT</span>' +
+        '<button class="cal-x" aria-label="Dismiss" type="button">\u00d7</button>' +
+      '</div>' +
+      '<p class="cal-msg">' + esc(title) + '</p>' +
+      (body ? '<p class="cal-more">' + esc(body) + '</p>' : '') +
+      goHtml;
+
+    bubble.classList.add('cal-visible');
+
+    bubble.querySelector('.cal-x').addEventListener('click', function () {
+      bubble.classList.remove('cal-visible');
+      focusedNotif = null;
+      setMood('ok');
+    });
   }
 
   // ─── Idle management ──────────────────────────────────────────────────────
@@ -424,7 +622,7 @@
       '<div class="cal-bubble-top">' +
         '<span class="cal-bot-name">Cal-BOT</span>' +
         '<span class="cal-badge ' + statusCls + '">' + statusTxt + '</span>' +
-        '<button class="cal-x" aria-label="Dismiss" data-cid="' + esc(id) + '">\u00d7</button>' +
+        '<button class="cal-x" aria-label="Dismiss" data-cid="' + esc(id) + '" type="button">\u00d7</button>' +
       '</div>' +
       '<p class="cal-msg">' + formatMessage(c) + moreTxt + '</p>' +
       actionsHtml;

@@ -19,6 +19,7 @@ from . import migrate_co_surgeon
 from .routers import (
     admin_otp_audit,
     admin_block_or,
+    admin_grok,
     admin, admin_call_groups, admin_call_schedule, admin_clinic_schedule, admin_daysoff,
     admin_clinic_groups, admin_co_surgeon_pairs, admin_locations, admin_meetings, admin_metrics, admin_scheduler_availability, admin_settings, admin_surgeons,
     admin_surgical_blocks,
@@ -101,6 +102,7 @@ app.include_router(admin_meetings.router)
 app.include_router(admin_metrics.router)
 app.include_router(admin_scheduler_availability.router)
 app.include_router(admin_block_or.router)
+app.include_router(admin_grok.router)
 app.include_router(admin_surgical_blocks.router)
 app.include_router(admin_settings.router)
 app.include_router(admin_surgical_schedule.router)

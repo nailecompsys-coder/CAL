@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_current_admin
 from ..database import get_db
+from ..grok_lookahead_service import reconcile_stale_call_coverage_notifications
 from ..off_conflict_service import detect_off_conflicts
 
 router = APIRouter(prefix="/api")
@@ -50,6 +51,7 @@ def cal_assistant_conflicts(
     if admin.role == "scheduler":
         raise HTTPException(status_code=403, detail="Cal-BOT not available for scheduler role")
 
+    reconcile_stale_call_coverage_notifications(db)
     week_start, week_end = _week_bounds(week_offset)
     conflicts = detect_off_conflicts(db, week_start, week_end)
 

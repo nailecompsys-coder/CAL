@@ -58,36 +58,6 @@
     .color-picker-row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
     .color-picker-row input[type="color"] { width: 2.5rem; height: 2.5rem; padding: 2px; border: 1px solid #e2e8f0; border-radius: 0.5rem; cursor: pointer; background: none; }
     .color-picker-row input[type="text"].color-hex { width: 6rem; font-family: ui-monospace, monospace; font-size: 0.8rem; }
-    #grok-bot-root { position:fixed; right:1.25rem; bottom:1.25rem; z-index:45; font-family:inherit; }
-    #grok-bot-panel {
-      width: min(22rem, calc(100vw - 2rem));
-      margin-bottom:.75rem;
-      background: var(--cal-card-strong);
-      border: 1px solid var(--cal-stroke);
-      border-radius: 1.15rem;
-      box-shadow: 0 16px 40px var(--cal-shadow);
-      backdrop-filter: blur(18px);
-    }
-    #grok-bot-fab {
-      width: 3.5rem; height: 3.5rem; border-radius: 9999px; padding: 0;
-      border: 1px solid var(--cal-stroke);
-      background: linear-gradient(160deg, var(--cal-accent-soft), var(--cal-lavender));
-      box-shadow: 0 10px 24px var(--cal-shadow);
-      cursor: pointer;
-      display: flex; align-items: center; justify-content: center;
-    }
-    #grok-bot-fab:hover { transform: translateY(-1px); }
-    .grok-face { width: 2.4rem; height: 2.4rem; display: block; }
-    .grok-eye-white { fill: #fff; }
-    .grok-pupil { fill: var(--cal-ink); transform-origin: center; }
-    .grok-bot.is-thinking .grok-pupil-l { animation: grok-whirl 0.45s linear infinite; }
-    .grok-bot.is-thinking .grok-pupil-r { animation: grok-whirl 0.45s linear infinite reverse; }
-    @keyframes grok-whirl {
-      from { transform: rotate(0deg) translateX(2.2px); }
-      to { transform: rotate(360deg) translateX(2.2px); }
-    }
-    .grok-issue-link { color: var(--cal-accent); text-decoration: none; font-weight: 700; }
-    .grok-issue-link:hover { text-decoration: underline; }
   </style>
 </head>
 <body class="admin-shell bg-clinical-mist font-sans">
@@ -219,37 +189,6 @@
   </main>
 </div>
 
-{% if admin.role != 'scheduler' %}
-<div id="grok-bot-root" class="grok-bot">
-  <div id="grok-bot-panel" class="hidden p-3">
-    <div class="flex items-start justify-between gap-2 mb-2">
-      <div>
-        <p class="text-clinical-ink font-extrabold text-sm leading-tight">Grok</p>
-        <p class="text-clinical-muted text-[11px] font-semibold">Look ahead on this schedule</p>
-      </div>
-      <button type="button" id="grok-bot-close" class="text-clinical-muted hover:text-clinical-ink w-7 h-7 rounded-lg" title="Close">
-        <i class="fa-solid fa-xmark"></i>
-      </button>
-    </div>
-    <p id="grok-bot-briefing" class="text-[12px] text-clinical-ink leading-snug mb-2">Tap look ahead. I will scan the next 14 days for call, coverage, and blocks that still have to be worked.</p>
-    <div id="grok-bot-issues" class="max-h-56 overflow-y-auto space-y-1.5 mb-2"></div>
-    <button type="button" id="grok-bot-run" class="w-full bg-clinical-teal text-white text-xs font-extrabold px-3 py-2 rounded-xl">
-      Look ahead 2 weeks
-    </button>
-  </div>
-  <button type="button" id="grok-bot-fab" title="Ask Grok to look ahead" aria-label="Open Grok">
-    <svg class="grok-face" viewBox="0 0 64 64" aria-hidden="true">
-      <circle cx="32" cy="32" r="30" fill="var(--cal-accent)"></circle>
-      <circle class="grok-eye-white" cx="22" cy="28" r="8"></circle>
-      <circle class="grok-eye-white" cx="42" cy="28" r="8"></circle>
-      <circle class="grok-pupil grok-pupil-l" cx="22" cy="28" r="3.2"></circle>
-      <circle class="grok-pupil grok-pupil-r" cx="42" cy="28" r="3.2"></circle>
-      <path d="M22 44c3 4 8 6 10 6s7-2 10-6" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"></path>
-    </svg>
-  </button>
-</div>
-{% endif %}
-
 <script>
 function openSidebar() {
   document.getElementById('sidebar').classList.remove('-translate-x-full');
@@ -287,10 +226,12 @@ function closeSidebar() {
   if (mainEl) mainEl.addEventListener('scroll', markActive, { passive: true });
 
   function overlayOpen() {
-    var nodes = document.querySelectorAll('.fixed.inset-0, [id$="-modal"], #hospital-panel, #pill-detail-float, #grok-bot-panel');
+    var nodes = document.querySelectorAll('.fixed.inset-0, [id$="-modal"], #hospital-panel, #pill-detail-float');
     for (var i = 0; i < nodes.length; i++) {
       if (!nodes[i].classList.contains('hidden')) return true;
     }
+    var bubble = document.getElementById('cal-bubble');
+    if (bubble && bubble.classList.contains('cal-visible')) return true;
     return false;
   }
 
@@ -324,69 +265,6 @@ function closeSidebar() {
     if (document.visibilityState === 'visible' && Date.now() - lastRefresh >= REFRESH_MS) {
       refreshNow();
     }
-  });
-})();
-
-(function grokBot() {
-  var root = document.getElementById('grok-bot-root');
-  if (!root) return;
-  var panel = document.getElementById('grok-bot-panel');
-  var fab = document.getElementById('grok-bot-fab');
-  var closeBtn = document.getElementById('grok-bot-close');
-  var runBtn = document.getElementById('grok-bot-run');
-  var briefing = document.getElementById('grok-bot-briefing');
-  var issuesEl = document.getElementById('grok-bot-issues');
-
-  function setOpen(open) {
-    panel.classList.toggle('hidden', !open);
-  }
-  function setThinking(on) {
-    root.classList.toggle('is-thinking', on);
-    fab.disabled = on;
-    runBtn.disabled = on;
-  }
-  function escapeHtml(value) {
-    return String(value || '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
-
-  fab.addEventListener('click', function () {
-    setOpen(panel.classList.contains('hidden'));
-  });
-  closeBtn.addEventListener('click', function () { setOpen(false); });
-
-  runBtn.addEventListener('click', function () {
-    setThinking(true);
-    briefing.textContent = 'Looking at the next 14 days…';
-    issuesEl.innerHTML = '';
-    var started = Date.now();
-    fetch('/api/admin/grok/lookahead', {
-      credentials: 'same-origin',
-      headers: { 'Accept': 'application/json' }
-    }).then(function (res) {
-      if (!res.ok) throw new Error('Look ahead failed');
-      return res.json();
-    }).then(function (data) {
-      briefing.textContent = data.briefing || '';
-      var rows = data.issues || [];
-      if (!rows.length) {
-        issuesEl.innerHTML = '';
-        return;
-      }
-      issuesEl.innerHTML = rows.map(function (row) {
-        var href = escapeHtml(row.href || '/admin/dashboard');
-        var msg = escapeHtml(row.message || '');
-        return '<a class="grok-issue-link block text-[12px] leading-snug" href="' + href + '">' + msg + '</a>';
-      }).join('');
-    }).catch(function () {
-      briefing.textContent = 'Could not look ahead. Try again after you are signed in.';
-    }).finally(function () {
-      var wait = Math.max(0, 700 - (Date.now() - started));
-      setTimeout(function () { setThinking(false); }, wait);
-    });
   });
 })();
 

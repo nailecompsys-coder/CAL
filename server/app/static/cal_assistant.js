@@ -61,6 +61,7 @@
     setMood('ok');
     bindEvents();
     setTimeout(fetchConflicts, 900);
+    setInterval(fetchConflicts, 5 * 60 * 1000);
   }
 
   // ─── Styles ───────────────────────────────────────────────────────────────
@@ -407,6 +408,7 @@
     // Walk up to the nearest [data-cal-notif] ancestor (handles clicks on child elements).
     var card = e.target && e.target.closest ? e.target.closest('[data-cal-notif]') : null;
     if (!card) return;
+    if (card.getAttribute('data-cal-informational') === '1') return;
 
     if (card === focusedNotif) {
       // Second click on the same focused card — follow the href.

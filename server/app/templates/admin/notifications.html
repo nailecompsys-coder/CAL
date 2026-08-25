@@ -37,7 +37,9 @@
               {{ row.body }}
               {% set payload = (row.payload|from_json) if row.payload else {} %}
               {% set href = admin_notification_href(row.kind, payload) %}
-              {% if href %}
+              {% if notification_is_informational(row) %}
+              <a class="block mt-1 text-xs font-bold text-blue-700 hover:underline" href="/admin/notifications/{{ row.id }}/ack">Dismiss</a>
+              {% elif href %}
               <a class="block mt-1 text-xs font-bold text-blue-700 hover:underline" href="{{ href }}">Open record</a>
               {% endif %}
             </td>

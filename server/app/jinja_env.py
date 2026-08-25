@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo as _ZoneInfo
 from fastapi.templating import Jinja2Templates
 
 from .admin_notification_href import admin_notification_href
+from .admin_notification_ack import notification_is_informational
 from .device_names import readable_device_name
 from .or_block_service import sanitize_schedule_note_for_humans
 from .paths import TEMPLATES_DIR
@@ -66,3 +67,4 @@ templates.env.filters["release_label"] = release_label
 templates.env.filters["release_channel"] = release_channel
 templates.env.filters["human_schedule_note"] = sanitize_schedule_note_for_humans
 templates.env.globals["admin_notification_href"] = admin_notification_href
+templates.env.globals["notification_is_informational"] = notification_is_informational

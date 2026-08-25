@@ -25,6 +25,7 @@ from ..admin_settings_service import (
     toggle_admin_user as toggle_admin_user_service,
     unread_admin_notification_count,
 )
+from ..admin_notification_ack import ack_informational_notification
 from ..admin_surgeon_service import (
     add_surgeon as add_surgeon_service,
     surgeon_fields,
@@ -180,6 +181,16 @@ def notifications_page(
             admin_unread_notifications=unread_admin_notification_count(db, current_admin.id),
         ),
     )
+
+
+@router.get("/notifications/{notification_id}/ack")
+def ack_notification(
+    notification_id: int,
+    db: Session = Depends(get_db),
+    current_admin=Depends(get_current_admin),
+):
+    href = ack_informational_notification(db, current_admin.id, notification_id)
+    return RedirectResponse(href or "/admin/dashboard", status_code=303)
 
 
 @router.get("/settings/backup", response_class=HTMLResponse)

@@ -70,7 +70,7 @@ async def surgeon_html_no_store(request: Request, call_next):
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
         return response
-    if path.startswith("/surgeon/"):
+    if path.startswith("/surgeon/") or path.startswith("/admin/"):
         ct = response.headers.get("content-type", "")
         if "text/html" in ct:
             response.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate, private"

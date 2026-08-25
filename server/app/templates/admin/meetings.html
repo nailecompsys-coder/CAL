@@ -402,6 +402,7 @@ function editFromDetail(event) {
       const data = await res.json();
       const next = data.fingerprint || '';
       if (lastFingerprint && next && next !== lastFingerprint) {
+        if (window.CALAdmin && window.CALAdmin.isBusy && window.CALAdmin.isBusy()) return;
         window.location.reload();
         return;
       }

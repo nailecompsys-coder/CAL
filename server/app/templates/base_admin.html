@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{% block title %}Mid Florida Surgical{% endblock %} — Admin</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -195,6 +198,74 @@ function closeSidebar() {
   document.getElementById('sidebar').classList.add('-translate-x-full');
   document.getElementById('sidebar-overlay').classList.add('hidden');
 }
+
+(function adminQuietRefresh() {
+  var REFRESH_MS = 60000;
+  var IDLE_MS = 20000;
+  var lastActive = Date.now();
+  var lastRefresh = Date.now();
+  var SCROLL_KEY = 'cal-admin-main-scroll';
+
+  var saved = sessionStorage.getItem(SCROLL_KEY);
+  if (saved != null) {
+    sessionStorage.removeItem(SCROLL_KEY);
+    var mainEl = document.querySelector('main');
+    if (mainEl) mainEl.scrollTop = parseInt(saved, 10) || 0;
+  }
+  var url = new URL(window.location.href);
+  if (url.searchParams.has('_calr')) {
+    url.searchParams.delete('_calr');
+    history.replaceState(null, '', url.pathname + url.search + url.hash);
+  }
+
+  function markActive() { lastActive = Date.now(); }
+  ['pointerdown', 'keydown', 'input', 'change', 'touchstart'].forEach(function (ev) {
+    document.addEventListener(ev, markActive, { capture: true, passive: true });
+  });
+  var mainEl = document.querySelector('main');
+  if (mainEl) mainEl.addEventListener('scroll', markActive, { passive: true });
+
+  function overlayOpen() {
+    var nodes = document.querySelectorAll('.fixed.inset-0, [id$="-modal"], #hospital-panel, #pill-detail-float');
+    for (var i = 0; i < nodes.length; i++) {
+      if (!nodes[i].classList.contains('hidden')) return true;
+    }
+    return false;
+  }
+
+  function isBusy() {
+    if (document.hidden) return true;
+    if (Date.now() - lastActive < IDLE_MS) return true;
+    var ae = document.activeElement;
+    if (ae && ae.matches && ae.matches('input, textarea, select, [contenteditable="true"]')) return true;
+    return overlayOpen();
+  }
+
+  window.CALAdmin = window.CALAdmin || {};
+  window.CALAdmin.isBusy = isBusy;
+
+  function refreshNow() {
+    if (isBusy()) return;
+    var main = document.querySelector('main');
+    sessionStorage.setItem(SCROLL_KEY, String(main ? main.scrollTop : 0));
+    lastRefresh = Date.now();
+    var next = new URL(window.location.href);
+    next.searchParams.set('_calr', String(Date.now()));
+    window.location.replace(next.toString());
+  }
+
+  setInterval(function () {
+    if (Date.now() - lastRefresh < REFRESH_MS) return;
+    refreshNow();
+  }, 5000);
+
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible' && Date.now() - lastRefresh >= REFRESH_MS) {
+      refreshNow();
+    }
+  });
+})();
+
 </script>
 {% if admin.role != 'scheduler' %}
 <script src="/static/cal_assistant.js?v={{ app_version|default('dev')|urlencode }}" defer></script>

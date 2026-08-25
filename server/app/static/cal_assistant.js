@@ -1,9 +1,9 @@
 /**
  * Cal-BOT — in-app scheduling assistant for the CAL admin portal.
  *
- * Purple circular face with orbiting ring. Pupils track the mouse cursor
- * and scan the schedule grid in idle. Surfaces OFF-conflict insight bubbles
- * with concrete fix links. Quiet on a clean week.
+ * Grok Bot tablet avatar (violet, portrait rounded-rect).
+ * Comet trail + 3D spin only while thinking. Idle: eyes + mood (smile vs worry).
+ * Surfaces OFF-conflict insight bubbles with fix links. Quiet on a clean week.
  *
  * No React. No build step. Jinja2 + plain JS only.
  * Uses Clinical Trust CSS tokens from input.css :root.
@@ -26,7 +26,7 @@
   var SEEN_KEY    = 'cal-seen-v1';
   var MAX_SEEN    = 200;
   var IDLE_MS     = 2800;    // ms still before idle grid-scan kicks in
-  var MAX_OFFSET  = 2.2;     // max pupil translation in SVG units (face is 64×64)
+  var MAX_OFFSET  = 6.2;     // max pupil translation in SVG units (face is 64×64)
 
   var idleTimer = null;
   var isIdle    = true;
@@ -42,6 +42,7 @@
 
     injectStyles();
     document.body.appendChild(buildWidget());
+    setMood('ok');
     bindEvents();
     setTimeout(fetchConflicts, 900);
   }
@@ -51,103 +52,90 @@
     var s = document.createElement('style');
     s.id = 'cal-bot-styles';
     s.textContent = [
-      /* ── Widget shell ── */
       '#cal-assist{',
-      '  position:fixed;bottom:1.25rem;right:1.25rem;',
+      '  position:fixed;top:1.1rem;right:1.1rem;',
       '  z-index:9999;display:flex;flex-direction:column;',
       '  align-items:flex-end;gap:.5rem;pointer-events:none;',
       '}',
-
-      /* ── Face button ── */
       '#cal-btn{',
-      '  width:64px;height:64px;',
-      '  background:none;border:none;padding:0;',
-      '  cursor:pointer;pointer-events:all;border-radius:50%;display:block;',
-      '  filter:drop-shadow(0 2px 10px rgba(109,40,217,.22));',
-      '  transition:filter .2s,transform .2s;',
+      '  width:88px;height:88px;background:none;border:none;padding:0;',
+      '  cursor:pointer;pointer-events:all;display:block;position:relative;',
+      '  perspective:260px;filter:drop-shadow(0 6px 16px rgba(109,40,217,.38));',
       '}',
-      '#cal-btn:hover{filter:drop-shadow(0 4px 18px rgba(109,40,217,.44));}',
+      '#cal-comet-svg{',
+      '  position:absolute;inset:0;width:88px;height:88px;',
+      '  overflow:visible;pointer-events:none;opacity:0;',
+      '  transition:opacity .18s ease-out;',
+      '}',
+      '#cal-btn.cal-thinking #cal-comet-svg{opacity:1;}',
+      '.cal-comet{',
+      '  transform-origin:44px 44px;',
+      '  animation:cal-comet-spin 1.7s linear infinite;',
+      '  animation-play-state:paused;',
+      '}',
+      '#cal-btn.cal-thinking .cal-comet{animation-play-state:running;}',
+      '@keyframes cal-comet-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}',
+      '.cal-comet-trail{',
+      '  fill:none;stroke:#c4b5fd;stroke-width:3.2;stroke-linecap:round;',
+      '  stroke-dasharray:46 192;',
+      '  filter:drop-shadow(0 0 5px #a78bfa);',
+      '}',
+      '.cal-comet-head{fill:#fff;filter:drop-shadow(0 0 7px #e9d5ff) drop-shadow(0 0 12px #a78bfa);}',
+      '.cal-comet-spark{fill:#ddd6fe;opacity:.4;}',
+      '.cal-comet-dust{fill:#a78bfa;}',
+      '#cal-yaw{',
+      '  position:absolute;left:12px;top:12px;width:64px;height:64px;',
+      '  transform-style:preserve-3d;',
+      '}',
+      '#cal-btn.cal-thinking #cal-yaw{animation:cal-spin 2.8s linear infinite;}',
+      '@keyframes cal-spin{from{transform:rotateY(0deg)}to{transform:rotateY(360deg)}}',
       '#cal-svg{width:64px;height:64px;display:block;overflow:visible;}',
-
-      /* ── SVG face elements — CSS vars from input.css :root ── */
-      '.cal-face{',
-      '  fill:var(--cal-purple-soft,#ede9fe);',
-      '  stroke:var(--cal-purple,#6d28d9);stroke-width:2;',
-      '}',
-      /* Subtle radial highlight — liquid-glass feel */
-      '.cal-face-shine{fill:white;opacity:.09;}',
-      '.cal-brow{',
-      '  fill:none;stroke:var(--cal-purple,#6d28d9);',
-      '  stroke-width:1.4;stroke-linecap:round;opacity:.38;',
-      '}',
-      '.cal-eye-white{fill:#fff;stroke:var(--cal-stroke,rgba(180,196,220,.55));stroke-width:.8;}',
-      '.cal-iris{fill:var(--cal-purple,#6d28d9);}',
-      '.cal-glint{fill:#fff;opacity:.78;}',
-      '.cal-mouth{',
-      '  fill:none;stroke:var(--cal-purple-mid,#8b5cf6);',
-      '  stroke-width:1.5;stroke-linecap:round;opacity:.45;',
-      '}',
-
-      /* ── Orbit ring ──
-         transform-box:view-box + transform-origin:50% 50% anchors rotation
-         to the SVG viewport center (32,32) — avoids the bounding-box offset
-         that would cause a wobble. */
-      '.cal-orbit{',
-      '  transform-box:view-box;transform-origin:50% 50%;',
-      '  animation:cal-orbit-spin 13s linear infinite;',
-      '}',
-      '.cal-orbit-ring{',
-      '  stroke:var(--cal-purple-mid,#8b5cf6);',
-      '  stroke-width:1.5;stroke-dasharray:3 9;opacity:.42;',
-      '}',
-      '.cal-orbit-dot{fill:var(--cal-purple-mid,#8b5cf6);opacity:.65;}',
-      '@keyframes cal-orbit-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}',
-
-      /* ── Pupils — smooth JS-driven tracking ── */
-      '.cal-pupil-group{',
-      '  transition:transform .11s ease-out;',
-      '}',
-
-      /* ── Idle grid-scan ──
-         Simulates reading a schedule grid left-to-right, row by row.
-         Per-keyframe animation-timing-function: linear for the sweep,
-         steps(1) for the instant snap back to the start of the next row.
-         Class toggled by JS; clearing style.transform returns control to CSS. */
-      '.cal-pupil-group.cal-idle{',
-      '  transition:none;',
-      '  animation:cal-grid-scan 9s ease-in-out infinite;',
-      '}',
-
-      /* Three row-sweeps then a brief center rest.
-         Row 1: upper-left → upper-right  (linear sweep)
-         snap back → Row 2: mid-left → mid-right
-         snap back → Row 3: lower-left → lower-right
-         snap back → center rest → restart */
+      '.cal-face{fill:#7c3aed;}',
+      '.cal-face-shine{fill:#fff;opacity:.16;}',
+      '.cal-eye-white{fill:#fff;}',
+      '.cal-iris{fill:#1c1430;}',
+      '.cal-glint{fill:#fff;opacity:.9;}',
+      '.cal-pupil-group{transition:transform .1s ease-out;}',
+      '.cal-pupil-group.cal-idle{transition:none;animation:cal-grid-scan 3.2s linear infinite;}',
       '@keyframes cal-grid-scan{',
-      '  /* Row 1 sweep */             ',
-      '  0%  { transform:translate(-2px,-1.4px); animation-timing-function:linear; }',
-      '  16% { transform:translate( 2px,-1.4px); animation-timing-function:steps(1,end); }',
-      '  /* Row 2 sweep */             ',
-      '  17% { transform:translate(-2px,  .1px); animation-timing-function:linear; }',
-      '  33% { transform:translate( 2px,  .1px); animation-timing-function:steps(1,end); }',
-      '  /* Row 3 sweep */             ',
-      '  34% { transform:translate(-2px, 1.5px); animation-timing-function:linear; }',
-      '  50% { transform:translate( 2px, 1.5px); animation-timing-function:steps(1,end); }',
-      '  /* Center rest */             ',
-      '  51% { transform:translate(0,0); }',
-      '  85% { transform:translate(0,0); }',
-      '  /* Pre-loop jump back to row-1 start */  ',
-      '  86% { transform:translate(-2px,-1.4px); }',
-      ' 100% { transform:translate(-2px,-1.4px); }',
+      '  0%  { transform:translate(-6px,-3px); }',
+      '  18% { transform:translate( 6px,-3px); }',
+      '  20% { transform:translate(-6px, 0px); }',
+      '  38% { transform:translate( 6px, 0px); }',
+      '  40% { transform:translate(-6px, 3.2px); }',
+      '  58% { transform:translate( 6px, 3.2px); }',
+      '  62% { transform:translate(0,0); }',
+      '  100%{ transform:translate(0,0); }',
       '}',
-
-      /* ── Click pulse ── */
-      '#cal-btn.cal-pulse{animation:cal-pulse-anim .28s ease-out;}',
+      '#cal-btn.cal-pulse:not(.cal-thinking) #cal-yaw{animation:cal-pulse-anim .28s ease-out;}',
       '@keyframes cal-pulse-anim{',
-      '  0%{transform:scale(1)} 50%{transform:scale(1.13)} 100%{transform:scale(1)}',
+      '  0%{transform:rotateY(0) scale(1)} 50%{transform:rotateY(0) scale(1.12)} 100%{transform:rotateY(0) scale(1)}',
       '}',
-
-      /* ── Speech bubble ── */
+      '.cal-mouth{fill:none;stroke:#2e1064;stroke-width:1.7;stroke-linecap:round;}',
+      '.cal-mouth-ok,.cal-mouth-alert{display:none;}',
+      '#cal-btn.cal-mood-ok .cal-mouth-ok{display:block;}',
+      '#cal-btn.cal-mood-alert .cal-mouth-alert{display:block;}',
+      '.cal-arm{',
+      '  fill:#7c3aed;stroke:#5b21b6;stroke-width:1;',
+      '  transform-origin:52px 50px;',
+      '  opacity:0;',
+      '}',
+      '#cal-btn.cal-mood-ok:not(.cal-thinking) .cal-arm{',
+      '  opacity:1;animation:cal-wave 3.6s ease-in-out infinite;',
+      '}',
+      '@keyframes cal-wave{',
+      '  0%,70%,100%{transform:rotate(12deg)}',
+      '  78%{transform:rotate(-28deg)}',
+      '  86%{transform:rotate(18deg)}',
+      '  94%{transform:rotate(-16deg)}',
+      '}',
+      '#cal-btn.cal-mood-alert:not(.cal-thinking) #cal-yaw{',
+      '  animation:cal-worry 2.8s ease-in-out infinite;',
+      '}',
+      '@keyframes cal-worry{',
+      '  0%,100%{transform:rotate(-4deg)}',
+      '  50%{transform:rotate(4deg)}',
+      '}',
       '#cal-bubble{',
       '  max-width:15.5rem;',
       '  background:var(--cal-mist,#f4f6fa);',
@@ -155,16 +143,13 @@
       '  border-radius:.9rem;',
       '  padding:.75rem .875rem;',
       '  box-shadow:0 4px 22px rgba(109,40,217,.13),0 1px 4px rgba(28,36,48,.07);',
-      '  pointer-events:none;',          /* disabled until .cal-visible */
+      '  pointer-events:none;',
       '  font-size:.8125rem;line-height:1.5;',
       '  color:var(--cal-ink,#1c2430);',
-      /* Fade-in transition — toggled via .cal-visible */
       '  opacity:0;transform:translateY(6px);',
       '  transition:opacity .22s ease-out,transform .22s ease-out;',
       '}',
       '#cal-bubble.cal-visible{opacity:1;transform:translateY(0);pointer-events:all;}',
-
-      /* Bubble internals */
       '.cal-bubble-top{display:flex;align-items:center;gap:.4rem;margin-bottom:.4rem;}',
       '.cal-bot-name{',
       '  font-size:.68rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;',
@@ -203,52 +188,47 @@
     div.innerHTML =
       '<div id="cal-bubble"></div>' +
       '<button id="cal-btn" aria-label="Cal-BOT" type="button">' +
-      buildFaceSVG() +
+      buildCometSVG() +
+      '<div id="cal-yaw">' + buildFaceSVG() + '</div>' +
       '</button>';
     return div;
   }
 
+  function buildCometSVG() {
+    // 2D comet lives outside the 3D spin so the trail stays readable.
+    return (
+      '<svg id="cal-comet-svg" viewBox="0 0 88 88" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+        '<g class="cal-comet">' +
+          '<circle cx="44" cy="44" r="38" class="cal-comet-trail" transform="rotate(-90 44 44)"/>' +
+          '<circle cx="44" cy="6" r="7" class="cal-comet-spark"/>' +
+          '<circle cx="44" cy="6" r="3.8" class="cal-comet-head"/>' +
+          '<circle cx="36.6" cy="7.2" r="2.2" class="cal-comet-dust" opacity=".55"/>' +
+          '<circle cx="30.2" cy="10.8" r="1.6" class="cal-comet-dust" opacity=".35"/>' +
+          '<circle cx="25.2" cy="16.2" r="1.15" class="cal-comet-dust" opacity=".2"/>' +
+        '</g>' +
+      '</svg>'
+    );
+  }
+
   function buildFaceSVG() {
-    // viewBox 64×64; face at (32,32) r=22; orbit ring r=30
-    // Eyes at (23,29) left and (41,29) right; mouth curves below.
+    // Grok Bot tablet: portrait rounded-rect, solid violet, two eyes, no mouth.
     return (
       '<svg id="cal-svg" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
-
-        /* Orbiting ring — single dot traces a circular path */
-        '<g class="cal-orbit">' +
-          '<circle cx="32" cy="32" r="30" fill="none" class="cal-orbit-ring"/>' +
-          '<circle cx="32" cy="2.5" r="2.8" class="cal-orbit-dot"/>' +
-        '</g>' +
-
-        /* Face disc */
-        '<circle cx="32" cy="32" r="22" class="cal-face"/>' +
-
-        /* Liquid-glass face highlight */
-        '<ellipse cx="26" cy="24" rx="9" ry="5.5" class="cal-face-shine"/>' +
-
-        /* Eyebrows — very subtle arcs above eye sockets */
-        '<path d="M 17.5 22.5 Q 23 20 28.5 22.5" class="cal-brow"/>' +
-        '<path d="M 35.5 22.5 Q 41 20 46.5 22.5" class="cal-brow"/>' +
-
-        /* Eye sockets (whites) */
-        '<circle cx="23" cy="29" r="5.6" class="cal-eye-white"/>' +
-        '<circle cx="41" cy="29" r="5.6" class="cal-eye-white"/>' +
-
-        /* Left pupil — translated by JS for tracking; CSS animates in idle */
+        '<rect x="14" y="6" width="36" height="52" rx="12" ry="12" class="cal-face"/>' +
+        '<ellipse cx="26" cy="16" rx="10" ry="6" class="cal-face-shine"/>' +
+        '<ellipse cx="24.5" cy="28" rx="7.2" ry="8.4" class="cal-eye-white"/>' +
+        '<ellipse cx="39.5" cy="28" rx="7.2" ry="8.4" class="cal-eye-white"/>' +
         '<g id="cal-pupil-l" class="cal-pupil-group cal-idle">' +
-          '<circle cx="23" cy="29" r="3.3" class="cal-iris"/>' +
-          '<circle cx="24.4" cy="27.7" r="1.1" class="cal-glint"/>' +
+          '<circle cx="24.5" cy="28" r="4.1" class="cal-iris"/>' +
+          '<circle cx="26.2" cy="26.2" r="1.2" class="cal-glint"/>' +
         '</g>' +
-
-        /* Right pupil */
         '<g id="cal-pupil-r" class="cal-pupil-group cal-idle">' +
-          '<circle cx="41" cy="29" r="3.3" class="cal-iris"/>' +
-          '<circle cx="42.4" cy="27.7" r="1.1" class="cal-glint"/>' +
+          '<circle cx="39.5" cy="28" r="4.1" class="cal-iris"/>' +
+          '<circle cx="41.2" cy="26.2" r="1.2" class="cal-glint"/>' +
         '</g>' +
-
-        /* Mouth — gentle smile */
-        '<path d="M 24 40 Q 32 45.5 40 40" class="cal-mouth"/>' +
-
+        '<path class="cal-mouth cal-mouth-ok" d="M 24 41 Q 32 47 40 41"/>' +
+        '<path class="cal-mouth cal-mouth-alert" d="M 25 43 Q 32 39 39 43"/>' +
+        '<path class="cal-arm" d="M 48 46 Q 58 44 60 34 Q 61 30 58 31 Q 56 38 50 42 Z"/>' +
       '</svg>'
     );
   }
@@ -258,6 +238,8 @@
     document.addEventListener('mousemove', onMouseMove, { passive: true });
     document.addEventListener('mousedown', onMouseDown, { passive: true });
     document.addEventListener('focusin', onFocusIn, { passive: true });
+    var btn = document.getElementById('cal-btn');
+    if (btn) btn.addEventListener('click', function () { fetchConflicts(); });
   }
 
   function onMouseMove(e) {
@@ -349,13 +331,36 @@
   }
 
   // ─── Conflict fetch ───────────────────────────────────────────────────────
+  var thinkTO = null;
+  function setThinking(on) {
+    var btn = document.getElementById('cal-btn');
+    if (!btn) return;
+    if (on) btn.classList.add('cal-thinking');
+    else btn.classList.remove('cal-thinking');
+  }
+  function setMood(mood) {
+    var btn = document.getElementById('cal-btn');
+    if (!btn) return;
+    btn.classList.remove('cal-mood-ok', 'cal-mood-alert');
+    btn.classList.add('cal-mood-' + mood);
+  }
   function fetchConflicts() {
+    setThinking(true);
+    var started = Date.now();
     var offset = getWeekOffset();
     var url = '/api/cal-assistant/conflicts?week_offset=' + encodeURIComponent(offset);
     fetch(url, { credentials: 'same-origin' })
       .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (data) { if (data) renderConflicts(data); })
-      .catch(function () {});
+      .then(function (data) {
+        if (data) renderConflicts(data);
+        else setMood('ok');
+      })
+      .catch(function () { setMood('ok'); })
+      .then(function () {
+        var wait = Math.max(0, 1600 - (Date.now() - started));
+        clearTimeout(thinkTO);
+        thinkTO = setTimeout(function () { setThinking(false); }, wait);
+      });
   }
 
   function getWeekOffset() {
@@ -382,9 +387,16 @@
 
   // ─── Bubble ───────────────────────────────────────────────────────────────
   function renderConflicts(data) {
-    if (!data.conflicts || !data.conflicts.length) return;
+    if (!data.conflicts || !data.conflicts.length) {
+      setMood('ok');
+      return;
+    }
     var unseen = data.conflicts.filter(function (c) { return !isSeen(conflictId(c)); });
-    if (!unseen.length) return;
+    if (!unseen.length) {
+      setMood('ok');
+      return;
+    }
+    setMood('alert');
     showBubble(unseen[0], unseen.length);
   }
 

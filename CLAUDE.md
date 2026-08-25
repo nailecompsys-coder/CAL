@@ -183,6 +183,7 @@ RVU (`/home/dnaile748/rvu/`) is a **separate app** that uses Cal's auth by desig
 - `bcrypt==4.0.1` — pinned, do not upgrade
 - All `requirements.txt` versions locked — do not `pip install --upgrade`
 - Server-rendered Jinja2 — no React, no npm, no build step for the cal UI
+- **Commit when a slice is done and safe to ship** — do not wait for Don to say commit. Tell him the hash. Push and deploy still need an explicit ask.
 
 ---
 

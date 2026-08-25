@@ -18,6 +18,9 @@ module.exports = {
           mint: '#E8F8F0',
           amber: '#FFE8C2',
           lavender: '#EBE4FF',
+          purple: '#6D28D9',
+          purpleMid: '#8B5CF6',
+          purpleSoft: '#EDE9FE',
           stroke: '#B4C4DC',
         },
         slate: {

@@ -1,4 +1,21 @@
-"""Tests for Cal-BOT: /api/cal-assistant/conflicts endpoint."""
+"""Tests for Cal-BOT: /api/cal-assistant/conflicts endpoint.
+
+JS-behaviour notes (manual validation):
+  Drag — #cal-btn pointerdown/pointermove/pointerup repositions #cal-assist via
+    left+top (right: cleared). A move ≥ 5 px sets dragState.moved=True and
+    suppresses the subsequent click-to-think. Position is clamped to [0,
+    innerWidth-88] × [0, innerHeight-88] and persisted in localStorage
+    (key 'cal-bot-pos-v1'). Refresh restores it; default falls back to upper-right.
+
+  Notif focus — document click on [data-cal-notif] cards:
+    • First click: preventDefault, eyes track card centre, 850 ms comet, bubble
+      shows data-cal-title + data-cal-body + "Go there →" if data-cal-href.
+    • Second click on same focused card: location.href = data-cal-href (navigate).
+    • Clicking a different card switches focus without navigating.
+    • Bubble × clears focusedNotif and restores cal-mood-ok.
+    Works for all kinds in admin_notifications (call_coverage_conflict,
+    ingest_correction, schedule_flag, day_off_request, …).
+"""
 
 import os
 import unittest
@@ -226,6 +243,81 @@ class SchedulerRoleGatingTest(unittest.TestCase):
                 raise HTTPException(status_code=403, detail="Cal-BOT not available for scheduler role")
 
         self.assertEqual(ctx.exception.status_code, 403)
+
+
+class AdminNotificationHrefTest(unittest.TestCase):
+    """
+    Tests for admin_notification_href — the Python helper that produces the
+    data-cal-href value stamped on each notification card in dashboard.html.
+    The JS notif-focus feature reads this attribute; these tests verify the
+    Python side produces navigable, well-formed URLs for every card kind.
+    """
+
+    def setUp(self):
+        from app.admin_notification_href import admin_notification_href
+        self.href = admin_notification_href
+
+    def test_day_off_request_with_id_and_date(self):
+        payload = {"dayOffId": 7, "startDate": "2026-09-01", "endDate": "2026-09-02"}
+        url = self.href("day_off_request", payload)
+        self.assertIn("/admin/daysoff", url)
+        self.assertIn("focus=7", url)
+        self.assertIn("gantt_start=2026-09-01", url)
+
+    def test_day_off_request_no_id_falls_back(self):
+        url = self.href("day_off_request", {})
+        self.assertEqual(url, "/admin/daysoff")
+
+    def test_call_coverage_conflict_with_date(self):
+        payload = {"date": "2026-09-15", "rotationId": 3}
+        url = self.href("call_coverage_conflict", payload)
+        self.assertIn("/admin/call-schedule", url)
+        self.assertIn("rotation_id=3", url)
+        self.assertIn("month_offset=", url)
+
+    def test_call_coverage_conflict_no_params(self):
+        url = self.href("call_coverage_conflict", {})
+        self.assertEqual(url, "/admin/call-schedule")
+
+    def test_ingest_correction_surgeon_not_found(self):
+        payload = {"reason": "surgeon_not_found", "surgeonName": "Smith, John"}
+        url = self.href("ingest_correction", payload)
+        self.assertIn("/admin/surgeons", url)
+        self.assertIn("add=1", url)
+
+    def test_ingest_correction_missing_time(self):
+        payload = {"reason": "missing_time", "date": "2026-09-10", "surgeonId": 2}
+        url = self.href("ingest_correction", payload)
+        self.assertIn("/admin/clinic-schedule", url)
+        self.assertIn("fix=missing_time", url)
+
+    def test_schedule_flag_with_block_id(self):
+        payload = {"blockId": 12, "date": "2026-09-10"}
+        url = self.href("schedule_flag", payload)
+        self.assertIn("/admin/block-or", url)
+        self.assertIn("block_id=12", url)
+        self.assertIn("panel=assign", url)
+
+    def test_schedule_flag_no_block_falls_back(self):
+        url = self.href("schedule_flag", {})
+        self.assertEqual(url, "/admin/block-or")
+
+    def test_rules_engine_error_with_rule_id(self):
+        url = self.href("rules_engine_error", {"ruleId": "call-gap-72h"})
+        self.assertIn("/admin/settings/scheduling-rules", url)
+        self.assertIn("rule-call-gap-72h", url)
+
+    def test_unknown_kind_returns_empty_or_payload_href(self):
+        url = self.href("clippy", {"href": "/admin/daysoff?focus=5"})
+        self.assertEqual(url, "/admin/daysoff?focus=5")
+
+    def test_unknown_kind_no_payload_href_returns_empty(self):
+        url = self.href("clippy", {})
+        self.assertEqual(url, "")
+
+    def test_none_kind_returns_empty(self):
+        url = self.href(None, {})
+        self.assertEqual(url, "")
 
 
 if __name__ == "__main__":

@@ -163,30 +163,12 @@
       {# FIFO: oldest request first — top-left, then right, then next row #}
       {% for row in admin_notifications %}
       {% set payload = (row.payload|from_json) if row.payload else {} %}
-      {% set is_dayoff = row.kind == 'day_off_request' %}
-      {% set is_schedule_flag = row.kind == 'schedule_flag' %}
-      {% set is_ingest_fix = row.kind == 'ingest_correction' %}
+      {% set is_fixable = row.kind in ['schedule_flag', 'ingest_correction', 'call_coverage_conflict', 'rules_engine_error'] %}
       {% set notif_title = 'Pending Request' if row.title == 'CAL request pending' else row.title %}
-      {% if is_dayoff and payload.get('dayOffId') and payload.get('startDate') %}
-        {% set dayoff_href = '/admin/daysoff?focus=' ~ payload.get('dayOffId') ~ '&gantt_start=' ~ payload.get('startDate') ~ '&gantt_end=' ~ (payload.get('endDate') or payload.get('startDate')) %}
-      {% elif is_dayoff and payload.get('dayOffId') %}
-        {% set dayoff_href = '/admin/daysoff?focus=' ~ payload.get('dayOffId') %}
-      {% elif is_dayoff %}
-        {% set dayoff_href = '/admin/daysoff' %}
-      {% elif (is_schedule_flag or is_ingest_fix) and payload.get('href') %}
-        {% set dayoff_href = payload.get('href') %}
-      {% elif is_schedule_flag and payload.get('blockId') %}
-        {% set dayoff_href = '/admin/block-or?block_id=' ~ payload.get('blockId') %}
-      {% elif is_schedule_flag %}
-        {% set dayoff_href = '/admin/scheduler-availability' %}
-      {% elif is_ingest_fix %}
-        {% set dayoff_href = '/admin/clinic-schedule' %}
-      {% else %}
-        {% set dayoff_href = '' %}
-      {% endif %}
-      {% if is_dayoff or ((is_schedule_flag or is_ingest_fix) and dayoff_href) %}
+      {% set dayoff_href = admin_notification_href(row.kind, payload) %}
+      {% if dayoff_href %}
       <a href="{{ dayoff_href }}"
-        class="rounded-lg border {% if row.read_at %}border-slate-100 bg-white/60{% else %}{% if is_schedule_flag or is_ingest_fix %}border-amber-200 bg-amber-50/80{% else %}border-teal-100 bg-teal-50/70{% endif %}{% endif %} px-2.5 py-1.5 block hover:border-teal-300 hover:bg-teal-50 transition-colors">
+        class="rounded-lg border {% if row.read_at %}border-slate-100 bg-white/60{% else %}{% if is_fixable %}border-amber-200 bg-amber-50/80{% else %}border-teal-100 bg-teal-50/70{% endif %}{% endif %} px-2.5 py-1.5 block hover:border-teal-300 hover:bg-teal-50 transition-colors">
         <div class="flex items-center justify-between gap-2">
           <p class="text-xs font-bold text-slate-800 truncate">{{ notif_title }}</p>
           <p class="text-[10px] text-slate-400 whitespace-nowrap">{% if row.created_at %}{{ row.created_at.strftime('%b %d %H:%M') }}{% endif %}</p>

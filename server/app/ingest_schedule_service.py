@@ -18,11 +18,13 @@ import re
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 from typing import Any
+from urllib.parse import urlencode
 
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
-from .admin_surgical_schedule_service import add_surgical_case, week_offset_for_date
+from .admin_notification_href import admin_notification_href, clinic_schedule_fix_href
+from .admin_surgical_schedule_service import add_surgical_case
 from .ingest_resolve import resolve_clinic_location, resolve_or_location, resolve_surgeon
 from .models import ClinicSchedule, CoSurgeonPair, ORBlockAssignment, ORBlockInstance, SurgicalCase
 from .or_block_service import (
@@ -136,6 +138,9 @@ def _queue_ingest_correction(
     patient_name: str | None = None,
     extra: str | None = None,
     case_id: int | None = None,
+    procedure: str | None = None,
+    site: str | None = None,
+    room: str | None = None,
 ) -> dict[str, Any]:
     """Park missing Desk fields on the admin portal instead of failing the fax."""
     fingerprint = _correction_fingerprint(
@@ -156,7 +161,12 @@ def _queue_ingest_correction(
         "date": day.isoformat() if day else None,
         "patientName": patient_name,
         "caseId": case_id,
+        "extra": extra,
+        "procedure": procedure,
+        "site": site,
+        "room": room,
     }
+    payload["href"] = admin_notification_href("ingest_correction", payload)
     from .models import AdminNotification
 
     existing = (
@@ -199,14 +209,27 @@ def _queue_ingest_correction(
     return item
 
 
-def _clinic_href(day: date | None, surgeon_id: int | None = None, case_id: int | None = None) -> str:
-    offset = week_offset_for_date(day) if day else 0
-    href = f"/admin/clinic-schedule?week_offset={offset}"
-    if surgeon_id:
-        href += f"&surgeon_id={surgeon_id}"
-    if case_id:
-        href += f"&edit_case={case_id}"
-    return href
+def _clinic_href(
+    day: date | None,
+    surgeon_id: int | None = None,
+    case_id: int | None = None,
+    *,
+    reason: str | None = None,
+    patient_name: str | None = None,
+    procedure: str | None = None,
+    site: str | None = None,
+    room: str | None = None,
+) -> str:
+    return clinic_schedule_fix_href(
+        day=day,
+        surgeon_id=surgeon_id,
+        case_id=case_id,
+        reason=reason,
+        patient_name=patient_name,
+        procedure=procedure,
+        site=site,
+        room=room,
+    )
 
 
 def _session_from_slots(slots: list[dict], fallback: str) -> str:
@@ -587,6 +610,7 @@ def _flag_admin_schedule_issues(
             "date": day.isoformat(),
             "warnings": warnings,
             "href": f"/admin/block-or?block_id={block.id}",
+            "date": day.isoformat(),
         },
         require_schedule_opt_in=True,
     )
@@ -1034,7 +1058,7 @@ def ingest_surgeon_schedule(
                 reason="surgeon_not_found",
                 title="Desk ingest · surgeon missing",
                 body=f"Fax #{source_fax_id or '?'} · surgeon not in CAL: {raw}",
-                href="/admin/surgeons",
+                href=f"/admin/surgeons?{urlencode({'add': '1', 'name': str(raw)})}",
                 source_fax_id=source_fax_id,
                 extra=str(raw),
             )
@@ -1116,11 +1140,14 @@ def ingest_surgeon_schedule(
                         f"{surgeon.full_name} · {day.strftime('%m-%d-%y')} · "
                         f"OR location not found for room: {room}"
                     ),
-                    href="/admin/locations",
+                    href=_clinic_href(
+                        day, surgeon.id, reason="or_location_not_found", room=str(room or ""),
+                    ),
                     source_fax_id=source_fax_id,
                     surgeon_id=surgeon.id,
                     day=day,
                     extra=str(room or ""),
+                    room=str(room or ""),
                 )
                 continue
 
@@ -1141,12 +1168,21 @@ def ingest_surgeon_schedule(
                             f"no start time on fax row"
                             + (f" · {(case.get('procedure') or '')[:60]}" if case.get("procedure") else "")
                         ),
-                        href=_clinic_href(day, surgeon.id),
+                        href=_clinic_href(
+                            day,
+                            surgeon.id,
+                            reason="missing_time",
+                            patient_name=case.get("patient_name"),
+                            procedure=case.get("procedure") or "",
+                            room=case.get("room") or room or "",
+                        ),
                         source_fax_id=source_fax_id,
                         surgeon_id=surgeon.id,
                         day=day,
                         patient_name=case.get("patient_name"),
                         extra=case.get("procedure") or "",
+                        procedure=case.get("procedure") or "",
+                        room=case.get("room") or room or "",
                     )
             if not timed:
                 continue
@@ -1257,7 +1293,7 @@ def ingest_surgeon_schedule(
                     reason="missing_block_window",
                     title="Desk ingest · OR times missing",
                     body=f"{surgeon.full_name} · {day.strftime('%m-%d-%y')} · {exc}",
-                    href=_clinic_href(day, surgeon.id),
+                    href=_clinic_href(day, surgeon.id, reason="missing_block_window"),
                     source_fax_id=source_fax_id,
                     surgeon_id=surgeon.id,
                     day=day,
@@ -1306,11 +1342,17 @@ def ingest_surgeon_schedule(
                         f"{surgeon.full_name} · {day.strftime('%m-%d-%y')} · "
                         f"clinic location not found for site: {site_for_day}"
                     ),
-                    href="/admin/locations",
+                    href=_clinic_href(
+                        day,
+                        surgeon.id,
+                        reason="clinic_location_not_found",
+                        site=str(site_for_day or ""),
+                    ),
                     source_fax_id=source_fax_id,
                     surgeon_id=surgeon.id,
                     day=day,
                     extra=str(site_for_day or ""),
+                    site=str(site_for_day or ""),
                 )
                 continue
             time_bits = []

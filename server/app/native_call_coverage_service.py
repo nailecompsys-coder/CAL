@@ -103,7 +103,13 @@ def assign_native_call_coverage(
             f"{covering.full_name} covering {rotation.date.strftime('%b %-d')}: " + " · ".join(warnings[:3]),
             db,
             kind="call_coverage_conflict",
-            payload={"rotationId": rotation.id, "coveringSurgeonId": covering.id, "warnings": warnings[:5]},
+            payload={
+                "rotationId": rotation.id,
+                "coveringSurgeonId": covering.id,
+                "warnings": warnings[:5],
+                "date": rotation.date.isoformat() if rotation.date else None,
+                "callGroupId": rotation.call_group_id,
+            },
             require_schedule_opt_in=True,
         )
 

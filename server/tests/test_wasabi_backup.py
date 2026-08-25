@@ -89,6 +89,14 @@ class WasabiBackupTest(unittest.TestCase):
         self.assertIn("DATABASE_URL", manifest["env"]["present_secret_keys"])
         self.assertNotIn("postgresql://cal_app:secret", str(manifest["env"]))
 
+    def test_backup_stamp_displays_us_eastern(self):
+        from app.us_datetime import format_us_datetime
+
+        # 2026-06-16 19:46:17 UTC → 3:46 PM EDT
+        self.assertEqual(format_us_datetime("20260616-194617"), "6/16/2026 3:46 PM ET")
+        self.assertEqual(format_us_datetime("2026-01-15T14:05:00+00:00"), "1/15/2026 9:05 AM ET")
+        self.assertEqual(format_us_datetime(""), "—")
+
 
 if __name__ == "__main__":
     unittest.main()

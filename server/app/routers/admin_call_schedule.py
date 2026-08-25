@@ -12,11 +12,12 @@ from ..admin_call_schedule_service import (
     page_data,
     parse_call_group_id,
 )
+from ..admin_notification_href import month_offset_for_date
 from ..auth import get_current_admin
 from ..call_schedule_audit_service import recent_call_schedule_audit_logs, surgeon_label
 from ..database import get_db
 from ..jinja_env import templates
-from ..models import Surgeon
+from ..models import CallRotation, Surgeon
 from ..surgeon_visibility import surgeon_is_visible
 from .admin import _base, _call_schedule_qs, _sort_surgeons_physicians_first, _surgeon_sort_key, _warn_redirect
 
@@ -33,9 +34,14 @@ def _redirect_rotations(week_offset: int = 0):
 def call_schedule_page(
     request: Request,
     month_offset: int = 0,
+    rotation_id: int | None = None,
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
+    if rotation_id:
+        rotation = db.get(CallRotation, rotation_id)
+        if rotation and rotation.date:
+            month_offset = month_offset_for_date(rotation.date)
     surgeons = [
         row for row in db.query(Surgeon).filter(Surgeon.is_active == True).order_by(Surgeon.last_name).all()  # noqa: E712
         if surgeon_is_visible(row)

@@ -122,9 +122,9 @@
     <form method="post" action="/admin/surgeons/add" class="space-y-4">
       <div class="grid grid-cols-2 gap-3">
         <div><label class="block text-xs font-medium text-slate-600 mb-1">First Name *</label>
-          <input type="text" name="first_name" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
+          <input id="add-first" type="text" name="first_name" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
         <div><label class="block text-xs font-medium text-slate-600 mb-1">Last Name *</label>
-          <input type="text" name="last_name" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
+          <input id="add-last" type="text" name="last_name" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" /></div>
       </div>
       <div><label class="block text-xs font-medium text-slate-600 mb-1">Role</label>
         <select name="staff_type" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
@@ -248,5 +248,27 @@ function openEditModal(id, first, last, suffix, email, phone, staffType, sortOrd
     if (e.target === this) this.classList.add('hidden');
   });
 });
+(function openAddFromQuery() {
+  var params = new URLSearchParams(window.location.search);
+  if (params.get('add') !== '1') return;
+  var raw = (params.get('name') || '').trim();
+  var first = '';
+  var last = raw;
+  if (raw.indexOf(',') >= 0) {
+    last = raw.split(',')[0].trim();
+    first = raw.split(',').slice(1).join(',').replace(/\bMD\b|\bDO\b/g, '').trim();
+  } else {
+    var bits = raw.replace(/,/g, ' ').split(/\s+/).filter(Boolean);
+    if (bits.length >= 2) {
+      last = bits[bits.length - 1];
+      first = bits.slice(0, -1).join(' ');
+    }
+  }
+  openAddModal();
+  var firstEl = document.getElementById('add-first');
+  var lastEl = document.getElementById('add-last');
+  if (firstEl) firstEl.value = first;
+  if (lastEl) lastEl.value = last;
+})();
 </script>
 {% endblock %}

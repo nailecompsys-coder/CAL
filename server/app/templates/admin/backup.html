@@ -15,7 +15,7 @@
 {% elif msg == 'backup_running' %}
 <div class="mx-5 mt-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-amber-800 text-sm"><i class="fa-solid fa-clock mr-2"></i>A backup is already running.</div>
 {% elif msg == 'backup_ok' %}
-<div class="mx-5 mt-4 status-approved border rounded-xl px-4 py-3 text-sm font-semibold"><i class="fa-solid fa-circle-check mr-2"></i>Backup {% if request.query_params.get('ts') %}{{ request.query_params.get('ts') }}{% endif %} completed.</div>
+<div class="mx-5 mt-4 status-approved border rounded-xl px-4 py-3 text-sm font-semibold"><i class="fa-solid fa-circle-check mr-2"></i>Backup{% if request.query_params.get('ts') %} {{ request.query_params.get('ts')|us_datetime }}{% endif %} completed.</div>
 {% elif msg == 'backup_upload_failed' %}
 <div class="mx-5 mt-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-amber-800 text-sm"><i class="fa-solid fa-triangle-exclamation mr-2"></i>Backup created but Wasabi upload failed.</div>
 {% elif msg == 'backup_failed' %}
@@ -47,7 +47,9 @@
     </div>
     <div class="text-xs mt-1 opacity-80">
       {{ backup_job.get('message', '') }}
-      {% if backup_job.get('timestamp') %} · {{ backup_job.get('timestamp') }}{% endif %}
+      {% if backup_job.get('finished_at') %} · {{ backup_job.get('finished_at')|us_datetime }}
+      {% elif backup_job.get('timestamp') %} · {{ backup_job.get('timestamp')|us_datetime }}
+      {% elif backup_job.get('started_at') %} · {{ backup_job.get('started_at')|us_datetime }}{% endif %}
       {% if backup_job.get('db_size_bytes') %} · {{ backup_job.get('db_size_bytes')|bytes }}{% endif %}
       {% if backup_job.get('error') %} · {{ backup_job.get('error') }}{% endif %}
     </div>
@@ -72,7 +74,7 @@
       <table class="w-full text-sm">
         <thead>
           <tr class="border-b border-slate-200 bg-slate-50 text-left">
-            <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Timestamp</th>
+            <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Date</th>
             <th class="px-4 py-3 text-xs font-semibold text-slate-500 uppercase tracking-wide">Size</th>
             <th class="px-4 py-3 text-right text-xs font-semibold text-slate-500 uppercase tracking-wide">Restore</th>
           </tr>
@@ -82,10 +84,10 @@
           {% set db_file = b.files|selectattr('name', 'equalto', 'db.sql.gz')|list|first %}
           {% if db_file %}
           <tr class="hover:bg-slate-50/70">
-            <td class="px-4 py-3 font-medium text-slate-800">{{ b.timestamp }}</td>
+            <td class="px-4 py-3 font-medium text-slate-800">{{ b.timestamp|us_datetime }}</td>
             <td class="px-4 py-3 text-slate-600">{{ b.total_bytes|bytes }}</td>
             <td class="px-4 py-3 text-right">
-              <button type="button" onclick="openRestoreModal('{{ db_file.key|e }}', '{{ b.timestamp|e }}')"
+              <button type="button" onclick="openRestoreModal('{{ db_file.key|e }}', {{ b.timestamp|us_datetime|tojson }})"
                 class="text-rose-600 hover:text-rose-800 text-xs font-medium">Restore</button>
             </td>
           </tr>

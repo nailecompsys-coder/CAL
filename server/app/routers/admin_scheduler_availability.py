@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
+from ..admin_notification_href import admin_notification_href
 from ..auth import get_current_admin
 from ..database import get_db
 from ..jinja_env import templates
@@ -117,7 +118,7 @@ def scheduler_availability_page(
         ingest_fixes.append({
             "date": payload.get("date") or (note.created_at.date().isoformat() if note.created_at else None),
             "body": note.body,
-            "href": payload.get("href") or "/admin/clinic-schedule",
+            "href": admin_notification_href("ingest_correction", payload) or "/admin/clinic-schedule",
             "title": note.title,
         })
     return templates.TemplateResponse("admin/scheduler_availability.html", _base(

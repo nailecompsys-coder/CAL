@@ -36,8 +36,9 @@
             <td class="px-4 py-3 text-slate-600">
               {{ row.body }}
               {% set payload = (row.payload|from_json) if row.payload else {} %}
-              {% if payload.get('href') %}
-              <a class="block mt-1 text-xs font-bold text-blue-700 hover:underline" href="{{ payload.get('href') }}">Open to correct</a>
+              {% set href = admin_notification_href(row.kind, payload) %}
+              {% if href %}
+              <a class="block mt-1 text-xs font-bold text-blue-700 hover:underline" href="{{ href }}">Open record</a>
               {% endif %}
             </td>
             <td class="px-4 py-3">

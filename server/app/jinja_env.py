@@ -7,9 +7,11 @@ from zoneinfo import ZoneInfo as _ZoneInfo
 
 from fastapi.templating import Jinja2Templates
 
+from .admin_notification_href import admin_notification_href
 from .device_names import readable_device_name
 from .or_block_service import sanitize_schedule_note_for_humans
 from .paths import TEMPLATES_DIR
+from .us_datetime import format_us_datetime
 from .version_display import release_channel, release_label
 
 
@@ -56,9 +58,11 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.filters["from_json"] = _json.loads
 templates.env.filters["urlquote"] = lambda s: _url_quote(str(s or ""), safe="")
 templates.env.filters["eastern_time"] = _eastern_time
+templates.env.filters["us_datetime"] = format_us_datetime
 templates.env.filters["phone"] = _format_phone
 templates.env.filters["bytes"] = _format_bytes
 templates.env.filters["device_name"] = readable_device_name
 templates.env.filters["release_label"] = release_label
 templates.env.filters["release_channel"] = release_channel
 templates.env.filters["human_schedule_note"] = sanitize_schedule_note_for_humans
+templates.env.globals["admin_notification_href"] = admin_notification_href

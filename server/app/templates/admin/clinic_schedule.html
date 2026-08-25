@@ -195,10 +195,21 @@
         {% set day_has_hospital_clinic = (day_entries|selectattr('assignment_type', 'equalto', 'assigned')|map(attribute='location')|selectattr('location_type', 'equalto', 'hospital')|list|length > 0) %}
         {# Cases chip when surgeries exist and nothing else already surfaces them (OR pills / hospital grid). #}
         {% set day_has_hospital = day_surgeries|length > 0 and not day_has_hospital_clinic and not day_block_assignments and not day_has_off_conflict %}
-        <td class="px-1.5 py-1.5 border border-slate-200 align-top
+        <td id="sched-cell-{{ surgeon.id }}-{{ day.isoformat() }}"
+          class="px-1.5 py-1.5 border border-slate-200 align-top
           {% if day_has_off_conflict %}bg-rose-50/50{% elif is_today %}bg-blue-50/30{% else %}bg-white{% endif %}
           {% if selected_surgeon_id == surgeon.id and day_entries %}ring-2 ring-inset ring-teal-300 bg-teal-50/30{% endif %}
           cursor-pointer hover:bg-slate-50 group/cell"
+          data-surgeon-id="{{ surgeon.id }}"
+          data-date="{{ day.isoformat() }}"
+          data-surgeon-name="{{ surgeon.full_name }}"
+          data-date-label="{{ day.strftime('%a, %b %-d') }}"
+          data-schedule-id="{{ day_entries[0].id if day_entries else '' }}"
+          {% if day_entries %}
+          data-location-choice="{{ '__off__' if day_entries[0].assignment_type == 'off' else day_entries[0].location_id }}"
+          data-session="{{ day_entries[0].session or 'full' }}"
+          data-notes="{{ day_entries[0].notes or '' }}"
+          {% endif %}
           onclick='openAssignModal({"surgeonId": {{ surgeon.id }}, "date": {{ day.isoformat()|tojson }}, "surgeonName": {{ surgeon.full_name|tojson }}, "dateLabel": {{ day.strftime("%a, %b %-d")|tojson }}})'>
 
           <div class="min-h-[52px] space-y-0.5">
@@ -343,6 +354,7 @@
       <div>
         <h3 id="assign-title" class="font-bold text-slate-800">Assign Location</h3>
         <p id="assign-subtitle" class="text-sm text-slate-500"></p>
+        <p id="assign-fix-banner" class="hidden mt-2 text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5"></p>
       </div>
       <button onclick="closeAssignModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
     </div>
@@ -451,6 +463,7 @@
       <div>
         <h3 class="font-bold text-slate-800">Add surgical case</h3>
         <p id="surgical-add-subtitle" class="text-sm text-slate-500"></p>
+        <p id="add-fix-banner" class="hidden mt-2 text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5"></p>
       </div>
       <button type="button" onclick="closeCaseAddModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
     </div>
@@ -474,7 +487,7 @@
       </div>
       <div class="md:col-span-2">
         <label class="block text-xs font-semibold text-slate-600 mb-1">Patient name</label>
-        <input type="text" name="patient_name" required placeholder="Last, First" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        <input type="text" name="patient_name" id="add-patient-name" required placeholder="Last, First" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
       </div>
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1">DOB</label>
@@ -486,7 +499,7 @@
       </div>
       <div class="md:col-span-2">
         <label class="block text-xs font-semibold text-slate-600 mb-1">Procedure</label>
-        <input type="text" name="procedure" required placeholder="e.g. Colonoscopy, Robotic Chole" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        <input type="text" name="procedure" id="add-procedure" required placeholder="e.g. Colonoscopy, Robotic Chole" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
       </div>
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1">Location / Room</label>
@@ -499,7 +512,7 @@
       </div>
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1">Room (free text)</label>
-        <input type="text" name="room_text" placeholder="Room 3" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        <input type="text" name="room_text" id="add-room-text" placeholder="Room 3" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
       </div>
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1">Status</label>
@@ -876,6 +889,16 @@ function openAssignModal(options) {
   document.getElementById('assign-title').textContent = scheduleId ? 'Edit Assignment' : 'Assign Location';
   document.getElementById('assign-submit-label').textContent = scheduleId ? 'Save' : 'Assign';
   document.getElementById('assign-notes').value = options.notes || '';
+  var banner = document.getElementById('assign-fix-banner');
+  if (banner) {
+    if (options.fixMessage) {
+      banner.textContent = options.fixMessage;
+      banner.classList.remove('hidden');
+    } else {
+      banner.textContent = '';
+      banner.classList.add('hidden');
+    }
+  }
   if (scheduleId) {
     setCheckedRadio('location_choice', options.locationChoice);
     setCheckedRadio('session', options.session || 'full');
@@ -988,6 +1011,11 @@ function openCaseAdd(surgeonId, dateIso, surgeonName, dayLabel) {
   document.getElementById('add-end-time').value = '';
   var locEl = document.getElementById('add-location-id');
   locEl.value = _timelineLocationId ? String(_timelineLocationId) : '';
+  var banner = document.getElementById('add-fix-banner');
+  if (banner) {
+    banner.textContent = '';
+    banner.classList.add('hidden');
+  }
   document.getElementById('surgical-add-modal').classList.remove('hidden');
   closeHospitalTimeline();
 }
@@ -1041,31 +1069,113 @@ document.getElementById('surgical-edit-modal').addEventListener('click', functio
 (function openEditCaseFromQuery() {
   var params = new URLSearchParams(window.location.search);
   var editId = params.get('edit_case');
-  if (!editId) return;
-  var found = null;
-  Object.keys(SCHEDULE_DATA || {}).forEach(function(key) {
-    (SCHEDULE_DATA[key] || []).forEach(function(c) {
-      if (String(c.id) === String(editId)) found = c;
+  if (editId) {
+    var found = null;
+    Object.keys(SCHEDULE_DATA || {}).forEach(function(key) {
+      (SCHEDULE_DATA[key] || []).forEach(function(c) {
+        if (String(c.id) === String(editId)) found = c;
+      });
     });
-  });
-  if (!found) return;
-  openCaseEditFromRow({
-    dataset: {
-      caseId: String(found.id),
-      surgeonId: String(found.surgeon_id || ''),
-      date: found.date || '',
-      startTime: found.start || '08:00',
-      endTime: found.end || '',
-      patientName: found.patient || '',
-      patientDob: found.patient_dob || '',
-      patientPhone: found.patient_phone || '',
-      procedure: found.procedure || '',
-      locationId: found.location_id || '',
-      roomText: found.room_text || '',
-      status: found.status || 'scheduled',
-      notes: found.notes || '',
-    },
-  });
+    if (!found) return;
+    openCaseEditFromRow({
+      dataset: {
+        caseId: String(found.id),
+        surgeonId: String(found.surgeon_id || ''),
+        date: found.date || '',
+        startTime: found.start || '08:00',
+        endTime: found.end || '',
+        patientName: found.patient || '',
+        patientDob: found.patient_dob || '',
+        patientPhone: found.patient_phone || '',
+        procedure: found.procedure || '',
+        locationId: found.location_id || '',
+        roomText: found.room_text || '',
+        status: found.status || 'scheduled',
+        notes: found.notes || '',
+      },
+    });
+    return;
+  }
+  var focusDate = params.get('focus_date');
+  var surgeonId = params.get('surgeon_id');
+  var fix = params.get('fix') || '';
+  if (!focusDate || !surgeonId) return;
+  var cell = document.getElementById('sched-cell-' + surgeonId + '-' + focusDate);
+  if (cell) {
+    cell.classList.add('ring-2', 'ring-inset', 'ring-amber-400');
+    cell.scrollIntoView({ block: 'center', inline: 'nearest' });
+  }
+  var surgeonName = cell ? (cell.getAttribute('data-surgeon-name') || '') : '';
+  var dateLabel = cell ? (cell.getAttribute('data-date-label') || focusDate) : focusDate;
+  if (fix === 'missing_time') {
+    var patient = params.get('patient') || '';
+    var key = surgeonId + '_' + focusDate;
+    var cases = (SCHEDULE_DATA && SCHEDULE_DATA[key]) || [];
+    var existing = null;
+    cases.forEach(function(c) {
+      if (!existing && patient && String(c.patient || '').toLowerCase() === patient.toLowerCase()) {
+        existing = c;
+      }
+    });
+    if (existing) {
+      openCaseEditFromRow({
+        dataset: {
+          caseId: String(existing.id),
+          surgeonId: String(existing.surgeon_id || surgeonId),
+          date: existing.date || focusDate,
+          startTime: existing.start || '',
+          endTime: existing.end || '',
+          patientName: existing.patient || patient,
+          patientDob: existing.patient_dob || '',
+          patientPhone: existing.patient_phone || '',
+          procedure: existing.procedure || params.get('procedure') || '',
+          locationId: existing.location_id || '',
+          roomText: existing.room_text || params.get('room') || '',
+          status: existing.status || 'scheduled',
+          notes: existing.notes || '',
+        },
+      });
+      return;
+    }
+    if (typeof openCaseAdd !== 'function') return;
+    openCaseAdd(surgeonId, focusDate, surgeonName, dateLabel);
+    var addBanner = document.getElementById('add-fix-banner');
+    if (addBanner) {
+      addBanner.textContent = 'Fax row has no start time. Fill it in and save.';
+      addBanner.classList.remove('hidden');
+    }
+    var nameEl = document.getElementById('add-patient-name');
+    if (nameEl && patient) nameEl.value = patient;
+    var procEl = document.getElementById('add-procedure');
+    if (procEl && params.get('procedure')) procEl.value = params.get('procedure');
+    var roomEl = document.getElementById('add-room-text');
+    if (roomEl && params.get('room')) roomEl.value = params.get('room');
+    var startEl = document.getElementById('add-start-time');
+    if (startEl) {
+      startEl.value = '';
+      startEl.focus();
+    }
+    return;
+  }
+  if (fix === 'clinic_location' || fix === 'or_location') {
+    var site = params.get('site') || params.get('room') || '';
+    var opts = {
+      surgeonId: surgeonId,
+      date: focusDate,
+      surgeonName: surgeonName,
+      dateLabel: dateLabel,
+      fixMessage: site
+        ? ('Fax ' + (fix === 'or_location' ? 'room' : 'site') + ' not matched: ' + site + ' — pick the location below.')
+        : 'Fax location did not match. Pick the clinic or OR below.',
+    };
+    if (cell && cell.getAttribute('data-schedule-id')) {
+      opts.scheduleId = cell.getAttribute('data-schedule-id');
+      opts.locationChoice = cell.getAttribute('data-location-choice') || '';
+      opts.session = cell.getAttribute('data-session') || 'full';
+      opts.notes = cell.getAttribute('data-notes') || '';
+    }
+    openAssignModal(opts);
+  }
 })();
 </script>
 {% endblock %}

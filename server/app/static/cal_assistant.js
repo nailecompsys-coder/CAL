@@ -37,6 +37,7 @@
   var MAX_OFFSET     = 6.2;    // max pupil translation in SVG units (face is 64×64)
   var DRAG_KEY       = 'cal-bot-pos-v1';
   var DRAG_THRESHOLD = 5;      // px — minimum move to count as a real drag
+  var FOCUS_KEY      = 'cal-bot-focus-v1'; // sessionStorage key for user-selected notif issue
 
   var idleTimer = null;
   var isIdle    = true;
@@ -46,6 +47,30 @@
   var dragState         = null;  // {startX,startY,startLeft,startTop,moved}
   var suppressNextClick = false; // suppresses fetchConflicts after a real drag
   var focusedNotif      = null;  // the DOM element of the currently-focused notif card
+
+  // ─── Session focus helpers (survive full-page navigation) ────────────────
+  function loadSessionFocus() {
+    try { return JSON.parse(sessionStorage.getItem(FOCUS_KEY) || 'null'); } catch (e) { return null; }
+  }
+  function saveSessionFocus(f) {
+    try { sessionStorage.setItem(FOCUS_KEY, JSON.stringify(f)); } catch (e) {}
+  }
+  function clearSessionFocus() {
+    try { sessionStorage.removeItem(FOCUS_KEY); } catch (e) {}
+  }
+
+  // ─── Kind → concrete one-sentence fix suggestion ─────────────────────────
+  function notifFixSuggestion(kind) {
+    var map = {
+      call_coverage_conflict: 'Assign a covering provider in the Call schedule, or move an existing rotation to fill the gap.',
+      day_off_request:        'Open Days Off and Approve or Deny this pending request.',
+      day_off_duplicate:      'Remove the overlapping duplicate day-off entry in Days Off.',
+      schedule_flag:          'Open Block OR and fill the missing assignment or resolve the flagged item.',
+      ingest_correction:      'Correct the surgeon name or location in Clinic\u00a0/\u00a0OR so the case imports cleanly.',
+      rules_engine_error:     'Review the conflict in Settings \u2192 Scheduling Rules and adjust the schedule.',
+    };
+    return map[(kind || '')] || 'Review the issue and take the corrective action shown above.';
+  }
 
   // ─── Bootstrap ────────────────────────────────────────────────────────────
   function init() {
@@ -60,7 +85,16 @@
     initPosition();
     setMood('ok');
     bindEvents();
-    setTimeout(fetchConflicts, 900);
+
+    // If the user had focused a specific notification card before navigating,
+    // restore that issue immediately.  Do NOT auto-fetch and overwrite with the
+    // first OFF-conflict (that was the "JF OFF" bug).
+    var sessionFocus = loadSessionFocus();
+    if (sessionFocus && sessionFocus.href) {
+      setTimeout(function () { showSessionFocusBubble(sessionFocus); }, 200);
+    } else {
+      setTimeout(fetchConflicts, 900);
+    }
   }
 
   // ─── Styles ───────────────────────────────────────────────────────────────
@@ -194,6 +228,13 @@
       '  text-decoration:none;font-size:.78rem;',
       '}',
       '.cal-link:hover{text-decoration:underline;}',
+      // Fix-hint shown below the body text in a notif bubble
+      '.cal-fix-hint{',
+      '  margin:.3rem 0 .15rem;padding:.3rem .5rem;',
+      '  background:rgba(109,40,217,.07);border-radius:.42rem;',
+      '  font-size:.73rem;line-height:1.45;',
+      '  color:var(--cal-ink,#1c2430);',
+      '}',
     ].join('\n');
     document.head.appendChild(s);
   }
@@ -368,7 +409,19 @@
       btn.addEventListener('pointerdown', onBtnPointerDown);
       btn.addEventListener('click', function () {
         if (suppressNextClick) { suppressNextClick = false; return; }
-        fetchConflicts();
+        var sf = loadSessionFocus();
+        if (sf && sf.href) {
+          // User has a focused issue — run the comet briefly then re-show it.
+          // Do NOT fetch and replace with the live OFF-conflict list.
+          setThinking(true);
+          clearTimeout(thinkTO);
+          thinkTO = setTimeout(function () {
+            setThinking(false);
+            showSessionFocusBubble(sf);
+          }, 700);
+        } else {
+          fetchConflicts();
+        }
       });
     }
 
@@ -409,10 +462,12 @@
     if (!card) return;
 
     if (card === focusedNotif) {
-      // Second click on the same focused card — follow the href.
-      var href = card.getAttribute('data-cal-href') || '';
-      if (href) {
-        window.location.href = href;
+      // Second click on the same focused card — follow the href (persist first).
+      var href2 = card.getAttribute('data-cal-href') || '';
+      if (href2) {
+        // Focus is already in sessionStorage from the first click; destination
+        // page will restore it.
+        window.location.href = href2;
       }
       return;
     }
@@ -420,6 +475,17 @@
     // First click (or click on a different card): focus it.
     e.preventDefault();
     focusedNotif = card;
+
+    // Persist the focused issue to sessionStorage so Go-there navigation and
+    // page reloads on the destination page restore this issue (not JF OFF).
+    var newFocus = {
+      title: card.getAttribute('data-cal-title') || '',
+      body:  card.getAttribute('data-cal-body')  || '',
+      href:  card.getAttribute('data-cal-href')  || '',
+      kind:  card.getAttribute('data-cal-kind')  || '',
+      date:  card.getAttribute('data-cal-date')  || null,
+    };
+    saveSessionFocus(newFocus);
 
     // Eyes look at the card.
     var r = card.getBoundingClientRect();
@@ -443,9 +509,11 @@
     var title = card.getAttribute('data-cal-title') || 'Notification';
     var body  = card.getAttribute('data-cal-body')  || '';
     var href  = card.getAttribute('data-cal-href')  || '';
+    var kind  = card.getAttribute('data-cal-kind')  || '';
 
     setMood('alert');
 
+    var suggestion = notifFixSuggestion(kind);
     var goHtml = href
       ? '<div class="cal-actions">' +
           '<a href="' + esc(href) + '" class="cal-link">Go there \u2192</a>' +
@@ -459,6 +527,7 @@
       '</div>' +
       '<p class="cal-msg">' + esc(title) + '</p>' +
       (body ? '<p class="cal-more">' + esc(body) + '</p>' : '') +
+      '<p class="cal-more cal-fix-hint">\u21b3\u00a0' + esc(suggestion) + '</p>' +
       goHtml;
 
     bubble.classList.add('cal-visible');
@@ -467,6 +536,53 @@
       bubble.classList.remove('cal-visible');
       focusedNotif = null;
       setMood('ok');
+      // sessionStorage focus is preserved intentionally — a page refresh or
+      // navigation within this tab should still show the same issue.
+    });
+  }
+
+  // Shows a notif bubble from the sessionStorage focus object (cross-page restore).
+  function showSessionFocusBubble(focus) {
+    var bubble = document.getElementById('cal-bubble');
+    if (!bubble) return;
+
+    var suggestion = notifFixSuggestion(focus.kind);
+    var goHtml = focus.href
+      ? '<div class="cal-actions">' +
+          '<a href="' + esc(focus.href) + '" class="cal-link">Go there \u2192</a>' +
+        '</div>'
+      : '';
+
+    bubble.innerHTML =
+      '<div class="cal-bubble-top">' +
+        '<span class="cal-bot-name">Cal-BOT</span>' +
+        '<button class="cal-x" aria-label="Dismiss" type="button">\u00d7</button>' +
+      '</div>' +
+      '<p class="cal-msg">' + esc(focus.title || 'Notification') + '</p>' +
+      (focus.body ? '<p class="cal-more">' + esc(focus.body) + '</p>' : '') +
+      '<p class="cal-more cal-fix-hint">\u21b3\u00a0' + esc(suggestion) + '</p>' +
+      goHtml;
+
+    setMood('alert');
+    bubble.classList.add('cal-visible');
+
+    // If we can find the matching calendar cell, look at it.
+    if (focus.date) {
+      var cell = document.querySelector('[data-call-date="' + focus.date + '"]');
+      if (cell) {
+        var r = cell.getBoundingClientRect();
+        if (r.width) {
+          setIdle(false);
+          trackPoint(r.left + r.width / 2, r.top + r.height / 2);
+          resetIdleTimer();
+        }
+      }
+    }
+
+    bubble.querySelector('.cal-x').addEventListener('click', function () {
+      bubble.classList.remove('cal-visible');
+      setMood('ok');
+      // sessionStorage focus preserved — user must click a different card to clear it.
     });
   }
 

@@ -166,6 +166,7 @@
       {% set is_fixable = row.kind in ['schedule_flag', 'ingest_correction', 'call_coverage_conflict', 'rules_engine_error'] %}
       {% set notif_title = 'Pending Request' if row.title == 'CAL request pending' else row.title %}
       {% set dayoff_href = admin_notification_href(row.kind, payload) %}
+      {% set notif_date = (payload.date or payload.startDate or '')[:10] %}
       {% if dayoff_href %}
       <a href="{{ dayoff_href }}"
         data-cal-notif=""
@@ -173,6 +174,7 @@
         data-cal-body="{{ row.body | e }}"
         data-cal-href="{{ dayoff_href | e }}"
         data-cal-kind="{{ row.kind | e }}"
+        data-cal-date="{{ notif_date | e }}"
         class="rounded-lg border {% if row.read_at %}border-slate-100 bg-white/60{% else %}{% if is_fixable %}border-amber-200 bg-amber-50/80{% else %}border-teal-100 bg-teal-50/70{% endif %}{% endif %} px-2.5 py-1.5 block hover:border-teal-300 hover:bg-teal-50 transition-colors">
         <div class="flex items-center justify-between gap-2">
           <p class="text-xs font-bold text-slate-800 truncate">{{ notif_title }}</p>
@@ -187,6 +189,7 @@
         data-cal-body="{{ row.body | e }}"
         data-cal-href=""
         data-cal-kind="{{ row.kind | e }}"
+        data-cal-date="{{ notif_date | e }}"
         class="rounded-lg border {% if row.read_at %}border-slate-100 bg-white/60{% else %}border-teal-100 bg-teal-50/70{% endif %} px-2.5 py-1.5">
         <div class="flex items-center justify-between gap-2">
           <p class="text-xs font-bold text-slate-800 truncate">{{ notif_title }}</p>

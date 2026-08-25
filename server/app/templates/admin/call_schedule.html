@@ -74,7 +74,7 @@
         {% if (pad_start + loop.index0) % 7 == 0 and not loop.first %}</tr><tr>{% endif %}
         {% set off_bucket = day_off_by_date.get(day, {'pending': [], 'approved': []}) %}
         {% set is_today = day == today %}
-        <td class="px-2 py-2 border border-slate-200 align-top {% if is_today %}bg-blue-50/30{% else %}bg-white{% endif %}">
+        <td class="px-2 py-2 border border-slate-200 align-top {% if is_today %}bg-blue-50/30{% else %}bg-white{% endif %}" data-call-date="{{ day.isoformat() }}">
           <div class="min-h-[88px] space-y-1">
             <div class="text-[11px] font-extrabold {% if is_today %}text-blue-600{% elif day.weekday() >= 5 %}text-slate-400{% else %}text-slate-700{% endif %}">
               {{ day.strftime('%-d') }}{% if is_today %} <span class="font-normal text-blue-500">·today</span>{% endif %}

@@ -69,10 +69,10 @@
     s.id = 'cal-bot-styles';
     s.textContent = [
       '#cal-assist{',
-      '  position:fixed;top:1.1rem;right:1.1rem;',
+      '  position:fixed;top:1.1rem;right:1.1rem;left:auto;',
       '  z-index:9999;display:flex;flex-direction:column;',
       '  align-items:flex-end;gap:.5rem;pointer-events:none;',
-      '  touch-action:none;user-select:none;',
+      '  touch-action:none;user-select:none;width:max-content;',
       '}',
       '#cal-btn{',
       '  width:88px;height:88px;background:none;border:none;padding:0;',
@@ -280,7 +280,7 @@
     var c = clampPos(left, top);
     assist.style.left  = c.left + 'px';
     assist.style.top   = c.top  + 'px';
-    assist.style.right = '';  // clear the CSS default right:1.1rem
+    assist.style.right = 'auto';  // must be auto, not '' — stylesheet still has right:1.1rem
   }
 
   function initPosition() {
@@ -303,11 +303,12 @@
     var btn    = document.getElementById('cal-btn');
     if (!assist || !btn) return;
 
+    var r = assist.getBoundingClientRect();
     dragState = {
       startX:    e.clientX,
       startY:    e.clientY,
-      startLeft: assist.offsetLeft,
-      startTop:  assist.offsetTop,
+      startLeft: r.left,
+      startTop:  r.top,
       moved:     false,
     };
 
@@ -347,7 +348,10 @@
 
     if (moved) {
       var assist = document.getElementById('cal-assist');
-      if (assist) saveDragPos(assist.offsetLeft, assist.offsetTop);
+      if (assist) {
+        var r = assist.getBoundingClientRect();
+        saveDragPos(r.left, r.top);
+      }
       // Suppress the click event that always fires after pointerup.
       suppressNextClick = true;
     }

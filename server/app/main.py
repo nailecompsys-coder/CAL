@@ -28,6 +28,7 @@ from .routers import (
     surgeon_pwa_retired, surgeon_surgical_cases,
 )
 from . import migrate_call_groups
+from . import migrate_grok_bot_rules
 
 
 @asynccontextmanager
@@ -46,11 +47,14 @@ async def lifespan(app: FastAPI):
     migrate_scheduling_guardrails.run_migration()
     migrate_site_settings_tools.run_migration()
     migrate_co_surgeon.run_migration()
+    migrate_grok_bot_rules.run_migration()
     db = SessionLocal()
     try:
         admin._get_settings(db)
         from .rules_engine.engine import ensure_rule_config_seeded
+        from .grok_bot_rules import ensure_grok_bot_rules_seeded
         ensure_rule_config_seeded(db)
+        ensure_grok_bot_rules_seeded(db)
         ensure_location_palette_seeded(db)
     finally:
         db.close()

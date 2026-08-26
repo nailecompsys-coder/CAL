@@ -1528,7 +1528,7 @@ def ingest_surgeon_schedule(
     def _count(action: str) -> int:
         return sum(1 for row in case_results if row.get("action") == action)
 
-    return {
+    payload = {
         "ok": len(errors) == 0,
         "blocks": created_blocks,
         "blocks_count": len(created_blocks),
@@ -1557,4 +1557,11 @@ def ingest_surgeon_schedule(
         "error_count": len(errors),
         "errors": errors,
         "created": case_results,
+        "grok_cleared": 0,
     }
+    try:
+        from .grok_lookahead_service import run_grok_rules
+        payload["grok_cleared"] = run_grok_rules(db).get("cleared", 0)
+    except Exception:
+        payload["grok_cleared"] = 0
+    return payload

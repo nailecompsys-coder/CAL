@@ -25,6 +25,14 @@ from ..admin_settings_service import (
     toggle_admin_user as toggle_admin_user_service,
     unread_admin_notification_count,
 )
+from ..grok_bot_rules import (
+    add_grok_bot_rule,
+    delete_grok_bot_rule,
+    list_grok_bot_rules,
+    match_plain_language,
+    save_grok_bot_rules,
+)
+from ..grok_lookahead_service import run_grok_rules
 from ..admin_notification_ack import ack_informational_notification
 from ..admin_surgeon_service import (
     add_surgeon as add_surgeon_service,
@@ -138,6 +146,65 @@ def scheduling_rules_page(
         "admin/scheduling_rules.html",
         _settings_base(request, current_admin, db, rule_config=rule_config, all_rules=all_rules),
     )
+
+
+@router.get("/settings/grok-bot-rules", response_class=HTMLResponse)
+def grok_bot_rules_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_admin=Depends(get_current_admin),
+):
+    return templates.TemplateResponse(
+        "admin/grok_bot_rules.html",
+        _settings_base(request, current_admin, db, grok_bot_rules=list_grok_bot_rules(db)),
+    )
+
+
+@router.post("/settings/grok-bot-rules")
+async def save_grok_bot_rules_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_admin=Depends(get_current_admin),
+):
+    form = await request.form()
+    save_grok_bot_rules(db, form)
+    return RedirectResponse("/admin/settings/grok-bot-rules?msg=rules_saved", status_code=303)
+
+
+@router.post("/settings/grok-bot-rules/add")
+async def add_grok_bot_rule_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_admin=Depends(get_current_admin),
+):
+    form = await request.form()
+    text = str(form.get("instruction") or "").strip()
+    if not text:
+        return RedirectResponse("/admin/settings/grok-bot-rules?msg=rule_blank", status_code=303)
+    matched = match_plain_language(text)
+    add_grok_bot_rule(db, text)
+    msg = "rule_matched" if matched else "rule_added"
+    return RedirectResponse(f"/admin/settings/grok-bot-rules?msg={msg}", status_code=303)
+
+
+@router.post("/settings/grok-bot-rules/check")
+def check_grok_bot_rules_page(
+    db: Session = Depends(get_db),
+    current_admin=Depends(get_current_admin),
+):
+    del current_admin
+    run_grok_rules(db)
+    return RedirectResponse("/admin/settings/grok-bot-rules?msg=rules_checked", status_code=303)
+
+
+@router.post("/settings/grok-bot-rules/{rule_pk}/delete")
+def delete_grok_bot_rule_page(
+    rule_pk: int,
+    db: Session = Depends(get_db),
+    current_admin=Depends(get_current_admin),
+):
+    delete_grok_bot_rule(db, rule_pk)
+    return RedirectResponse("/admin/settings/grok-bot-rules?msg=rules_saved", status_code=303)
 
 
 @router.get("/settings/access", response_class=HTMLResponse)

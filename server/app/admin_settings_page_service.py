@@ -475,6 +475,11 @@ def recent_admin_notifications(db: Session, admin_user_id: int, limit: int = 20)
 
 
 def _reconcile_admin_notification_feed(db: Session, admin_user_id: int) -> None:
+    try:
+        from .grok_lookahead_service import run_grok_rules
+        run_grok_rules(db)
+    except Exception:
+        pass
     reconcile_stale_dayoff_notifications(db, admin_user_id)
     reconcile_stale_schedule_flag_notifications(db, admin_user_id)
     reconcile_ingest_correction_notifications(db, admin_user_id)

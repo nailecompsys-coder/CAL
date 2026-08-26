@@ -1,4 +1,5 @@
 """Shared scheduling conflict detection. Uses the rules engine; returns legacy list[str] for compatibility."""
+import logging
 from datetime import date
 from typing import Optional
 
@@ -6,6 +7,8 @@ from sqlalchemy.orm import Session
 
 from .rules_engine import evaluate
 from .rules_engine.engine import conflicts_to_messages
+
+log = logging.getLogger(__name__)
 
 
 def check_conflicts(
@@ -45,6 +48,7 @@ def check_conflicts(
         exclude_entity=exclude_entity,
         target_entity=target_entity,
     )
+    _run_grok_behind_valerie(db)
     return [c.message for c in conflicts]
 
 
@@ -65,3 +69,12 @@ def check_conflicts_structured(
         exclude_entity=exclude_entity,
         target_entity=target_entity,
     )
+
+
+def _run_grok_behind_valerie(db: Session) -> None:
+    """Valerie already checked the save. Grok sweeps the board next."""
+    try:
+        from .grok_lookahead_service import run_grok_rules
+        run_grok_rules(db)
+    except Exception:
+        log.exception("Grok-BOT rules failed after a schedule save")

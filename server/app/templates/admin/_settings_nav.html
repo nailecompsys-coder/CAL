@@ -28,8 +28,12 @@
     <a href="/admin/settings/co-surgeon-pairs" class="settings-rail-link {% if cosurgeon_active %}active{% endif %}">
       <i class="fa-solid fa-user-doctor"></i> Co-Surgeon Pairs
     </a>
+    {% set grok_active = path.startswith('/admin/settings/grok-bot-rules') %}
     <a href="/admin/settings/scheduling-rules" class="settings-rail-link {% if rules_active %}active{% endif %}">
       <i class="fa-solid fa-scale-balanced"></i> Scheduling Rules
+    </a>
+    <a href="/admin/settings/grok-bot-rules" class="settings-rail-link {% if grok_active %}active{% endif %}">
+      <i class="fa-solid fa-robot"></i> Grok-BOT
     </a>
 
     <p class="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 px-3 mt-4 mb-2">Security</p>

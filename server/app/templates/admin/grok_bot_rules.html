@@ -1,0 +1,116 @@
+{% extends "base_admin.html" %}
+{% block title %}Grok-BOT Rules{% endblock %}
+
+{% block content %}
+<header class="portal-header px-5 py-3 sticky top-0 z-10 flex-shrink-0">
+  <div>
+    <h1 class="font-bold">Settings</h1>
+    <p class="text-xs text-slate-500">Grok-BOT follows these in plain language</p>
+  </div>
+</header>
+
+{% if request.query_params.get('msg') == 'rules_saved' %}
+<div class="mx-5 mt-4 status-approved border rounded-xl px-4 py-3 text-sm font-semibold">
+  <i class="fa-solid fa-circle-check mr-2"></i>Grok-BOT rules saved.
+</div>
+{% endif %}
+{% if request.query_params.get('msg') == 'rule_added' %}
+<div class="mx-5 mt-4 status-approved border rounded-xl px-4 py-3 text-sm font-semibold">
+  <i class="fa-solid fa-circle-check mr-2"></i>Grok-BOT will follow that rule.
+</div>
+{% endif %}
+{% if request.query_params.get('msg') == 'rule_matched' %}
+<div class="mx-5 mt-4 status-approved border rounded-xl px-4 py-3 text-sm font-semibold">
+  <i class="fa-solid fa-circle-check mr-2"></i>That matches a rule he already has. Wording updated and turned on.
+</div>
+{% endif %}
+{% if request.query_params.get('msg') == 'rule_blank' %}
+<div class="mx-5 mt-4 status-pending border rounded-xl px-4 py-3 text-sm font-semibold">
+  Write the rule in plain language first.
+</div>
+{% endif %}
+{% if request.query_params.get('msg') == 'rules_checked' %}
+<div class="mx-5 mt-4 status-approved border rounded-xl px-4 py-3 text-sm font-semibold">
+  <i class="fa-solid fa-circle-check mr-2"></i>Grok-BOT checked the live board against these rules.
+</div>
+{% endif %}
+
+<div class="settings-shell">
+  {% include "admin/_settings_nav.html" %}
+  <div class="settings-main space-y-5">
+
+    <div class="clinical-panel p-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <p class="text-sm font-semibold text-slate-800">Ask him from the Grok-BOT bubble</p>
+        <p class="text-xs text-slate-500 mt-1">He answers from the live CAL database — time off, clinic patients, cases, call, meetings, locations. No data leaves the app.</p>
+      </div>
+      <form method="post" action="/admin/settings/grok-bot-rules/check">
+        <button type="submit" class="bg-slate-800 text-white px-5 py-2 rounded-lg text-sm font-semibold hover:bg-slate-900">
+          Check rules now
+        </button>
+      </form>
+    </div>
+
+    <form method="post" action="/admin/settings/grok-bot-rules/add" class="clinical-panel p-5 space-y-3">
+      <p class="text-sm font-semibold text-slate-800">Add a rule</p>
+      <p class="text-xs text-slate-500">Write it the way you would tell him. If it matches a rule he already knows, he uses your wording. If it is new, he keeps it as a standing note.</p>
+      <label class="block">
+        <span class="sr-only">New Grok-BOT rule</span>
+        <textarea name="instruction" rows="3" required
+          placeholder="If a notice has a date that has already passed, take it off the board."
+          class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"></textarea>
+      </label>
+      <button type="submit" class="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700">
+        Add rule
+      </button>
+    </form>
+
+    <form method="post" action="/admin/settings/grok-bot-rules" class="clinical-panel overflow-hidden">
+      <div class="px-5 py-4 border-b border-slate-100">
+        <p class="text-sm font-semibold text-slate-800">Rules he follows</p>
+        <p class="text-xs text-slate-500 mt-1">Turn one off and he stops. Edit the sentence if you want him to say it differently.</p>
+      </div>
+      <div class="divide-y divide-slate-100">
+        {% for rule in grok_bot_rules %}
+        <div class="px-5 py-4 flex flex-col gap-3 sm:flex-row sm:items-start">
+          <input type="hidden" name="rule_{{ rule.id }}_present" value="1" />
+          <label class="flex items-center gap-2 sm:w-20 shrink-0 pt-1">
+            <input type="checkbox" name="rule_{{ rule.id }}_enabled" value="1"
+              {% if rule.enabled %}checked{% endif %}
+              class="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+            <span class="text-xs font-semibold uppercase tracking-wide text-slate-500">On</span>
+          </label>
+          <div class="flex-1 space-y-2 min-w-0">
+            <input type="text" name="rule_{{ rule.id }}_title" value="{{ rule.title }}"
+              class="w-full px-3 py-1.5 rounded-lg border border-slate-200 text-sm font-semibold text-slate-800" />
+            <textarea name="rule_{{ rule.id }}_instruction" rows="3"
+              class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-700">{{ rule.instruction }}</textarea>
+            <p class="text-[11px] text-slate-400">
+              {% if rule.is_builtin %}Built-in · he can run this{% else %}Standing note · he keeps this in mind{% endif %}
+            </p>
+          </div>
+          {% if not rule.is_builtin %}
+          <button type="submit" form="delete-grok-{{ rule.id }}"
+            class="text-xs font-semibold text-slate-500 hover:text-red-600 shrink-0">
+            Remove
+          </button>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      <div class="px-5 py-4 border-t border-slate-100">
+        <button type="submit" class="bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700">
+          Save Grok-BOT rules
+        </button>
+      </div>
+    </form>
+
+    {% for rule in grok_bot_rules %}
+    {% if not rule.is_builtin %}
+    <form id="delete-grok-{{ rule.id }}" method="post" action="/admin/settings/grok-bot-rules/{{ rule.id }}/delete"></form>
+    {% endif %}
+    {% endfor %}
+
+  </div>
+</div>
+{% endblock %}

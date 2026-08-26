@@ -66,6 +66,21 @@ class SchedulingRuleConfig(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
+class GrokBotRule(Base):
+    """Plain-language rules Grok-BOT follows on the live board."""
+    __tablename__ = "grok_bot_rules"
+    id = Column(Integer, primary_key=True)
+    rule_id = Column(String(64), unique=True, nullable=False)
+    title = Column(String(128), nullable=False)
+    instruction = Column(Text, nullable=False)
+    handler = Column(String(64), default="", server_default="")
+    enabled = Column(Boolean, default=True, nullable=False, server_default="true")
+    is_builtin = Column(Boolean, default=False, nullable=False, server_default="false")
+    sort_order = Column(Integer, default=100, nullable=False, server_default="100")
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
 class Location(Base):
     __tablename__ = "locations"
     id = Column(Integer, primary_key=True)
@@ -422,7 +437,7 @@ class SurgicalCase(Base):
     id = Column(Integer, primary_key=True)
     surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=False)
     date = Column(Date, nullable=False)
-    start_time = Column(Time, nullable=False)
+    start_time = Column(Time)
     end_time = Column(Time)
     patient_name = Column(String(255), nullable=False)
     patient_dob = Column(String(32))

@@ -1,8 +1,9 @@
 /**
- * Cal-BOT — in-app scheduling assistant for the CAL admin portal.
+ * Grok-BOT — in-app scheduling assistant for the CAL admin portal.
  *
- * Grok Bot tablet avatar (violet, portrait rounded-rect).
- * Comet trail + 3D spin only while thinking. Idle: eyes + mood (smile vs worry).
+ * Capsule avatar (Grok-style: lavender pill, white slit eyes).
+ * Idle is not a loop: he sleeps, glances, bobs, blinks, and wiggles at random.
+ * Thinking: 3D spin, eyes dart, debris flies around him.
  * Surfaces OFF-conflict insight bubbles with fix links. Quiet on a clean week.
  *
  * No React. No build step. Jinja2 + plain JS only.
@@ -13,13 +14,12 @@
  *   Real drag (≥ DRAG_THRESHOLD px) suppresses the click-to-think handler.
  *
  * Notif focus: clicking any [data-cal-notif] card on the dashboard focuses
- *   that issue — eyes track it, comet fires briefly, bubble restates it.
+ *   that issue — eyes track it, debris fires briefly, bubble restates it.
  *   A second click on the same focused card follows the data-cal-href.
  */
 (function () {
   'use strict';
 
-  // ─── Pages where Cal-BOT appears ─────────────────────────────────────────
   var RELEVANT_PATHS = [
     '/admin/dashboard',
     '/admin/calendar',
@@ -29,25 +29,28 @@
     '/admin/block-or',
     '/admin/notifications',
     '/admin/daysoff',
+    '/admin/settings',
   ];
 
   var SEEN_KEY       = 'cal-seen-v1';
   var MAX_SEEN       = 200;
-  var IDLE_MS        = 2800;   // ms still before idle grid-scan kicks in
-  var MAX_OFFSET     = 6.2;    // max pupil translation in SVG units (face is 64×64)
+  var IDLE_MS        = 2200;
+  var MAX_OFFSET     = 5.4;
   var DRAG_KEY       = 'cal-bot-pos-v1';
-  var DRAG_THRESHOLD = 5;      // px — minimum move to count as a real drag
+  var DRAG_THRESHOLD = 5;
 
   var idleTimer = null;
   var isIdle    = true;
   var pulseTO   = null;
+  var directorTO = null;
+  var dartTO     = null;
+  var sleeping   = false;
+  var thinking   = false;
 
-  // Drag state
-  var dragState         = null;  // {startX,startY,startLeft,startTop,moved}
-  var suppressNextClick = false; // suppresses fetchConflicts after a real drag
-  var focusedNotif      = null;  // the DOM element of the currently-focused notif card
+  var dragState         = null;
+  var suppressNextClick = false;
+  var focusedNotif      = null;
 
-  // ─── Bootstrap ────────────────────────────────────────────────────────────
   function init() {
     var path = window.location.pathname;
     var relevant = RELEVANT_PATHS.some(function (p) {
@@ -60,11 +63,11 @@
     initPosition();
     setMood('ok');
     bindEvents();
+    startDirector();
     setTimeout(fetchConflicts, 900);
     setInterval(fetchConflicts, 5 * 60 * 1000);
   }
 
-  // ─── Styles ───────────────────────────────────────────────────────────────
   function injectStyles() {
     var s = document.createElement('style');
     s.id = 'cal-bot-styles';
@@ -78,77 +81,102 @@
       '#cal-btn{',
       '  width:88px;height:88px;background:none;border:none;padding:0;',
       '  cursor:grab;pointer-events:all;display:block;position:relative;',
-      '  perspective:260px;filter:drop-shadow(0 6px 16px rgba(109,40,217,.38));',
+      '  perspective:280px;',
+      '  filter:drop-shadow(0 6px 16px color-mix(in srgb, var(--cal-purple,#6d28d9) 38%, transparent));',
       '}',
       '#cal-btn.cal-dragging{cursor:grabbing;}',
-      '#cal-comet-svg{',
+      '#cal-orbit-svg{',
       '  position:absolute;inset:0;width:88px;height:88px;',
-      '  overflow:visible;pointer-events:none;opacity:0;',
-      '  transition:opacity .18s ease-out;',
+      '  overflow:visible;pointer-events:none;opacity:.12;',
+      '  transition:opacity .22s ease-out;',
       '}',
-      '#cal-btn.cal-thinking #cal-comet-svg{opacity:1;}',
-      '.cal-comet{',
-      '  transform-origin:44px 44px;',
-      '  animation:cal-comet-spin 1.7s linear infinite;',
-      '  animation-play-state:paused;',
-      '}',
-      '#cal-btn.cal-thinking .cal-comet{animation-play-state:running;}',
-      '@keyframes cal-comet-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}',
-      '.cal-comet-trail{',
-      '  fill:none;stroke:#c4b5fd;stroke-width:3.2;stroke-linecap:round;',
-      '  stroke-dasharray:46 192;',
-      '  filter:drop-shadow(0 0 5px #a78bfa);',
-      '}',
-      '.cal-comet-head{fill:#fff;filter:drop-shadow(0 0 7px #e9d5ff) drop-shadow(0 0 12px #a78bfa);}',
-      '.cal-comet-spark{fill:#ddd6fe;opacity:.4;}',
-      '.cal-comet-dust{fill:#a78bfa;}',
+      '#cal-btn.cal-thinking #cal-orbit-svg{opacity:1;}',
+      '#cal-btn.cal-spark #cal-orbit-svg{opacity:.55;}',
+      '.cal-orbit{transform-origin:44px 44px;animation-play-state:paused;}',
+      '#cal-btn.cal-thinking .cal-orbit,',
+      '#cal-btn.cal-spark .cal-orbit{animation-play-state:running;}',
+      '.cal-orbit-a{animation:cal-orbit-spin 1.15s linear infinite;}',
+      '.cal-orbit-b{animation:cal-orbit-spin 1.85s linear infinite reverse;}',
+      '.cal-orbit-c{animation:cal-orbit-spin 2.55s linear infinite;}',
+      '@keyframes cal-orbit-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}',
+      '.cal-fly-dot{fill:var(--cal-purple-soft,#ede9fe);filter:drop-shadow(0 0 4px var(--cal-purple-mid,#8b5cf6));}',
+      '.cal-fly-chip{fill:var(--cal-purple-mid,#8b5cf6);opacity:.85;}',
+      '.cal-fly-star{fill:#fff;opacity:.9;filter:drop-shadow(0 0 5px var(--cal-purple-mid,#8b5cf6));}',
+      '.cal-fly-spark{fill:var(--cal-purple-soft,#ede9fe);opacity:.55;}',
       '#cal-yaw{',
-      '  position:absolute;left:12px;top:12px;width:64px;height:64px;',
+      '  position:absolute;left:12px;top:18px;width:64px;height:52px;',
       '  transform-style:preserve-3d;',
       '}',
-      '#cal-btn.cal-thinking #cal-yaw{animation:cal-spin 2.8s linear infinite;}',
-      '@keyframes cal-spin{from{transform:rotateY(0deg)}to{transform:rotateY(360deg)}}',
-      '#cal-svg{width:64px;height:64px;display:block;overflow:visible;}',
-      '.cal-face{fill:#7c3aed;}',
-      '.cal-face-shine{fill:#fff;opacity:.16;}',
-      '.cal-eye-white{fill:#fff;}',
-      '.cal-iris{fill:#1c1430;}',
-      '.cal-glint{fill:#fff;opacity:.9;}',
-      '.cal-pupil-group{transition:transform .1s ease-out;}',
-      '.cal-pupil-group.cal-idle{transition:none;animation:cal-grid-scan 3.2s linear infinite;}',
-      '@keyframes cal-grid-scan{',
-      '  0%  { transform:translate(-6px,-3px); }',
-      '  18% { transform:translate( 6px,-3px); }',
-      '  20% { transform:translate(-6px, 0px); }',
-      '  38% { transform:translate( 6px, 0px); }',
-      '  40% { transform:translate(-6px, 3.2px); }',
-      '  58% { transform:translate( 6px, 3.2px); }',
-      '  62% { transform:translate(0,0); }',
-      '  100%{ transform:translate(0,0); }',
+      '#cal-btn.cal-thinking #cal-yaw{animation:cal-spin 2.4s linear infinite;}',
+      '@keyframes cal-spin{',
+      '  0%{transform:rotateY(0deg) rotateZ(0deg)}',
+      '  40%{transform:rotateY(180deg) rotateZ(-8deg)}',
+      '  100%{transform:rotateY(360deg) rotateZ(0deg)}',
       '}',
+      '#cal-svg{width:64px;height:52px;display:block;overflow:visible;}',
+      '.cal-face{fill:var(--cal-purple-mid,#8b5cf6);}',
+      '.cal-face-shine{fill:#fff;opacity:.22;}',
+      '.cal-slit{fill:#fff;}',
+      '.cal-eyes{transform-origin:44px 28px;transition:transform .16s ease-out;}',
+      '#cal-btn.cal-sleep .cal-eyes{',
+      '  transform:scaleY(.16) translateY(2px);',
+      '  transition:transform .35s ease;',
+      '}',
+      '#cal-btn.cal-blink .cal-eyes{',
+      '  transform:scaleY(.12);',
+      '  transition:transform .08s ease;',
+      '}',
+      '#cal-btn.cal-thinking .cal-eyes{transition:transform .08s ease-out;}',
       '#cal-btn.cal-pulse:not(.cal-thinking) #cal-yaw{animation:cal-pulse-anim .28s ease-out;}',
       '@keyframes cal-pulse-anim{',
       '  0%{transform:rotateY(0) scale(1)} 50%{transform:rotateY(0) scale(1.12)} 100%{transform:rotateY(0) scale(1)}',
       '}',
-      '.cal-mouth{fill:none;stroke:#2e1064;stroke-width:1.7;stroke-linecap:round;}',
-      '.cal-mouth-ok,.cal-mouth-alert{display:none;}',
-      '#cal-btn.cal-mood-ok .cal-mouth-ok{display:block;}',
-      '#cal-btn.cal-mood-alert .cal-mouth-alert{display:block;}',
-      '.cal-arm{',
-      '  fill:#7c3aed;stroke:#5b21b6;stroke-width:1;',
-      '  transform-origin:52px 50px;',
-      '  opacity:0;',
+      '#cal-btn.cal-bob:not(.cal-thinking):not(.cal-sleep) #cal-yaw{',
+      '  animation:cal-bob 1.6s ease-in-out 1;',
       '}',
-      '#cal-btn.cal-mood-ok:not(.cal-thinking) .cal-arm{',
-      '  opacity:1;animation:cal-wave 3.6s ease-in-out infinite;',
+      '@keyframes cal-bob{',
+      '  0%,100%{transform:translateY(0)}',
+      '  40%{transform:translateY(-5px) rotateZ(-4deg)}',
+      '  70%{transform:translateY(2px) rotateZ(3deg)}',
       '}',
-      '@keyframes cal-wave{',
-      '  0%,70%,100%{transform:rotate(12deg)}',
-      '  78%{transform:rotate(-28deg)}',
-      '  86%{transform:rotate(18deg)}',
-      '  94%{transform:rotate(-16deg)}',
+      '#cal-btn.cal-wiggle:not(.cal-thinking):not(.cal-sleep) #cal-yaw{',
+      '  animation:cal-wiggle .7s ease-in-out 1;',
       '}',
-      '#cal-btn.cal-mood-alert:not(.cal-thinking) #cal-yaw{',
+      '@keyframes cal-wiggle{',
+      '  0%,100%{transform:rotateZ(0)}',
+      '  25%{transform:rotateZ(-11deg) translateX(-2px)}',
+      '  50%{transform:rotateZ(9deg) translateX(2px)}',
+      '  75%{transform:rotateZ(-5deg)}',
+      '}',
+      '#cal-btn.cal-peek:not(.cal-thinking):not(.cal-sleep) #cal-yaw{',
+      '  animation:cal-peek 1.4s ease-in-out 1;',
+      '}',
+      '@keyframes cal-peek{',
+      '  0%,100%{transform:rotateZ(0) rotateY(0)}',
+      '  35%{transform:rotateZ(-14deg) rotateY(-18deg)}',
+      '  65%{transform:rotateZ(6deg) rotateY(10deg)}',
+      '}',
+      '#cal-btn.cal-sleep #cal-yaw{',
+      '  animation:cal-sleep-bob 3.6s ease-in-out infinite;',
+      '  filter:brightness(.93);',
+      '}',
+      '@keyframes cal-sleep-bob{',
+      '  0%,100%{transform:translateY(3px) rotateZ(-8deg)}',
+      '  50%{transform:translateY(6px) rotateZ(-4deg)}',
+      '}',
+      '#cal-btn.cal-zzz::after{',
+      '  content:"zzz";position:absolute;top:6px;right:4px;',
+      '  font-size:11px;font-weight:800;letter-spacing:.04em;',
+      '  color:var(--cal-purple,#6d28d9);opacity:.55;',
+      '  animation:cal-zzz 1.8s ease-in-out infinite;',
+      '  pointer-events:none;',
+      '}',
+      '@keyframes cal-zzz{',
+      '  0%{transform:translate(0,0) scale(.8);opacity:.15}',
+      '  50%{transform:translate(4px,-8px) scale(1);opacity:.7}',
+      '  100%{transform:translate(8px,-16px) scale(1.1);opacity:0}',
+      '}',
+      '#cal-btn.cal-mood-alert:not(.cal-thinking):not(.cal-sleep) #cal-yaw{',
       '  animation:cal-worry 2.8s ease-in-out infinite;',
       '}',
       '@keyframes cal-worry{',
@@ -158,10 +186,10 @@
       '#cal-bubble{',
       '  max-width:15.5rem;',
       '  background:var(--cal-mist,#f4f6fa);',
-      '  border:1.5px solid rgba(109,40,217,.28);',
+      '  border:1.5px solid color-mix(in srgb, var(--cal-purple,#6d28d9) 28%, transparent);',
       '  border-radius:.9rem;',
       '  padding:.75rem .875rem;',
-      '  box-shadow:0 4px 22px rgba(109,40,217,.13),0 1px 4px rgba(28,36,48,.07);',
+      '  box-shadow:0 4px 22px color-mix(in srgb, var(--cal-purple,#6d28d9) 13%, transparent),0 1px 4px rgba(28,36,48,.07);',
       '  pointer-events:none;',
       '  font-size:.8125rem;line-height:1.5;',
       '  color:var(--cal-ink,#1c2430);',
@@ -195,64 +223,84 @@
       '  text-decoration:none;font-size:.78rem;',
       '}',
       '.cal-link:hover{text-decoration:underline;}',
+      '#cal-ask{',
+      '  width:16.5rem;pointer-events:all;',
+      '}',
+      '#cal-ask-form{',
+      '  display:flex;gap:.35rem;align-items:stretch;',
+      '  background:var(--cal-mist,#f4f6fa);',
+      '  border:1.5px solid color-mix(in srgb, var(--cal-purple,#6d28d9) 28%, transparent);',
+      '  border-radius:.9rem;padding:.28rem .28rem .28rem .55rem;',
+      '  box-shadow:0 4px 18px color-mix(in srgb, var(--cal-purple,#6d28d9) 12%, transparent);',
+      '}',
+      '#cal-ask-input{',
+      '  flex:1;min-width:0;border:0;background:transparent;outline:none;',
+      '  font-size:.75rem;color:var(--cal-ink,#1c2430);',
+      '}',
+      '#cal-ask-input::placeholder{color:var(--cal-muted,#6b7a8d);}',
+      '#cal-ask-go{',
+      '  border:0;border-radius:.7rem;cursor:pointer;',
+      '  background:var(--cal-purple,#6d28d9);color:#fff;',
+      '  font-size:.68rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;',
+      '  padding:.4rem .65rem;',
+      '}',
     ].join('\n');
     document.head.appendChild(s);
   }
 
-  // ─── Widget DOM ───────────────────────────────────────────────────────────
   function buildWidget() {
     var div = document.createElement('div');
     div.id = 'cal-assist';
-    // Bubble starts invisible (no hidden attr; CSS handles opacity:0 / .cal-visible)
     div.innerHTML =
       '<div id="cal-bubble"></div>' +
-      '<button id="cal-btn" aria-label="Cal-BOT" type="button">' +
-      buildCometSVG() +
+      '<div id="cal-ask">' +
+        '<form id="cal-ask-form" autocomplete="off">' +
+          '<input id="cal-ask-input" type="text" maxlength="240" placeholder="Ask Grok about the live board\u2026" />' +
+          '<button id="cal-ask-go" type="submit">Ask</button>' +
+        '</form>' +
+      '</div>' +
+      '<button id="cal-btn" aria-label="Grok-BOT" type="button">' +
+      buildOrbitSVG() +
       '<div id="cal-yaw">' + buildFaceSVG() + '</div>' +
       '</button>';
     return div;
   }
 
-  function buildCometSVG() {
-    // 2D comet lives outside the 3D spin so the trail stays readable.
+  function buildOrbitSVG() {
     return (
-      '<svg id="cal-comet-svg" viewBox="0 0 88 88" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
-        '<g class="cal-comet">' +
-          '<circle cx="44" cy="44" r="38" class="cal-comet-trail" transform="rotate(-90 44 44)"/>' +
-          '<circle cx="44" cy="6" r="7" class="cal-comet-spark"/>' +
-          '<circle cx="44" cy="6" r="3.8" class="cal-comet-head"/>' +
-          '<circle cx="36.6" cy="7.2" r="2.2" class="cal-comet-dust" opacity=".55"/>' +
-          '<circle cx="30.2" cy="10.8" r="1.6" class="cal-comet-dust" opacity=".35"/>' +
-          '<circle cx="25.2" cy="16.2" r="1.15" class="cal-comet-dust" opacity=".2"/>' +
+      '<svg id="cal-orbit-svg" viewBox="0 0 88 88" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+        '<g class="cal-orbit cal-orbit-a">' +
+          '<circle class="cal-fly-dot" cx="44" cy="5" r="2.6"/>' +
+          '<rect class="cal-fly-chip" x="78" y="40" width="5" height="5" rx="1.2"/>' +
+        '</g>' +
+        '<g class="cal-orbit cal-orbit-b">' +
+          '<polygon class="cal-fly-star" points="12,44 13.4,47.2 16.8,47.4 14.2,49.6 15,53 12,51.2 9,53 9.8,49.6 7.2,47.4 10.6,47.2"/>' +
+          '<circle class="cal-fly-spark" cx="62" cy="10" r="1.6"/>' +
+          '<circle class="cal-fly-spark" cx="18" cy="70" r="1.3"/>' +
+        '</g>' +
+        '<g class="cal-orbit cal-orbit-c">' +
+          '<circle class="cal-fly-dot" cx="44" cy="82" r="1.8"/>' +
+          '<rect class="cal-fly-chip" x="6" y="22" width="3.2" height="3.2" rx="0.8" transform="rotate(22 7.6 23.6)"/>' +
+          '<polygon class="cal-fly-star" points="74,68 75,70.4 77.6,70.6 75.6,72.2 76.2,74.6 74,73.2 71.8,74.6 72.4,72.2 70.4,70.6 73,70.4"/>' +
         '</g>' +
       '</svg>'
     );
   }
 
   function buildFaceSVG() {
-    // Grok Bot tablet: portrait rounded-rect, solid violet, two eyes, no mouth.
+    // Grok capsule: horizontal pill, two white slit eyes on the right.
     return (
-      '<svg id="cal-svg" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
-        '<rect x="14" y="6" width="36" height="52" rx="12" ry="12" class="cal-face"/>' +
-        '<ellipse cx="26" cy="16" rx="10" ry="6" class="cal-face-shine"/>' +
-        '<ellipse cx="24.5" cy="28" rx="7.2" ry="8.4" class="cal-eye-white"/>' +
-        '<ellipse cx="39.5" cy="28" rx="7.2" ry="8.4" class="cal-eye-white"/>' +
-        '<g id="cal-pupil-l" class="cal-pupil-group cal-idle">' +
-          '<circle cx="24.5" cy="28" r="4.1" class="cal-iris"/>' +
-          '<circle cx="26.2" cy="26.2" r="1.2" class="cal-glint"/>' +
+      '<svg id="cal-svg" viewBox="0 0 64 52" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+        '<rect x="4" y="12" width="56" height="28" rx="14" ry="14" class="cal-face"/>' +
+        '<ellipse cx="20" cy="20" rx="14" ry="7" class="cal-face-shine"/>' +
+        '<g id="cal-eyes" class="cal-eyes">' +
+          '<rect class="cal-slit" x="34.5" y="23.4" width="10.2" height="3.4" rx="1.7" transform="rotate(-30 39.6 25.1)"/>' +
+          '<rect class="cal-slit" x="45.2" y="21.6" width="10.2" height="3.4" rx="1.7" transform="rotate(-30 50.3 23.3)"/>' +
         '</g>' +
-        '<g id="cal-pupil-r" class="cal-pupil-group cal-idle">' +
-          '<circle cx="39.5" cy="28" r="4.1" class="cal-iris"/>' +
-          '<circle cx="41.2" cy="26.2" r="1.2" class="cal-glint"/>' +
-        '</g>' +
-        '<path class="cal-mouth cal-mouth-ok" d="M 24 41 Q 32 47 40 41"/>' +
-        '<path class="cal-mouth cal-mouth-alert" d="M 25 43 Q 32 39 39 43"/>' +
-        '<path class="cal-arm" d="M 48 46 Q 58 44 60 34 Q 61 30 58 31 Q 56 38 50 42 Z"/>' +
       '</svg>'
     );
   }
 
-  // ─── Drag positioning ─────────────────────────────────────────────────────
   function loadDragPos() {
     try {
       var v = JSON.parse(localStorage.getItem(DRAG_KEY) || 'null');
@@ -266,7 +314,6 @@
   }
 
   function clampPos(left, top) {
-    // Clamp so the 88×88 button is always fully on-screen.
     var btnW = 88;
     var btnH = 88;
     var maxL = Math.max(0, window.innerWidth  - btnW);
@@ -281,7 +328,7 @@
     var c = clampPos(left, top);
     assist.style.left  = c.left + 'px';
     assist.style.top   = c.top  + 'px';
-    assist.style.right = 'auto';  // must be auto, not '' — stylesheet still has right:1.1rem
+    assist.style.right = 'auto';
   }
 
   function initPosition() {
@@ -291,13 +338,11 @@
     if (saved) {
       applyPos(assist, saved.left, saved.top);
     } else {
-      // Default: upper-right, mirroring the CSS right:1.1rem / top:1.1rem.
-      var margin = Math.round(1.1 * 16); // 1.1rem ≈ 18px
+      var margin = Math.round(1.1 * 16);
       applyPos(assist, window.innerWidth - 88 - margin, margin);
     }
   }
 
-  // ─── Drag handlers ────────────────────────────────────────────────────────
   function onBtnPointerDown(e) {
     if (e.button !== 0 && e.pointerType !== 'touch') return;
     var assist = document.getElementById('cal-assist');
@@ -353,12 +398,10 @@
         var r = assist.getBoundingClientRect();
         saveDragPos(r.left, r.top);
       }
-      // Suppress the click event that always fires after pointerup.
       suppressNextClick = true;
     }
   }
 
-  // ─── Events ───────────────────────────────────────────────────────────────
   function bindEvents() {
     document.addEventListener('mousemove', onMouseMove, { passive: true });
     document.addEventListener('mousedown', onMouseDown, { passive: true });
@@ -369,21 +412,37 @@
       btn.addEventListener('pointerdown', onBtnPointerDown);
       btn.addEventListener('click', function () {
         if (suppressNextClick) { suppressNextClick = false; return; }
-        fetchConflicts();
+        wakeFromSleep();
+        checkRulesThenConflicts();
       });
     }
 
-    // Notif card focus: first click focuses, second click on same card navigates.
+    var askForm = document.getElementById('cal-ask-form');
+    if (askForm) {
+      askForm.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var input = document.getElementById('cal-ask-input');
+        var question = input ? String(input.value || '').trim() : '';
+        if (!question) {
+          showAskBubble('Ask me about time off, clinic patients, cases, call, meetings, or a location.');
+          return;
+        }
+        askGrok(question);
+      });
+    }
+
     document.addEventListener('click', onNotifCardClick);
   }
 
   function onMouseMove(e) {
+    if (sleeping) return;
     setIdle(false);
-    trackPoint(e.clientX, e.clientY);
+    if (!thinking) trackPoint(e.clientX, e.clientY);
     resetIdleTimer();
   }
 
   function onMouseDown() {
+    if (sleeping) wakeFromSleep();
     triggerPulse();
   }
 
@@ -396,22 +455,20 @@
     if (isField || isCell) {
       var r = t.getBoundingClientRect();
       if (r.width > 0 && r.height > 0) {
+        if (sleeping) wakeFromSleep();
         setIdle(false);
-        trackPoint(r.left + r.width / 2, r.top + r.height / 2);
+        if (!thinking) trackPoint(r.left + r.width / 2, r.top + r.height / 2);
         resetIdleTimer();
       }
     }
   }
 
-  // ─── Admin Notification card focus ────────────────────────────────────────
   function onNotifCardClick(e) {
-    // Walk up to the nearest [data-cal-notif] ancestor (handles clicks on child elements).
     var card = e.target && e.target.closest ? e.target.closest('[data-cal-notif]') : null;
     if (!card) return;
     if (card.getAttribute('data-cal-informational') === '1') return;
 
     if (card === focusedNotif) {
-      // Second click on the same focused card — follow the href.
       var href = card.getAttribute('data-cal-href') || '';
       if (href) {
         window.location.href = href;
@@ -419,22 +476,19 @@
       return;
     }
 
-    // First click (or click on a different card): focus it.
     e.preventDefault();
     focusedNotif = card;
 
-    // Eyes look at the card.
     var r = card.getBoundingClientRect();
+    wakeFromSleep();
     setIdle(false);
     trackPoint(r.left + r.width / 2, r.top + r.height / 2);
     resetIdleTimer();
 
-    // Brief thinking comet fires.
     setThinking(true);
     var thinkNotifTO = setTimeout(function () { setThinking(false); }, 850);
-    void thinkNotifTO; // reference avoids linter warning
+    void thinkNotifTO;
 
-    // Render the bubble with notif content.
     showNotifBubble(card);
   }
 
@@ -456,7 +510,7 @@
 
     bubble.innerHTML =
       '<div class="cal-bubble-top">' +
-        '<span class="cal-bot-name">Cal-BOT</span>' +
+        '<span class="cal-bot-name">Grok-BOT</span>' +
         '<button class="cal-x" aria-label="Dismiss" type="button">\u00d7</button>' +
       '</div>' +
       '<p class="cal-msg">' + esc(title) + '</p>' +
@@ -472,34 +526,69 @@
     });
   }
 
-  // ─── Idle management ──────────────────────────────────────────────────────
+  function showAskBubble(answer) {
+    var bubble = document.getElementById('cal-bubble');
+    if (!bubble) return;
+    setMood('ok');
+    bubble.innerHTML =
+      '<div class="cal-bubble-top">' +
+        '<span class="cal-bot-name">Grok-BOT</span>' +
+        '<button class="cal-x" aria-label="Dismiss" type="button">\u00d7</button>' +
+      '</div>' +
+      '<p class="cal-msg">' + esc(answer) + '</p>' +
+      '<div class="cal-actions">' +
+        '<a href="/admin/settings/grok-bot-rules" class="cal-link">Rules he follows \u2192</a>' +
+      '</div>';
+    bubble.classList.add('cal-visible');
+    bubble.querySelector('.cal-x').addEventListener('click', function () {
+      bubble.classList.remove('cal-visible');
+    });
+  }
+
+  function askGrok(question) {
+    wakeFromSleep();
+    setThinking(true);
+    fetch('/api/admin/grok/ask', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ question: question }),
+    })
+      .then(function (r) { return r.ok ? r.json() : { answer: 'I could not reach the live board.' }; })
+      .then(function (data) {
+        showAskBubble((data && data.answer) || 'I could not tell who or what that was about.');
+      })
+      .catch(function () { showAskBubble('I could not reach the live board.'); })
+      .then(function () { setThinking(false); });
+  }
+
+  function checkRulesThenConflicts() {
+    setThinking(true);
+    fetch('/api/admin/grok/check-rules', { method: 'POST', credentials: 'same-origin' })
+      .catch(function () {})
+      .then(function () { fetchConflicts(); });
+  }
+
   function resetIdleTimer() {
     clearTimeout(idleTimer);
     idleTimer = setTimeout(function () { setIdle(true); }, IDLE_MS);
   }
 
   function setIdle(idle) {
-    if (isIdle === idle) return;
     isIdle = idle;
-    var pl = document.getElementById('cal-pupil-l');
-    var pr = document.getElementById('cal-pupil-r');
-    if (!pl || !pr) return;
-    if (idle) {
-      // Clear inline transform so CSS keyframe animation takes over
-      pl.style.transform = '';
-      pr.style.transform = '';
-      pl.classList.add('cal-idle');
-      pr.classList.add('cal-idle');
-    } else {
-      pl.classList.remove('cal-idle');
-      pr.classList.remove('cal-idle');
+    if (!idle && sleeping) return;
+    var eyes = document.getElementById('cal-eyes');
+    if (!eyes) return;
+    if (!idle) {
+      eyes.style.transition = 'transform .16s ease-out';
     }
   }
 
-  // ─── Pupil tracking ───────────────────────────────────────────────────────
   function trackPoint(screenX, screenY) {
+    if (sleeping || thinking) return;
     var btn = document.getElementById('cal-btn');
-    if (!btn) return;
+    var eyes = document.getElementById('cal-eyes');
+    if (!btn || !eyes) return;
     var r = btn.getBoundingClientRect();
     if (!r.width) return;
 
@@ -509,38 +598,147 @@
     var dy  = screenY - fcy;
     var dist = Math.sqrt(dx * dx + dy * dy);
 
-    // Influence saturates at ~320 px from face center
     var influence = Math.min(1, dist / 320);
     var angle = Math.atan2(dy, dx);
     var ox = +(Math.cos(angle) * MAX_OFFSET * influence).toFixed(3);
-    var oy = +(Math.sin(angle) * MAX_OFFSET * influence).toFixed(3);
-
-    var pl = document.getElementById('cal-pupil-l');
-    var pr = document.getElementById('cal-pupil-r');
-    if (!pl || !pr) return;
-    var t = 'translate(' + ox + 'px,' + oy + 'px)';
-    pl.style.transform = t;
-    pr.style.transform = t;
+    var oy = +(Math.sin(angle) * MAX_OFFSET * influence * 0.7).toFixed(3);
+    eyes.style.transform = 'translate(' + ox + 'px,' + oy + 'px)';
   }
 
-  // ─── Click pulse ──────────────────────────────────────────────────────────
+  function setEyeOffset(ox, oy) {
+    var eyes = document.getElementById('cal-eyes');
+    if (!eyes) return;
+    eyes.style.transform = 'translate(' + ox + 'px,' + oy + 'px)';
+  }
+
   function triggerPulse() {
     var btn = document.getElementById('cal-btn');
     if (!btn) return;
     btn.classList.remove('cal-pulse');
-    void btn.offsetWidth; // force reflow so animation restarts
+    void btn.offsetWidth;
     btn.classList.add('cal-pulse');
     clearTimeout(pulseTO);
     pulseTO = setTimeout(function () { btn.classList.remove('cal-pulse'); }, 320);
   }
 
-  // ─── Conflict fetch ───────────────────────────────────────────────────────
+  function rand(min, max) {
+    return min + Math.random() * (max - min);
+  }
+
+  function startDirector() {
+    scheduleDirector(rand(1600, 3200));
+  }
+
+  function scheduleDirector(ms) {
+    clearTimeout(directorTO);
+    directorTO = setTimeout(runDirector, ms);
+  }
+
+  function clearMotionClasses() {
+    var btn = document.getElementById('cal-btn');
+    if (!btn) return;
+    btn.classList.remove('cal-bob', 'cal-wiggle', 'cal-peek', 'cal-blink', 'cal-spark');
+  }
+
+  function bumpClass(name, ms) {
+    var btn = document.getElementById('cal-btn');
+    if (!btn) return;
+    btn.classList.remove(name);
+    void btn.offsetWidth;
+    btn.classList.add(name);
+    setTimeout(function () { btn.classList.remove(name); }, ms);
+  }
+
+  function goSleep() {
+    var btn = document.getElementById('cal-btn');
+    if (!btn || thinking) return;
+    sleeping = true;
+    clearMotionClasses();
+    var eyes = document.getElementById('cal-eyes');
+    if (eyes) eyes.style.transform = '';
+    btn.classList.add('cal-sleep', 'cal-zzz');
+  }
+
+  function wakeFromSleep() {
+    if (!sleeping) return;
+    sleeping = false;
+    var btn = document.getElementById('cal-btn');
+    if (btn) btn.classList.remove('cal-sleep', 'cal-zzz');
+    blinkOnce();
+  }
+
+  function twitchInSleep() {
+    bumpClass('cal-wiggle', 700);
+  }
+
+  function blinkOnce() {
+    bumpClass('cal-blink', 140);
+  }
+
+  function glanceAway() {
+    if (sleeping || thinking) return;
+    var ox = rand(-5, 6);
+    var oy = rand(-3, 3);
+    setEyeOffset(ox, oy);
+    setTimeout(function () {
+      if (!thinking && !sleeping) setEyeOffset(rand(-2, 2), rand(-1.5, 1.5));
+    }, 700);
+  }
+
+  function dartEyesTick() {
+    if (!thinking) return;
+    setEyeOffset(rand(-6, 6), rand(-4, 4));
+    dartTO = setTimeout(dartEyesTick, rand(90, 260));
+  }
+
+  function runDirector() {
+    if (dragState) {
+      scheduleDirector(2400);
+      return;
+    }
+    if (thinking) {
+      scheduleDirector(rand(1800, 2800));
+      return;
+    }
+    if (sleeping) {
+      if (Math.random() < 0.58) wakeFromSleep();
+      else twitchInSleep();
+      scheduleDirector(rand(3500, 8000));
+      return;
+    }
+    if (!isIdle && Math.random() < 0.55) {
+      blinkOnce();
+      scheduleDirector(rand(1800, 4200));
+      return;
+    }
+    var roll = Math.random();
+    if (roll < 0.18) goSleep();
+    else if (roll < 0.36) glanceAway();
+    else if (roll < 0.5) bumpClass('cal-bob', 1600);
+    else if (roll < 0.64) bumpClass('cal-wiggle', 700);
+    else if (roll < 0.78) blinkOnce();
+    else if (roll < 0.9) bumpClass('cal-peek', 1400);
+    else bumpClass('cal-spark', 1400);
+    scheduleDirector(rand(2200, 6200));
+  }
+
   var thinkTO = null;
   function setThinking(on) {
     var btn = document.getElementById('cal-btn');
     if (!btn) return;
-    if (on) btn.classList.add('cal-thinking');
-    else btn.classList.remove('cal-thinking');
+    thinking = !!on;
+    if (on) {
+      wakeFromSleep();
+      clearMotionClasses();
+      btn.classList.add('cal-thinking');
+      clearTimeout(dartTO);
+      dartEyesTick();
+    } else {
+      btn.classList.remove('cal-thinking');
+      clearTimeout(dartTO);
+      var eyes = document.getElementById('cal-eyes');
+      if (eyes) eyes.style.transform = '';
+    }
   }
   function setMood(mood) {
     var btn = document.getElementById('cal-btn');
@@ -574,22 +772,19 @@
     } catch (e) { return 0; }
   }
 
-  // ─── Seen tracking ────────────────────────────────────────────────────────
   function loadSeen() {
     try { return JSON.parse(localStorage.getItem(SEEN_KEY) || '[]'); } catch (e) { return []; }
   }
   function markSeen(id) {
     var s = loadSeen();
-    if (s.indexOf(id) === -1) {
-      s.push(id);
-      if (s.length > MAX_SEEN) s.splice(0, s.length - MAX_SEEN);
-    }
+    if (s.indexOf(id) !== -1) return;
+    s.push(id);
+    if (s.length > MAX_SEEN) s.splice(0, s.length - MAX_SEEN);
     try { localStorage.setItem(SEEN_KEY, JSON.stringify(s)); } catch (e) {}
   }
   function isSeen(id) { return loadSeen().indexOf(id) !== -1; }
   function conflictId(c) { return c.surgeonId + '-' + c.date + '-' + c.dayOffId; }
 
-  // ─── Bubble ───────────────────────────────────────────────────────────────
   function renderConflicts(data) {
     if (!data.conflicts || !data.conflicts.length) {
       setMood('ok');
@@ -626,7 +821,7 @@
 
     bubble.innerHTML =
       '<div class="cal-bubble-top">' +
-        '<span class="cal-bot-name">Cal-BOT</span>' +
+        '<span class="cal-bot-name">Grok-BOT</span>' +
         '<span class="cal-badge ' + statusCls + '">' + statusTxt + '</span>' +
         '<button class="cal-x" aria-label="Dismiss" data-cid="' + esc(id) + '" type="button">\u00d7</button>' +
       '</div>' +
@@ -639,18 +834,11 @@
       var cid = e.currentTarget.getAttribute('data-cid');
       if (cid) markSeen(cid);
       bubble.classList.remove('cal-visible');
-      // Show next unseen after transition finishes
       setTimeout(fetchConflicts, 260);
     });
   }
 
-  /**
-   * Format the conflict in Shannon's language:
-   * "JF is approved OFF Thu Aug 27 with 1 clinic patient"
-   * Uses structured fields (not the raw server message string).
-   */
   function formatMessage(c) {
-    // c.date is ISO "YYYY-MM-DD"; parse as local midnight
     var d = new Date(c.date + 'T00:00:00');
     var DAY   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     var MONTH = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -667,13 +855,11 @@
       (parts.length ? ' with ' + parts.join(' and ') : '');
   }
 
-  // ─── Util ─────────────────────────────────────────────────────────────────
   var ESC_MAP = { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' };
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (ch) { return ESC_MAP[ch]; });
   }
 
-  // ─── Run ──────────────────────────────────────────────────────────────────
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {

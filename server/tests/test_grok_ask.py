@@ -1,6 +1,6 @@
 import os
 import unittest
-from datetime import date
+from datetime import date, time
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SECRET_KEY", "test-secret")
@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.grok_ask_service import ask_grok, parse_topic, parse_window
-from app.models import Base, ClinicSchedule, DayOff, Location, Surgeon
+from app.models import Base, ClinicSchedule, DayOff, Location, Meeting, Surgeon
 
 
 class GrokAskWindowTest(unittest.TestCase):
@@ -50,6 +50,15 @@ class GrokAskWindowTest(unittest.TestCase):
             parse_topic("how many clinical patient has Alex seen this month to date"),
             "clinic",
         )
+
+    def test_meetings_this_month_is_meetings_topic(self):
+        self.assertEqual(parse_topic("what meeting are scheduled this month"), "meetings")
+
+    def test_this_month_is_the_full_calendar_month(self):
+        window = parse_window("what meeting are scheduled this month", date(2026, 8, 26))
+        self.assertEqual(window["start"], date(2026, 8, 1))
+        self.assertEqual(window["end"], date(2026, 8, 31))
+        self.assertEqual(window["label"], "August 2026")
 
 
 class GrokAskLiveBoardTest(unittest.TestCase):
@@ -222,6 +231,43 @@ class GrokAskLiveBoardTest(unittest.TestCase):
             self.assertIn("Alex Schroeder", result["answer"])
             self.assertIn("3 clinic patients", result["answer"])
             self.assertIn("to date", result["answer"])
+            self.assertNotIn("could not tell who", result["answer"].lower())
+        finally:
+            db.close()
+
+    def test_meetings_this_month_lists_board_rows(self):
+        db = self.Session()
+        try:
+            loc = Location(
+                name="Health Park", abbreviation="HP", location_type="hospital", is_active=True,
+            )
+            db.add(loc)
+            db.flush()
+            db.add(Meeting(
+                title="Tumor Board",
+                date=date(2026, 8, 28),
+                start_time=time(7, 0),
+                location_id=loc.id,
+            ))
+            db.add(Meeting(
+                title="Friday huddle",
+                date=date(2026, 8, 7),
+                start_time=time(8, 30),
+                location_text="Admin conference",
+            ))
+            db.commit()
+            result = ask_grok(
+                db,
+                "what meeting are scheduled this month",
+                today=date(2026, 8, 26),
+            )
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["topic"], "meetings", result)
+            self.assertEqual(result["count"], 2, result)
+            self.assertIn("Tumor Board", result["answer"])
+            self.assertIn("Friday huddle", result["answer"])
+            self.assertIn("August 2026", result["answer"])
+            self.assertNotIn("I stay inside CAL", result["answer"])
             self.assertNotIn("could not tell who", result["answer"].lower())
         finally:
             db.close()

@@ -48,7 +48,7 @@ _NOISE = re.compile(
     r"meeting|meetings|block|blocks|room|rooms|count|number|total|"
     r"yesterday|today|tomorrow|approved|pending|list|tell|me|show|"
     r"phone|email|address|working|work|date|dates|mtd|ytd|through|thru|"
-    r"far|currently|upto|until|question)\b",
+    r"far|currently|upto|until|question|scheduled|schedule)\b",
     re.IGNORECASE,
 )
 
@@ -103,6 +103,25 @@ def ask_grok(
         return _answer_who_clinic(db, window)
     if topic == "pending_off":
         return _answer_pending_off(db, window)
+    if topic == "meetings":
+        if surgeon:
+            facts = collect_surgeon_facts(db, surgeon, window["start"], window["end"])
+            return _answer_meetings(surgeon, window, facts)
+        return _answer_meetings_board(db, window)
+    if topic == "cases" and not surgeon:
+        return _answer_cases_board(db, window)
+    if topic == "time_off" and not surgeon:
+        return _answer_who_off(db, window)
+    if topic == "clinic" and not surgeon:
+        return _answer_who_clinic(db, window)
+    if topic == "call" and not surgeon:
+        return _answer_who_call(db, window)
+    if topic == "blocks" and not surgeon:
+        return _answer_blocks_board(db, window)
+    if topic == "board":
+        return _answer_board(db, window)
+    if topic == "location" and not location:
+        return _answer_locations_board(db)
     if topic == "location" and location:
         return _answer_location_details(location)
     if topic == "contact" and surgeon:
@@ -179,7 +198,8 @@ def parse_window(text: str, today: date) -> dict:
         return _window(first, today, f"{today.strftime('%B %Y')} to date")
     if "this month" in blob:
         first = today.replace(day=1)
-        return _window(first, today, today.strftime("%B %Y"))
+        last_day = calendar.monthrange(today.year, today.month)[1]
+        return _window(first, today.replace(day=last_day), today.strftime("%B %Y"))
     if "next month" in blob:
         first_next = (today.replace(day=28) + timedelta(days=8)).replace(day=1)
         last_day = calendar.monthrange(first_next.year, first_next.month)[1]
@@ -238,12 +258,16 @@ def parse_topic(text: str) -> str:
         return "cases"
     if re.search(r"\b(on call|call schedule|covering call)\b", blob):
         return "call"
-    if re.search(r"\bmeetings?\b", blob):
+    if re.search(r"\b(meetings?|huddle|tumor board)\b", blob):
         return "meetings"
     if re.search(r"\b(block or|or block|blocks?)\b", blob):
         return "blocks"
     if re.search(r"\b(available|availability|personal item)\b", blob):
         return "availability"
+    if re.search(r"\b(locations?|facilities|where do we (work|operate))\b", blob):
+        return "location"
+    if re.search(r"\b(what(?:'?s| is) scheduled|on the (board|calendar|schedule))\b", blob):
+        return "board"
     if re.search(r"\b(phone|address|where is)\b", blob):
         return "location"
     return "briefing"
@@ -344,11 +368,12 @@ def _answer_freeform(text: str, today: date) -> dict:
     return {
         "ok": True,
         "topic": "freeform",
+        "layout": "bubble",
         "answer": (
-            f"Today is {today.strftime('%A')}, {today.strftime('%B %-d, %Y')}. "
-            f"Tomorrow is {tomorrow.strftime('%A')}, {tomorrow.strftime('%B %-d, %Y')}. "
-            "I stay inside CAL — dates, the live board, and the rules in Settings. "
-            "Name a doctor, a clinic, or ask who is off / on call / in clinic."
+            f"I don't have that as a named person or place. "
+            f"Today is {today.strftime('%A')}, {today.strftime('%B %-d, %Y')}; "
+            f"tomorrow is {tomorrow.strftime('%A')}, {tomorrow.strftime('%B %-d, %Y')}. "
+            "Ask me meetings, who is off, clinic patients, cases, call, or a doctor by name."
         ),
     }
 
@@ -666,15 +691,203 @@ def _answer_call(surgeon: Surgeon, window: dict, facts: dict) -> dict:
 
 
 def _answer_meetings(surgeon: Surgeon, window: dict, facts: dict) -> dict:
-    n = len(facts["meetings"])
-    titles = ", ".join((m.title or "meeting") for m in facts["meetings"][:4])
-    tail = f" ({titles})" if titles else ""
-    return {
+    rows = facts["meetings"]
+    if not rows:
+        return _talk(
+            f"{surgeon.full_name} has no meetings {window['label']}.",
+            topic="meetings",
+            count=0,
+        )
+    lines = [_meeting_line(row) for row in rows]
+    heading = (
+        f"{surgeon.full_name} has {len(rows)} meeting"
+        f"{'' if len(rows) == 1 else 's'} {window['label']}:"
+    )
+    return _talk_list(heading, lines, topic="meetings")
+
+
+def _answer_meetings_board(db: Session, window: dict) -> dict:
+    rows = (
+        db.query(Meeting)
+        .options(
+            joinedload(Meeting.location),
+            joinedload(Meeting.attendees).joinedload(MeetingAttendee.surgeon),
+        )
+        .filter(Meeting.date >= window["start"], Meeting.date <= window["end"])
+        .order_by(Meeting.date, Meeting.start_time)
+        .all()
+    )
+    if not rows:
+        return _talk(
+            f"No meetings are on the board {window['label']}.",
+            topic="meetings",
+            count=0,
+        )
+    lines = [_meeting_line(row) for row in rows]
+    heading = (
+        f"{len(rows)} meeting{'' if len(rows) == 1 else 's'} {window['label']}:"
+    )
+    return _talk_list(heading, lines, topic="meetings")
+
+
+def _answer_cases_board(db: Session, window: dict) -> dict:
+    rows = (
+        db.query(SurgicalCase)
+        .options(joinedload(SurgicalCase.surgeon), joinedload(SurgicalCase.location))
+        .filter(
+            SurgicalCase.date >= window["start"],
+            SurgicalCase.date <= window["end"],
+            SurgicalCase.status != "cancelled",
+        )
+        .order_by(SurgicalCase.date, SurgicalCase.start_time)
+        .all()
+    )
+    if not rows:
+        return _talk(
+            f"No surgical cases are on the board {window['label']}.",
+            topic="cases",
+            count=0,
+        )
+    lines = []
+    for row in rows[:40]:
+        who = row.surgeon.full_name if row.surgeon else "unassigned"
+        clock = _clock_label(row.start_time)
+        loc = ""
+        if row.location:
+            loc = f" · {row.location.abbreviation or row.location.name}"
+        lines.append(
+            f"{row.date.strftime('%a %b %-d')} · {clock} · {who}{loc}"
+            + (f" · {row.procedure}" if row.procedure else "")
+        )
+    heading = f"{len(rows)} surgical case{'' if len(rows) == 1 else 's'} {window['label']}:"
+    return _talk_list(heading, lines, topic="cases", count=len(rows))
+
+
+def _answer_blocks_board(db: Session, window: dict) -> dict:
+    rows = (
+        db.query(ORBlockInstance)
+        .options(
+            joinedload(ORBlockInstance.location),
+            joinedload(ORBlockInstance.assigned_surgeon),
+            joinedload(ORBlockInstance.assignments).joinedload(ORBlockAssignment.surgeon),
+        )
+        .filter(
+            ORBlockInstance.date >= window["start"],
+            ORBlockInstance.date <= window["end"],
+        )
+        .order_by(ORBlockInstance.date, ORBlockInstance.start_time)
+        .all()
+    )
+    if not rows:
+        return _talk(
+            f"No Block OR rows are on the board {window['label']}.",
+            topic="blocks",
+            count=0,
+        )
+    lines = []
+    for row in rows[:40]:
+        loc = ""
+        if row.location:
+            loc = row.location.abbreviation or row.location.name
+        who = ""
+        if row.assigned_surgeon and surgeon_is_visible(row.assigned_surgeon):
+            who = row.assigned_surgeon.full_name
+        elif row.assignments:
+            names = [
+                a.surgeon.full_name
+                for a in row.assignments
+                if a.surgeon and surgeon_is_visible(a.surgeon)
+            ]
+            who = ", ".join(names[:4])
+        lines.append(
+            f"{row.date.strftime('%a %b %-d')} · {_clock_label(row.start_time)} · "
+            f"{loc or 'OR'} · {who or (row.status or 'open')}"
+        )
+    heading = f"{len(rows)} Block OR row{'' if len(rows) == 1 else 's'} {window['label']}:"
+    return _talk_list(heading, lines, topic="blocks", count=len(rows))
+
+
+def _answer_locations_board(db: Session) -> dict:
+    rows = (
+        db.query(Location)
+        .filter(Location.is_active.is_(True))
+        .order_by(Location.name)
+        .all()
+    )
+    if not rows:
+        return _talk("No active locations on file.", topic="location", count=0)
+    lines = []
+    for row in rows:
+        bits = [row.name]
+        if row.abbreviation:
+            bits.append(row.abbreviation)
+        if row.location_type:
+            bits.append(row.location_type)
+        lines.append(" · ".join(bits))
+    heading = f"{len(rows)} locations:"
+    return _talk_list(heading, lines, topic="location", count=len(rows))
+
+
+def _answer_board(db: Session, window: dict) -> dict:
+    meetings = _answer_meetings_board(db, window)
+    cases = _answer_cases_board(db, window)
+    off = _answer_who_off(db, window)
+    call = _answer_who_call(db, window)
+    lines = [
+        f"Live board {window['label']}:",
+        meetings.get("answer") or "",
+        cases.get("answer") or "",
+        off.get("answer") or "",
+        call.get("answer") or "",
+    ]
+    clean = [line for line in lines if line]
+    return _talk_list(clean[0], clean[1:], topic="board")
+
+
+def _meeting_line(row: Meeting) -> str:
+    clock = _clock_label(row.start_time)
+    loc = ""
+    if row.location:
+        loc = f" · {row.location.abbreviation or row.location.name}"
+    elif row.location_text:
+        loc = f" · {row.location_text}"
+    who = []
+    for att in row.attendees or []:
+        if att.surgeon and surgeon_is_visible(att.surgeon):
+            name = att.surgeon.full_name
+            if name and name not in who:
+                who.append(name)
+    people = f" · {', '.join(who[:6])}" if who else ""
+    return f"{row.date.strftime('%a %b %-d')} · {clock} · {row.title or 'Meeting'}{loc}{people}"
+
+
+def _clock_label(value) -> str:
+    if not value:
+        return "time TBD"
+    stamp = value.strftime("%I:%M %p")
+    return stamp.lstrip("0")
+
+
+def _talk(answer: str, *, topic: str, count: int | None = None, layout: str = "bubble") -> dict:
+    payload = {"ok": True, "topic": topic, "answer": answer, "layout": layout}
+    if count is not None:
+        payload["count"] = count
+    return payload
+
+
+def _talk_list(heading: str, lines: list[str], *, topic: str, count: int | None = None) -> dict:
+    shown = lines[:40]
+    answer = heading + "\n" + "\n".join(shown)
+    layout = "panel" if len(shown) > 4 or len(answer) > 220 else "bubble"
+    payload = {
         "ok": True,
-        "topic": "meetings",
-        "answer": f"{surgeon.full_name} has {n} meeting{'s' if n != 1 else ''} {window['label']}{tail}.",
-        "count": n,
+        "topic": topic,
+        "answer": answer,
+        "lines": [heading] + shown,
+        "layout": layout,
+        "count": len(lines) if count is None else count,
     }
+    return payload
 
 
 def _answer_blocks(surgeon: Surgeon, window: dict, facts: dict) -> dict:

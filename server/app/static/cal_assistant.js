@@ -198,7 +198,7 @@
       '  border-bottom:1.5px solid color-mix(in srgb, var(--cal-purple,#6d28d9) 28%, transparent);',
       '  transform:translateX(-50%) rotate(45deg);',
       '}',
-      '#cal-bubble.cal-talk .cal-msg{margin:0;font-weight:500;line-height:1.45;}',
+      '#cal-bubble.cal-talk .cal-msg{margin:0;font-weight:500;line-height:1.45;white-space:pre-wrap;}',
       '#cal-bubble.cal-talk .cal-x{position:absolute;top:.2rem;right:.3rem;}',
       '.cal-bubble-top{display:flex;align-items:center;gap:.4rem;margin-bottom:.4rem;}',
       '.cal-bot-name{',
@@ -282,6 +282,30 @@
       '}',
       '#cal-assist.cal-docked #cal-ask-go{width:100%;padding:.55rem .65rem;font-size:.72rem;}',
       '#cal-assist.cal-docked #cal-bubble{max-width:none;width:100%;}',
+      '#cal-talk-panel{',
+      '  position:fixed;inset:0;z-index:10050;',
+      '  display:flex;align-items:center;justify-content:center;',
+      '  padding:1.25rem;',
+      '  background:color-mix(in srgb, var(--cal-ink,#1c2430) 32%, transparent);',
+      '  pointer-events:all;',
+      '}',
+      '#cal-talk-panel.hidden{display:none;}',
+      '#cal-talk-card{',
+      '  position:relative;',
+      '  width:min(36rem,100%);',
+      '  max-height:min(72vh,34rem);',
+      '  overflow:auto;',
+      '  background:var(--cal-card-strong,rgba(255,255,255,.96));',
+      '  border:1.5px solid color-mix(in srgb, var(--cal-purple,#6d28d9) 28%, transparent);',
+      '  border-radius:1.25rem;',
+      '  padding:1.15rem 1.35rem 1.25rem;',
+      '  box-shadow:0 18px 48px color-mix(in srgb, var(--cal-purple,#6d28d9) 18%, transparent);',
+      '}',
+      '#cal-talk-card .cal-x{position:absolute;top:.45rem;right:.55rem;}',
+      '#cal-talk-body{padding-right:.6rem;}',
+      '.cal-talk-lead{margin:0 0 .7rem;font-weight:650;line-height:1.4;color:var(--cal-ink,#1c2430);}',
+      '.cal-talk-list{margin:0;padding:0 0 0 1.1rem;display:flex;flex-direction:column;gap:.4rem;}',
+      '.cal-talk-list li{line-height:1.4;color:var(--cal-ink,#1c2430);font-size:.875rem;}',
     ].join('\n');
     document.head.appendChild(s);
   }
@@ -580,6 +604,7 @@
   }
 
   function showAskBubble(answer) {
+    hideTalkPanel();
     var bubble = document.getElementById('cal-bubble');
     if (!bubble) return;
     wakeFromSleep();
@@ -589,10 +614,77 @@
       '<p class="cal-msg">' + esc(answer) + '</p>';
     bubble.classList.add('cal-visible', 'cal-talk');
     keepWidgetOnScreen();
-    bubble.querySelector('.cal-x').addEventListener('click', function () {
+    bubble.querySelector('.cal-x').addEventListener('click', dismissTalk);
+  }
+
+  function ensureTalkPanel() {
+    var panel = document.getElementById('cal-talk-panel');
+    if (panel) return panel;
+    panel = document.createElement('div');
+    panel.id = 'cal-talk-panel';
+    panel.className = 'hidden';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-label', 'Grok-BOT answer');
+    panel.innerHTML =
+      '<div id="cal-talk-card">' +
+        '<button class="cal-x" aria-label="Dismiss" type="button">\u00d7</button>' +
+        '<div id="cal-talk-body"></div>' +
+      '</div>';
+    document.body.appendChild(panel);
+    panel.addEventListener('click', function (ev) {
+      if (ev.target === panel) dismissTalk();
+    });
+    panel.querySelector('.cal-x').addEventListener('click', dismissTalk);
+    return panel;
+  }
+
+  function hideTalkPanel() {
+    var panel = document.getElementById('cal-talk-panel');
+    if (panel) panel.classList.add('hidden');
+  }
+
+  function showTalkPanel(data) {
+    var bubble = document.getElementById('cal-bubble');
+    if (bubble) {
       bubble.classList.remove('cal-visible', 'cal-talk');
       bubble.innerHTML = '';
-    });
+    }
+    var panel = ensureTalkPanel();
+    var body = document.getElementById('cal-talk-body');
+    var lines = (data && data.lines && data.lines.length)
+      ? data.lines
+      : String((data && data.answer) || '').split('\n').filter(Boolean);
+    var lead = lines.length ? lines[0] : ((data && data.answer) || '');
+    var rest = lines.slice(1);
+    var items = rest.map(function (line) {
+      return '<li>' + esc(line) + '</li>';
+    }).join('');
+    body.innerHTML =
+      '<p class="cal-talk-lead">' + esc(lead) + '</p>' +
+      (items ? '<ol class="cal-talk-list">' + items + '</ol>' : '');
+    wakeFromSleep();
+    setMood('ok');
+    panel.classList.remove('hidden');
+  }
+
+  function dismissTalk() {
+    var bubble = document.getElementById('cal-bubble');
+    if (bubble) {
+      bubble.classList.remove('cal-visible', 'cal-talk');
+      bubble.innerHTML = '';
+    }
+    hideTalkPanel();
+    clearAskField();
+  }
+
+  function showAskResult(data) {
+    var payload = data || {};
+    var answer = payload.answer || 'I could not reach the live board.';
+    if (payload.layout === 'panel') {
+      showTalkPanel(payload);
+      return;
+    }
+    showAskBubble(answer);
   }
 
   function clearAskField() {
@@ -613,12 +705,10 @@
     })
       .then(function (r) { return r.ok ? r.json() : { answer: 'I could not reach the live board.' }; })
       .then(function (data) {
-        showAskBubble((data && data.answer) || 'I could not reach the live board.');
-        clearAskField();
+        showAskResult(data);
       })
       .catch(function () {
         showAskBubble('I could not reach the live board.');
-        clearAskField();
       })
       .then(function () { setThinking(false); });
   }

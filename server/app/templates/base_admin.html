@@ -245,6 +245,8 @@ function closeSidebar() {
     }
     var bubble = document.getElementById('cal-bubble');
     if (bubble && bubble.classList.contains('cal-visible')) return true;
+    var talk = document.getElementById('cal-talk-panel');
+    if (talk && !talk.classList.contains('hidden')) return true;
     return false;
   }
 
@@ -283,7 +285,7 @@ function closeSidebar() {
 
 </script>
 {% if admin.role != 'scheduler' %}
-<script src="/static/cal_assistant.js?v={{ app_version|default('dev')|urlencode }}&b=talk1" defer></script>
+<script src="/static/cal_assistant.js?v={{ app_version|default('dev')|urlencode }}&b=talk2" defer></script>
 {% endif %}
 {% block scripts %}{% endblock %}
 </body>

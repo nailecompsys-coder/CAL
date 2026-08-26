@@ -6,12 +6,13 @@ from datetime import date, datetime, time, timedelta
 from sqlalchemy.orm import Session
 
 from .models import SurgicalCase
+from .practice_time import practice_today
 from .push import send_push_to_surgeon
 from .scheduling_guardrails_service import surgical_case_warning_messages
 
 
 def week_offset_for_date(target_date: date) -> int:
-    today = date.today()
+    today = practice_today()
     week_start = today - timedelta(days=today.weekday())
     return (target_date - week_start).days // 7
 

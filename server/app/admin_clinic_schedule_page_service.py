@@ -6,6 +6,7 @@ from datetime import date, time, timedelta
 from sqlalchemy.orm import Session, joinedload
 
 from .models import ClinicSchedule, Location, SurgicalCase
+from .practice_time import practice_today
 from .or_block_service import (
     block_instances_for_range,
     open_blocks_by_day,
@@ -347,7 +348,7 @@ def clinic_schedule_sort_key(schedule: ClinicSchedule) -> tuple[int, int]:
 
 
 def week_days_for_offset(week_offset: int) -> tuple[date, list[date]]:
-    today = date.today()
+    today = practice_today()
     week_start = today - timedelta(days=today.weekday()) + timedelta(weeks=week_offset)
     return today, [week_start + timedelta(days=i) for i in range(7)]
 

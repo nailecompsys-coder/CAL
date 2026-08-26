@@ -271,14 +271,14 @@ def _block_window_for_cases(
     if end is None and times:
         latest = max(times)
         # Cover last listed case start; Shannon can edit the block end in portal.
-        end = (datetime.combine(date.today(), latest) + timedelta(minutes=90)).time()
+        end = (datetime.combine(date.min, latest) + timedelta(minutes=90)).time()
     if start is None or end is None:
         raise ValueError(
             "Fax OR block missing case/block times — cannot invent a window "
             f"(session={session or 'am'})"
         )
     if start >= end:
-        end = (datetime.combine(date.today(), start) + timedelta(hours=4)).time()
+        end = (datetime.combine(date.min, start) + timedelta(hours=4)).time()
     return start, end
 
 

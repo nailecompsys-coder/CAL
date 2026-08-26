@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from sqlalchemy.orm import Session, joinedload
 
 from .models import CallCoverage, CallGroup, CallGroupLocation, CallRotation, DayOff, Location, Surgeon
+from .practice_time import practice_today
 from .surgeon_visibility import surgeon_is_visible
 
 
@@ -19,7 +20,7 @@ def parse_call_group_id(raw: str | int | None) -> int | None:
 
 
 def month_schedule_days(month_offset: int) -> dict:
-    today = date.today()
+    today = practice_today()
     total_months = today.year * 12 + (today.month - 1) + month_offset
     year = total_months // 12
     month = total_months % 12 + 1

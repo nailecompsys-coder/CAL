@@ -10,13 +10,14 @@ from sqlalchemy.orm import Session
 
 from .conflicts import check_conflicts
 from .models import Meeting, MeetingAttendee, Surgeon
+from .practice_time import practice_today
 from .or_block_service import log_schedule_change
 from .push import notify_schedule_change
 from .surgeon_visibility import surgeon_is_visible
 
 
 def _month_from_offset(month_offset: int, today: date | None = None) -> date:
-    today = today or date.today()
+    today = today or practice_today()
     total_months = today.year * 12 + (today.month - 1) + month_offset
     year = total_months // 12
     month = total_months % 12 + 1
@@ -24,7 +25,7 @@ def _month_from_offset(month_offset: int, today: date | None = None) -> date:
 
 
 def month_schedule_days(month_offset: int) -> dict:
-    today = date.today()
+    today = practice_today()
     first_day = _month_from_offset(month_offset, today)
     days_in_month = calendar_lib.monthrange(first_day.year, first_day.month)[1]
     schedule_days = [
@@ -47,7 +48,7 @@ def month_picker_options(
     future: int = 12,
 ) -> list[dict]:
     """Offsets and labels for a month jump dropdown (past N + next N relative to today)."""
-    today = date.today()
+    today = practice_today()
     offsets = list(range(-past, future + 1))
     if current_offset not in offsets:
         offsets.append(current_offset)

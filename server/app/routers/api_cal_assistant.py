@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_current_admin
 from ..database import get_db
+from ..practice_time import practice_today
 from ..grok_lookahead_service import reconcile_stale_call_coverage_notifications
 from ..off_conflict_service import detect_off_conflicts
 
@@ -21,7 +22,7 @@ router = APIRouter(prefix="/api")
 
 def _week_bounds(week_offset: int) -> tuple[date, date]:
     """Return Mon–Sun date bounds for the given week offset (0 = current week)."""
-    today = date.today()
+    today = practice_today()
     week_start = today - timedelta(days=today.weekday())
     week_start += timedelta(weeks=week_offset)
     return week_start, week_start + timedelta(days=6)

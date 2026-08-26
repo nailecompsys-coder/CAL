@@ -12,6 +12,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from .models import Surgeon
+from .practice_time import practice_today
 
 
 EASTERN_TZ = ZoneInfo("America/New_York")
@@ -274,7 +275,7 @@ def monday_of(day: date) -> date:
 
 def weekday_range(anchor: date | None = None) -> tuple[date, date]:
     """Return Mon–Fri for the week containing *anchor* (defaults to today)."""
-    start = monday_of(anchor or date.today())
+    start = monday_of(anchor or practice_today())
     return start, start + timedelta(days=4)
 
 
@@ -373,7 +374,7 @@ def fetch_main_office_patients_by_weekday(anchor: date | None = None) -> dict:
             "surgeons": surgeons,
             "clinicLabel": ", ".join(clinics),
             "surgeonLabel": ", ".join(surgeons),
-            "isToday": day == date.today(),
+            "isToday": day == practice_today(),
         })
 
     return {

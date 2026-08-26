@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_current_surgeon
 from ..conflicts import check_conflicts
+from ..practice_time import practice_today
 from ..database import get_db
 from ..jinja_env import templates
 from ..models import Availability
@@ -19,7 +20,7 @@ router = APIRouter(prefix="/surgeon")
 @router.get("/availability", response_class=HTMLResponse)
 def availability_page(request: Request, db: Session = Depends(get_db), auth=Depends(get_current_surgeon)):
     surgeon, device = auth
-    today = date.today()
+    today = practice_today()
     avail_records = db.query(Availability).filter(
         Availability.surgeon_id == surgeon.id,
         Availability.date >= today,
@@ -49,7 +50,7 @@ async def save_availability(
     auth=Depends(get_current_surgeon),
 ):
     surgeon, _ = auth
-    today = date.today()
+    today = practice_today()
     form = await request.form()
 
     def parse_time(s: str):

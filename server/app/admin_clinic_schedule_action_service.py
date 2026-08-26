@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from .conflicts import check_conflicts
 from .models import ClinicSchedule, Location, Surgeon
+from .practice_time import practice_today
 from .or_block_service import log_schedule_change
 from .push import send_push_to_surgeon
 
@@ -115,7 +116,7 @@ def clear_clinic(db: Session, schedule_id: int) -> None:
 
 
 def copy_clinic_week(db: Session, source_offset: int, surgeon_id: str) -> dict:
-    today = date.today()
+    today = practice_today()
     src_start = today - timedelta(days=today.weekday()) + timedelta(weeks=source_offset)
     src_end = src_start + timedelta(days=6)
     dst_start = src_start + timedelta(weeks=1)

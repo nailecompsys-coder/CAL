@@ -22,6 +22,7 @@ from ..admin_dayoff_service import (
 from ..auth import get_current_admin
 from ..database import get_db
 from ..jinja_env import templates
+from ..practice_time import practice_today
 from ..models import DayOff, Surgeon
 from ..surgeon_visibility import surgeon_is_visible
 from .admin import _base, _sort_surgeons_physicians_first, _warn_redirect
@@ -40,7 +41,7 @@ def daysoff_page(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    today = date.today()
+    today = practice_today()
     resolved_offset = 0 if month_offset is None else month_offset
     if month_offset is None and gantt_start:
         try:

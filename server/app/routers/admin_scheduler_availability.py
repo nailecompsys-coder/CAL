@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..admin_notification_href import admin_notification_href
 from ..auth import get_current_admin
+from ..practice_time import practice_today
 from ..database import get_db
 from ..jinja_env import templates
 from ..models import Surgeon
@@ -43,9 +44,9 @@ def scheduler_availability_page(
     admin=Depends(get_current_admin),
 ):
     try:
-        start_date = date.fromisoformat(start) if start else date.today()
+        start_date = date.fromisoformat(start) if start else practice_today()
     except ValueError:
-        start_date = date.today()
+        start_date = practice_today()
     days = min(max(days, 1), 45)
     end_date = start_date + timedelta(days=days - 1)
     selected_surgeon_id = _optional_int(surgeon_id)

@@ -18,9 +18,12 @@ WORKDIR /app
 
 # curl: Docker HEALTHCHECK + Tailwind CLI download; postgresql-client: pg_dump/psql for Wasabi backup/restore
 # libpq-dev and gcc are NOT needed — psycopg2-binary ships a pre-compiled wheel
+# tzdata + TZ: date.today() and cron must stay on Florida time, not UTC
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl postgresql-client \
+    curl postgresql-client tzdata \
     && rm -rf /var/lib/apt/lists/*
+
+ENV TZ=America/New_York
 
 # Download Tailwind CSS standalone CLI (v3, no Node.js required).
 # uname is used because classic docker build does not always set TARGETARCH.

@@ -5,18 +5,16 @@ from __future__ import annotations
 import json
 import logging
 from datetime import date, datetime, time, timedelta
-from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
 from .conflicts import check_conflicts_structured
 from .models import DayOff, Surgeon
+from .practice_time import practice_now, practice_today
 from .push import notify_admins, send_native_push_to_surgeon, send_push_to_surgeon
 from .scheduling_guardrails_service import DayOffFinding, encode_findings, finding_dicts
 
 log = logging.getLogger(__name__)
-
-PRACTICE_TZ = ZoneInfo("America/New_York")
 
 DUPLICATE_REJECT_MESSAGE = (
     "These dates overlap an existing time-off request. "
@@ -31,14 +29,6 @@ CONFER_WITH_SHANNON = (
     "Shannon will review. You can change or cancel this request, "
     "or leave it for Shannon to sort out with the schedule."
 )
-
-
-def practice_now() -> datetime:
-    return datetime.now(PRACTICE_TZ)
-
-
-def practice_today() -> date:
-    return practice_now().date()
 
 
 def clip_window_to_now(start_date: date, end_date: date) -> tuple[date, date] | None:

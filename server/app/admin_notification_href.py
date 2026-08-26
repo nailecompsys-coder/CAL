@@ -6,13 +6,14 @@ from datetime import date
 from urllib.parse import urlencode
 
 from .admin_surgical_schedule_service import week_offset_for_date
+from .practice_time import practice_today
 
 _CASE_FIXES = {"missing_time", "missing_block_window"}
 _ASSIGN_FIXES = {"clinic_location_not_found", "or_location_not_found"}
 
 
 def month_offset_for_date(target: date, today: date | None = None) -> int:
-    today = today or date.today()
+    today = today or practice_today()
     return (target.year * 12 + target.month) - (today.year * 12 + today.month)
 
 

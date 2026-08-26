@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_current_surgeon
 from ..database import get_db
+from ..practice_time import practice_today
 from ..models import SurgeonDayItem
 from .surgeon_context import serialize_personal_item
 
@@ -59,7 +60,7 @@ def api_create_day_item(
     auth=Depends(get_current_surgeon),
 ):
     surgeon, _ = auth
-    today = date.today()
+    today = practice_today()
     _validate_item_date(body.date, today)
     row = SurgeonDayItem(
         surgeon_id=surgeon.id,
@@ -87,7 +88,7 @@ def api_patch_day_item(
     row = db.get(SurgeonDayItem, item_id)
     if not row or row.surgeon_id != surgeon.id:
         raise HTTPException(404, "Not found")
-    today = date.today()
+    today = practice_today()
     if body.date is not None:
         _validate_item_date(body.date, today)
         row.date = body.date

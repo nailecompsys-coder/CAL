@@ -9,6 +9,7 @@ from sqlalchemy import func as sql_func
 from sqlalchemy.orm import Session, joinedload
 
 from .models import CallGroup, CallRotation, DayOff, Surgeon
+from .practice_time import practice_today
 from .push import notify_admins
 from .scheduling_guardrails_service import store_dayoff_findings
 from .surgeon_visibility import surgeon_is_visible
@@ -40,7 +41,7 @@ def dominant_call_group_id(db: Session, surgeon_id: int, start_date: date, end_d
 
 
 def year_months(all_requests) -> list[tuple[int, int]]:
-    today = date.today()
+    today = practice_today()
     months = []
     year = today.year
     month = today.month
@@ -59,7 +60,7 @@ def year_months(all_requests) -> list[tuple[int, int]]:
 
 
 def request_off_page_data(db: Session, surgeon: Surgeon) -> dict:
-    today = date.today()
+    today = practice_today()
     months = year_months([])
     window_start = date(months[0][0], months[0][1], 1)
     discovery_end = today + timedelta(days=730)

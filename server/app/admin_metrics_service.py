@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from .models import CallCoverage, CallGroup, CallRotation, DayOff, Surgeon
 from .native_call_support import active_coverage_for_rotation
+from .practice_time import practice_today
 from .native_dayoff_support import day_off_segments
 from .surgeon_visibility import surgeon_is_hidden, surgeon_is_visible
 
@@ -34,7 +35,7 @@ class PersonMetrics:
 
 
 def build_admin_metrics(db: Session, start_date: date, end_date: date, staff_type: str = "all", today: date | None = None) -> dict:
-    as_of = today or date.today()
+    as_of = today or practice_today()
     cohort = _normalized_staff_type(staff_type)
     surgeons = _active_people_for_cohort(db, cohort)
     metrics_by_id = {surgeon.id: PersonMetrics(surgeon=surgeon) for surgeon in surgeons}
@@ -106,7 +107,7 @@ def default_metrics_range(today: date) -> tuple[date, date]:
 
 
 def approved_day_off_detail(db: Session, surgeon_id: int, start_date: date, end_date: date, today: date | None = None) -> dict | None:
-    as_of = today or date.today()
+    as_of = today or practice_today()
     surgeon = db.get(Surgeon, surgeon_id)
     if not surgeon_is_visible(surgeon):
         return None

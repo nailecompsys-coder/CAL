@@ -22,6 +22,7 @@ from .surgeon_schedule_queries import (
 )
 from .surgeon_schedule_serializers import serialize_schedule_week
 from .surgeon_schedule_slots import compute_schedule_slots
+from .practice_time import practice_today
 
 
 def _merge_aprima_surgeries(db: Session, surgeon, surgeries_by_day: dict, start_day: date, end_day: date) -> None:
@@ -71,7 +72,7 @@ def _merge_aprima_surgeries(db: Session, surgeon, surgeries_by_day: dict, start_
 
 
 def build_surgeon_schedule_view(db: Session, surgeon, week_offset: int = 0) -> dict:
-    today = date.today()
+    today = practice_today()
     week_start = today - timedelta(days=today.weekday()) + timedelta(weeks=week_offset)
     week_days = [week_start + timedelta(days=i) for i in range(7)]
     week_end = week_days[-1]

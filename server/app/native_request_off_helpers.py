@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from .models import DayOff
 from .native_support import normalize_day_off_segments, parse_hhmm, validate_day_off_segments
+from .practice_time import practice_today
 
 
 @dataclass(frozen=True)
@@ -23,7 +24,7 @@ class NativeRequestOffInput:
 
 
 def validate_request_dates(start_date: date, end_date: date, action: str) -> None:
-    today = date.today()
+    today = practice_today()
     if start_date < today or end_date < today:
         raise HTTPException(400, f"Days off can only be {action} for today or later.")
     if end_date < start_date:

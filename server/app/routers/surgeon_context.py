@@ -1,11 +1,10 @@
 """Shared surgeon route context helpers."""
-from datetime import date
-
 from fastapi import Request
 
 from .. import __version__ as app_version
 from ..auth import SURGEON_ADMIN_PREVIEW_DEVICE_NAME
 from ..models import SurgeonDayItem
+from ..practice_time import practice_today
 
 
 def base_context(request: Request, surgeon, device=None, **kwargs):
@@ -18,7 +17,7 @@ def base_context(request: Request, surgeon, device=None, **kwargs):
     return {
         "request": request,
         "surgeon": surgeon,
-        "today": date.today(),
+        "today": practice_today(),
         "desktop_preview": desktop_preview,
         "desktop_browser": desktop_browser,
         "app_version": app_version,

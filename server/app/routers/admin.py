@@ -20,6 +20,7 @@ from ..models import (
 )
 from ..native_home_serializers import is_clinic_day_meeting
 from ..paths import UPLOADS_DIR
+from ..practice_time import practice_today
 from ..surgeon_visibility import surgeon_is_visible
 from .. import wasabi_backup
 from .. import __version__ as app_version
@@ -71,7 +72,7 @@ def _base(request: Request, admin: AdminUser, db: Session | None = None, **kwarg
     return {
         "request": request,
         "admin": admin,
-        "today": date.today(),
+        "today": practice_today(),
         "settings": settings,
         "app_version": app_version,
         "wasabi_configured": wasabi_backup.is_configured(),
@@ -110,7 +111,7 @@ def dashboard(
     admin=Depends(get_current_admin),
     s1: str | None = None,
 ):
-    today = date.today()
+    today = practice_today()
     week_end = today + timedelta(days=7)
     surgical_one_anchor = today
     if s1:

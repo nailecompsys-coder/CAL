@@ -25,6 +25,7 @@ from .native_support import (
     native_day_off_sections,
 )
 from .native_home_sections import build_native_call_schedule, native_alerts
+from .practice_time import practice_today
 
 
 class NativeHomeService:
@@ -33,7 +34,7 @@ class NativeHomeService:
         self.surgeon = surgeon
         self.start_date = start_date
         self.end_date = end_date
-        self.today = date.today()
+        self.today = practice_today()
         self.days = empty_days(start_date, end_date)
         self.by_date = {d["date"]: d for d in self.days}
         self.my_day_off_rows = my_day_off_rows(db, surgeon, start_date, end_date)

@@ -9,11 +9,12 @@ from .admin_clinic_schedule_page_service import parse_clinic_fax_visit_segments
 from .aprima_cache_service import patient_appointments_for_api
 from .aprima_schedule_service import is_surgery_appointment
 from .models import ClinicSchedule, SurgicalCase
+from .practice_time import practice_today
 
 
 def surgical_cases_today_count(db: Session, day: date | None = None) -> int:
     """Non-cancelled SurgicalCase rows for *day* (all locations / campuses)."""
-    target = day or date.today()
+    target = day or practice_today()
     return (
         db.query(SurgicalCase)
         .filter(
@@ -46,7 +47,7 @@ def clinic_visits_today_count(db: Session, day: date | None = None) -> int:
     sites) plus Desk fax visit segments on ClinicSchedule notes. Both pipelines
     feed the portal as scheduling lands in CAL.
     """
-    target = day or date.today()
+    target = day or practice_today()
     payload = patient_appointments_for_api(db, target, target, surgeon=None)
     aprima_rows = payload.get("appointments") or []
     aprima_clinic = sum(1 for row in aprima_rows if not is_surgery_appointment(row))
@@ -54,7 +55,7 @@ def clinic_visits_today_count(db: Session, day: date | None = None) -> int:
 
 
 def dashboard_today_volume_stats(db: Session, day: date | None = None) -> dict:
-    target = day or date.today()
+    target = day or practice_today()
     return {
         "surgical_cases_today": surgical_cases_today_count(db, target),
         "clinic_visits_today": clinic_visits_today_count(db, target),

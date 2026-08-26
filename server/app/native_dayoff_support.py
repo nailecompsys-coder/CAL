@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from .models import DayOff, Surgeon
 from .native_surgeon_support import native_surgeon_rank_key, native_viewer_sees_physicians
+from .practice_time import practice_today
 from .native_time_utils import fmt_time, parse_hhmm
 from .surgeon_visibility import surgeon_is_visible
 
@@ -111,7 +112,7 @@ def months_spanned(start_date: date, end_date: date) -> list[tuple[int, int]]:
 
 
 def native_day_off_sections(db: Session, viewer: Surgeon) -> list[dict]:
-    today = date.today()
+    today = practice_today()
     current_month = date(today.year, today.month, 1)
     window_start = current_month - timedelta(days=95)
     discovery_end = today + timedelta(days=730)

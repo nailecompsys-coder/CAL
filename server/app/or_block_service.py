@@ -30,6 +30,7 @@ from .models import (
 )
 from .push import send_push_to_surgeon
 from .email_service import send_email
+from .practice_time import practice_today
 from .scheduling_guardrails_service import scheduler_safe_warning
 from .surgeon_visibility import surgeon_is_visible
 
@@ -1868,7 +1869,7 @@ def scheduler_digest_recipients(db: Session) -> list[AdminUser]:
 
 
 def scheduler_digest_payload(db: Session, today: date | None = None) -> dict:
-    current = today or datetime.now(timezone.utc).date()
+    current = today or practice_today()
     end_date = current + timedelta(days=14)
     open_blocks = [
         serialize_block_instance(block)

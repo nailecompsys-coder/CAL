@@ -9,6 +9,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
 from app.rules_engine.checker_helpers import day_off_unavailable_range_on_day
 from app.rules_engine.overlap_helpers import OverlapTarget, should_skip_time_overlap
+from app.practice_time import practice_today
 from app.scheduling_gate_service import (
     DUPLICATE_REJECT_MESSAGE,
     clip_window_to_now,
@@ -20,11 +21,11 @@ from app.scheduling_guardrails_service import DayOffFinding
 
 class SchedulingGateHelpersTest(unittest.TestCase):
     def test_clip_window_drops_fully_past(self):
-        today = date.today()
+        today = practice_today()
         self.assertIsNone(clip_window_to_now(today - timedelta(days=5), today - timedelta(days=1)))
 
     def test_clip_window_trims_start_to_today(self):
-        today = date.today()
+        today = practice_today()
         clipped = clip_window_to_now(today - timedelta(days=3), today + timedelta(days=2))
         self.assertEqual(clipped, (today, today + timedelta(days=2)))
 

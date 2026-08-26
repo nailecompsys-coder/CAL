@@ -259,10 +259,10 @@ def main_office_patients_by_weekday(db: Session, anchor: date | None = None) -> 
             "surgeons": surgeons,
             "clinicLabel": ", ".join(clinics),
             "surgeonLabel": ", ".join(surgeons),
-            "isToday": day == date.today(),
+            "isToday": day == practice_today(),
         })
 
-    today = date.today()
+    today = practice_today()
     return {
         "weekStart": week_start,
         "weekEnd": week_end,

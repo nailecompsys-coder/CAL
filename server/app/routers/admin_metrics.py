@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..admin_metrics_service import approved_day_off_detail, build_admin_metrics, default_metrics_range
 from ..auth import get_current_admin
+from ..practice_time import practice_today
 from ..database import get_db
 from ..jinja_env import templates
 from .admin import _base
@@ -24,7 +25,7 @@ def metrics_page(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    default_start, default_end = default_metrics_range(date.today())
+    default_start, default_end = default_metrics_range(practice_today())
     start_date = _parse_date(start, default_start)
     end_date = _parse_date(end, default_end)
     if end_date < start_date:
@@ -50,7 +51,7 @@ def metrics_person_page(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    default_start, default_end = default_metrics_range(date.today())
+    default_start, default_end = default_metrics_range(practice_today())
     start_date = _parse_date(start, default_start)
     end_date = _parse_date(end, default_end)
     if end_date < start_date:
@@ -63,7 +64,7 @@ def metrics_person_page(
             "role_label": "",
             "start_date": start_date,
             "end_date": end_date,
-            "as_of": date.today(),
+            "as_of": practice_today(),
             "segments": [],
             "taken_total": 0,
             "approved_upcoming_total": 0,

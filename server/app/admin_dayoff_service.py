@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from .models import DayOff, Surgeon
 from .or_block_service import log_schedule_change
+from .practice_time import practice_today
 from .push import clear_dayoff_request_notifications, send_push_to_surgeon
 from .scheduling_gate_service import day_off_overlap_advisory
 from .scheduling_guardrails_service import (
@@ -30,7 +31,7 @@ def resolved_months(resolved: list[DayOff]) -> list[dict]:
 
 def month_window(month_offset: int) -> dict:
     """Calendar month for the Who's Out Gantt (offset from current month)."""
-    today = date.today()
+    today = practice_today()
     total_months = today.year * 12 + (today.month - 1) + month_offset
     year = total_months // 12
     month = total_months % 12 + 1
@@ -130,7 +131,7 @@ def gantt_rows(
 
 
 def dayoff_is_current_or_future(dayoff: DayOff, today: date | None = None) -> bool:
-    today = today or date.today()
+    today = today or practice_today()
     return bool(dayoff.end_date and dayoff.end_date >= today)
 
 

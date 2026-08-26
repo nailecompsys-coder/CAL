@@ -6,6 +6,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session, joinedload
 
 from ..auth import get_current_surgeon
+from ..practice_time import practice_today
 from ..call_schedule_utils import (
     build_call_group_rows,
     build_merged_slot_index,
@@ -28,7 +29,7 @@ def call_schedule_page(
     auth=Depends(get_current_surgeon),
 ):
     surgeon, device = auth
-    today = date.today()
+    today = practice_today()
     week_start = today - timedelta(days=today.weekday()) + timedelta(weeks=week_offset)
     use_30d = schedule_view == "30d"
     if use_30d:

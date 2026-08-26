@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from .call_schedule_audit_service import actor_label_for_admin, log_call_schedule_change
 from .conflicts import check_conflicts
+from .practice_time import practice_today
 from .models import AdminUser, CallGroup, CallRotation, Surgeon
 from .push import send_push_to_surgeon
 
@@ -95,7 +96,7 @@ def assign_rotation(
 
 
 def copy_call_week(db: Session, source_offset: int) -> int:
-    today = date.today()
+    today = practice_today()
     week_start = today - timedelta(days=today.weekday()) + timedelta(weeks=source_offset)
     week_days_src = [week_start + timedelta(days=i) for i in range(7)]
     week_start_dst = week_start + timedelta(weeks=1)

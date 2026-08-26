@@ -9,7 +9,21 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.grok_ask_service import ask_grok, parse_topic, parse_window
-from app.models import Base, ClinicSchedule, DayOff, Location, Meeting, Surgeon
+from app.models import Base, CallGroup, CallRotation, ClinicSchedule, DayOff, Location, Meeting, Surgeon
+
+# Practice English → topic. When Ask misses, add the phrase here first.
+QUESTION_CATALOG = (
+    ("Who has coverage today", "who_call"),
+    ("who is covering today", "who_call"),
+    ("who is on call today", "who_call"),
+    ("who is off today", "who_off"),
+    ("who is in clinic today", "who_clinic"),
+    ("what meeting are scheduled this month", "meetings"),
+    ("what's on the board today", "board"),
+    ("who is working today", "board"),
+    ("what is today", "when"),
+    ("how many clinical patient has Alex seen this month to date", "clinic"),
+)
 
 
 class GrokAskWindowTest(unittest.TestCase):
@@ -59,6 +73,11 @@ class GrokAskWindowTest(unittest.TestCase):
         self.assertEqual(window["start"], date(2026, 8, 1))
         self.assertEqual(window["end"], date(2026, 8, 31))
         self.assertEqual(window["label"], "August 2026")
+
+    def test_question_catalog_maps_practice_english(self):
+        for question, topic in QUESTION_CATALOG:
+            with self.subTest(question=question):
+                self.assertEqual(parse_topic(question), topic, question)
 
 
 class GrokAskLiveBoardTest(unittest.TestCase):
@@ -269,5 +288,30 @@ class GrokAskLiveBoardTest(unittest.TestCase):
             self.assertIn("August 2026", result["answer"])
             self.assertNotIn("I stay inside CAL", result["answer"])
             self.assertNotIn("could not tell who", result["answer"].lower())
+        finally:
+            db.close()
+
+    def test_who_has_coverage_today_lists_call(self):
+        db = self.Session()
+        try:
+            chris = Surgeon(
+                first_name="Chris", last_name="Johnson",
+                email="cj@example.com", is_active=True, staff_type="physician",
+            )
+            group = CallGroup(name="Winter Garden")
+            db.add_all([chris, group])
+            db.flush()
+            db.add(CallRotation(
+                surgeon_id=chris.id,
+                call_group_id=group.id,
+                date=date(2026, 8, 26),
+            ))
+            db.commit()
+            result = ask_grok(db, "Who has coverage today", today=date(2026, 8, 26))
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["topic"], "who_call", result)
+            self.assertIn("Chris Johnson", result["answer"])
+            self.assertNotIn("don't have that", result["answer"].lower())
+            self.assertNotIn("I stay inside CAL", result["answer"])
         finally:
             db.close()

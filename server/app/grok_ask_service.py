@@ -48,7 +48,8 @@ _NOISE = re.compile(
     r"meeting|meetings|block|blocks|room|rooms|count|number|total|"
     r"yesterday|today|tomorrow|approved|pending|list|tell|me|show|"
     r"phone|email|address|working|work|date|dates|mtd|ytd|through|thru|"
-    r"far|currently|upto|until|question|scheduled|schedule)\b",
+    r"far|currently|upto|until|question|scheduled|schedule|"
+    r"coverage|covering|cover)\b",
     re.IGNORECASE,
 )
 
@@ -151,6 +152,9 @@ def ask_grok(
     if location and topic in {"clinic", "cases", "briefing", "unknown"}:
         return _answer_location_volume(db, location, window, topic)
 
+    if topic in {"briefing", "unknown"} and _looks_like_live_ask(raw):
+        return _answer_board(db, window)
+
     return _answer_freeform(raw, today)
 
 
@@ -221,7 +225,17 @@ def parse_window(text: str, today: date) -> dict:
     return _window(mon, mon + timedelta(days=6), f"this week ({_span(mon, mon + timedelta(days=6))})")
 
 
+_CALL_WORDS = (
+    r"(?:on[- ]call|call schedule|covering call|coverage|covering|"
+    r"\bcover\b|\bcall\b)"
+)
+
+
 def parse_topic(text: str) -> str:
+    """Map practice English onto a live-board topic.
+
+    Add a synonym here and a line in tests.QUESTION_CATALOG when Ask misses.
+    """
     blob = text.lower()
     if _is_when_question(blob):
         return "when"
@@ -229,7 +243,7 @@ def parse_topic(text: str) -> str:
         return "identity"
     if re.search(r"\bwho\b", blob) and re.search(r"\b(off|time off)\b", blob):
         return "who_off"
-    if re.search(r"\bwho\b", blob) and re.search(r"\b(call|covering)\b", blob):
+    if re.search(r"\bwho\b", blob) and re.search(_CALL_WORDS, blob):
         return "who_call"
     if re.search(r"\bwho\b", blob) and re.search(r"\bclinic\b", blob):
         return "who_clinic"
@@ -239,7 +253,7 @@ def parse_topic(text: str) -> str:
         r"\b(surgeons?|doctors?|physicians?)\b", blob
     ):
         return "roster"
-    if re.search(r"\b(notice|notices|notification|board|leftover card)\b", blob):
+    if re.search(r"\b(notices?|notifications?|leftover card)\b", blob):
         return "notices"
     if re.search(r"\b(clinic groups?|call groups?)\b", blob):
         return "groups"
@@ -256,7 +270,7 @@ def parse_topic(text: str) -> str:
         return "time_off"
     if re.search(r"\b(case|cases|surgery|surgeries|or case)\b", blob):
         return "cases"
-    if re.search(r"\b(on call|call schedule|covering call)\b", blob):
+    if re.search(_CALL_WORDS, blob):
         return "call"
     if re.search(r"\b(meetings?|huddle|tumor board)\b", blob):
         return "meetings"
@@ -266,18 +280,36 @@ def parse_topic(text: str) -> str:
         return "availability"
     if re.search(r"\b(locations?|facilities|where do we (work|operate))\b", blob):
         return "location"
-    if re.search(r"\b(what(?:'?s| is) scheduled|on the (board|calendar|schedule))\b", blob):
+    if re.search(
+        r"\b(what(?:'?s| is) scheduled|on the (board|calendar|schedule)|"
+        r"who(?:'?s| is) working)\b",
+        blob,
+    ):
         return "board"
     if re.search(r"\b(phone|address|where is)\b", blob):
         return "location"
     return "briefing"
 
 
+def _looks_like_live_ask(text: str) -> bool:
+    blob = text.lower()
+    if not re.search(r"\b(who|what|which|list|show|any|scheduled|schedule)\b", blob):
+        return False
+    return bool(
+        re.search(
+            r"\b(today|tomorrow|yesterday|tonight|this week|next week|"
+            r"this month|next month|this year)\b",
+            blob,
+        )
+    )
+
+
 def _is_when_question(blob: str) -> bool:
     if re.search(r"\bwho\b", blob):
         return False
     if re.search(
-        r"\b(time off|day off|days off|clinic|patient|case|surgery|call|meeting|block)\b",
+        r"\b(time off|day off|days off|clinic|patient|case|surgery|call|meeting|block|"
+        r"board|calendar|schedule|coverage|covering|working)\b",
         blob,
     ):
         return False

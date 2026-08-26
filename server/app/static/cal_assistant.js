@@ -183,6 +183,23 @@
       '}',
       '#cal-bubble:empty{display:none;padding:0;border:0;box-shadow:none;}',
       '#cal-bubble.cal-visible{opacity:1;transform:translateY(0);pointer-events:all;}',
+      '#cal-bubble.cal-talk{',
+      '  position:relative;',
+      '  background:var(--cal-card-strong,rgba(255,255,255,.92));',
+      '  border-radius:1.15rem 1.15rem 1.15rem .35rem;',
+      '  padding:.7rem 1.7rem .75rem .9rem;',
+      '}',
+      '#cal-bubble.cal-talk::after{',
+      '  content:"";',
+      '  position:absolute;left:50%;bottom:-7px;',
+      '  width:14px;height:14px;',
+      '  background:var(--cal-card-strong,rgba(255,255,255,.92));',
+      '  border-right:1.5px solid color-mix(in srgb, var(--cal-purple,#6d28d9) 28%, transparent);',
+      '  border-bottom:1.5px solid color-mix(in srgb, var(--cal-purple,#6d28d9) 28%, transparent);',
+      '  transform:translateX(-50%) rotate(45deg);',
+      '}',
+      '#cal-bubble.cal-talk .cal-msg{margin:0;font-weight:500;line-height:1.45;}',
+      '#cal-bubble.cal-talk .cal-x{position:absolute;top:.2rem;right:.3rem;}',
       '.cal-bubble-top{display:flex;align-items:center;gap:.4rem;margin-bottom:.4rem;}',
       '.cal-bot-name{',
       '  font-size:.68rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;',
@@ -552,6 +569,7 @@
       (body ? '<p class="cal-more">' + esc(body) + '</p>' : '') +
       goHtml;
 
+    bubble.classList.remove('cal-talk');
     bubble.classList.add('cal-visible');
 
     bubble.querySelector('.cal-x').addEventListener('click', function () {
@@ -564,21 +582,24 @@
   function showAskBubble(answer) {
     var bubble = document.getElementById('cal-bubble');
     if (!bubble) return;
+    wakeFromSleep();
     setMood('ok');
     bubble.innerHTML =
-      '<div class="cal-bubble-top">' +
-        '<span class="cal-bot-name">Grok-BOT</span>' +
-        '<button class="cal-x" aria-label="Dismiss" type="button">\u00d7</button>' +
-      '</div>' +
-      '<p class="cal-msg">' + esc(answer) + '</p>' +
-      '<div class="cal-actions">' +
-        '<a href="/admin/settings/grok-bot-rules" class="cal-link">Rules he follows \u2192</a>' +
-      '</div>';
-    bubble.classList.add('cal-visible');
+      '<button class="cal-x" aria-label="Dismiss" type="button">\u00d7</button>' +
+      '<p class="cal-msg">' + esc(answer) + '</p>';
+    bubble.classList.add('cal-visible', 'cal-talk');
     keepWidgetOnScreen();
     bubble.querySelector('.cal-x').addEventListener('click', function () {
-      bubble.classList.remove('cal-visible');
+      bubble.classList.remove('cal-visible', 'cal-talk');
+      bubble.innerHTML = '';
     });
+  }
+
+  function clearAskField() {
+    var input = document.getElementById('cal-ask-input');
+    if (!input) return;
+    input.value = '';
+    input.focus();
   }
 
   function askGrok(question) {
@@ -593,8 +614,12 @@
       .then(function (r) { return r.ok ? r.json() : { answer: 'I could not reach the live board.' }; })
       .then(function (data) {
         showAskBubble((data && data.answer) || 'I could not reach the live board.');
+        clearAskField();
       })
-      .catch(function () { showAskBubble('I could not reach the live board.'); })
+      .catch(function () {
+        showAskBubble('I could not reach the live board.');
+        clearAskField();
+      })
       .then(function () { setThinking(false); });
   }
 
@@ -864,6 +889,7 @@
       '<p class="cal-msg">' + formatMessage(c) + moreTxt + '</p>' +
       actionsHtml;
 
+    bubble.classList.remove('cal-talk');
     bubble.classList.add('cal-visible');
 
     bubble.querySelector('.cal-x').addEventListener('click', function (e) {

@@ -158,6 +158,10 @@
       .then(function (r) { return r.ok ? r.json() : { answer: 'I could not reach the live board.' }; })
       .then(function (data) {
         answerEl.textContent = (data && data.answer) || 'I could not reach the live board.';
+        if (input) {
+          input.value = '';
+          input.focus();
+        }
       })
       .catch(function () { answerEl.textContent = 'I could not reach the live board.'; })
       .then(function () { if (go) go.disabled = false; });

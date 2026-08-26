@@ -100,6 +100,8 @@ def ask_grok(
         return _answer_who_off(db, window)
     if topic == "who_call":
         return _answer_who_call(db, window)
+    if topic == "no_call":
+        return _answer_no_call(db, window)
     if topic == "who_clinic":
         return _answer_who_clinic(db, window)
     if topic == "pending_off":
@@ -241,9 +243,13 @@ def parse_topic(text: str) -> str:
         return "when"
     if _is_identity_question(blob):
         return "identity"
-    if re.search(r"\bwho\b", blob) and re.search(r"\b(off|time off)\b", blob):
+    if re.search(r"\bno call\b", blob):
+        return "no_call"
+    if re.search(r"\bwho\b", blob) and re.search(r"\b(off|time off|out today)\b", blob):
         return "who_off"
-    if re.search(r"\bwho\b", blob) and re.search(_CALL_WORDS, blob):
+    if re.search(r"\btoday'?s coverage\b", blob) or (
+        re.search(r"\bwho\b", blob) and re.search(_CALL_WORDS, blob)
+    ):
         return "who_call"
     if re.search(r"\bwho\b", blob) and re.search(r"\bclinic\b", blob):
         return "who_clinic"
@@ -1044,7 +1050,39 @@ def _answer_pending_off(db: Session, window: dict) -> dict:
     }
 
 
+def _is_no_call_reason(reason: str | None) -> bool:
+    if not reason:
+        return False
+    return " ".join(reason.strip().lower().split()) == "no call"
+
+
+def _off_lists_for_window(db: Session, window: dict) -> tuple[list[str], list[str]]:
+    rows = (
+        db.query(DayOff)
+        .options(joinedload(DayOff.surgeon))
+        .filter(
+            DayOff.start_date <= window["end"],
+            DayOff.end_date >= window["start"],
+            DayOff.status == "approved",
+        )
+        .all()
+    )
+    out_names: list[str] = []
+    no_call_names: list[str] = []
+    for row in rows:
+        if not surgeon_is_visible(row.surgeon):
+            continue
+        name = row.surgeon.full_name
+        if _is_no_call_reason(row.reason):
+            if name not in no_call_names:
+                no_call_names.append(name)
+        elif name not in out_names:
+            out_names.append(name)
+    return out_names, no_call_names
+
+
 def _answer_who_call(db: Session, window: dict) -> dict:
+    """Same facts as the dashboard Today's Coverage card."""
     rows = (
         db.query(CallRotation)
         .options(
@@ -1053,27 +1091,55 @@ def _answer_who_call(db: Session, window: dict) -> dict:
             joinedload(CallRotation.coverages).joinedload(CallCoverage.covering_surgeon),
         )
         .filter(CallRotation.date >= window["start"], CallRotation.date <= window["end"])
+        .order_by(CallRotation.date)
         .all()
     )
-    bits = []
+    lines = []
     for row in rows:
-        group = row.call_group.name if row.call_group else "call"
+        if not row.surgeon_id or not surgeon_is_visible(row.surgeon):
+            continue
+        group = row.call_group.name if row.call_group else "On-Call"
+        stamp = ""
+        if window["start"] != window["end"]:
+            stamp = f"{row.date.strftime('%a %b %-d')} · "
+        extra = ""
         active = row.active_coverage
         if active:
             covering = active.covering_surgeon or db.get(Surgeon, active.covering_surgeon_id)
             if covering and surgeon_is_visible(covering):
-                bits.append(f"{covering.full_name} covering {group} {row.date.strftime('%b %-d')}")
-            continue
-        if row.surgeon and surgeon_is_visible(row.surgeon):
-            bits.append(f"{row.surgeon.full_name} on {group} {row.date.strftime('%b %-d')}")
-    if not bits:
-        return {"ok": True, "topic": "who_call", "answer": f"No call assignments {window['label']}."}
-    return {
-        "ok": True,
-        "topic": "who_call",
-        "answer": "; ".join(bits[:20]) + ".",
-        "count": len(bits),
-    }
+                extra = f" · covering: {covering.full_name}"
+        lines.append(f"{stamp}{row.surgeon.full_name} · {group}{extra}")
+
+    heading = (
+        "Today's Coverage:"
+        if window["label"] == "today"
+        else f"Coverage {window['label']}:"
+    )
+    if not lines:
+        lines = [
+            "No On-Call Coverage — not assigned."
+            if window["label"] == "today"
+            else f"No On-Call Coverage {window['label']}."
+        ]
+
+    if window["start"] == window["end"]:
+        out_names, no_call_names = _off_lists_for_window(db, window)
+        if out_names:
+            lines.append("Out today: " + ", ".join(out_names[:12]))
+        if no_call_names:
+            lines.append("No Call Today: " + ", ".join(no_call_names[:12]))
+
+    return _talk_list(heading, lines, topic="who_call", count=len(lines))
+
+
+def _answer_no_call(db: Session, window: dict) -> dict:
+    _out_names, no_call_names = _off_lists_for_window(db, window)
+    if not no_call_names:
+        return _talk(f"Nobody is marked No Call {window['label']}.", topic="no_call", count=0)
+    heading = f"No Call Today ({len(no_call_names)}):" if window["label"] == "today" else (
+        f"No Call {window['label']} ({len(no_call_names)}):"
+    )
+    return _talk_list(heading, no_call_names, topic="no_call", count=len(no_call_names))
 
 
 def _answer_who_clinic(db: Session, window: dict) -> dict:

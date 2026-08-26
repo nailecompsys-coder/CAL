@@ -14,9 +14,13 @@ from app.models import Base, CallGroup, CallRotation, ClinicSchedule, DayOff, Lo
 # Practice English → topic. When Ask misses, add the phrase here first.
 QUESTION_CATALOG = (
     ("Who has coverage today", "who_call"),
+    ("today's coverage", "who_call"),
+    ("Todays Coverage", "who_call"),
     ("who is covering today", "who_call"),
     ("who is on call today", "who_call"),
     ("who is off today", "who_off"),
+    ("who is out today", "who_off"),
+    ("who has no call today", "no_call"),
     ("who is in clinic today", "who_clinic"),
     ("what meeting are scheduled this month", "meetings"),
     ("what's on the board today", "board"),
@@ -310,7 +314,9 @@ class GrokAskLiveBoardTest(unittest.TestCase):
             result = ask_grok(db, "Who has coverage today", today=date(2026, 8, 26))
             self.assertTrue(result["ok"], result)
             self.assertEqual(result["topic"], "who_call", result)
+            self.assertIn("Today's Coverage", result["answer"])
             self.assertIn("Chris Johnson", result["answer"])
+            self.assertIn("Winter Garden", result["answer"])
             self.assertNotIn("don't have that", result["answer"].lower())
             self.assertNotIn("I stay inside CAL", result["answer"])
         finally:

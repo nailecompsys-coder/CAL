@@ -32,7 +32,7 @@ from .models import (
     SurgicalCase,
 )
 from .off_conflict_service import aprima_patient_counts, clinic_patient_count_for_schedules
-from .practice_time import practice_today
+from .practice_time import practice_now, practice_today
 from .surgeon_visibility import surgeon_is_visible
 
 _MONTHS = {name.lower(): i for i, name in enumerate(calendar.month_name) if name}
@@ -42,11 +42,13 @@ _NOISE = re.compile(
     r"\b(how|many|much|days?|has|have|had|did|does|do|take|taken|took|off|"
     r"last|this|previous|next|month|week|year|in|at|the|a|an|and|of|to|for|"
     r"about|please|what|when|where|who|which|is|was|were|are|be|been|"
-    r"grok|bot|schedule|schedules|clinic|clinics|patient|patients|see|saw|seen|"
+    r"grok|bot|schedule|schedules|clinic|clinics|clinical|clinically|"
+    r"patient|patients|see|saw|seen|"
     r"case|cases|surgery|surgeries|surgical|call|cover|covering|on|"
     r"meeting|meetings|block|blocks|room|rooms|count|number|total|"
     r"yesterday|today|tomorrow|approved|pending|list|tell|me|show|"
-    r"phone|email|address|working|work)\b",
+    r"phone|email|address|working|work|date|dates|mtd|ytd|through|thru|"
+    r"far|currently|upto|until|question)\b",
     re.IGNORECASE,
 )
 
@@ -70,14 +72,20 @@ def ask_grok(
         return {
             "ok": False,
             "answer": (
-                "Ask me anything on the live board — time off, clinic patients, "
-                "cases, call, meetings, blocks, locations, or who is working."
+                "Ask me anything — what today or tomorrow is, who is off, "
+                "clinic patients, cases, call, meetings, or a location."
             ),
         }
 
     window = parse_window(raw, today)
     topic = parse_topic(raw)
+    if topic == "when":
+        return _answer_when(raw, today)
+    if topic == "identity":
+        return _answer_identity()
     surgeon = _surgeon_from_question(db, raw)
+    if isinstance(surgeon, dict):
+        return surgeon
     location = _location_from_question(db, raw)
     patient_hit = _patient_from_question(db, raw) if not surgeon else None
 
@@ -124,14 +132,7 @@ def ask_grok(
     if location and topic in {"clinic", "cases", "briefing", "unknown"}:
         return _answer_location_volume(db, location, window, topic)
 
-    return {
-        "ok": True,
-        "answer": (
-            "I could not tell who or what that was about. Name a doctor, a patient "
-            "on the board, a clinic, or ask who is off / on call / in clinic."
-        ),
-        "topic": "unknown",
-    }
+    return _answer_freeform(raw, today)
 
 
 def parse_window(text: str, today: date) -> dict:
@@ -173,6 +174,9 @@ def parse_window(text: str, today: date) -> dict:
         last_prev = first_this - timedelta(days=1)
         first_prev = last_prev.replace(day=1)
         return _window(first_prev, last_prev, last_prev.strftime("%B %Y"))
+    if "this month" in blob and re.search(r"\b(to date|so far|mtd|year to date)\b", blob):
+        first = today.replace(day=1)
+        return _window(first, today, f"{today.strftime('%B %Y')} to date")
     if "this month" in blob:
         first = today.replace(day=1)
         return _window(first, today, today.strftime("%B %Y"))
@@ -199,6 +203,10 @@ def parse_window(text: str, today: date) -> dict:
 
 def parse_topic(text: str) -> str:
     blob = text.lower()
+    if _is_when_question(blob):
+        return "when"
+    if _is_identity_question(blob):
+        return "identity"
     if re.search(r"\bwho\b", blob) and re.search(r"\b(off|time off)\b", blob):
         return "who_off"
     if re.search(r"\bwho\b", blob) and re.search(r"\b(call|covering)\b", blob):
@@ -217,7 +225,7 @@ def parse_topic(text: str) -> str:
         return "groups"
     if re.search(r"\b(phone|email|contact)\b", blob) and not re.search(r"\b(where is)\b", blob):
         return "contact"
-    if re.search(r"\b(patient|patients|clinic visit|saw|seen)\b", blob) and not re.search(
+    if re.search(r"\b(patient|patients|clinic visit|clinical|saw|seen)\b", blob) and not re.search(
         r"\b(time off|day off|days off)\b", blob
     ):
         return "clinic"
@@ -239,6 +247,110 @@ def parse_topic(text: str) -> str:
     if re.search(r"\b(phone|address|where is)\b", blob):
         return "location"
     return "briefing"
+
+
+def _is_when_question(blob: str) -> bool:
+    if re.search(r"\bwho\b", blob):
+        return False
+    if re.search(
+        r"\b(time off|day off|days off|clinic|patient|case|surgery|call|meeting|block)\b",
+        blob,
+    ):
+        return False
+    if re.search(r"\bwhat time\b", blob):
+        return True
+    if re.search(r"\b(what(?:'?s| is)|what day|what date)\b", blob) and re.search(
+        r"\b(today|tomorrow|yesterday|date|day|it)\b", blob
+    ):
+        return True
+    stripped = re.sub(r"[^a-z\s]", " ", blob)
+    stripped = " ".join(stripped.split())
+    return stripped in {
+        "today",
+        "tomorrow",
+        "yesterday",
+        "the date",
+        "what day",
+        "what date",
+        "whats today",
+        "whats tomorrow",
+        "whats yesterday",
+    }
+
+
+def _is_identity_question(blob: str) -> bool:
+    stripped = re.sub(r"[^a-z\s]", " ", blob)
+    stripped = " ".join(stripped.split())
+    if stripped in {"help", "help me"}:
+        return True
+    return bool(
+        re.search(
+            r"\b(who are you|what are you|what can you do|what do you do)\b",
+            blob,
+        )
+    )
+
+
+def _answer_when(text: str, today: date) -> dict:
+    blob = text.lower()
+    now = practice_now()
+    if "tomorrow" in blob:
+        day = today + timedelta(days=1)
+        word = "Tomorrow"
+    elif "yesterday" in blob:
+        day = today - timedelta(days=1)
+        word = "Yesterday"
+    else:
+        day = today
+        word = "Today"
+    pretty = f"{day.strftime('%A')}, {day.strftime('%B %-d, %Y')}"
+    if re.search(r"\btime\b", blob) and "tomorrow" not in blob and "yesterday" not in blob:
+        clock = now.strftime("%-I:%M %p").lstrip("0")
+        return {
+            "ok": True,
+            "topic": "when",
+            "answer": f"It is {clock} Eastern. Today is {pretty}.",
+        }
+    return {
+        "ok": True,
+        "topic": "when",
+        "answer": f"{word} is {pretty}.",
+    }
+
+
+def _answer_identity() -> dict:
+    return {
+        "ok": True,
+        "topic": "identity",
+        "answer": (
+            "I'm Grok-BOT. Ask me anything — what today or tomorrow is, "
+            "who is off, clinic patients, cases, call, meetings, or a location. "
+            "I stay inside CAL. Nothing leaves the app."
+        ),
+    }
+
+
+def _answer_freeform(text: str, today: date) -> dict:
+    blob = text.lower()
+    if _is_when_question(blob) or (
+        re.search(r"\b(today|tomorrow|yesterday)\b", blob)
+        and not re.search(r"\bwho\b", blob)
+        and len(blob.split()) <= 8
+    ):
+        return _answer_when(text, today)
+    if _is_identity_question(blob):
+        return _answer_identity()
+    tomorrow = today + timedelta(days=1)
+    return {
+        "ok": True,
+        "topic": "freeform",
+        "answer": (
+            f"Today is {today.strftime('%A')}, {today.strftime('%B %-d, %Y')}. "
+            f"Tomorrow is {tomorrow.strftime('%A')}, {tomorrow.strftime('%B %-d, %Y')}. "
+            "I stay inside CAL — dates, the live board, and the rules in Settings. "
+            "Name a doctor, a clinic, or ask who is off / on call / in clinic."
+        ),
+    }
 
 
 def collect_surgeon_facts(db: Session, surgeon: Surgeon, start: date, end: date) -> dict:
@@ -348,13 +460,57 @@ def collect_surgeon_facts(db: Session, surgeon: Surgeon, start: date, end: date)
     }
 
 
-def _surgeon_from_question(db: Session, question: str) -> Surgeon | None:
+def _surgeon_from_question(db: Session, question: str):
     cleaned = _NOISE.sub(" ", question)
     cleaned = re.sub(r"[^A-Za-z\s'\-]", " ", cleaned)
     cleaned = " ".join(cleaned.split())
-    if not cleaned:
-        return None
-    return resolve_surgeon(db, cleaned)
+    if cleaned:
+        hit = resolve_surgeon(db, cleaned)
+        if hit:
+            return hit
+    tokens = [
+        tok
+        for tok in re.findall(r"[A-Za-z][A-Za-z'\-]{1,}", cleaned or question or "")
+        if tok.lower() not in {"so", "far"}
+    ]
+    if tokens:
+        hit = resolve_surgeon(db, " ".join(tokens))
+        if hit:
+            return hit
+    surgeons = [
+        row
+        for row in db.query(Surgeon).filter(Surgeon.is_active.is_(True)).all()
+        if surgeon_is_visible(row)
+    ]
+    first_hits: list[Surgeon] = []
+    last_hits: list[Surgeon] = []
+    initial_hits: list[Surgeon] = []
+    prefix_hits: list[Surgeon] = []
+    for tok in tokens:
+        key = tok.lower()
+        for row in surgeons:
+            first = (row.first_name or "").split()[0].lower() if row.first_name else ""
+            last = (row.last_name or "").split()[-1].lower() if row.last_name else ""
+            initials = (row.initials or "").lower()
+            if first == key and row not in first_hits:
+                first_hits.append(row)
+            elif first.startswith(key) and len(key) >= 4 and row not in prefix_hits:
+                prefix_hits.append(row)
+            if last == key and row not in last_hits:
+                last_hits.append(row)
+            if len(key) <= 3 and initials == key and row not in initial_hits:
+                initial_hits.append(row)
+    for group in (last_hits, first_hits, prefix_hits, initial_hits):
+        if len(group) == 1:
+            return group[0]
+        if len(group) > 1:
+            names = "; ".join(row.full_name for row in group[:8])
+            return {
+                "ok": True,
+                "topic": "ambiguous",
+                "answer": f"Which one: {names}?",
+            }
+    return None
 
 
 def _location_from_question(db: Session, question: str) -> Location | None:

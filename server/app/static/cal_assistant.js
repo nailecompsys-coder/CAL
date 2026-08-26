@@ -9,8 +9,8 @@
  * No React. No build step. Jinja2 + plain JS only.
  * Uses Clinical Trust CSS tokens from input.css :root.
  *
- * Lives in the admin sidebar footer (#grok-dock), on the v2.0 / Backup line.
- * Ask him is the field next to the capsule — not a floating off-screen bar.
+ * Lives in the admin sidebar under Settings, above the v2.0 / Backup line.
+ * Large Ask Grok-BOT field — free-form plus the live board.
  *
  * Notif focus: clicking any [data-cal-notif] card on the dashboard focuses
  *   that issue — eyes track it, debris fires briefly, bubble restates it.
@@ -237,21 +237,33 @@
       '}',
       '#cal-assist.cal-docked{',
       '  position:relative;top:auto;right:auto;left:auto;',
-      '  width:100%;align-items:stretch;gap:.4rem;',
+      '  width:100%;align-items:stretch;gap:.45rem;',
       '  pointer-events:all;z-index:2;',
       '}',
       '#cal-assist.cal-docked .cal-dock-row{',
-      '  display:flex;align-items:center;gap:.4rem;width:100%;',
+      '  display:flex;flex-direction:column;align-items:stretch;gap:.45rem;width:100%;',
       '}',
       '#cal-assist.cal-docked #cal-btn{',
-      '  width:52px;height:40px;flex-shrink:0;cursor:pointer;',
+      '  width:72px;height:56px;flex-shrink:0;cursor:pointer;align-self:center;',
       '}',
-      '#cal-assist.cal-docked #cal-orbit-svg{width:52px;height:40px;}',
-      '#cal-assist.cal-docked #cal-yaw{left:2px;top:4px;width:48px;height:32px;}',
-      '#cal-assist.cal-docked #cal-svg{width:48px;height:32px;}',
-      '#cal-assist.cal-docked #cal-ask{width:auto;flex:1;min-width:0;}',
-      '#cal-assist.cal-docked #cal-ask-label{display:none;}',
-      '#cal-assist.cal-docked #cal-ask-form{box-shadow:none;}',
+      '#cal-assist.cal-docked #cal-orbit-svg{width:72px;height:56px;}',
+      '#cal-assist.cal-docked #cal-yaw{left:6px;top:10px;width:60px;height:36px;}',
+      '#cal-assist.cal-docked #cal-svg{width:60px;height:36px;}',
+      '#cal-assist.cal-docked #cal-ask{width:100%;flex:1;min-width:0;}',
+      '#cal-assist.cal-docked #cal-ask-label{',
+      '  display:block;margin:0 0 .3rem .1rem;',
+      '  font-size:.68rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;',
+      '}',
+      '#cal-assist.cal-docked #cal-ask-form{',
+      '  flex-direction:column;align-items:stretch;gap:.4rem;',
+      '  padding:.45rem;',
+      '  box-shadow:none;',
+      '}',
+      '#cal-assist.cal-docked #cal-ask-input{',
+      '  font-size:.875rem;line-height:1.4;min-height:4.75rem;width:100%;',
+      '  resize:vertical;padding:.2rem .15rem;',
+      '}',
+      '#cal-assist.cal-docked #cal-ask-go{width:100%;padding:.55rem .65rem;font-size:.72rem;}',
       '#cal-assist.cal-docked #cal-bubble{max-width:none;width:100%;}',
     ].join('\n');
     document.head.appendChild(s);
@@ -268,10 +280,10 @@
         '<div id="cal-yaw">' + buildFaceSVG() + '</div>' +
         '</button>' +
         '<div id="cal-ask">' +
-          '<span id="cal-ask-label">Ask him</span>' +
+          '<span id="cal-ask-label">Ask Grok-BOT</span>' +
           '<form id="cal-ask-form" autocomplete="off">' +
-            '<input id="cal-ask-input" type="text" maxlength="240" placeholder="Ask him\u2026" />' +
-            '<button id="cal-ask-go" type="submit">Ask him</button>' +
+            '<textarea id="cal-ask-input" rows="3" maxlength="500" placeholder="Ask Grok-BOT anything\u2026"></textarea>' +
+            '<button id="cal-ask-go" type="submit">Ask Grok-BOT</button>' +
           '</form>' +
         '</div>' +
       '</div>';
@@ -438,11 +450,20 @@
         var input = document.getElementById('cal-ask-input');
         var question = input ? String(input.value || '').trim() : '';
         if (!question) {
-          showAskBubble('Ask me about time off, clinic patients, cases, call, meetings, or a location.');
+          showAskBubble('Ask me anything — what today or tomorrow is, who is off, clinic, cases, call, or a location.');
           return;
         }
         askGrok(question);
       });
+      var askInput = document.getElementById('cal-ask-input');
+      if (askInput) {
+        askInput.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            askForm.requestSubmit();
+          }
+        });
+      }
     }
 
     document.addEventListener('click', onNotifCardClick);
@@ -571,7 +592,7 @@
     })
       .then(function (r) { return r.ok ? r.json() : { answer: 'I could not reach the live board.' }; })
       .then(function (data) {
-        showAskBubble((data && data.answer) || 'I could not tell who or what that was about.');
+        showAskBubble((data && data.answer) || 'I could not reach the live board.');
       })
       .catch(function () { showAskBubble('I could not reach the live board.'); })
       .then(function () { setThinking(false); });

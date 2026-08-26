@@ -33,6 +33,24 @@ class GrokAskWindowTest(unittest.TestCase):
             "clinic",
         )
 
+    def test_what_is_today_is_when(self):
+        self.assertEqual(parse_topic("what is today"), "when")
+
+    def test_this_month_to_date_is_first_through_today(self):
+        window = parse_window(
+            "how many clinical patient has Alex seen this month to date",
+            date(2026, 8, 26),
+        )
+        self.assertEqual(window["start"], date(2026, 8, 1))
+        self.assertEqual(window["end"], date(2026, 8, 26))
+        self.assertEqual(window["label"], "August 2026 to date")
+
+    def test_clinical_patient_is_clinic(self):
+        self.assertEqual(
+            parse_topic("how many clinical patient has Alex seen this month to date"),
+            "clinic",
+        )
+
 
 class GrokAskLiveBoardTest(unittest.TestCase):
     def setUp(self):
@@ -126,5 +144,84 @@ class GrokAskLiveBoardTest(unittest.TestCase):
             result = ask_grok(db, "Who is off today?", today=date(2026, 8, 26))
             self.assertEqual(result["topic"], "who_off")
             self.assertIn("Alex Schroeder", result["answer"])
+        finally:
+            db.close()
+
+    def test_what_is_today(self):
+        db = self.Session()
+        try:
+            result = ask_grok(db, "what is today", today=date(2026, 8, 26))
+            self.assertEqual(result["topic"], "when")
+            self.assertIn("Wednesday", result["answer"])
+            self.assertIn("August 26, 2026", result["answer"])
+        finally:
+            db.close()
+
+    def test_what_is_tomorrow(self):
+        db = self.Session()
+        try:
+            result = ask_grok(db, "What is tomorrow?", today=date(2026, 8, 26))
+            self.assertEqual(result["topic"], "when")
+            self.assertIn("Thursday", result["answer"])
+            self.assertIn("August 27, 2026", result["answer"])
+        finally:
+            db.close()
+
+    def test_freeform_does_not_require_a_doctor(self):
+        db = self.Session()
+        try:
+            result = ask_grok(db, "hello", today=date(2026, 8, 26))
+            self.assertTrue(result["ok"])
+            self.assertNotIn("could not tell who", result["answer"].lower())
+            self.assertIn("Wednesday", result["answer"])
+        finally:
+            db.close()
+
+    def test_alex_clinical_patients_this_month_to_date(self):
+        db = self.Session()
+        try:
+            alex = Surgeon(
+                first_name="Alex", last_name="Schroeder",
+                email="as@example.com", is_active=True, staff_type="physician",
+            )
+            loc = Location(name="Health Park", abbreviation="HP-CL", location_type="clinic", is_active=True)
+            db.add_all([alex, loc])
+            db.flush()
+            db.add(ClinicSchedule(
+                surgeon_id=alex.id,
+                location_id=loc.id,
+                date=date(2026, 8, 4),
+                session="am",
+                assignment_type="assigned",
+                notes="Desk fax · 09:00 SMITH, JANE; 09:15 DOE, JOHN",
+            ))
+            db.add(ClinicSchedule(
+                surgeon_id=alex.id,
+                location_id=loc.id,
+                date=date(2026, 8, 18),
+                session="am",
+                assignment_type="assigned",
+                notes="Desk fax · 09:00 LEE, PAT",
+            ))
+            db.add(ClinicSchedule(
+                surgeon_id=alex.id,
+                location_id=loc.id,
+                date=date(2026, 7, 8),
+                session="am",
+                assignment_type="assigned",
+                notes="Desk fax · 09:00 OLD, PATIENT",
+            ))
+            db.commit()
+            result = ask_grok(
+                db,
+                "how many clinical patient has Alex seen this month to date",
+                today=date(2026, 8, 26),
+            )
+            self.assertEqual(result["topic"], "clinic", result)
+            self.assertEqual(result["count"], 3, result)
+            self.assertIn("Alex Schroeder", result["answer"])
+            self.assertIn("3 clinic patients", result["answer"])
+            self.assertIn("to date", result["answer"])
+            self.assertNotIn("could not tell who", result["answer"].lower())
         finally:
             db.close()

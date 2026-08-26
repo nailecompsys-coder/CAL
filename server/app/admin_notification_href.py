@@ -48,6 +48,7 @@ def clinic_schedule_fix_href(
     procedure: str | None = None,
     site: str | None = None,
     room: str | None = None,
+    patient_dob: str | None = None,
 ) -> str:
     """Clinic / OR cell for this surgeon and date, with the matching edit modal."""
     params: dict[str, str] = {
@@ -76,6 +77,8 @@ def clinic_schedule_fix_href(
         params["site"] = str(site)
     if room:
         params["room"] = str(room)
+    if patient_dob:
+        params["dob"] = str(patient_dob)
     return "/admin/clinic-schedule?" + urlencode(params)
 
 
@@ -127,6 +130,7 @@ def _ingest_href(payload: dict) -> str:
         procedure=procedure,
         site=site,
         room=room,
+        patient_dob=payload.get("patientDob") or payload.get("patient_dob"),
     )
 
 

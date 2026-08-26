@@ -1,4 +1,5 @@
 """Tests for Desk → CAL surgeon-schedule ingest."""
+import json
 import os
 import unittest
 from datetime import date, time
@@ -11,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.ingest_resolve import resolve_clinic_location, resolve_or_location, resolve_surgeon
 from app.ingest_schedule_service import _block_window_for_cases, ingest_surgeon_schedule
-from app.models import Base, ClinicSchedule, CoSurgeonPair, Location, ORBlockAssignment, ORBlockInstance, Surgeon, SurgicalCase
+from app.models import AdminNotification, AdminUser, Base, ClinicSchedule, CoSurgeonPair, Location, ORBlockAssignment, ORBlockInstance, Surgeon, SurgicalCase
 
 
 class IngestScheduleTest(unittest.TestCase):
@@ -628,8 +629,11 @@ class IngestScheduleTest(unittest.TestCase):
         self.assertEqual(result["cases_unchanged"], 1)
         self.assertEqual(self.db.query(SurgicalCase).count(), 1)
 
-    def test_dob_date_is_not_a_missing_time_card(self):
-        """Wilkinson 07-27-65 is a DOB. Do not park it as a 1965 OR case."""
+    def test_dob_date_keeps_birthday_and_asks_for_case_clock(self):
+        """Wilkinson 07-27-65 is a DOB. Keep it as DOB and flag missing case date/time."""
+        admin = AdminUser(username="don", email="don@example.com", password_hash="x", is_active=True)
+        self.db.add(admin)
+        self.db.commit()
         result = ingest_surgeon_schedule(
             self.db,
             source_fax_id=102,
@@ -661,13 +665,62 @@ class IngestScheduleTest(unittest.TestCase):
         )
         self.assertTrue(result["ok"], result)
         reasons = [row["reason"] for row in result["corrections"]]
-        self.assertNotIn("missing_time", reasons)
+        self.assertIn("missing_time", reasons)
+        wilkinson = next(row for row in result["corrections"] if "Wilkinson" in (row.get("body") or ""))
+        self.assertIn("DOB 07-27-65", wilkinson["body"])
+        self.assertIn("case date or time missing", wilkinson["body"])
+        self.assertNotIn("1965-07-27", wilkinson.get("date") or "")
+        self.assertEqual(wilkinson["date"], "2026-08-25")
         self.assertGreaterEqual(result["skipped_dates_count"], 1)
         self.assertEqual(result["skipped_dates"][0]["rejected_date"], "1965-07-27")
         rows = self.db.query(SurgicalCase).filter(SurgicalCase.status != "cancelled").all()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].date, date(2026, 8, 27))
         self.assertIn("Madden", rows[0].patient_name)
+        note = self.db.query(AdminNotification).filter(
+            AdminNotification.kind == "ingest_correction"
+        ).first()
+        self.assertIsNotNone(note)
+        payload = json.loads(note.payload)
+        self.assertEqual(payload["patientDob"], "1965-07-27")
+        self.assertEqual(payload["date"], "2026-08-25")
+        self.assertIn("dob=1965-07-27", payload.get("href") or "")
+
+    def test_fax_case_date_with_dob_flags_missing_clock(self):
+        """After reading fax #102: Wilkinson is 8/24/2026, DOB 7/27/65, time OCR junk."""
+        admin = AdminUser(username="shannon", email="shannon@example.com", password_hash="x", is_active=True)
+        self.db.add(admin)
+        self.db.commit()
+        result = ingest_surgeon_schedule(
+            self.db,
+            source_fax_id=102,
+            surgeons=[{
+                "surgeon_name": "Jorge Luis Florin, MD",
+                "start_date": "2026-08-24",
+                "end_date": "2026-08-28",
+                "or_block": {
+                    "session": "am",
+                    "room": "APK S03",
+                    "cases": [{
+                        "case_date": "2026-08-24",
+                        "patient_dob": "1965-07-27",
+                        "start_time": None,
+                        "patient_name": "Wilkinson, Llyod",
+                        "procedure": "ROBOTIC RIGHT INGUINAL HERNIA REPAIR WITH MESH",
+                        "room": "APK S03",
+                    }],
+                },
+            }],
+        )
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["skipped_dates_count"], 0)
+        self.assertEqual(self.db.query(SurgicalCase).count(), 0)
+        note = self.db.query(AdminNotification).one()
+        payload = json.loads(note.payload)
+        self.assertEqual(payload["reason"], "missing_time")
+        self.assertEqual(payload["date"], "2026-08-24")
+        self.assertEqual(payload["patientDob"], "1965-07-27")
+        self.assertIn("no start time", note.body)
 
     def test_ocr_future_year_snaps_into_the_fax_week(self):
         result = ingest_surgeon_schedule(

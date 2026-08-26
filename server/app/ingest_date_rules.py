@@ -135,6 +135,30 @@ def date_allowed_for_fax(
     return None
 
 
+def looks_like_patient_dob(
+    day: date | None,
+    window: tuple[date, date] | None,
+    *,
+    today: date | None = None,
+) -> bool:
+    """True when a parsed 'case date' is a birthday, not a surgery day.
+
+    07-27-65 → 1965-07-27 is a DOB. 2028-08-27 is OCR year noise, not a DOB.
+    """
+    if day is None:
+        return False
+    today = today or practice_today()
+    if window:
+        return day.year < min(window[0].year, window[1].year) - 1
+    return day.year < today.year - 1
+
+
+def format_dob_display(day: date | None) -> str:
+    if day is None:
+        return ""
+    return day.strftime("%m-%d-%y")
+
+
 def desk_fax_id_from_notes(notes: str | None) -> int | None:
     match = _DESK_FAX_RE.search(notes or "")
     if not match:

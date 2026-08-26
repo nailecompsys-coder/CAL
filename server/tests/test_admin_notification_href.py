@@ -56,6 +56,18 @@ class AdminNotificationHrefTest(unittest.TestCase):
         self.assertIn("patient=", href)
         self.assertIn("week_offset=2", href)
 
+    def test_missing_time_href_includes_dob_from_fax(self):
+        with patch("app.admin_notification_href.week_offset_for_date", return_value=0):
+            href = admin_notification_href("ingest_correction", {
+                "reason": "missing_time",
+                "surgeonId": 12,
+                "date": "2026-08-24",
+                "patientName": "Wilkinson, Llyod",
+                "patientDob": "1965-07-27",
+            })
+        self.assertIn("dob=1965-07-27", href)
+        self.assertIn("focus_date=2026-08-24", href)
+
     def test_clinic_location_opens_that_cell_not_locations_admin(self):
         with patch("app.admin_notification_href.week_offset_for_date", return_value=0):
             href = admin_notification_href("ingest_correction", {

@@ -491,7 +491,7 @@
       </div>
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1">DOB</label>
-        <input type="text" name="patient_dob" placeholder="1/10/1958" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        <input type="text" name="patient_dob" id="add-patient-dob" placeholder="1/10/1958" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
       </div>
       <div>
         <label class="block text-xs font-semibold text-slate-600 mb-1">Phone</label>
@@ -1140,12 +1140,17 @@ document.getElementById('surgical-edit-modal').addEventListener('click', functio
     if (typeof openCaseAdd !== 'function') return;
     openCaseAdd(surgeonId, focusDate, surgeonName, dateLabel);
     var addBanner = document.getElementById('add-fix-banner');
+    var dob = params.get('dob') || '';
     if (addBanner) {
-      addBanner.textContent = 'Fax row has no start time. Fill it in and save.';
+      addBanner.textContent = dob
+        ? ('Fax row is missing the case date or start time. DOB on the fax is ' + dob + '. Fill in date/time and save.')
+        : 'Fax row has no start time. Fill it in and save.';
       addBanner.classList.remove('hidden');
     }
     var nameEl = document.getElementById('add-patient-name');
     if (nameEl && patient) nameEl.value = patient;
+    var dobEl = document.getElementById('add-patient-dob');
+    if (dobEl && dob) dobEl.value = dob;
     var procEl = document.getElementById('add-procedure');
     if (procEl && params.get('procedure')) procEl.value = params.get('procedure');
     var roomEl = document.getElementById('add-room-text');

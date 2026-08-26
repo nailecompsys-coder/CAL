@@ -9,6 +9,7 @@ os.environ.setdefault("SECRET_KEY", "test-secret")
 from app.ingest_date_rules import (
     date_allowed_for_fax,
     infer_fax_group_window,
+    looks_like_patient_dob,
     plausible_schedule_date,
     snap_date_into_fax_window,
 )
@@ -37,6 +38,8 @@ class IngestDateRulesTest(unittest.TestCase):
         window = infer_fax_group_window(self.payload, today=self.today)
         self.assertIsNone(date_allowed_for_fax(date(1965, 7, 27), window, today=self.today))
         self.assertFalse(plausible_schedule_date(date(1965, 7, 27), self.today))
+        self.assertTrue(looks_like_patient_dob(date(1965, 7, 27), window, today=self.today))
+        self.assertFalse(looks_like_patient_dob(date(2028, 8, 27), window, today=self.today))
 
     def test_ocr_year_snaps_into_fax_week(self):
         window = infer_fax_group_window(self.payload, today=self.today)

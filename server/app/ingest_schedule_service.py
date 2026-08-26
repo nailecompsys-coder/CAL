@@ -25,7 +25,13 @@ from sqlalchemy.orm import Session
 
 from .admin_notification_href import admin_notification_href, clinic_schedule_fix_href
 from .admin_surgical_schedule_service import add_surgical_case
-from .ingest_date_rules import date_allowed_for_fax, infer_fax_group_window, parse_iso_date
+from .ingest_date_rules import (
+    date_allowed_for_fax,
+    format_dob_display,
+    infer_fax_group_window,
+    looks_like_patient_dob,
+    parse_iso_date,
+)
 from .ingest_resolve import resolve_clinic_location, resolve_or_location, resolve_surgeon
 from .models import ClinicSchedule, CoSurgeonPair, ORBlockAssignment, ORBlockInstance, SurgicalCase
 from .or_block_service import (
@@ -138,6 +144,7 @@ def _queue_ingest_correction(
     procedure: str | None = None,
     site: str | None = None,
     room: str | None = None,
+    patient_dob: str | None = None,
 ) -> dict[str, Any]:
     """Park missing Desk fields on the admin portal instead of failing the fax."""
     fingerprint = _correction_fingerprint(
@@ -157,6 +164,7 @@ def _queue_ingest_correction(
         "surgeonId": surgeon_id,
         "date": day.isoformat() if day else None,
         "patientName": patient_name,
+        "patientDob": patient_dob,
         "caseId": case_id,
         "extra": extra,
         "procedure": procedure,
@@ -216,6 +224,7 @@ def _clinic_href(
     procedure: str | None = None,
     site: str | None = None,
     room: str | None = None,
+    patient_dob: str | None = None,
 ) -> str:
     return clinic_schedule_fix_href(
         day=day,
@@ -226,6 +235,72 @@ def _clinic_href(
         procedure=procedure,
         site=site,
         room=room,
+        patient_dob=patient_dob,
+    )
+
+
+def _patient_dob_value(
+    case: dict[str, Any],
+    raw_day: date | None,
+    fax_window: tuple[date, date] | None,
+) -> str | None:
+    explicit = str(case.get("patient_dob") or "").strip()
+    if explicit:
+        return explicit[:32]
+    if looks_like_patient_dob(raw_day, fax_window):
+        return raw_day.isoformat()
+    return None
+
+
+def _queue_rejected_case_date(
+    db: Session,
+    *,
+    corrections: list[dict[str, Any]],
+    surgeon: Any,
+    case: dict[str, Any],
+    raw_day: date,
+    fax_window: tuple[date, date] | None,
+    source_fax_id: int | None,
+    room: str | None = None,
+) -> None:
+    """DOB used as a surgery date: keep the birthday, ask for the real case date/time."""
+    patient = (case.get("patient_name") or "Unknown").strip()
+    procedure = (case.get("procedure") or "").strip()
+    room_text = (case.get("room") or room or "").strip()
+    patient_dob = _patient_dob_value(case, raw_day, fax_window)
+    board_day = fax_window[0] if fax_window else None
+    dob_bit = ""
+    if looks_like_patient_dob(raw_day, fax_window):
+        dob_bit = f" · DOB {format_dob_display(raw_day)}"
+    elif patient_dob:
+        dob_bit = f" · DOB {patient_dob}"
+    _queue_ingest_correction(
+        db,
+        corrections=corrections,
+        reason="missing_time",
+        title="Desk ingest · case date or time missing",
+        body=(
+            f"{surgeon.full_name}{dob_bit} · {patient} · "
+            f"case date or time missing on fax"
+            + (f" · {procedure[:60]}" if procedure else "")
+        ),
+        href=_clinic_href(
+            board_day,
+            surgeon.id,
+            reason="missing_time",
+            patient_name=patient,
+            procedure=procedure,
+            room=room_text,
+            patient_dob=patient_dob,
+        ),
+        source_fax_id=source_fax_id,
+        surgeon_id=surgeon.id,
+        day=board_day,
+        patient_name=patient,
+        extra=procedure,
+        procedure=procedure,
+        room=room_text,
+        patient_dob=patient_dob,
     )
 
 
@@ -731,11 +806,13 @@ def _upsert_surgical_case(
     notify: bool,
     day_candidates: list[SurgicalCase],
     claimed_ids: set[int],
+    patient_dob: str | None = None,
 ) -> dict[str, Any]:
     """Create / update / ignore. Identity = surgeon + date + patient (not time)."""
     incoming_name = patient_name.strip()
     incoming_proc = (procedure or "TBD").strip() or "TBD"
     incoming_room = (room_text or "").strip() or None
+    incoming_dob = (patient_dob or "").strip() or None
 
     existing = _find_matching_case(
         day_candidates,
@@ -782,6 +859,9 @@ def _upsert_surgical_case(
             # something clinical also moved.
         if or_block_instance_id and existing.or_block_instance_id != or_block_instance_id:
             existing.or_block_instance_id = or_block_instance_id
+            changed = True
+        if incoming_dob and not (existing.patient_dob or "").strip():
+            existing.patient_dob = incoming_dob
             changed = True
         if changed:
             # Only rewrite source notes when the row actually moved.
@@ -871,7 +951,7 @@ def _upsert_surgical_case(
         "start_time": start_time,
         "end_time": None,
         "patient_name": incoming_name,
-        "patient_dob": None,
+        "patient_dob": incoming_dob,
         "patient_phone": None,
         "procedure": incoming_proc,
         "location_id": location_id,
@@ -1076,19 +1156,34 @@ def ingest_surgeon_schedule(
 
         by_date: dict[date, list[dict]] = defaultdict(list)
         for case in cases:
-            raw_day = _parse_date(case.get("case_date") or block.get("start_date"))
+            raw_day = _parse_date(case.get("case_date"))
+            explicit_dob = (case.get("patient_dob") or "").strip()
+            if raw_day is None and not explicit_dob:
+                raw_day = _parse_date(block.get("start_date"))
             day = date_allowed_for_fax(raw_day, fax_window, today=practice_today())
-            if raw_day and day is None:
-                skipped_dates.append({
-                    "rule": "INGEST_DATE_IN_FAX_WINDOW",
-                    "patient_name": case.get("patient_name"),
-                    "rejected_date": raw_day.isoformat(),
-                    "window": (
-                        [fax_window[0].isoformat(), fax_window[1].isoformat()]
-                        if fax_window
-                        else None
-                    ),
-                })
+            if (raw_day and day is None) or (raw_day is None and explicit_dob):
+                rejected = raw_day or parse_iso_date(explicit_dob)
+                if rejected:
+                    skipped_dates.append({
+                        "rule": "INGEST_DATE_IN_FAX_WINDOW",
+                        "patient_name": case.get("patient_name"),
+                        "rejected_date": rejected.isoformat(),
+                        "window": (
+                            [fax_window[0].isoformat(), fax_window[1].isoformat()]
+                            if fax_window
+                            else None
+                        ),
+                    })
+                    _queue_rejected_case_date(
+                        db,
+                        corrections=corrections,
+                        surgeon=surgeon,
+                        case=case,
+                        raw_day=rejected,
+                        fax_window=fax_window,
+                        source_fax_id=source_fax_id,
+                        room=or_block.get("room") or (or_block.get("rooms") or [None])[0],
+                    )
                 continue
             if not day or not (case.get("patient_name") or "").strip():
                 errors.append({
@@ -1187,6 +1282,11 @@ def ingest_surgeon_schedule(
                 if _parse_time(case.get("start_time")):
                     timed.append(case)
                 else:
+                    patient_dob = _patient_dob_value(
+                        case,
+                        _parse_date(case.get("patient_dob") or case.get("case_date")),
+                        fax_window,
+                    )
                     _queue_ingest_correction(
                         db,
                         corrections=corrections,
@@ -1205,6 +1305,7 @@ def ingest_surgeon_schedule(
                             patient_name=case.get("patient_name"),
                             procedure=case.get("procedure") or "",
                             room=case.get("room") or room or "",
+                            patient_dob=patient_dob,
                         ),
                         source_fax_id=source_fax_id,
                         surgeon_id=surgeon.id,
@@ -1213,6 +1314,7 @@ def ingest_surgeon_schedule(
                         extra=case.get("procedure") or "",
                         procedure=case.get("procedure") or "",
                         room=case.get("room") or room or "",
+                        patient_dob=patient_dob,
                     )
             if not timed:
                 continue
@@ -1306,6 +1408,7 @@ def ingest_surgeon_schedule(
                         notify=notify,
                         day_candidates=day_candidates,
                         claimed_ids=claimed_ids,
+                        patient_dob=case.get("patient_dob"),
                     )
                     case_results.append(result)
                 case_results.extend(
@@ -1356,6 +1459,16 @@ def ingest_surgeon_schedule(
                         else None
                     ),
                 })
+                _queue_rejected_case_date(
+                    db,
+                    corrections=corrections,
+                    surgeon=surgeon,
+                    case=slot,
+                    raw_day=raw_day,
+                    fax_window=fax_window,
+                    source_fax_id=source_fax_id,
+                    room=slot.get("site_raw") or site,
+                )
                 continue
             if day:
                 slot["case_date"] = day.isoformat()

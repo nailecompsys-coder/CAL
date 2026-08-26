@@ -67,6 +67,7 @@ class OrCaseIn(BaseModel):
     patient_name: str
     procedure: str = ""
     room: str = ""
+    patient_dob: str = ""
 
 
 class OrBlockIn(BaseModel):

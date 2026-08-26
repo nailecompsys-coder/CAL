@@ -209,6 +209,37 @@ class IngestCardRereadTest(unittest.TestCase):
             db.close()
             engine.dispose()
 
+    def test_keeps_missing_time_card_when_dob_is_payload_not_case_date(self):
+        engine, db, admin = self._db()
+        try:
+            note = AdminNotification(
+                admin_user_id=admin.id,
+                title="Desk ingest · case date or time missing",
+                body="Christopher Johnson · DOB 07-27-65 · Wilkinson, Llyod · case date or time missing on fax",
+                kind="ingest_correction",
+                payload=json.dumps({
+                    "reason": "missing_time",
+                    "date": "2026-08-24",
+                    "patientName": "Wilkinson, Llyod",
+                    "patientDob": "1965-07-27",
+                    "surgeonId": 12,
+                    "sourceFaxId": 102,
+                    "caseId": None,
+                }),
+            )
+            db.add(note)
+            db.commit()
+            note_id = note.id
+            self.assertEqual(reconcile_ingest_correction_notifications(db, admin.id), 0)
+            kept = db.get(AdminNotification, note_id)
+            self.assertIsNotNone(kept)
+            payload = json.loads(kept.payload)
+            self.assertEqual(payload["patientDob"], "1965-07-27")
+            self.assertEqual(payload["date"], "2026-08-24")
+        finally:
+            db.close()
+            engine.dispose()
+
     def test_drops_missing_time_when_patient_already_has_a_clock(self):
         engine, db, admin = self._db()
         try:

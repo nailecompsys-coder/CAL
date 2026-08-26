@@ -628,6 +628,96 @@ class IngestScheduleTest(unittest.TestCase):
         self.assertEqual(result["cases_unchanged"], 1)
         self.assertEqual(self.db.query(SurgicalCase).count(), 1)
 
+    def test_dob_date_is_not_a_missing_time_card(self):
+        """Wilkinson 07-27-65 is a DOB. Do not park it as a 1965 OR case."""
+        result = ingest_surgeon_schedule(
+            self.db,
+            source_fax_id=102,
+            surgeons=[{
+                "surgeon_name": "Jorge Luis Florin, MD",
+                "start_date": "2026-08-25",
+                "end_date": "2026-08-28",
+                "or_block": {
+                    "session": "am",
+                    "room": "APK S03",
+                    "cases": [
+                        {
+                            "case_date": "1965-07-27",
+                            "start_time": None,
+                            "patient_name": "Wilkinson, Llyod",
+                            "procedure": "ROBOTIC RIGHT INGUINAL HERNIA REPAIR WITH MESH",
+                            "room": "APK S03",
+                        },
+                        {
+                            "case_date": "2026-08-27",
+                            "start_time": "13:00",
+                            "patient_name": "Madden, David",
+                            "procedure": "ROBOTIC CHOLECYSTECTOMY",
+                            "room": "APK S03",
+                        },
+                    ],
+                },
+            }],
+        )
+        self.assertTrue(result["ok"], result)
+        reasons = [row["reason"] for row in result["corrections"]]
+        self.assertNotIn("missing_time", reasons)
+        self.assertGreaterEqual(result["skipped_dates_count"], 1)
+        self.assertEqual(result["skipped_dates"][0]["rejected_date"], "1965-07-27")
+        rows = self.db.query(SurgicalCase).filter(SurgicalCase.status != "cancelled").all()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].date, date(2026, 8, 27))
+        self.assertIn("Madden", rows[0].patient_name)
+
+    def test_ocr_future_year_snaps_into_the_fax_week(self):
+        result = ingest_surgeon_schedule(
+            self.db,
+            source_fax_id=102,
+            surgeons=self._florin_payload(
+                [{
+                    "case_date": "2028-08-27",
+                    "start_time": "07:00",
+                    "patient_name": "Ferber, Robert",
+                    "procedure": "LAPAROSCOPY",
+                    "room": "APK S03",
+                }],
+                start="2026-08-24",
+                end="2026-08-28",
+            ),
+        )
+        self.assertTrue(result["ok"], result)
+        row = self.db.query(SurgicalCase).one()
+        self.assertEqual(row.date, date(2026, 8, 27))
+
+    def test_min_fax_site_maps_to_minneola_clinic(self):
+        mn = Location(
+            name="Minneola Clinic", abbreviation="MN-OV",
+            location_type="clinic", color="#DDF2FC", is_active=True,
+        )
+        self.db.add(mn)
+        self.db.commit()
+        self.assertEqual(
+            resolve_clinic_location(self.db, "MIN").abbreviation,
+            "MN-OV",
+        )
+        result = ingest_surgeon_schedule(
+            self.db,
+            source_fax_id=102,
+            surgeons=[{
+                "surgeon_name": "Jorge Luis Florin, MD",
+                "start_date": "2026-08-25",
+                "clinic_rotation": {
+                    "session": "pm",
+                    "site_raw": "MIN",
+                    "slots": [{"case_date": "2026-08-25", "patient_name": "X"}],
+                },
+            }],
+        )
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["corrections_count"], 0)
+        clinic = self.db.query(ClinicSchedule).one()
+        self.assertEqual(clinic.location_id, mn.id)
+
 
 if __name__ == "__main__":
     unittest.main()

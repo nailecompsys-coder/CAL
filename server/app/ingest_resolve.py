@@ -299,6 +299,10 @@ def resolve_clinic_location(
     if not raw:
         return None
     compact = raw.replace(" ", "")
+    if compact in {"MIN", "MN"}:
+        loc = _loc_by_abbr(db, "MN-OV")
+        if loc and _is_clinic_location(loc):
+            return loc
     # Map Advent fax site codes → live CAL clinic abbreviations (*-OV).
     code_map = (
         ("MGALTGS", "AL-OV"),
@@ -309,6 +313,7 @@ def resolve_clinic_location(
         ("APOPKA", "AP-OV"),
         ("APK", "AP-OV"),
         ("MINNEOLA", "MN-OV"),
+        ("MN-OV", "MN-OV"),
         ("LAKEMARY", "LM-OV"),
         ("ALTAMONTE", "AL-OV"),
         ("CLERMONT", "CL-OV"),

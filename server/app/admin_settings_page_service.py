@@ -212,9 +212,13 @@ def reconcile_ingest_correction_notifications(
     db: Session,
     admin_user_id: int | None = None,
 ) -> int:
-    """Drop Desk ingest-correction cards once Shannon (or a later fax) fixed the field."""
+    """Re-read ingest cards. Drop ones that were never real work (DOB dates, already fixed)."""
+    from .ingest_date_rules import parse_iso_date, plausible_schedule_date
+    from .ingest_resolve import resolve_clinic_location
     from .models import SurgicalCase
+    from .practice_time import practice_today
 
+    today = practice_today()
     q = db.query(AdminNotification).filter(AdminNotification.kind == "ingest_correction")
     if admin_user_id is not None:
         q = q.filter(AdminNotification.admin_user_id == admin_user_id)
@@ -230,6 +234,28 @@ def reconcile_ingest_correction_notifications(
             db.delete(row)
             removed += 1
             continue
+        day = parse_iso_date(payload.get("date"))
+        if day and not plausible_schedule_date(day, today):
+            db.delete(row)
+            removed += 1
+            continue
+        if reason == "clinic_location_not_found":
+            loc = resolve_clinic_location(
+                db,
+                payload.get("site") or payload.get("extra"),
+                surgeon_id=payload.get("surgeonId"),
+                day=day,
+            )
+            if loc:
+                db.delete(row)
+                removed += 1
+                continue
+        if reason == "missing_time" and day:
+            patient = payload.get("patientName") or ""
+            if _timed_case_already_on_board(db, day, patient):
+                db.delete(row)
+                removed += 1
+                continue
         case_id = payload.get("caseId")
         if not case_id:
             continue
@@ -241,6 +267,93 @@ def reconcile_ingest_correction_notifications(
     if removed:
         db.commit()
     return removed
+
+
+def _timed_case_already_on_board(db: Session, day, patient: str) -> bool:
+    from .ingest_date_rules import patient_name_key
+    from .models import SurgicalCase
+
+    last = patient_name_key((patient or "").split(",")[0])
+    first = patient_name_key(",".join((patient or "").split(",")[1:]))
+    if not last:
+        return False
+    rows = (
+        db.query(SurgicalCase)
+        .filter(
+            SurgicalCase.date == day,
+            SurgicalCase.status != "cancelled",
+            SurgicalCase.start_time.isnot(None),
+        )
+        .all()
+    )
+    for case in rows:
+        other_last = patient_name_key((case.patient_name or "").split(",")[0])
+        other_first = patient_name_key(",".join((case.patient_name or "").split(",")[1:]))
+        if other_last != last:
+            continue
+        if not first or not other_first or first[:4] == other_first[:4]:
+            return True
+    return False
+
+
+def reconcile_desk_fax_outlier_cases(db: Session) -> int:
+    """Cancel desk-sourced cases whose dates are DOBs or OCR years, or snap them into the fax week."""
+    from .ingest_date_rules import (
+        date_allowed_for_fax,
+        desk_fax_id_from_notes,
+        plausible_schedule_date,
+    )
+    from .models import SurgicalCase
+    from .practice_time import practice_today
+
+    today = practice_today()
+    rows = (
+        db.query(SurgicalCase)
+        .filter(
+            SurgicalCase.status != "cancelled",
+            SurgicalCase.notes.isnot(None),
+        )
+        .all()
+    )
+    by_fax: dict[int, list] = {}
+    for row in rows:
+        fax_id = desk_fax_id_from_notes(row.notes)
+        if not fax_id:
+            continue
+        by_fax.setdefault(fax_id, []).append(row)
+
+    changed = 0
+    for _fax_id, cases in by_fax.items():
+        in_window = [c.date for c in cases if c.date and plausible_schedule_date(c.date, today)]
+        window = (min(in_window), max(in_window)) if in_window else None
+        for case in cases:
+            allowed = date_allowed_for_fax(case.date, window, today=today)
+            if allowed == case.date:
+                continue
+            if allowed is None:
+                case.status = "cancelled"
+                changed += 1
+                continue
+            clash = next(
+                (
+                    other
+                    for other in cases
+                    if other.id != case.id
+                    and other.date == allowed
+                    and (other.status or "") != "cancelled"
+                    and (other.patient_name or "").strip().lower()
+                    == (case.patient_name or "").strip().lower()
+                ),
+                None,
+            )
+            if clash:
+                case.status = "cancelled"
+            else:
+                case.date = allowed
+            changed += 1
+    if changed:
+        db.commit()
+    return changed
 
 
 def _reconcile_stale_desk_or_schedule_flag_events(db: Session) -> int:
@@ -365,6 +478,7 @@ def _reconcile_admin_notification_feed(db: Session, admin_user_id: int) -> None:
     reconcile_stale_dayoff_notifications(db, admin_user_id)
     reconcile_stale_schedule_flag_notifications(db, admin_user_id)
     reconcile_ingest_correction_notifications(db, admin_user_id)
+    reconcile_desk_fax_outlier_cases(db)
     from .grok_lookahead_service import reconcile_stale_call_coverage_notifications
     reconcile_stale_call_coverage_notifications(db, admin_user_id)
     reconcile_bot_chatter_notifications(db, admin_user_id)

@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from .admin_notification_href import admin_notification_href, clinic_schedule_fix_href
 from .admin_surgical_schedule_service import add_surgical_case
+from .ingest_date_rules import date_allowed_for_fax, infer_fax_group_window, parse_iso_date
 from .ingest_resolve import resolve_clinic_location, resolve_or_location, resolve_surgeon
 from .models import ClinicSchedule, CoSurgeonPair, ORBlockAssignment, ORBlockInstance, SurgicalCase
 from .or_block_service import (
@@ -38,6 +39,7 @@ from .or_block_service import (
     update_block_assignment,
     update_or_block_instance,
 )
+from .practice_time import practice_today
 from .push import clear_block_or_schedule_flag_notifications, notify_admins
 
 _DESK_SOURCE_RE = re.compile(r"(Desk fax\s*#|source=desk)", re.IGNORECASE)
@@ -51,12 +53,7 @@ _LEADING_H_COLON_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)(?=\s|[A-Za-z]|$)"
 
 
 def _parse_date(raw: str | None) -> date | None:
-    if not raw or not str(raw).strip():
-        return None
-    try:
-        return date.fromisoformat(str(raw).strip()[:10])
-    except ValueError:
-        return None
+    return parse_iso_date(raw)
 
 
 def _parse_time(raw: str | None, fallback: time | None = None) -> time | None:
@@ -1032,6 +1029,8 @@ def ingest_surgeon_schedule(
     source_fax_id: int | None = None,
     source_message_id: str | None = None,
     notify: bool = False,
+    window_start: str | None = None,
+    window_end: str | None = None,
 ) -> dict[str, Any]:
     """Publish parsed Desk surgeon blocks into CAL Block OR + cases + clinic lanes."""
     created_blocks: list[dict] = []
@@ -1040,6 +1039,13 @@ def ingest_surgeon_schedule(
     flags: list[dict] = []
     errors: list[dict] = []
     corrections: list[dict] = []
+    skipped_dates: list[dict] = []
+    fax_window = infer_fax_group_window(
+        surgeons,
+        today=practice_today(),
+        window_start=_parse_date(window_start),
+        window_end=_parse_date(window_end),
+    )
 
     note_bits = []
     # Keep fax provenance in audit/flags only — not in human-facing OR notes.
@@ -1070,7 +1076,20 @@ def ingest_surgeon_schedule(
 
         by_date: dict[date, list[dict]] = defaultdict(list)
         for case in cases:
-            day = _parse_date(case.get("case_date") or block.get("start_date"))
+            raw_day = _parse_date(case.get("case_date") or block.get("start_date"))
+            day = date_allowed_for_fax(raw_day, fax_window, today=practice_today())
+            if raw_day and day is None:
+                skipped_dates.append({
+                    "rule": "INGEST_DATE_IN_FAX_WINDOW",
+                    "patient_name": case.get("patient_name"),
+                    "rejected_date": raw_day.isoformat(),
+                    "window": (
+                        [fax_window[0].isoformat(), fax_window[1].isoformat()]
+                        if fax_window
+                        else None
+                    ),
+                })
+                continue
             if not day or not (case.get("patient_name") or "").strip():
                 errors.append({
                     "index": idx,
@@ -1078,19 +1097,30 @@ def ingest_surgeon_schedule(
                     "error": "OR case missing date or patient_name",
                 })
                 continue
+            case["case_date"] = day.isoformat()
             by_date[day].append(case)
 
         # Only days with OR cases (plus empty days inside a declared OR window) are
         # authoritative. Clinic-only surgeon blocks must not cancel OR inventory.
+        # Never expand this span with DOB / OCR years — that was how 1965 leaked in.
         authority_days: list[date] = []
         if by_date:
-            range_start = _parse_date(block.get("start_date"))
-            range_end = _parse_date(block.get("end_date")) or range_start
-            range_start = min([d for d in [range_start, *by_date.keys()] if d is not None])
-            range_end = max([d for d in [range_end, *by_date.keys()] if d is not None])
-            cursor = range_start
-            while cursor <= range_end:
-                authority_days.append(cursor)
+            range_start = date_allowed_for_fax(
+                _parse_date(block.get("start_date")), fax_window, today=practice_today()
+            )
+            range_end = date_allowed_for_fax(
+                _parse_date(block.get("end_date")), fax_window, today=practice_today()
+            ) or range_start
+            span_days = list(by_date.keys())
+            if range_start:
+                span_days.append(range_start)
+            if range_end:
+                span_days.append(range_end)
+            cursor = min(span_days)
+            last = max(span_days)
+            while cursor <= last:
+                if date_allowed_for_fax(cursor, fax_window, today=practice_today()):
+                    authority_days.append(cursor)
                 cursor += timedelta(days=1)
 
         for day in authority_days:
@@ -1313,12 +1343,28 @@ def ingest_surgeon_schedule(
 
         clinic_by_date: dict[date, list[dict]] = defaultdict(list)
         for slot in slots:
-            day = _parse_date(slot.get("case_date") or block.get("start_date"))
+            raw_day = _parse_date(slot.get("case_date") or block.get("start_date"))
+            day = date_allowed_for_fax(raw_day, fax_window, today=practice_today())
+            if raw_day and day is None:
+                skipped_dates.append({
+                    "rule": "INGEST_DATE_IN_FAX_WINDOW",
+                    "patient_name": slot.get("patient_name"),
+                    "rejected_date": raw_day.isoformat(),
+                    "window": (
+                        [fax_window[0].isoformat(), fax_window[1].isoformat()]
+                        if fax_window
+                        else None
+                    ),
+                })
+                continue
             if day:
+                slot["case_date"] = day.isoformat()
                 clinic_by_date[day].append(slot)
         # Only touch clinic lanes when the fax actually has clinic data (SSOT).
         if not clinic_by_date and site:
-            day = _parse_date(block.get("start_date"))
+            day = date_allowed_for_fax(
+                _parse_date(block.get("start_date")), fax_window, today=practice_today()
+            )
             if day:
                 clinic_by_date[day] = []
 
@@ -1402,6 +1448,13 @@ def ingest_surgeon_schedule(
         "flags_count": len(flags),
         "corrections": corrections,
         "corrections_count": len(corrections),
+        "skipped_dates": skipped_dates,
+        "skipped_dates_count": len(skipped_dates),
+        "fax_window": (
+            {"start": fax_window[0].isoformat(), "end": fax_window[1].isoformat()}
+            if fax_window
+            else None
+        ),
         # created_count kept for Desk handoff UI; now means net new cases only.
         "created_count": _count("created"),
         "error_count": len(errors),

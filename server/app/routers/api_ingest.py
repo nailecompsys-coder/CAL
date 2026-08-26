@@ -107,6 +107,8 @@ class SurgeonScheduleBatch(BaseModel):
     source_fax_id: int | None = None
     source_message_id: str | None = None
     notify: bool = False
+    window_start: str | None = None
+    window_end: str | None = None
     surgeons: list[SurgeonScheduleIn] = Field(default_factory=list)
 
 
@@ -235,4 +237,6 @@ def ingest_surgeon_schedule_route(
         source_fax_id=body.source_fax_id,
         source_message_id=body.source_message_id,
         notify=body.notify,
+        window_start=body.window_start,
+        window_end=body.window_end,
     )

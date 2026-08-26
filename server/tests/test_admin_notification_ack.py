@@ -1,7 +1,7 @@
 import json
 import os
 import unittest
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 from types import SimpleNamespace
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
@@ -15,7 +15,12 @@ from app.admin_notification_ack import (
     notification_is_informational,
     reconcile_bot_chatter_notifications,
 )
-from app.admin_settings_page_service import recent_admin_notifications, unread_admin_notification_count
+from app.admin_settings_page_service import (
+    recent_admin_notifications,
+    reconcile_desk_fax_outlier_cases,
+    reconcile_ingest_correction_notifications,
+    unread_admin_notification_count,
+)
 from app.grok_lookahead_service import (
     build_grok_lookahead,
     reconcile_stale_call_coverage_notifications,
@@ -29,6 +34,7 @@ from app.models import (
     CallRotation,
     DayOff,
     Surgeon,
+    SurgicalCase,
 )
 
 
@@ -161,6 +167,122 @@ class BotChatterFeedTest(unittest.TestCase):
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0].kind, "ingest_correction")
             self.assertEqual(unread_admin_notification_count(db, admin.id), 1)
+        finally:
+            db.close()
+            engine.dispose()
+
+
+class IngestCardRereadTest(unittest.TestCase):
+    def _db(self):
+        engine = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(engine)
+        db = sessionmaker(bind=engine)()
+        admin = AdminUser(username="don", email="don@example.com", password_hash="x", is_active=True)
+        db.add(admin)
+        db.commit()
+        db.refresh(admin)
+        return engine, db, admin
+
+    def test_drops_dob_missing_time_card(self):
+        engine, db, admin = self._db()
+        try:
+            note = AdminNotification(
+                admin_user_id=admin.id,
+                title="Desk ingest · case time missing",
+                body="Christopher Johnson · 07-27-65 · Wilkinson, Llyod · no start time on fax row",
+                kind="ingest_correction",
+                payload=json.dumps({
+                    "reason": "missing_time",
+                    "date": "1965-07-27",
+                    "patientName": "Wilkinson, Llyod",
+                    "surgeonId": 12,
+                    "sourceFaxId": 102,
+                    "caseId": None,
+                }),
+            )
+            db.add(note)
+            db.commit()
+            note_id = note.id
+            self.assertGreaterEqual(reconcile_ingest_correction_notifications(db, admin.id), 1)
+            self.assertIsNone(db.get(AdminNotification, note_id))
+        finally:
+            db.close()
+            engine.dispose()
+
+    def test_drops_missing_time_when_patient_already_has_a_clock(self):
+        engine, db, admin = self._db()
+        try:
+            surgeon = Surgeon(
+                first_name="Lucy", last_name="Woodley",
+                email="lw@example.com", is_active=True, staff_type="physician",
+            )
+            db.add(surgeon)
+            db.commit()
+            db.add(SurgicalCase(
+                surgeon_id=surgeon.id,
+                date=date(2026, 8, 27),
+                start_time=time(12, 0),
+                patient_name="White, Latisha Monique",
+                procedure="HERNIA",
+                status="scheduled",
+            ))
+            note = AdminNotification(
+                admin_user_id=admin.id,
+                title="Desk ingest · case time missing",
+                body="Alexander Schroeder · 08-27-26 · White, Latisna Monique · no start time",
+                kind="ingest_correction",
+                payload=json.dumps({
+                    "reason": "missing_time",
+                    "date": "2026-08-27",
+                    "patientName": "White, Latisna Monique",
+                    "surgeonId": 16,
+                    "caseId": None,
+                }),
+            )
+            db.add(note)
+            db.commit()
+            note_id = note.id
+            self.assertGreaterEqual(reconcile_ingest_correction_notifications(db, admin.id), 1)
+            self.assertIsNone(db.get(AdminNotification, note_id))
+        finally:
+            db.close()
+            engine.dispose()
+
+    def test_cancels_desk_case_on_a_dob_year(self):
+        engine, db, admin = self._db()
+        try:
+            del admin
+            surgeon = Surgeon(
+                first_name="Christopher", last_name="Johnson",
+                email="cj@example.com", is_active=True, staff_type="physician",
+            )
+            db.add(surgeon)
+            db.commit()
+            junk = SurgicalCase(
+                surgeon_id=surgeon.id,
+                date=date(1954, 9, 30),
+                start_time=time(9, 15),
+                patient_name="Hoffmeister, Howard",
+                procedure="CHOLE",
+                status="scheduled",
+                notes="Desk fax #102",
+            )
+            keep = SurgicalCase(
+                surgeon_id=surgeon.id,
+                date=date(2026, 8, 25),
+                start_time=time(7, 15),
+                patient_name="Dhanessur, Shirley",
+                procedure="THYROID",
+                status="scheduled",
+                notes="Desk fax #102",
+            )
+            db.add_all([junk, keep])
+            db.commit()
+            self.assertGreaterEqual(reconcile_desk_fax_outlier_cases(db), 1)
+            db.refresh(junk)
+            db.refresh(keep)
+            self.assertEqual(junk.status, "cancelled")
+            self.assertEqual(keep.status, "scheduled")
         finally:
             db.close()
             engine.dispose()

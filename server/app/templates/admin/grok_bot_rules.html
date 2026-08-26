@@ -39,16 +39,30 @@
   {% include "admin/_settings_nav.html" %}
   <div class="settings-main space-y-5">
 
-    <div class="clinical-panel p-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div>
-        <p class="text-sm font-semibold text-slate-800">Ask him from the Grok-BOT bubble</p>
-        <p class="text-xs text-slate-500 mt-1">He answers from the live CAL database — time off, clinic patients, cases, call, meetings, locations. No data leaves the app.</p>
+    <div class="clinical-panel p-5 space-y-4">
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p class="text-sm font-semibold text-slate-800">Ask him</p>
+          <p class="text-xs text-slate-500 mt-1">He answers from the live CAL database — time off, clinic patients, cases, call, meetings, locations. No data leaves the app.</p>
+        </div>
+        <form method="post" action="/admin/settings/grok-bot-rules/check">
+          <button type="submit" class="bg-slate-800 text-white px-5 py-2 rounded-lg text-sm font-semibold hover:bg-slate-900">
+            Check rules now
+          </button>
+        </form>
       </div>
-      <form method="post" action="/admin/settings/grok-bot-rules/check">
-        <button type="submit" class="bg-slate-800 text-white px-5 py-2 rounded-lg text-sm font-semibold hover:bg-slate-900">
-          Check rules now
+      <form id="grok-ask-form" autocomplete="off" class="space-y-3">
+        <label class="block">
+          <span class="sr-only">Question for Grok-BOT</span>
+          <textarea id="grok-ask-input" name="question" rows="2" maxlength="240" required
+            placeholder="How many days has Alex Schroeder taken off last month?"
+            class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm"></textarea>
+        </label>
+        <button id="grok-ask-go" type="submit" class="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700">
+          Ask him
         </button>
       </form>
+      <div id="grok-ask-answer" hidden class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 whitespace-pre-wrap"></div>
     </div>
 
     <form method="post" action="/admin/settings/grok-bot-rules/add" class="clinical-panel p-5 space-y-3">
@@ -113,4 +127,41 @@
 
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var form = document.getElementById('grok-ask-form');
+  if (!form) return;
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var input = document.getElementById('grok-ask-input');
+    var answerEl = document.getElementById('grok-ask-answer');
+    var go = document.getElementById('grok-ask-go');
+    var question = input ? String(input.value || '').trim() : '';
+    if (!answerEl) return;
+    if (!question) {
+      answerEl.hidden = false;
+      answerEl.textContent = 'Ask me about time off, clinic patients, cases, call, meetings, or a location.';
+      return;
+    }
+    if (go) go.disabled = true;
+    answerEl.hidden = false;
+    answerEl.textContent = 'Looking at the live board\u2026';
+    fetch('/api/admin/grok/ask', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ question: question }),
+    })
+      .then(function (r) { return r.ok ? r.json() : { answer: 'I could not reach the live board.' }; })
+      .then(function (data) {
+        answerEl.textContent = (data && data.answer) || 'I could not tell who or what that was about.';
+      })
+      .catch(function () { answerEl.textContent = 'I could not reach the live board.'; })
+      .then(function () { if (go) go.disabled = false; });
+  });
+})();
+</script>
 {% endblock %}

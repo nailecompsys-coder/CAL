@@ -9,9 +9,8 @@
  * No React. No build step. Jinja2 + plain JS only.
  * Uses Clinical Trust CSS tokens from input.css :root.
  *
- * Drag: pointer events on #cal-btn; #cal-assist repositioned via left/top.
- *   Position persisted in localStorage (DRAG_KEY). Clamped to viewport.
- *   Real drag (≥ DRAG_THRESHOLD px) suppresses the click-to-think handler.
+ * Lives in the admin sidebar footer (#grok-dock), on the v2.0 / Backup line.
+ * Ask him is the field next to the capsule — not a floating off-screen bar.
  *
  * Notif focus: clicking any [data-cal-notif] card on the dashboard focuses
  *   that issue — eyes track it, debris fires briefly, bubble restates it.
@@ -19,18 +18,6 @@
  */
 (function () {
   'use strict';
-
-  var RELEVANT_PATHS = [
-    '/admin/dashboard',
-    '/admin/calendar',
-    '/admin/clinic-schedule',
-    '/admin/call-schedule',
-    '/admin/call-audit',
-    '/admin/block-or',
-    '/admin/notifications',
-    '/admin/daysoff',
-    '/admin/settings',
-  ];
 
   var SEEN_KEY       = 'cal-seen-v1';
   var MAX_SEEN       = 200;
@@ -52,15 +39,13 @@
   var focusedNotif      = null;
 
   function init() {
-    var path = window.location.pathname;
-    var relevant = RELEVANT_PATHS.some(function (p) {
-      return path === p || path.indexOf(p + '?') === 0 || path.indexOf(p + '/') === 0;
-    });
-    if (!relevant) return;
+    var dock = document.getElementById('grok-dock');
+    if (!dock) return;
 
     injectStyles();
-    document.body.appendChild(buildWidget());
-    initPosition();
+    dock.appendChild(buildWidget());
+    var assist = document.getElementById('cal-assist');
+    if (assist) assist.classList.add('cal-docked');
     setMood('ok');
     bindEvents();
     startDirector();
@@ -104,7 +89,7 @@
       '.cal-fly-star{fill:#fff;opacity:.9;filter:drop-shadow(0 0 5px var(--cal-purple-mid,#8b5cf6));}',
       '.cal-fly-spark{fill:var(--cal-purple-soft,#ede9fe);opacity:.55;}',
       '#cal-yaw{',
-      '  position:absolute;left:12px;top:18px;width:64px;height:52px;',
+      '  position:absolute;left:12px;top:26px;width:64px;height:36px;',
       '  transform-style:preserve-3d;',
       '}',
       '#cal-btn.cal-thinking #cal-yaw{animation:cal-spin 2.4s linear infinite;}',
@@ -113,11 +98,11 @@
       '  40%{transform:rotateY(180deg) rotateZ(-8deg)}',
       '  100%{transform:rotateY(360deg) rotateZ(0deg)}',
       '}',
-      '#cal-svg{width:64px;height:52px;display:block;overflow:visible;}',
+      '#cal-svg{width:64px;height:36px;display:block;overflow:visible;}',
       '.cal-face{fill:var(--cal-purple-mid,#8b5cf6);}',
       '.cal-face-shine{fill:#fff;opacity:.22;}',
       '.cal-slit{fill:#fff;}',
-      '.cal-eyes{transform-origin:44px 28px;transition:transform .16s ease-out;}',
+      '.cal-eyes{transform-origin:44px 18px;transition:transform .16s ease-out;}',
       '#cal-btn.cal-sleep .cal-eyes{',
       '  transform:scaleY(.16) translateY(2px);',
       '  transition:transform .35s ease;',
@@ -196,6 +181,7 @@
       '  opacity:0;transform:translateY(6px);',
       '  transition:opacity .22s ease-out,transform .22s ease-out;',
       '}',
+      '#cal-bubble:empty{display:none;padding:0;border:0;box-shadow:none;}',
       '#cal-bubble.cal-visible{opacity:1;transform:translateY(0);pointer-events:all;}',
       '.cal-bubble-top{display:flex;align-items:center;gap:.4rem;margin-bottom:.4rem;}',
       '.cal-bot-name{',
@@ -226,6 +212,11 @@
       '#cal-ask{',
       '  width:16.5rem;pointer-events:all;',
       '}',
+      '#cal-ask-label{',
+      '  display:block;margin:0 0 .22rem .15rem;',
+      '  font-size:.62rem;font-weight:800;letter-spacing:.08em;text-transform:uppercase;',
+      '  color:var(--cal-purple,#6d28d9);',
+      '}',
       '#cal-ask-form{',
       '  display:flex;gap:.35rem;align-items:stretch;',
       '  background:var(--cal-mist,#f4f6fa);',
@@ -244,6 +235,24 @@
       '  font-size:.68rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;',
       '  padding:.4rem .65rem;',
       '}',
+      '#cal-assist.cal-docked{',
+      '  position:relative;top:auto;right:auto;left:auto;',
+      '  width:100%;align-items:stretch;gap:.4rem;',
+      '  pointer-events:all;z-index:2;',
+      '}',
+      '#cal-assist.cal-docked .cal-dock-row{',
+      '  display:flex;align-items:center;gap:.4rem;width:100%;',
+      '}',
+      '#cal-assist.cal-docked #cal-btn{',
+      '  width:52px;height:40px;flex-shrink:0;cursor:pointer;',
+      '}',
+      '#cal-assist.cal-docked #cal-orbit-svg{width:52px;height:40px;}',
+      '#cal-assist.cal-docked #cal-yaw{left:2px;top:4px;width:48px;height:32px;}',
+      '#cal-assist.cal-docked #cal-svg{width:48px;height:32px;}',
+      '#cal-assist.cal-docked #cal-ask{width:auto;flex:1;min-width:0;}',
+      '#cal-assist.cal-docked #cal-ask-label{display:none;}',
+      '#cal-assist.cal-docked #cal-ask-form{box-shadow:none;}',
+      '#cal-assist.cal-docked #cal-bubble{max-width:none;width:100%;}',
     ].join('\n');
     document.head.appendChild(s);
   }
@@ -253,16 +262,19 @@
     div.id = 'cal-assist';
     div.innerHTML =
       '<div id="cal-bubble"></div>' +
-      '<div id="cal-ask">' +
-        '<form id="cal-ask-form" autocomplete="off">' +
-          '<input id="cal-ask-input" type="text" maxlength="240" placeholder="Ask Grok about the live board\u2026" />' +
-          '<button id="cal-ask-go" type="submit">Ask</button>' +
-        '</form>' +
-      '</div>' +
-      '<button id="cal-btn" aria-label="Grok-BOT" type="button">' +
-      buildOrbitSVG() +
-      '<div id="cal-yaw">' + buildFaceSVG() + '</div>' +
-      '</button>';
+      '<div class="cal-dock-row">' +
+        '<button id="cal-btn" aria-label="Grok-BOT" type="button">' +
+        buildOrbitSVG() +
+        '<div id="cal-yaw">' + buildFaceSVG() + '</div>' +
+        '</button>' +
+        '<div id="cal-ask">' +
+          '<span id="cal-ask-label">Ask him</span>' +
+          '<form id="cal-ask-form" autocomplete="off">' +
+            '<input id="cal-ask-input" type="text" maxlength="240" placeholder="Ask him\u2026" />' +
+            '<button id="cal-ask-go" type="submit">Ask him</button>' +
+          '</form>' +
+        '</div>' +
+      '</div>';
     return div;
   }
 
@@ -288,14 +300,14 @@
   }
 
   function buildFaceSVG() {
-    // Grok capsule: horizontal pill, two white slit eyes on the right.
+    // Horizontal Grok capsule — white slit eyes, no mouth, no arm.
     return (
-      '<svg id="cal-svg" viewBox="0 0 64 52" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
-        '<rect x="4" y="12" width="56" height="28" rx="14" ry="14" class="cal-face"/>' +
-        '<ellipse cx="20" cy="20" rx="14" ry="7" class="cal-face-shine"/>' +
+      '<svg id="cal-svg" viewBox="0 0 64 36" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+        '<rect x="2" y="6" width="60" height="24" rx="12" ry="12" class="cal-face"/>' +
+        '<ellipse cx="16" cy="12" rx="10" ry="5" class="cal-face-shine"/>' +
         '<g id="cal-eyes" class="cal-eyes">' +
-          '<rect class="cal-slit" x="34.5" y="23.4" width="10.2" height="3.4" rx="1.7" transform="rotate(-30 39.6 25.1)"/>' +
-          '<rect class="cal-slit" x="45.2" y="21.6" width="10.2" height="3.4" rx="1.7" transform="rotate(-30 50.3 23.3)"/>' +
+          '<rect class="cal-slit" x="34" y="15" width="11" height="4.2" rx="2.1"/>' +
+          '<rect class="cal-slit" x="47" y="15" width="11" height="4.2" rx="2.1"/>' +
         '</g>' +
       '</svg>'
     );
@@ -332,18 +344,20 @@
   }
 
   function initPosition() {
+    if (isDocked()) return;
+  }
+
+  function isDocked() {
     var assist = document.getElementById('cal-assist');
-    if (!assist) return;
-    var saved = loadDragPos();
-    if (saved) {
-      applyPos(assist, saved.left, saved.top);
-    } else {
-      var margin = Math.round(1.1 * 16);
-      applyPos(assist, window.innerWidth - 88 - margin, margin);
-    }
+    return !!(assist && assist.classList.contains('cal-docked'));
+  }
+
+  function keepWidgetOnScreen() {
+    if (isDocked()) return;
   }
 
   function onBtnPointerDown(e) {
+    if (isDocked()) return;
     if (e.button !== 0 && e.pointerType !== 'touch') return;
     var assist = document.getElementById('cal-assist');
     var btn    = document.getElementById('cal-btn');
@@ -540,6 +554,7 @@
         '<a href="/admin/settings/grok-bot-rules" class="cal-link">Rules he follows \u2192</a>' +
       '</div>';
     bubble.classList.add('cal-visible');
+    keepWidgetOnScreen();
     bubble.querySelector('.cal-x').addEventListener('click', function () {
       bubble.classList.remove('cal-visible');
     });

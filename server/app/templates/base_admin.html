@@ -58,6 +58,7 @@
     .color-picker-row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
     .color-picker-row input[type="color"] { width: 2.5rem; height: 2.5rem; padding: 2px; border: 1px solid #e2e8f0; border-radius: 0.5rem; cursor: pointer; background: none; }
     .color-picker-row input[type="text"].color-hex { width: 6rem; font-family: ui-monospace, monospace; font-size: 0.8rem; }
+    .grok-dock { min-height: 2.5rem; }
   </style>
 </head>
 <body class="admin-shell bg-clinical-mist font-sans">
@@ -142,6 +143,9 @@
     </nav>
 
     <div class="admin-sidebar-footer px-4 py-3 border-t space-y-2">
+      {% if admin.role != 'scheduler' %}
+      <div id="grok-dock" class="grok-dock"></div>
+      {% endif %}
       <div class="flex items-center justify-between gap-2 flex-wrap">
         <span class="inline-flex items-center gap-1 flex-wrap">
           <span class="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-bold bg-white/70 text-clinical-muted border border-clinical-stroke" title="Build {{ app_version|default('?') }}">v{{ app_version|release_label }}</span>
@@ -276,7 +280,7 @@ function closeSidebar() {
 
 </script>
 {% if admin.role != 'scheduler' %}
-<script src="/static/cal_assistant.js?v={{ app_version|default('dev')|urlencode }}" defer></script>
+<script src="/static/cal_assistant.js?v={{ app_version|default('dev')|urlencode }}&b=dock1" defer></script>
 {% endif %}
 {% block scripts %}{% endblock %}
 </body>

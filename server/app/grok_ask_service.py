@@ -50,7 +50,8 @@ _NOISE = re.compile(
     r"yesterday|today|tomorrow|approved|pending|list|tell|me|show|"
     r"phone|email|address|working|work|date|dates|mtd|ytd|through|thru|"
     r"far|currently|upto|until|question|scheduled|schedule|"
-    r"coverage|covering|cover|visits?|available|approvals?|notifications?)\b",
+    r"coverage|covering|cover|visits?|available|approvals?|notifications?|"
+    r"monday|tuesday|wednesday|thursday|friday|saturday|sunday|office)\b",
     re.IGNORECASE,
 )
 
@@ -91,6 +92,9 @@ def ask_grok(
         return surgeon
     location = _location_from_question(db, raw)
     patient_hit = _patient_from_question(db, raw) if not surgeon else None
+
+    if location and topic in {"clinic", "clinic_visits", "who_clinic", "clinics_or"}:
+        return _answer_location_volume(db, location, window, "clinic")
 
     if topic == "roster":
         return _answer_roster(db)
@@ -168,6 +172,51 @@ def ask_grok(
     return _answer_freeform(raw, today)
 
 
+_WEEKDAYS = {
+    "monday": 0,
+    "tuesday": 1,
+    "wednesday": 2,
+    "thursday": 3,
+    "friday": 4,
+    "saturday": 5,
+    "sunday": 6,
+    "mon": 0,
+    "tue": 1,
+    "tues": 1,
+    "wed": 2,
+    "thu": 3,
+    "thur": 3,
+    "thurs": 3,
+    "fri": 4,
+    "sat": 5,
+    "sun": 6,
+}
+_GENERIC_LOC_WORDS = frozenset({
+    "office", "clinic", "hospital", "center", "surgery", "surgical",
+    "one", "main", "or", "the", "and",
+})
+
+
+def _weekday_window(blob: str, today: date) -> dict | None:
+    for name, wd in _WEEKDAYS.items():
+        if not re.search(rf"\b{name}\b", blob):
+            continue
+        if re.search(rf"\b(last|previous) {name}\b", blob):
+            delta = today.weekday() - wd
+            if delta <= 0:
+                delta += 7
+            day = today - timedelta(days=delta)
+        elif re.search(rf"\bnext {name}\b", blob):
+            delta = wd - today.weekday()
+            if delta <= 0:
+                delta += 7
+            day = today + timedelta(days=delta)
+        else:
+            day = today + timedelta(days=(wd - today.weekday()) % 7)
+        return _window(day, day, f"{name.title()} ({day.strftime('%b %-d')})")
+    return None
+
+
 def parse_window(text: str, today: date) -> dict:
     blob = text.lower()
     iso = _ISO_DATE.search(blob)
@@ -193,6 +242,9 @@ def parse_window(text: str, today: date) -> dict:
         return _window(day, day, "tomorrow")
     if re.search(r"\btoday\b", blob):
         return _window(today, today, "today")
+    weekday = _weekday_window(blob, today)
+    if weekday:
+        return weekday
     if re.search(r"\b(upcoming meetings|meetings this week)\b", blob):
         return _window(today, today + timedelta(days=7), "this week")
     if "last week" in blob or "previous week" in blob:
@@ -621,6 +673,18 @@ def _surgeon_from_question(db: Session, question: str):
     return None
 
 
+def _location_needles(loc: Location) -> list[str]:
+    bits: list[str] = []
+    for raw in (loc.name, loc.abbreviation, loc.city):
+        text = (raw or "").strip().lower()
+        if text:
+            bits.append(text)
+        for tok in re.findall(r"[a-z]{4,}", text):
+            if tok not in _GENERIC_LOC_WORDS and tok not in bits:
+                bits.append(tok)
+    return bits
+
+
 def _location_from_question(db: Session, question: str) -> Location | None:
     blob = (question or "").lower()
     if not blob:
@@ -631,10 +695,17 @@ def _location_from_question(db: Session, question: str) -> Location | None:
         name = (loc.name or "").strip().lower()
         abbr = (loc.abbreviation or "").strip().lower()
         if name and name in blob:
-            hits.append((len(name), loc))
+            hits.append((100 + len(name), loc))
             continue
         if abbr and len(abbr) >= 3 and re.search(rf"\b{re.escape(abbr)}\b", blob, re.IGNORECASE):
             hits.append((len(abbr), loc))
+            continue
+        for needle in _location_needles(loc):
+            if needle == name:
+                continue
+            if re.search(rf"\b{re.escape(needle)}\b", blob):
+                hits.append((len(needle), loc))
+                break
     if not hits:
         return None
     hits.sort(key=lambda row: row[0], reverse=True)
@@ -1264,6 +1335,41 @@ def _answer_location_details(loc: Location) -> dict:
     return {"ok": True, "topic": "location", "answer": " · ".join(bits) + "."}
 
 
+def _aprima_clinic_count_at_location(
+    db: Session,
+    loc: Location,
+    start: date,
+    end: date,
+) -> int:
+    try:
+        from .aprima_cache_service import patient_appointments_for_api
+        from .aprima_schedule_service import is_surgery_appointment
+    except Exception:
+        return 0
+    try:
+        payload = patient_appointments_for_api(db, start, end, surgeon=None)
+    except Exception:
+        return 0
+    needles = [n for n in _location_needles(loc) if len(n) >= 4]
+    if not needles:
+        return 0
+    total = 0
+    for row in payload.get("appointments") or []:
+        if is_surgery_appointment(row):
+            continue
+        day_raw = (row.get("date") or "")[:10]
+        try:
+            day = date.fromisoformat(day_raw)
+        except ValueError:
+            continue
+        if day < start or day > end:
+            continue
+        site = (row.get("serviceSite") or "").strip().lower()
+        if any(needle in site for needle in needles):
+            total += 1
+    return total
+
+
 def _answer_location_volume(db: Session, loc: Location, window: dict, topic: str) -> dict:
     cases = (
         db.query(SurgicalCase)
@@ -1285,14 +1391,21 @@ def _answer_location_volume(db: Session, loc: Location, window: dict, topic: str
         .all()
     )
     patients = clinic_patient_count_for_schedules(clinics)
-    label = loc.abbreviation or loc.name
+    patients += _aprima_clinic_count_at_location(db, loc, window["start"], window["end"])
+    label = loc.name or loc.abbreviation or "that office"
     if topic == "clinic":
-        return {
-            "ok": True,
-            "topic": "clinic",
-            "answer": f"{label} had {patients} clinic patients {window['label']}.",
-            "count": patients,
-        }
+        if not patients:
+            return _talk(
+                f"No patients are on the board at {label} {window['label']}.",
+                topic="clinic",
+                count=0,
+            )
+        return _talk(
+            f"{label} {window['label']}: {patients} patient"
+            f"{'' if patients == 1 else 's'} to be seen.",
+            topic="clinic",
+            count=patients,
+        )
     if topic == "cases":
         n = len(cases)
         return {

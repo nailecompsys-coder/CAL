@@ -42,6 +42,7 @@ QUESTION_CATALOG = (
     ("who is working today", "board"),
     ("what is today", "when"),
     ("how many clinical patient has Alex seen this month to date", "clinic"),
+    ("How many patients to be seen on Friday at the clermont office", "clinic"),
 )
 
 
@@ -103,6 +104,27 @@ class GrokAskWindowTest(unittest.TestCase):
         self.assertEqual(window["start"], date(2026, 8, 26))
         self.assertEqual(window["end"], date(2026, 9, 2))
         self.assertEqual(window["label"], "this week")
+
+    def test_named_weekdays_are_the_matching_day_not_the_whole_week(self):
+        today = date(2026, 8, 26)  # Wednesday
+        expected = {
+            "Monday": date(2026, 8, 31),
+            "Tuesday": date(2026, 9, 1),
+            "Wednesday": date(2026, 8, 26),
+            "Thursday": date(2026, 8, 27),
+            "Friday": date(2026, 8, 28),
+            "Saturday": date(2026, 8, 29),
+            "Sunday": date(2026, 8, 30),
+        }
+        for name, day in expected.items():
+            with self.subTest(day=name):
+                window = parse_window(
+                    f"How many patients to be seen on {name} at the clermont office",
+                    today,
+                )
+                self.assertEqual(window["start"], day, name)
+                self.assertEqual(window["end"], day, name)
+                self.assertIn(name, window["label"])
 
 
 class GrokAskLiveBoardTest(unittest.TestCase):
@@ -399,5 +421,71 @@ class GrokAskLiveBoardTest(unittest.TestCase):
             self.assertIn("Available Today", result["answer"])
             self.assertIn("1 / 2", result["answer"])
             self.assertIn("Alex Schroeder", result["answer"])
+        finally:
+            db.close()
+
+    def test_patients_on_a_weekday_at_an_office_are_that_office_day(self):
+        db = self.Session()
+        try:
+            chris = Surgeon(
+                first_name="Chris", last_name="Johnson",
+                email="cj@example.com", is_active=True, staff_type="physician",
+            )
+            clermont = Location(
+                name="Clermont Office", abbreviation="CL-OF",
+                location_type="clinic", is_active=True, city="Clermont",
+            )
+            winter = Location(
+                name="Winter Garden OR", abbreviation="WG-OR",
+                location_type="hospital", is_active=True,
+            )
+            db.add_all([chris, clermont, winter])
+            db.flush()
+            db.add(ClinicSchedule(
+                surgeon_id=chris.id,
+                location_id=clermont.id,
+                date=date(2026, 8, 28),
+                session="am",
+                assignment_type="assigned",
+                notes="Desk fax · 09:00 SMITH, JANE; 09:15 DOE, JOHN",
+            ))
+            db.add(ClinicSchedule(
+                surgeon_id=chris.id,
+                location_id=clermont.id,
+                date=date(2026, 8, 27),
+                session="am",
+                assignment_type="assigned",
+                notes="Desk fax · 09:00 LEE, PAT",
+            ))
+            db.add(ClinicSchedule(
+                surgeon_id=chris.id,
+                location_id=winter.id,
+                date=date(2026, 8, 28),
+                session="am",
+                assignment_type="assigned",
+                notes="Desk fax · 07:00 OR, CASE",
+            ))
+            db.commit()
+            friday = ask_grok(
+                db,
+                "How many patients to be seen on Friday at the clermont office",
+                today=date(2026, 8, 26),
+            )
+            self.assertEqual(friday["topic"], "clinic", friday)
+            self.assertEqual(friday["count"], 2, friday)
+            self.assertIn("Clermont Office", friday["answer"])
+            self.assertIn("Friday", friday["answer"])
+            self.assertIn("2 patient", friday["answer"])
+            self.assertNotIn("Winter Garden", friday["answer"])
+            self.assertNotIn("this week", friday["answer"].lower())
+
+            thursday = ask_grok(
+                db,
+                "How many patients to be seen on Thursday at Clermont",
+                today=date(2026, 8, 26),
+            )
+            self.assertEqual(thursday["count"], 1, thursday)
+            self.assertIn("Thursday", thursday["answer"])
+            self.assertIn("1 patient", thursday["answer"])
         finally:
             db.close()

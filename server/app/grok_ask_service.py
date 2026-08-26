@@ -12,6 +12,7 @@ from datetime import date, timedelta
 
 from sqlalchemy.orm import Session, joinedload
 
+from .admin_dashboard_stats_service import clinic_visits_today_count, surgical_cases_today_count
 from .ingest_resolve import resolve_surgeon
 from .models import (
     AdminNotification,
@@ -49,7 +50,7 @@ _NOISE = re.compile(
     r"yesterday|today|tomorrow|approved|pending|list|tell|me|show|"
     r"phone|email|address|working|work|date|dates|mtd|ytd|through|thru|"
     r"far|currently|upto|until|question|scheduled|schedule|"
-    r"coverage|covering|cover)\b",
+    r"coverage|covering|cover|visits?|available|approvals?|notifications?)\b",
     re.IGNORECASE,
 )
 
@@ -73,8 +74,9 @@ def ask_grok(
         return {
             "ok": False,
             "answer": (
-                "Ask me anything — what today or tomorrow is, who is off, "
-                "clinic patients, cases, call, meetings, or a location."
+            "Ask me anything on the Dashboard — Today's Coverage, Surgical Cases Today, "
+            "Clinic Visits Today, No Call Today, Available Today, Pending Approvals, "
+            "or Meetings This Week."
             ),
         }
 
@@ -104,8 +106,14 @@ def ask_grok(
         return _answer_no_call(db, window)
     if topic == "who_clinic":
         return _answer_who_clinic(db, window)
+    if topic == "clinic_visits":
+        return _answer_clinic_visits(db, window)
+    if topic == "available":
+        return _answer_available(db, window)
+    if topic == "clinics_or":
+        return _answer_clinics_or(db, window)
     if topic == "pending_off":
-        return _answer_pending_off(db, window)
+        return _answer_pending_off(db, window, today=today)
     if topic == "meetings":
         if surgeon:
             facts = collect_surgeon_facts(db, surgeon, window["start"], window["end"])
@@ -185,6 +193,8 @@ def parse_window(text: str, today: date) -> dict:
         return _window(day, day, "tomorrow")
     if re.search(r"\btoday\b", blob):
         return _window(today, today, "today")
+    if re.search(r"\b(upcoming meetings|meetings this week)\b", blob):
+        return _window(today, today + timedelta(days=7), "this week")
     if "last week" in blob or "previous week" in blob:
         mon = today - timedelta(days=today.weekday() + 7)
         return _window(mon, mon + timedelta(days=6), f"last week ({_span(mon, mon + timedelta(days=6))})")
@@ -232,24 +242,55 @@ _CALL_WORDS = (
     r"\bcover\b|\bcall\b)"
 )
 
+# Portal labels → the same live query the screen already runs.
+# Longest / most specific first. Add a catalog test when a label misses.
+_UI_LABELS = (
+    (r"today'?s coverage", "who_call"),
+    (r"no on-call coverage", "who_call"),
+    (r"surgical cases", "cases"),
+    (r"clinic visits", "clinic_visits"),
+    (r"clinics?\s*/\s*or", "clinics_or"),
+    (r"no call(?: today)?", "no_call"),
+    (r"available today", "available"),
+    (r"pending approvals?", "pending_off"),
+    (r"pending approval", "pending_off"),
+    (r"meetings this week", "meetings"),
+    (r"upcoming meetings", "meetings"),
+    (r"admin notifications?", "notices"),
+    (r"scheduling flags", "notices"),
+    (r"desk ingest", "notices"),
+    (r"out today", "who_off"),
+    (r"who'?s out", "who_off"),
+    (r"master calendar", "board"),
+    (r"block or", "blocks"),
+    (r"open block or", "blocks"),
+    (r"assigned block or", "blocks"),
+    (r"call schedule", "who_call"),
+    (r"time off", "time_off"),
+    (r"days off", "time_off"),
+    (r"call groups?", "groups"),
+    (r"clinic groups?", "groups"),
+    (r"physicians", "roster"),
+    (r"clinics?\s*/\s*offices?", "location"),
+    (r"hospitals?\s*/\s*surgery centers?", "location"),
+)
+
 
 def parse_topic(text: str) -> str:
-    """Map practice English onto a live-board topic.
-
-    Add a synonym here and a line in tests.QUESTION_CATALOG when Ask misses.
-    """
+    """Map portal language onto the live query for that screen."""
     blob = text.lower()
     if _is_when_question(blob):
         return "when"
     if _is_identity_question(blob):
         return "identity"
+    for pattern, topic in _UI_LABELS:
+        if re.search(pattern, blob):
+            return topic
     if re.search(r"\bno call\b", blob):
         return "no_call"
     if re.search(r"\bwho\b", blob) and re.search(r"\b(off|time off|out today)\b", blob):
         return "who_off"
-    if re.search(r"\btoday'?s coverage\b", blob) or (
-        re.search(r"\bwho\b", blob) and re.search(_CALL_WORDS, blob)
-    ):
+    if re.search(r"\bwho\b", blob) and re.search(_CALL_WORDS, blob):
         return "who_call"
     if re.search(r"\bwho\b", blob) and re.search(r"\bclinic\b", blob):
         return "who_clinic"
@@ -282,7 +323,7 @@ def parse_topic(text: str) -> str:
         return "meetings"
     if re.search(r"\b(block or|or block|blocks?)\b", blob):
         return "blocks"
-    if re.search(r"\b(available|availability|personal item)\b", blob):
+    if re.search(r"\b(availability|personal item)\b", blob):
         return "availability"
     if re.search(r"\b(locations?|facilities|where do we (work|operate))\b", blob):
         return "location"
@@ -315,7 +356,8 @@ def _is_when_question(blob: str) -> bool:
         return False
     if re.search(
         r"\b(time off|day off|days off|clinic|patient|case|surgery|call|meeting|block|"
-        r"board|calendar|schedule|coverage|covering|working)\b",
+        r"board|calendar|schedule|coverage|covering|working|visits?|available|"
+        r"pending|notification|physician|dashboard)\b",
         blob,
     ):
         return False
@@ -385,9 +427,10 @@ def _answer_identity() -> dict:
         "ok": True,
         "topic": "identity",
         "answer": (
-            "I'm Grok-BOT. Ask me anything — what today or tomorrow is, "
-            "who is off, clinic patients, cases, call, meetings, or a location. "
-            "I stay inside CAL. Nothing leaves the app."
+            "I'm Grok-BOT. I answer from the live CAL screens: Today's Coverage, "
+            "Surgical Cases Today, Clinic Visits Today, No Call Today, Available Today, "
+            "Pending Approvals, Meetings This Week, Time Off, Block OR, and locations. "
+            "Nothing leaves the app."
         ),
     }
 
@@ -411,7 +454,9 @@ def _answer_freeform(text: str, today: date) -> dict:
             f"I don't have that as a named person or place. "
             f"Today is {today.strftime('%A')}, {today.strftime('%B %-d, %Y')}; "
             f"tomorrow is {tomorrow.strftime('%A')}, {tomorrow.strftime('%B %-d, %Y')}. "
-            "Ask me meetings, who is off, clinic patients, cases, call, or a doctor by name."
+            "Ask me a Dashboard label: Today's Coverage, Surgical Cases Today, "
+            "Clinic Visits Today, No Call Today, Available Today, Pending Approvals, "
+            "or Meetings This Week — or name a doctor."
         ),
     }
 
@@ -763,7 +808,9 @@ def _answer_meetings_board(db: Session, window: dict) -> dict:
         )
     lines = [_meeting_line(row) for row in rows]
     heading = (
-        f"{len(rows)} meeting{'' if len(rows) == 1 else 's'} {window['label']}:"
+        f"Meetings This Week ({len(rows)}):"
+        if "this week" in window["label"]
+        else f"{len(rows)} meeting{'' if len(rows) == 1 else 's'} {window['label']}:"
     )
     return _talk_list(heading, lines, topic="meetings")
 
@@ -797,7 +844,11 @@ def _answer_cases_board(db: Session, window: dict) -> dict:
             f"{row.date.strftime('%a %b %-d')} · {clock} · {who}{loc}"
             + (f" · {row.procedure}" if row.procedure else "")
         )
-    heading = f"{len(rows)} surgical case{'' if len(rows) == 1 else 's'} {window['label']}:"
+    heading = (
+        f"Surgical Cases Today ({len(rows)}):"
+        if window["label"] == "today"
+        else f"{len(rows)} surgical case{'' if len(rows) == 1 else 's'} {window['label']}:"
+    )
     return _talk_list(heading, lines, topic="cases", count=len(rows))
 
 
@@ -990,42 +1041,33 @@ def _answer_briefing(surgeon: Surgeon, window: dict, facts: dict) -> dict:
 
 
 def _answer_who_off(db: Session, window: dict) -> dict:
-    rows = (
-        db.query(DayOff)
-        .options(joinedload(DayOff.surgeon))
-        .filter(
-            DayOff.status.in_(("approved", "pending")),
-            DayOff.start_date <= window["end"],
-            DayOff.end_date >= window["start"],
-        )
-        .all()
+    out_names, _no_call = _off_lists_for_window(db, window)
+    if not out_names:
+        heading = "Out Today" if window["label"] == "today" else f"Out {window['label']}"
+        return _talk(f"Nobody is {heading.lower()}.", topic="who_off", count=0)
+    heading = (
+        f"Out Today ({len(out_names)}):"
+        if window["label"] == "today"
+        else f"Out {window['label']} ({len(out_names)}):"
     )
-    names = []
-    for row in rows:
-        if not surgeon_is_visible(row.surgeon):
-            continue
-        label = f"{row.surgeon.full_name} ({row.status})"
-        if label not in names:
-            names.append(label)
-    if not names:
-        return {"ok": True, "topic": "who_off", "answer": f"Nobody is off {window['label']}."}
-    return {
-        "ok": True,
-        "topic": "who_off",
-        "answer": f"Off {window['label']}: " + "; ".join(names[:20]) + ".",
-        "count": len(names),
-    }
+    return _talk_list(heading, out_names, topic="who_off", count=len(out_names))
 
 
-def _answer_pending_off(db: Session, window: dict) -> dict:
+def _answer_pending_off(
+    db: Session,
+    window: dict,
+    *,
+    today: date | None = None,
+) -> dict:
+    cutoff = today or window["start"]
     rows = (
         db.query(DayOff)
         .options(joinedload(DayOff.surgeon))
         .filter(
             DayOff.status == "pending",
-            DayOff.start_date <= window["end"],
-            DayOff.end_date >= window["start"],
+            DayOff.end_date >= cutoff,
         )
+        .order_by(DayOff.created_at.asc().nullsfirst(), DayOff.id.asc())
         .all()
     )
     names = []
@@ -1036,18 +1078,13 @@ def _answer_pending_off(db: Session, window: dict) -> dict:
         if label not in names:
             names.append(label)
     if not names:
-        return {
-            "ok": True,
-            "topic": "pending_off",
-            "answer": f"No pending time-off requests {window['label']}.",
-            "count": 0,
-        }
-    return {
-        "ok": True,
-        "topic": "pending_off",
-        "answer": f"Pending time off {window['label']}: " + "; ".join(names[:20]) + ".",
-        "count": len(names),
-    }
+        return _talk("Pending Approvals: all clear.", topic="pending_off", count=0)
+    return _talk_list(
+        f"Pending Approvals ({len(names)}):",
+        names,
+        topic="pending_off",
+        count=len(names),
+    )
 
 
 def _is_no_call_reason(reason: str | None) -> bool:
@@ -1140,6 +1177,47 @@ def _answer_no_call(db: Session, window: dict) -> dict:
         f"No Call {window['label']} ({len(no_call_names)}):"
     )
     return _talk_list(heading, no_call_names, topic="no_call", count=len(no_call_names))
+
+
+def _answer_clinic_visits(db: Session, window: dict) -> dict:
+    total = 0
+    day = window["start"]
+    while day <= window["end"]:
+        total += clinic_visits_today_count(db, day)
+        day += timedelta(days=1)
+    heading = (
+        "Clinic Visits Today"
+        if window["label"] == "today"
+        else f"Clinic Visits {window['label']}"
+    )
+    return _talk(f"{heading}: {total}.", topic="clinic_visits", count=total)
+
+
+def _answer_available(db: Session, window: dict) -> dict:
+    active = [
+        row
+        for row in db.query(Surgeon).filter(Surgeon.is_active.is_(True)).all()
+        if surgeon_is_visible(row)
+    ]
+    out_names, _no_call = _off_lists_for_window(db, window)
+    n = max(0, len(active) - len(out_names))
+    heading = (
+        "Available Today"
+        if window["label"] == "today"
+        else f"Available {window['label']}"
+    )
+    lines = [f"{n} / {len(active)} physicians in"]
+    if out_names:
+        lines.append("Out today: " + ", ".join(out_names[:12]))
+    return _talk_list(f"{heading}:", lines, topic="available", count=n)
+
+
+def _answer_clinics_or(db: Session, window: dict) -> dict:
+    clinic = _answer_who_clinic(db, window)
+    cases = _answer_cases_board(db, window)
+    lines = [clinic.get("answer") or "", cases.get("answer") or ""]
+    clean = [line for line in lines if line]
+    return _talk_list("Clinics / OR:", clean, topic="clinics_or")
 
 
 def _answer_who_clinic(db: Session, window: dict) -> dict:
@@ -1285,13 +1363,13 @@ def _answer_notices(db: Session, admin_user_id: int | None) -> dict:
         return {
             "ok": True,
             "topic": "notices",
-            "answer": "No open notices on the board.",
+            "answer": "Admin Notifications: none unread.",
             "count": 0,
         }
     return {
         "ok": True,
         "topic": "notices",
-        "answer": f"{len(titles)} open notice{'s' if len(titles) != 1 else ''}: "
+        "answer": f"Admin Notifications ({len(titles)}): "
         + "; ".join(titles[:12])
         + ".",
         "count": len(titles),

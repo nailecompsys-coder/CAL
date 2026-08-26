@@ -18,10 +18,25 @@ QUESTION_CATALOG = (
     ("Todays Coverage", "who_call"),
     ("who is covering today", "who_call"),
     ("who is on call today", "who_call"),
+    ("Call Schedule", "who_call"),
     ("who is off today", "who_off"),
     ("who is out today", "who_off"),
+    ("Out Today", "who_off"),
     ("who has no call today", "no_call"),
+    ("No Call Today", "no_call"),
     ("who is in clinic today", "who_clinic"),
+    ("Clinic Visits Today", "clinic_visits"),
+    ("Surgical Cases Today", "cases"),
+    ("Available Today", "available"),
+    ("Pending Approvals", "pending_off"),
+    ("Meetings This Week", "meetings"),
+    ("Upcoming Meetings", "meetings"),
+    ("Admin Notifications", "notices"),
+    ("Time Off", "time_off"),
+    ("Block OR", "blocks"),
+    ("Clinics / OR", "clinics_or"),
+    ("Master Calendar", "board"),
+    ("Physicians", "roster"),
     ("what meeting are scheduled this month", "meetings"),
     ("what's on the board today", "board"),
     ("who is working today", "board"),
@@ -82,6 +97,12 @@ class GrokAskWindowTest(unittest.TestCase):
         for question, topic in QUESTION_CATALOG:
             with self.subTest(question=question):
                 self.assertEqual(parse_topic(question), topic, question)
+
+    def test_meetings_this_week_is_rolling_seven_days(self):
+        window = parse_window("Meetings This Week", date(2026, 8, 26))
+        self.assertEqual(window["start"], date(2026, 8, 26))
+        self.assertEqual(window["end"], date(2026, 9, 2))
+        self.assertEqual(window["label"], "this week")
 
 
 class GrokAskLiveBoardTest(unittest.TestCase):
@@ -319,5 +340,64 @@ class GrokAskLiveBoardTest(unittest.TestCase):
             self.assertIn("Winter Garden", result["answer"])
             self.assertNotIn("don't have that", result["answer"].lower())
             self.assertNotIn("I stay inside CAL", result["answer"])
+        finally:
+            db.close()
+
+    def test_clinic_visits_today_uses_dashboard_count(self):
+        db = self.Session()
+        try:
+            chris = Surgeon(
+                first_name="Chris", last_name="Johnson",
+                email="cj@example.com", is_active=True, staff_type="physician",
+            )
+            loc = Location(
+                name="Health Park", abbreviation="HP-CL", location_type="clinic", is_active=True,
+            )
+            db.add_all([chris, loc])
+            db.flush()
+            db.add(ClinicSchedule(
+                surgeon_id=chris.id,
+                location_id=loc.id,
+                date=date(2026, 8, 26),
+                session="am",
+                assignment_type="assigned",
+                notes="Desk fax · 09:00 SMITH, JANE; 09:15 DOE, JOHN",
+            ))
+            db.commit()
+            result = ask_grok(db, "Clinic Visits Today", today=date(2026, 8, 26))
+            self.assertEqual(result["topic"], "clinic_visits", result)
+            self.assertEqual(result["count"], 2, result)
+            self.assertIn("Clinic Visits Today", result["answer"])
+            self.assertIn("2", result["answer"])
+        finally:
+            db.close()
+
+    def test_available_today_matches_dashboard_card(self):
+        db = self.Session()
+        try:
+            alex = Surgeon(
+                first_name="Alex", last_name="Schroeder",
+                email="as@example.com", is_active=True, staff_type="physician",
+            )
+            chris = Surgeon(
+                first_name="Chris", last_name="Johnson",
+                email="cj@example.com", is_active=True, staff_type="physician",
+            )
+            db.add_all([alex, chris])
+            db.flush()
+            db.add(DayOff(
+                surgeon_id=alex.id,
+                start_date=date(2026, 8, 26),
+                end_date=date(2026, 8, 26),
+                status="approved",
+                reason="Day Off",
+            ))
+            db.commit()
+            result = ask_grok(db, "Available Today", today=date(2026, 8, 26))
+            self.assertEqual(result["topic"], "available", result)
+            self.assertEqual(result["count"], 1, result)
+            self.assertIn("Available Today", result["answer"])
+            self.assertIn("1 / 2", result["answer"])
+            self.assertIn("Alex Schroeder", result["answer"])
         finally:
             db.close()

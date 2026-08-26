@@ -143,13 +143,15 @@ def looks_like_patient_dob(
 ) -> bool:
     """True when a parsed 'case date' is a birthday, not a surgery day.
 
-    07-27-65 → 1965-07-27 is a DOB. 2028-08-27 is OCR year noise, not a DOB.
+    If the fax is a week in 2026 and the date is 40+ years earlier (1952, 1965),
+    that is a DOB. Younger DOBs (2006) are still before the fax year.
     """
     if day is None:
         return False
     today = today or practice_today()
     if window:
-        return day.year < min(window[0].year, window[1].year) - 1
+        window_year = min(window[0].year, window[1].year)
+        return day.year <= window_year - 40 or day.year < window_year - 1
     return day.year < today.year - 1
 
 

@@ -613,6 +613,97 @@ class IngestScheduleTest(unittest.TestCase):
         cancelled = self.db.query(SurgicalCase).filter(SurgicalCase.status == "cancelled").one()
         self.assertIn("Cruz", cancelled.patient_name)
 
+    def test_week_lookahead_reprint_leaves_other_days_alone(self):
+        """Daily 1–2 week faxes reprint the whole window. OCR of Monday dups
+        must not cancel Tuesday just because the header says Mon–Fri."""
+        monday = [
+            {
+                "case_date": "2026-08-24",
+                "start_time": "10:15",
+                "patient_name": "Wilkinson, Terry",
+                "procedure": "Hernia",
+                "room": "APK S03",
+            }
+        ]
+        tuesday = [
+            {
+                "case_date": "2026-08-25",
+                "start_time": "07:15",
+                "patient_name": "Dhanessur, Shirley",
+                "procedure": "Chole",
+                "room": "APK S03",
+            }
+        ]
+        ingest_surgeon_schedule(
+            self.db,
+            source_fax_id=102,
+            surgeons=self._florin_payload(monday + tuesday, start="2026-08-24", end="2026-08-28"),
+        )
+        reprint = ingest_surgeon_schedule(
+            self.db,
+            source_fax_id=110,
+            surgeons=self._florin_payload(monday, start="2026-08-24", end="2026-08-28"),
+        )
+        self.assertEqual(reprint["cases_created"], 0)
+        self.assertEqual(reprint["cases_unchanged"], 1)
+        self.assertEqual(reprint["cases_removed"], 0)
+        active = self.db.query(SurgicalCase).filter(SurgicalCase.status != "cancelled").all()
+        names = sorted(row.patient_name for row in active)
+        self.assertEqual(len(active), 2)
+        self.assertTrue(any("Wilkinson" in n for n in names))
+        self.assertTrue(any("Dhanessur" in n for n in names))
+
+    def test_week_lookahead_adds_new_and_cancels_dropped_same_day(self):
+        monday = [
+            {
+                "case_date": "2026-08-24",
+                "start_time": "10:15",
+                "patient_name": "Wilkinson, Terry",
+                "procedure": "Hernia",
+                "room": "APK S03",
+            },
+            {
+                "case_date": "2026-08-24",
+                "start_time": "11:25",
+                "patient_name": "Littmann, Ann",
+                "procedure": "Hernia",
+                "room": "APK S03",
+            },
+        ]
+        ingest_surgeon_schedule(
+            self.db,
+            source_fax_id=102,
+            surgeons=self._florin_payload(monday, start="2026-08-24", end="2026-08-28"),
+        )
+        next_day = ingest_surgeon_schedule(
+            self.db,
+            source_fax_id=110,
+            surgeons=self._florin_payload(
+                [
+                    monday[0],
+                    {
+                        "case_date": "2026-08-24",
+                        "start_time": "13:00",
+                        "patient_name": "Madden, David",
+                        "procedure": "Chole",
+                        "room": "APK S03",
+                    },
+                ],
+                start="2026-08-24",
+                end="2026-08-28",
+            ),
+        )
+        self.assertEqual(next_day["cases_created"], 1)
+        self.assertEqual(next_day["cases_removed"], 1)
+        active = self.db.query(SurgicalCase).filter(SurgicalCase.status != "cancelled").all()
+        names = sorted(row.patient_name for row in active)
+        self.assertEqual(len(active), 2)
+        self.assertTrue(any("Wilkinson" in n for n in names))
+        self.assertTrue(any("Madden" in n for n in names))
+        self.assertTrue(any("Littmann" in n for n in names) is False)
+        cancelled = self.db.query(SurgicalCase).filter(SurgicalCase.status == "cancelled").one()
+        self.assertIn("Littmann", cancelled.patient_name)
+
     def test_fax_duplicate_lines_do_not_create_second_row(self):
         day = "2026-07-27"
         cases = [

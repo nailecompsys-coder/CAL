@@ -4,11 +4,13 @@ OR fax times become Block OR windows (practice capacity) with cases under them.
 Clinic fax times become ClinicSchedule day/session assignments (notes carry clock times
 until ClinicSchedule has real start/end columns).
 
-Re-ingest semantics (daily faxes covering the same window):
-- identical case → ignore (no overlay)
+Re-ingest semantics (daily 1–2 week lookahead faxes):
+- identical case → ignore (no overlay, no second row)
 - time / room / procedure / facility change → update existing row
 - new patient on that day → create
-- fax-sourced case missing from the day's fax list → cancel
+- fax-sourced case missing from a day that is actually on this fax → cancel
+- Start/End header days with no parsed OR rows → leave the board alone
+  (OCR of a week reprint is not a wipe of Tuesday)
 Identity is surgeon + date + normalized patient name (NOT start time).
 """
 from __future__ import annotations
@@ -585,6 +587,12 @@ def _assign_surgeon_to_block(
         .first()
     )
     if existing:
+        same_placement = (
+            existing.start_time == assigned_start
+            and (existing.case_count or 0) == case_count
+        )
+        if same_placement:
+            return warnings
         update_block_assignment(
             db,
             block.id,
@@ -1202,31 +1210,11 @@ def ingest_surgeon_schedule(
             case["case_date"] = day.isoformat()
             by_date[day].append(case)
 
-        # Only days with OR cases (plus empty days inside a declared OR window) are
-        # authoritative. Clinic-only surgeon blocks must not cancel OR inventory.
-        # Never expand this span with DOB / OCR years — that was how 1965 leaked in.
-        authority_days: list[date] = []
-        if by_date:
-            range_start = date_allowed_for_fax(
-                _parse_date(block.get("start_date")), fax_window, today=practice_today()
-            )
-            range_end = date_allowed_for_fax(
-                _parse_date(block.get("end_date")), fax_window, today=practice_today()
-            ) or range_start
-            span_days = list(by_date.keys())
-            if range_start:
-                span_days.append(range_start)
-            if range_end:
-                span_days.append(range_end)
-            cursor = min(span_days)
-            last = max(span_days)
-            while cursor <= last:
-                if date_allowed_for_fax(cursor, fax_window, today=practice_today()):
-                    authority_days.append(cursor)
-                cursor += timedelta(days=1)
-
-        for day in authority_days:
-            day_cases = by_date.get(day, [])
+        # Only days that actually have OR cases in this payload are
+        # authoritative. A Mon–Fri fax header is not a wipe of Tuesday when
+        # OCR only read Monday. Clinic-only blocks must not cancel OR.
+        for day in sorted(by_date.keys()):
+            day_cases = by_date[day]
             claimed_ids: set[int] = set()
             day_candidates = (
                 db.query(SurgicalCase)
@@ -1238,17 +1226,6 @@ def ingest_surgeon_schedule(
                 .order_by(SurgicalCase.start_time, SurgicalCase.id)
                 .all()
             )
-
-            if not day_cases:
-                case_results.extend(
-                    _cancel_missing_desk_cases(
-                        db,
-                        surgeon_id=surgeon.id,
-                        case_date=day,
-                        claimed_ids=claimed_ids,
-                    )
-                )
-                continue
 
             room = (
                 day_cases[0].get("room")

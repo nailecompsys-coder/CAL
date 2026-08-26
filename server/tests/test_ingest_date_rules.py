@@ -41,6 +41,13 @@ class IngestDateRulesTest(unittest.TestCase):
         self.assertTrue(looks_like_patient_dob(date(1965, 7, 27), window, today=self.today))
         self.assertFalse(looks_like_patient_dob(date(2028, 8, 27), window, today=self.today))
 
+    def test_forty_years_before_fax_week_is_dob(self):
+        window = (date(2026, 8, 24), date(2026, 8, 28))
+        self.assertTrue(looks_like_patient_dob(date(1952, 7, 8), window, today=self.today))
+        self.assertTrue(looks_like_patient_dob(date(2006, 3, 17), window, today=self.today))
+        self.assertFalse(looks_like_patient_dob(date(2026, 8, 25), window, today=self.today))
+        self.assertIsNone(date_allowed_for_fax(date(1952, 7, 8), window, today=self.today))
+
     def test_ocr_year_snaps_into_fax_week(self):
         window = infer_fax_group_window(self.payload, today=self.today)
         self.assertEqual(

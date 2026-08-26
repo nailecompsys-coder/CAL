@@ -174,7 +174,7 @@
   </div>
 
   <!-- Calendar -->
-  <div class="flex-1 p-4 overflow-auto">
+  <div id="calendar-pane" class="flex-1 p-4 overflow-auto">
     <div class="clinical-glass p-3 h-full">
       <div id="calendar" style="height:calc(100vh - 160px)"></div>
     </div>
@@ -205,6 +205,8 @@
 let calendar, activeSurgeonId = null;
 let visibleCalendarEvents = [];
 const dayCellFrames = new Map();
+let pinTodayUntil = 0;
+let pinTodayTO = null;
 
 function isDayGridView(type) {
   return type === 'dayGridMonth' || type === 'dayGridWeek' || type === 'dayGridDay';
@@ -218,8 +220,48 @@ function syncViewSeg(viewType) {
   });
 }
 
+function todayCell() {
+  return document.querySelector('#calendar .fc-daygrid-day.fc-day-today');
+}
+
+function todayScroller(cell) {
+  return (cell && cell.closest('.fc-scroller'))
+    || document.getElementById('calendar-pane')
+    || document.querySelector('main');
+}
+
+function scrollTodayIntoCenter() {
+  const cell = todayCell();
+  if (!cell) return false;
+  const scroller = todayScroller(cell);
+  if (!scroller) {
+    cell.scrollIntoView({ block: 'center', inline: 'nearest' });
+    return true;
+  }
+  const sRect = scroller.getBoundingClientRect();
+  const cRect = cell.getBoundingClientRect();
+  if (!sRect.height) return false;
+  scroller.scrollTop += (cRect.top + cRect.height / 2) - (sRect.top + sRect.height / 2);
+  return true;
+}
+
+function keepTodayPinned(ms) {
+  pinTodayUntil = Math.max(pinTodayUntil, Date.now() + (ms || 1800));
+  schedulePinToday();
+}
+
+function schedulePinToday() {
+  clearTimeout(pinTodayTO);
+  pinTodayTO = setTimeout(function () {
+    if (Date.now() > pinTodayUntil) return;
+    scrollTodayIntoCenter();
+    if (Date.now() < pinTodayUntil) schedulePinToday();
+  }, 80);
+}
+
 document.addEventListener('DOMContentLoaded', function() {
   const calEl = document.getElementById('calendar');
+  keepTodayPinned(2200);
   calendar = new FullCalendar.Calendar(calEl, {
     initialView: 'dayGridMonth',
     headerToolbar: { left:'prev,next today', center:'title', right:'' },
@@ -245,12 +287,14 @@ document.addEventListener('DOMContentLoaded', function() {
           }
           visibleCalendarEvents = events;
           setTimeout(renderMasterMonthCells, 0);
+          keepTodayPinned(1200);
           success(events);
         }).catch(fail);
     },
     loading: function(isLoading) {
       if (!isLoading) {
         syncMasterEventsFromCalendar();
+        keepTodayPinned(800);
       }
     },
     datesSet: function(arg) {
@@ -300,11 +344,18 @@ document.addEventListener('DOMContentLoaded', function() {
   });
   calendar.render();
   syncViewSeg(calendar.view.type);
+  keepTodayPinned(2200);
+
+  const todayBtn = calEl.querySelector('.fc-today-button');
+  if (todayBtn) {
+    todayBtn.addEventListener('click', function () { keepTodayPinned(1600); });
+  }
 
   document.getElementById('cal-view-seg').addEventListener('click', function(e) {
     const btn = e.target.closest('button[data-view]');
     if (!btn || !calendar) return;
     calendar.changeView(btn.dataset.view);
+    if (todayCell()) keepTodayPinned(1200);
   });
 
   calEl.addEventListener('click', function(e) {

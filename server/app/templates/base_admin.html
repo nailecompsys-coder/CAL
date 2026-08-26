@@ -206,11 +206,15 @@ function closeSidebar() {
   var lastRefresh = Date.now();
   var SCROLL_KEY = 'cal-admin-main-scroll';
 
+  var path = window.location.pathname || '';
+  var pinTodayPage = path === '/admin/calendar' || path.indexOf('/admin/calendar/') === 0;
   var saved = sessionStorage.getItem(SCROLL_KEY);
   if (saved != null) {
     sessionStorage.removeItem(SCROLL_KEY);
-    var mainEl = document.querySelector('main');
-    if (mainEl) mainEl.scrollTop = parseInt(saved, 10) || 0;
+    if (!pinTodayPage) {
+      var mainEl = document.querySelector('main');
+      if (mainEl) mainEl.scrollTop = parseInt(saved, 10) || 0;
+    }
   }
   var url = new URL(window.location.href);
   if (url.searchParams.has('_calr')) {
@@ -224,6 +228,8 @@ function closeSidebar() {
   });
   var mainEl = document.querySelector('main');
   if (mainEl) mainEl.addEventListener('scroll', markActive, { passive: true });
+  var calendarPane = document.getElementById('calendar-pane');
+  if (calendarPane) calendarPane.addEventListener('scroll', markActive, { passive: true });
 
   function overlayOpen() {
     var nodes = document.querySelectorAll('.fixed.inset-0, [id$="-modal"], #hospital-panel, #pill-detail-float');

@@ -62,7 +62,7 @@
           Ask Grok-BOT
         </button>
       </form>
-      <div id="grok-ask-answer" hidden class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 whitespace-pre-wrap"></div>
+      <div id="grok-ask-answer" hidden class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800"></div>
     </div>
 
     <form method="post" action="/admin/settings/grok-bot-rules/add" class="clinical-panel p-5 space-y-3">
@@ -143,7 +143,12 @@
     if (!answerEl) return;
     if (!question) {
       answerEl.hidden = false;
-      answerEl.textContent = 'Ask me anything — what today or tomorrow is, who is off, clinic, cases, call, or a location.';
+      answerEl.innerHTML = '<p class="font-bold mb-2">Ask me anything</p>'
+        + '<ul class="list-disc pl-5 space-y-1">'
+        + '<li>what today or tomorrow is</li>'
+        + '<li>who is off</li>'
+        + '<li>clinic, cases, call, or a location</li>'
+        + '</ul>';
       return;
     }
     if (go) go.disabled = true;
@@ -157,6 +162,11 @@
     })
       .then(function (r) { return r.ok ? r.json() : { answer: 'I could not reach the live board.' }; })
       .then(function (data) {
+        if (window.calPaintGrokAsk) {
+          window.calPaintGrokAsk(answerEl, data);
+          return;
+        }
+        answerEl.style.whiteSpace = 'pre-wrap';
         answerEl.textContent = (data && data.answer) || 'I could not reach the live board.';
       })
       .catch(function () { answerEl.textContent = 'I could not reach the live board.'; })

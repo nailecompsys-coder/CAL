@@ -374,11 +374,14 @@ def surgeon_from_question(db: Session, question: str):
         if len(group) == 1:
             return group[0]
         if len(group) > 1:
-            names = "; ".join(row.full_name for row in group[:8])
+            names = [row.full_name for row in group[:8]]
             return {
                 "ok": True,
                 "topic": "ambiguous",
-                "answer": f"Which one: {names}?",
+                "title": "Which one?",
+                "lines": names,
+                "answer": "Which one?\n\n" + "\n".join(f"• {name}" for name in names),
+                "layout": "bubble",
             }
     return None
 
@@ -445,20 +448,22 @@ def patient_from_question(db: Session, question: str) -> dict | None:
     if not hits:
         return None
     row = hits[0]
-    clock = row.start_time.strftime("%H:%M") if row.start_time else "no start time yet"
-    who = row.surgeon.full_name if row.surgeon else "unassigned"
-    loc = ""
+    lines = [
+        f"{row.surgeon.full_name if row.surgeon else 'unassigned'}'s board",
+        row.date.strftime("%b %-d, %Y"),
+        row.start_time.strftime("%H:%M") if row.start_time else "no start time yet",
+    ]
     if row.location:
-        loc = f" at {row.location.abbreviation or row.location.name}"
+        lines.append(row.location.abbreviation or row.location.name)
+    if row.procedure:
+        lines.append(row.procedure)
     return {
         "ok": True,
         "topic": "patient",
-        "answer": (
-            f"{row.patient_name} is on {who}'s board {row.date.strftime('%b %-d, %Y')} "
-            f"at {clock}{loc}"
-            + (f" · {row.procedure}" if row.procedure else "")
-            + "."
-        ),
+        "title": row.patient_name,
+        "lines": lines,
+        "answer": f"{row.patient_name}\n\n" + "\n".join(f"• {line}" for line in lines),
+        "layout": "bubble",
     }
 
 

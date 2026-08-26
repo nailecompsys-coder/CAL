@@ -52,31 +52,29 @@ def _answer_when(text: str, today: date) -> dict:
         day = today
         word = "Today"
     pretty = f"{day.strftime('%A')}, {day.strftime('%B %-d, %Y')}"
+    lines = [pretty]
     if re.search(r"\btime\b", blob) and "tomorrow" not in blob and "yesterday" not in blob:
         clock = now.strftime("%-I:%M %p").lstrip("0")
-        return {
-            "ok": True,
-            "topic": "when",
-            "answer": f"It is {clock} Eastern. Today is {pretty}.",
-        }
-    return {
-        "ok": True,
-        "topic": "when",
-        "answer": f"{word} is {pretty}.",
-    }
+        lines = [f"It is {clock} Eastern.", pretty]
+    return _talk(word, topic="when", lines=lines)
 
 
 def _answer_identity() -> dict:
-    return {
-        "ok": True,
-        "topic": "identity",
-        "answer": (
-            "I'm Grok-BOT. I answer from the live CAL screens: Today's Coverage, "
-            "Surgical Cases Today, Clinic Visits Today, No Call Today, Available Today, "
-            "Pending Approvals, Meetings This Week, Time Off, Block OR, and locations. "
-            "Nothing leaves the app."
-        ),
-    }
+    return _talk(
+        "I'm Grok-BOT",
+        topic="identity",
+        lines=[
+            "Today's Coverage",
+            "Surgical Cases Today",
+            "Clinic Visits Today",
+            "No Call Today",
+            "Available Today",
+            "Pending Approvals",
+            "Meetings This Week",
+            "Time Off, Block OR, and locations",
+            "Nothing leaves the app.",
+        ],
+    )
 
 
 def _answer_freeform(text: str, today: date) -> dict:
@@ -90,19 +88,17 @@ def _answer_freeform(text: str, today: date) -> dict:
     if is_identity_question(blob):
         return _answer_identity()
     tomorrow = today + timedelta(days=1)
-    return {
-        "ok": True,
-        "topic": "freeform",
-        "layout": "bubble",
-        "answer": (
-            f"I don't have that as a named person or place. "
-            f"Today is {today.strftime('%A')}, {today.strftime('%B %-d, %Y')}; "
-            f"tomorrow is {tomorrow.strftime('%A')}, {tomorrow.strftime('%B %-d, %Y')}. "
-            "Ask me a Dashboard label: Today's Coverage, Surgical Cases Today, "
+    return _talk(
+        "I don't have that as a named person or place",
+        topic="freeform",
+        lines=[
+            f"Today is {today.strftime('%A')}, {today.strftime('%B %-d, %Y')}",
+            f"Tomorrow is {tomorrow.strftime('%A')}, {tomorrow.strftime('%B %-d, %Y')}",
+            "Ask a Dashboard label: Today's Coverage, Surgical Cases Today, "
             "Clinic Visits Today, No Call Today, Available Today, Pending Approvals, "
-            "or Meetings This Week — or name a doctor."
-        ),
-    }
+            "or Meetings This Week — or name a doctor.",
+        ],
+    )
 
 
 def collect_surgeon_facts(db: Session, surgeon: Surgeon, start: date, end: date) -> dict:
@@ -236,16 +232,17 @@ def _off_days(db: Session, surgeon_id: int, start: date, end: date, status: str)
 def _answer_time_off(surgeon: Surgeon, window: dict, facts: dict) -> dict:
     n = len(facts["off_days"])
     pending = len(facts["pending_days"])
-    extra = f" Plus {pending} pending." if pending else ""
-    return {
-        "ok": True,
-        "topic": "time_off",
-        "answer": (
-            f"{surgeon.full_name} had {n} approved time-off "
-            f"day{'s' if n != 1 else ''} {window['label']}.{extra}"
-        ),
-        "count": n,
-    }
+    lines = [
+        f"{n} approved time-off day{'s' if n != 1 else ''} {window['label']}",
+    ]
+    if pending:
+        lines.append(f"{pending} pending")
+    return _talk(
+        f"{surgeon.full_name} — time off",
+        topic="time_off",
+        lines=lines,
+        count=n,
+    )
 
 
 def _answer_clinic(surgeon: Surgeon, window: dict, facts: dict) -> dict:
@@ -255,69 +252,64 @@ def _answer_clinic(surgeon: Surgeon, window: dict, facts: dict) -> dict:
         count, source = aprima, "Aprima"
     else:
         count, source = fax, "the clinic schedule"
-    return {
-        "ok": True,
-        "topic": "clinic",
-        "answer": (
-            f"{surgeon.full_name} had {count} clinic patient"
-            f"{'' if count == 1 else 's'} {window['label']} ({source})."
-        ),
-        "count": count,
-    }
+    return _talk(
+        f"{surgeon.full_name} — clinic",
+        topic="clinic",
+        lines=[
+            f"{count} clinic patient{'' if count == 1 else 's'} {window['label']} ({source})",
+        ],
+        count=count,
+    )
 
 
 def _answer_cases(surgeon: Surgeon, window: dict, facts: dict) -> dict:
     n = len(facts["cases"])
+    lines = [
+        f"{n} surgical case{'s' if n != 1 else ''} {window['label']}",
+    ]
     untimed = sum(1 for row in facts["cases"] if row.start_time is None)
-    extra = f" {untimed} still have no start time." if untimed else ""
-    return {
-        "ok": True,
-        "topic": "cases",
-        "answer": (
-            f"{surgeon.full_name} had {n} surgical case{'s' if n != 1 else ''} "
-            f"{window['label']}.{extra}"
-        ),
-        "count": n,
-    }
+    if untimed:
+        lines.append(f"{untimed} still have no start time")
+    return _talk(
+        f"{surgeon.full_name} — cases",
+        topic="cases",
+        lines=lines,
+        count=n,
+    )
 
 
 def _answer_call(surgeon: Surgeon, window: dict, facts: dict) -> dict:
     assigned = facts["call_days"]
     covering = facts["covering_days"]
-    bits = []
+    lines = []
     if assigned:
-        bits.append(f"on call {', '.join(d.strftime('%b %-d') for d in assigned[:8])}")
+        lines.append("On call " + ", ".join(d.strftime("%b %-d") for d in assigned[:8]))
     if covering:
-        bits.append(f"covering {', '.join(d.strftime('%b %-d') for d in covering[:8])}")
-    if not bits:
-        return {
-            "ok": True,
-            "topic": "call",
-            "answer": f"{surgeon.full_name} is not on call {window['label']}.",
-            "count": 0,
-        }
-    return {
-        "ok": True,
-        "topic": "call",
-        "answer": f"{surgeon.full_name} is {' and '.join(bits)} {window['label']}.",
-        "count": len(assigned) + len(covering),
-    }
+        lines.append("Covering " + ", ".join(d.strftime("%b %-d") for d in covering[:8]))
+    if not lines:
+        lines = [f"Not on call {window['label']}"]
+    return _talk(
+        f"{surgeon.full_name} — call",
+        topic="call",
+        lines=lines,
+        count=len(assigned) + len(covering),
+    )
 
 
 def _answer_meetings(surgeon: Surgeon, window: dict, facts: dict) -> dict:
     rows = facts["meetings"]
     if not rows:
         return _talk(
-            f"{surgeon.full_name} has no meetings {window['label']}.",
+            f"{surgeon.full_name} — meetings",
             topic="meetings",
+            lines=[f"No meetings {window['label']}"],
             count=0,
         )
-    lines = [_meeting_line(row) for row in rows]
-    heading = (
-        f"{surgeon.full_name} has {len(rows)} meeting"
-        f"{'' if len(rows) == 1 else 's'} {window['label']}:"
+    return _talk(
+        f"{surgeon.full_name} — {len(rows)} meeting{'' if len(rows) == 1 else 's'} {window['label']}",
+        topic="meetings",
+        lines=[_meeting_line(row) for row in rows],
     )
-    return _talk_list(heading, lines, topic="meetings")
 
 
 def _answer_meetings_board(db: Session, window: dict) -> dict:
@@ -333,17 +325,18 @@ def _answer_meetings_board(db: Session, window: dict) -> dict:
     )
     if not rows:
         return _talk(
-            f"No meetings are on the board {window['label']}.",
+            "Meetings",
             topic="meetings",
+            lines=[f"None on the board {window['label']}"],
             count=0,
         )
     lines = [_meeting_line(row) for row in rows]
     heading = (
-        f"Meetings This Week ({len(rows)}):"
+        f"Meetings This Week ({len(rows)})"
         if "this week" in window["label"]
-        else f"{len(rows)} meeting{'' if len(rows) == 1 else 's'} {window['label']}:"
+        else f"{len(rows)} meeting{'' if len(rows) == 1 else 's'} {window['label']}"
     )
-    return _talk_list(heading, lines, topic="meetings")
+    return _talk(heading, topic="meetings", lines=lines)
 
 
 def _answer_cases_board(db: Session, window: dict) -> dict:
@@ -360,8 +353,9 @@ def _answer_cases_board(db: Session, window: dict) -> dict:
     )
     if not rows:
         return _talk(
-            f"No surgical cases are on the board {window['label']}.",
+            "Surgical cases",
             topic="cases",
+            lines=[f"None on the board {window['label']}"],
             count=0,
         )
     lines = []
@@ -376,11 +370,11 @@ def _answer_cases_board(db: Session, window: dict) -> dict:
             + (f" · {row.procedure}" if row.procedure else "")
         )
     heading = (
-        f"Surgical Cases Today ({len(rows)}):"
+        f"Surgical Cases Today ({len(rows)})"
         if window["label"] == "today"
-        else f"{len(rows)} surgical case{'' if len(rows) == 1 else 's'} {window['label']}:"
+        else f"{len(rows)} surgical case{'' if len(rows) == 1 else 's'} {window['label']}"
     )
-    return _talk_list(heading, lines, topic="cases", count=len(rows))
+    return _talk(heading, topic="cases", lines=lines, count=len(rows))
 
 
 def _answer_blocks_board(db: Session, window: dict) -> dict:
@@ -400,8 +394,9 @@ def _answer_blocks_board(db: Session, window: dict) -> dict:
     )
     if not rows:
         return _talk(
-            f"No Block OR rows are on the board {window['label']}.",
+            "Block OR",
             topic="blocks",
+            lines=[f"None on the board {window['label']}"],
             count=0,
         )
     lines = []
@@ -423,8 +418,8 @@ def _answer_blocks_board(db: Session, window: dict) -> dict:
             f"{row.date.strftime('%a %b %-d')} · {_clock_label(row.start_time)} · "
             f"{loc or 'OR'} · {who or (row.status or 'open')}"
         )
-    heading = f"{len(rows)} Block OR row{'' if len(rows) == 1 else 's'} {window['label']}:"
-    return _talk_list(heading, lines, topic="blocks", count=len(rows))
+    heading = f"{len(rows)} Block OR row{'' if len(rows) == 1 else 's'} {window['label']}"
+    return _talk(heading, topic="blocks", lines=lines, count=len(rows))
 
 
 def _answer_locations_board(db: Session) -> dict:
@@ -435,7 +430,7 @@ def _answer_locations_board(db: Session) -> dict:
         .all()
     )
     if not rows:
-        return _talk("No active locations on file.", topic="location", count=0)
+        return _talk("Locations", topic="location", lines=["No active locations on file."], count=0)
     lines = []
     for row in rows:
         bits = [row.name]
@@ -444,8 +439,7 @@ def _answer_locations_board(db: Session) -> dict:
         if row.location_type:
             bits.append(row.location_type)
         lines.append(" · ".join(bits))
-    heading = f"{len(rows)} locations:"
-    return _talk_list(heading, lines, topic="location", count=len(rows))
+    return _talk(f"{len(rows)} locations", topic="location", lines=lines, count=len(rows))
 
 
 def _answer_board(db: Session, window: dict) -> dict:
@@ -453,15 +447,13 @@ def _answer_board(db: Session, window: dict) -> dict:
     cases = _answer_cases_board(db, window)
     off = _answer_who_off(db, window)
     call = _answer_who_call(db, window)
-    lines = [
-        f"Live board {window['label']}:",
-        meetings.get("answer") or "",
-        cases.get("answer") or "",
-        off.get("answer") or "",
-        call.get("answer") or "",
-    ]
-    clean = [line for line in lines if line]
-    return _talk_list(clean[0], clean[1:], topic="board")
+    lines = (
+        _prefixed("Meetings", meetings)
+        + _prefixed("Cases", cases)
+        + _prefixed("Out", off)
+        + _prefixed("Coverage", call)
+    )
+    return _talk(f"Live board {window['label']}", topic="board", lines=lines)
 
 
 def _meeting_line(row: Meeting) -> str:
@@ -488,63 +480,92 @@ def _clock_label(value) -> str:
     return stamp.lstrip("0")
 
 
-def _talk(answer: str, *, topic: str, count: int | None = None, layout: str = "bubble") -> dict:
-    payload = {"ok": True, "topic": topic, "answer": answer, "layout": layout}
+def _plain(title: str, lines: list[str]) -> str:
+    body = "\n".join(f"• {line}" for line in lines if line)
+    if body:
+        return f"{title}\n\n{body}"
+    return title
+
+
+def _bullet_lines(payload: dict) -> list[str]:
+    if payload.get("title"):
+        return [line for line in (payload.get("lines") or []) if line]
+    raw = [line for line in (payload.get("lines") or []) if line]
+    if len(raw) > 1:
+        return raw[1:]
+    answer = (payload.get("answer") or "").strip()
+    return [answer] if answer else []
+
+
+def _prefixed(prefix: str, payload: dict) -> list[str]:
+    return [f"{prefix} · {line}" for line in _bullet_lines(payload)]
+
+
+def _talk(
+    title: str,
+    *,
+    topic: str,
+    lines: list[str] | None = None,
+    count: int | None = None,
+    layout: str | None = None,
+) -> dict:
+    heading = title.rstrip(":").strip()
+    items = [line for line in (lines or []) if line][:40]
+    answer = _plain(heading, items)
+    if layout is None:
+        layout = "panel" if len(items) > 4 or len(answer) > 220 else "bubble"
+    payload = {
+        "ok": True,
+        "topic": topic,
+        "title": heading,
+        "lines": items,
+        "answer": answer,
+        "layout": layout,
+    }
     if count is not None:
         payload["count"] = count
+    elif items:
+        payload["count"] = len(items)
     return payload
 
 
 def _talk_list(heading: str, lines: list[str], *, topic: str, count: int | None = None) -> dict:
-    shown = lines[:40]
-    answer = heading + "\n" + "\n".join(shown)
-    layout = "panel" if len(shown) > 4 or len(answer) > 220 else "bubble"
-    payload = {
-        "ok": True,
-        "topic": topic,
-        "answer": answer,
-        "lines": [heading] + shown,
-        "layout": layout,
-        "count": len(lines) if count is None else count,
-    }
-    return payload
+    return _talk(heading, topic=topic, lines=lines, count=count)
 
 
 def _answer_blocks(surgeon: Surgeon, window: dict, facts: dict) -> dict:
     n = len(facts["blocks"])
-    return {
-        "ok": True,
-        "topic": "blocks",
-        "answer": (
-            f"{surgeon.full_name} has {n} Block OR assignment"
-            f"{'s' if n != 1 else ''} {window['label']}."
-        ),
-        "count": n,
-    }
+    return _talk(
+        f"{surgeon.full_name} — Block OR",
+        topic="blocks",
+        lines=[
+            f"{n} Block OR assignment{'s' if n != 1 else ''} {window['label']}",
+        ],
+        count=n,
+    )
 
 
 def _answer_availability(surgeon: Surgeon, window: dict, facts: dict) -> dict:
     n = len(facts["availability"]) + len(facts["day_items"])
-    return {
-        "ok": True,
-        "topic": "availability",
-        "answer": (
-            f"{surgeon.full_name} has {n} availability / personal item"
-            f"{'' if n == 1 else 's'} {window['label']}."
-        ),
-        "count": n,
-    }
+    return _talk(
+        f"{surgeon.full_name} — availability",
+        topic="availability",
+        lines=[
+            f"{n} availability / personal item{'' if n == 1 else 's'} {window['label']}",
+        ],
+        count=n,
+    )
 
 
 def _answer_contact(surgeon: Surgeon) -> dict:
-    bits = [surgeon.full_name]
+    lines = []
     if surgeon.phone:
-        bits.append(surgeon.phone)
+        lines.append(surgeon.phone)
     if surgeon.email:
-        bits.append(surgeon.email)
-    if len(bits) == 1:
-        bits.append("no phone or email on file")
-    return {"ok": True, "topic": "contact", "answer": " · ".join(bits) + "."}
+        lines.append(surgeon.email)
+    if not lines:
+        lines = ["no phone or email on file"]
+    return _talk(surgeon.full_name, topic="contact", lines=lines)
 
 
 def _answer_briefing(surgeon: Surgeon, window: dict, facts: dict) -> dict:
@@ -556,32 +577,31 @@ def _answer_briefing(surgeon: Surgeon, window: dict, facts: dict) -> dict:
             if label and label not in places:
                 places.append(label)
     loc_bit = f" at {', '.join(places[:4])}" if places else ""
-    parts = [
-        f"{len(facts['off_days'])} time-off days",
-        f"{clinic_n} clinic patients{loc_bit}",
-        f"{len(facts['cases'])} surgical cases",
-        f"{len(facts['call_days'])} call days",
-        f"{len(facts['meetings'])} meetings",
-        f"{len(facts['blocks'])} Block OR assignments",
-    ]
-    return {
-        "ok": True,
-        "topic": "briefing",
-        "answer": f"{surgeon.full_name} {window['label']}: " + "; ".join(parts) + ".",
-    }
+    return _talk(
+        f"{surgeon.full_name} — {window['label']}",
+        topic="briefing",
+        lines=[
+            f"{len(facts['off_days'])} time-off days",
+            f"{clinic_n} clinic patients{loc_bit}",
+            f"{len(facts['cases'])} surgical cases",
+            f"{len(facts['call_days'])} call days",
+            f"{len(facts['meetings'])} meetings",
+            f"{len(facts['blocks'])} Block OR assignments",
+        ],
+    )
 
 
 def _answer_who_off(db: Session, window: dict) -> dict:
     out_names, _no_call = _off_lists_for_window(db, window)
+    heading = "Out Today" if window["label"] == "today" else f"Out {window['label']}"
     if not out_names:
-        heading = "Out Today" if window["label"] == "today" else f"Out {window['label']}"
-        return _talk(f"Nobody is {heading.lower()}.", topic="who_off", count=0)
-    heading = (
-        f"Out Today ({len(out_names)}):"
-        if window["label"] == "today"
-        else f"Out {window['label']} ({len(out_names)}):"
+        return _talk(heading, topic="who_off", lines=["Nobody is out."], count=0)
+    return _talk(
+        f"{heading} ({len(out_names)})",
+        topic="who_off",
+        lines=out_names,
+        count=len(out_names),
     )
-    return _talk_list(heading, out_names, topic="who_off", count=len(out_names))
 
 
 def _answer_pending_off(
@@ -609,11 +629,11 @@ def _answer_pending_off(
         if label not in names:
             names.append(label)
     if not names:
-        return _talk("Pending Approvals: all clear.", topic="pending_off", count=0)
-    return _talk_list(
-        f"Pending Approvals ({len(names)}):",
-        names,
+        return _talk("Pending Approvals", topic="pending_off", lines=["All clear."], count=0)
+    return _talk(
+        f"Pending Approvals ({len(names)})",
         topic="pending_off",
+        lines=names,
         count=len(names),
     )
 
@@ -679,9 +699,9 @@ def _answer_who_call(db: Session, window: dict) -> dict:
         lines.append(f"{stamp}{row.surgeon.full_name} · {group}{extra}")
 
     heading = (
-        "Today's Coverage:"
+        "Today's Coverage"
         if window["label"] == "today"
-        else f"Coverage {window['label']}:"
+        else f"Coverage {window['label']}"
     )
     if not lines:
         lines = [
@@ -692,22 +712,25 @@ def _answer_who_call(db: Session, window: dict) -> dict:
 
     if window["start"] == window["end"]:
         out_names, no_call_names = _off_lists_for_window(db, window)
-        if out_names:
-            lines.append("Out today: " + ", ".join(out_names[:12]))
-        if no_call_names:
-            lines.append("No Call Today: " + ", ".join(no_call_names[:12]))
+        for name in out_names[:12]:
+            lines.append(f"Out · {name}")
+        for name in no_call_names[:12]:
+            lines.append(f"No Call · {name}")
 
-    return _talk_list(heading, lines, topic="who_call", count=len(lines))
+    return _talk(heading, topic="who_call", lines=lines, count=len(lines))
 
 
 def _answer_no_call(db: Session, window: dict) -> dict:
     _out_names, no_call_names = _off_lists_for_window(db, window)
+    heading = "No Call Today" if window["label"] == "today" else f"No Call {window['label']}"
     if not no_call_names:
-        return _talk(f"Nobody is marked No Call {window['label']}.", topic="no_call", count=0)
-    heading = f"No Call Today ({len(no_call_names)}):" if window["label"] == "today" else (
-        f"No Call {window['label']} ({len(no_call_names)}):"
+        return _talk(heading, topic="no_call", lines=["Nobody is marked No Call."], count=0)
+    return _talk(
+        f"{heading} ({len(no_call_names)})",
+        topic="no_call",
+        lines=no_call_names,
+        count=len(no_call_names),
     )
-    return _talk_list(heading, no_call_names, topic="no_call", count=len(no_call_names))
 
 
 def _answer_clinic_visits(db: Session, window: dict) -> dict:
@@ -721,7 +744,7 @@ def _answer_clinic_visits(db: Session, window: dict) -> dict:
         if window["label"] == "today"
         else f"Clinic Visits {window['label']}"
     )
-    return _talk(f"{heading}: {total}.", topic="clinic_visits", count=total)
+    return _talk(heading, topic="clinic_visits", lines=[str(total)], count=total)
 
 
 def _answer_available(db: Session, window: dict) -> dict:
@@ -738,17 +761,16 @@ def _answer_available(db: Session, window: dict) -> dict:
         else f"Available {window['label']}"
     )
     lines = [f"{n} / {len(active)} physicians in"]
-    if out_names:
-        lines.append("Out today: " + ", ".join(out_names[:12]))
-    return _talk_list(f"{heading}:", lines, topic="available", count=n)
+    for name in out_names[:12]:
+        lines.append(f"Out · {name}")
+    return _talk(heading, topic="available", lines=lines, count=n)
 
 
 def _answer_clinics_or(db: Session, window: dict) -> dict:
     clinic = _answer_who_clinic(db, window)
     cases = _answer_cases_board(db, window)
-    lines = [clinic.get("answer") or "", cases.get("answer") or ""]
-    clean = [line for line in lines if line]
-    return _talk_list("Clinics / OR:", clean, topic="clinics_or")
+    lines = _prefixed("Clinic", clinic) + _prefixed("OR", cases)
+    return _talk("Clinics / OR", topic="clinics_or", lines=lines)
 
 
 def _answer_who_clinic(db: Session, window: dict) -> dict:
@@ -771,28 +793,27 @@ def _answer_who_clinic(db: Session, window: dict) -> dict:
         if row.location:
             loc = f" at {row.location.abbreviation or row.location.name}"
         bits.append(f"{row.surgeon.full_name}{loc} {row.date.strftime('%b %-d')}")
+    heading = f"Clinic {window['label']}"
     if not bits:
-        return {"ok": True, "topic": "who_clinic", "answer": f"Nobody is in clinic {window['label']}."}
-    return {
-        "ok": True,
-        "topic": "who_clinic",
-        "answer": f"Clinic {window['label']}: " + "; ".join(bits[:20]) + ".",
-        "count": len(bits),
-    }
+        return _talk(heading, topic="who_clinic", lines=["Nobody is in clinic."], count=0)
+    return _talk(heading, topic="who_clinic", lines=bits[:20], count=len(bits))
 
 
 def _answer_location_details(loc: Location) -> dict:
-    bits = [loc.name]
+    lines = []
     if loc.abbreviation:
-        bits.append(loc.abbreviation)
+        lines.append(loc.abbreviation)
     if loc.phone:
-        bits.append(loc.phone)
+        lines.append(loc.phone)
     addr = " ".join(part for part in (loc.address, loc.city) if part)
     if addr:
-        bits.append(addr)
+        lines.append(addr)
     if loc.location_type:
-        bits.append(loc.location_type)
-    return {"ok": True, "topic": "location", "answer": " · ".join(bits) + "."}
+        lines.append(loc.location_type)
+    if not lines:
+        lines = ["on file"]
+    return _talk(loc.name or "Location", topic="location", lines=lines)
+
 
 
 def _aprima_clinic_count_at_location(
@@ -856,32 +877,35 @@ def _answer_location_volume(db: Session, loc: Location, window: dict, topic: str
     if topic == "clinic":
         if not patients:
             return _talk(
-                f"No patients are on the board at {label} {window['label']}.",
+                f"{label} {window['label']}",
                 topic="clinic",
+                lines=["No patients are on the board."],
                 count=0,
             )
         return _talk(
-            f"{label} {window['label']}: {patients} patient"
-            f"{'' if patients == 1 else 's'} to be seen.",
+            f"{label} {window['label']}",
             topic="clinic",
+            lines=[
+                f"{patients} patient{'' if patients == 1 else 's'} to be seen",
+            ],
             count=patients,
         )
     if topic == "cases":
         n = len(cases)
-        return {
-            "ok": True,
-            "topic": "cases",
-            "answer": f"{label} had {n} surgical case{'s' if n != 1 else ''} {window['label']}.",
-            "count": n,
-        }
-    return {
-        "ok": True,
-        "topic": "briefing",
-        "answer": (
-            f"{label} {window['label']}: {patients} clinic patients; "
-            f"{len(cases)} surgical cases."
-        ),
-    }
+        return _talk(
+            f"{label} {window['label']}",
+            topic="cases",
+            lines=[f"{n} surgical case{'s' if n != 1 else ''}"],
+            count=n,
+        )
+    return _talk(
+        f"{label} {window['label']}",
+        topic="briefing",
+        lines=[
+            f"{patients} clinic patients",
+            f"{len(cases)} surgical cases",
+        ],
+    )
 
 
 def _answer_roster(db: Session) -> dict:
@@ -893,13 +917,8 @@ def _answer_roster(db: Session) -> dict:
     )
     names = [row.full_name for row in rows if surgeon_is_visible(row)]
     if not names:
-        return {"ok": True, "topic": "roster", "answer": "No active surgeons on file."}
-    return {
-        "ok": True,
-        "topic": "roster",
-        "answer": f"{len(names)} surgeons: " + "; ".join(names[:40]) + ".",
-        "count": len(names),
-    }
+        return _talk("Physicians", topic="roster", lines=["No active surgeons on file."], count=0)
+    return _talk(f"{len(names)} physicians", topic="roster", lines=names[:40], count=len(names))
 
 
 def _answer_groups(db: Session) -> dict:
@@ -909,14 +928,11 @@ def _answer_groups(db: Session) -> dict:
         for row in db.query(ClinicGroup).filter(ClinicGroup.is_active.is_(True)).all()
         if row.name
     ]
-    bits = []
-    if call_groups:
-        bits.append("Call groups: " + ", ".join(call_groups[:20]))
-    if clinic_groups:
-        bits.append("Clinic groups: " + ", ".join(clinic_groups[:20]))
-    if not bits:
-        return {"ok": True, "topic": "groups", "answer": "No call or clinic groups on file."}
-    return {"ok": True, "topic": "groups", "answer": ". ".join(bits) + "."}
+    lines = [f"Call · {name}" for name in call_groups[:20]]
+    lines.extend(f"Clinic · {name}" for name in clinic_groups[:20])
+    if not lines:
+        return _talk("Groups", topic="groups", lines=["No call or clinic groups on file."])
+    return _talk("Groups", topic="groups", lines=lines)
 
 
 def _answer_notices(db: Session, admin_user_id: int | None) -> dict:
@@ -933,19 +949,12 @@ def _answer_notices(db: Session, admin_user_id: int | None) -> dict:
         if title and title not in titles:
             titles.append(title)
     if not titles:
-        return {
-            "ok": True,
-            "topic": "notices",
-            "answer": "Admin Notifications: none unread.",
-            "count": 0,
-        }
-    return {
-        "ok": True,
-        "topic": "notices",
-        "answer": f"Admin Notifications ({len(titles)}): "
-        + "; ".join(titles[:12])
-        + ".",
-        "count": len(titles),
-    }
+        return _talk("Admin Notifications", topic="notices", lines=["None unread."], count=0)
+    return _talk(
+        f"Admin Notifications ({len(titles)})",
+        topic="notices",
+        lines=titles[:12],
+        count=len(titles),
+    )
 
 

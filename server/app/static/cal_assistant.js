@@ -199,6 +199,9 @@
       '  transform:translateX(-50%) rotate(45deg);',
       '}',
       '#cal-bubble.cal-talk .cal-msg{margin:0;font-weight:500;line-height:1.45;white-space:pre-wrap;}',
+      '#cal-bubble.cal-talk .cal-talk-lead{margin:0 0 .45rem;font-weight:800;line-height:1.3;}',
+      '#cal-bubble.cal-talk .cal-talk-list{margin:0;padding:.05rem 0 0 1.15rem;list-style:disc;}',
+      '#cal-bubble.cal-talk .cal-talk-list li{line-height:1.4;}',
       '#cal-bubble.cal-talk .cal-x{position:absolute;top:.2rem;right:.3rem;}',
       '.cal-bubble-top{display:flex;align-items:center;gap:.4rem;margin-bottom:.4rem;}',
       '.cal-bot-name{',
@@ -282,6 +285,7 @@
       '}',
       '#cal-assist.cal-docked #cal-ask-go{width:100%;padding:.55rem .65rem;font-size:.72rem;}',
       '#cal-assist.cal-docked #cal-bubble{max-width:none;width:100%;}',
+      '#cal-assist.cal-docked #cal-bubble.cal-talk{max-height:min(42vh,22rem);overflow:auto;}',
       '#cal-talk-panel{',
       '  position:fixed;inset:0;z-index:10050;',
       '  display:flex;align-items:center;justify-content:center;',
@@ -303,8 +307,8 @@
       '}',
       '#cal-talk-card .cal-x{position:absolute;top:.45rem;right:.55rem;}',
       '#cal-talk-body{padding-right:.6rem;}',
-      '.cal-talk-lead{margin:0 0 .7rem;font-weight:650;line-height:1.4;color:var(--cal-ink,#1c2430);}',
-      '.cal-talk-list{margin:0;padding:0 0 0 1.1rem;display:flex;flex-direction:column;gap:.4rem;}',
+      '.cal-talk-lead{margin:0 0 .7rem;font-weight:800;line-height:1.35;color:var(--cal-ink,#1c2430);}',
+      '.cal-talk-list{margin:0;padding:0 0 0 1.15rem;list-style:disc;display:flex;flex-direction:column;gap:.4rem;}',
       '.cal-talk-list li{line-height:1.4;color:var(--cal-ink,#1c2430);font-size:.875rem;}',
     ].join('\n');
     document.head.appendChild(s);
@@ -603,15 +607,41 @@
     });
   }
 
-  function showAskBubble(answer) {
+  function askParts(data) {
+    data = data || {};
+    var title = String(data.title || '').trim();
+    var bullets = Array.isArray(data.lines) ? data.lines.filter(Boolean) : [];
+    if (!title) {
+      var raw = String(data.answer || '').split('\n').filter(Boolean);
+      title = raw.length ? raw[0].replace(/^[•\-\u2022]\s*/, '') : '';
+      bullets = raw.slice(1).map(function (line) {
+        return line.replace(/^[•\-\u2022]\s*/, '');
+      });
+    }
+    return { title: title, bullets: bullets };
+  }
+
+  function askHtml(data) {
+    var parts = askParts(data);
+    var html = '<p class="cal-talk-lead"><strong>' + esc(parts.title) + '</strong></p>';
+    if (parts.bullets.length) {
+      html += '<ul class="cal-talk-list">' + parts.bullets.map(function (line) {
+        return '<li>' + esc(line) + '</li>';
+      }).join('') + '</ul>';
+    }
+    return html;
+  }
+
+  function showAskBubble(data) {
     hideTalkPanel();
     var bubble = document.getElementById('cal-bubble');
     if (!bubble) return;
+    if (typeof data === 'string') data = { answer: data };
     wakeFromSleep();
     setMood('ok');
     bubble.innerHTML =
       '<button class="cal-x" aria-label="Dismiss" type="button">\u00d7</button>' +
-      '<p class="cal-msg">' + esc(answer) + '</p>';
+      askHtml(data);
     bubble.classList.add('cal-visible', 'cal-talk');
     keepWidgetOnScreen();
     bubble.querySelector('.cal-x').addEventListener('click', dismissTalk);
@@ -651,17 +681,7 @@
     }
     var panel = ensureTalkPanel();
     var body = document.getElementById('cal-talk-body');
-    var lines = (data && data.lines && data.lines.length)
-      ? data.lines
-      : String((data && data.answer) || '').split('\n').filter(Boolean);
-    var lead = lines.length ? lines[0] : ((data && data.answer) || '');
-    var rest = lines.slice(1);
-    var items = rest.map(function (line) {
-      return '<li>' + esc(line) + '</li>';
-    }).join('');
-    body.innerHTML =
-      '<p class="cal-talk-lead">' + esc(lead) + '</p>' +
-      (items ? '<ol class="cal-talk-list">' + items + '</ol>' : '');
+    body.innerHTML = askHtml(data);
     wakeFromSleep();
     setMood('ok');
     panel.classList.remove('hidden');
@@ -679,13 +699,20 @@
 
   function showAskResult(data) {
     var payload = data || {};
-    var answer = payload.answer || 'I could not reach the live board.';
+    if (!payload.answer && !payload.title) {
+      payload = { answer: 'I could not reach the live board.' };
+    }
     if (payload.layout === 'panel') {
       showTalkPanel(payload);
       return;
     }
-    showAskBubble(answer);
+    showAskBubble(payload);
   }
+
+  window.calPaintGrokAsk = function (el, data) {
+    if (!el) return;
+    el.innerHTML = askHtml(data || { answer: 'I could not reach the live board.' });
+  };
 
   function clearAskField() {
     var input = document.getElementById('cal-ask-input');

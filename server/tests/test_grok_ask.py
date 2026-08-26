@@ -360,6 +360,11 @@ class GrokAskLiveBoardTest(unittest.TestCase):
             self.assertIn("Today's Coverage", result["answer"])
             self.assertIn("Chris Johnson", result["answer"])
             self.assertIn("Winter Garden", result["answer"])
+            self.assertEqual(result["title"], "Today's Coverage")
+            self.assertTrue(result["lines"])
+            self.assertIn("Chris Johnson", result["lines"][0])
+            self.assertTrue(result["answer"].startswith("Today's Coverage"))
+            self.assertIn("• ", result["answer"])
             self.assertNotIn("don't have that", result["answer"].lower())
             self.assertNotIn("I stay inside CAL", result["answer"])
         finally:

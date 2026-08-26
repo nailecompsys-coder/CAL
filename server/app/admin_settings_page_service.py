@@ -7,7 +7,11 @@ from sqlalchemy import case
 from sqlalchemy.orm import Session
 
 from . import wasabi_backup
-from .admin_notification_ack import notification_is_informational
+from .admin_notification_ack import (
+    notification_is_bot_chatter,
+    notification_is_informational,
+    reconcile_bot_chatter_notifications,
+)
 from .models import AdminNotification, Surgeon, SurgeonDevice, SurgeonOtpAuditLog
 
 
@@ -301,11 +305,7 @@ def recent_admin_notifications(db: Session, admin_user_id: int, limit: int = 20)
     Day-off / schedule-flag cards only appear while the underlying issue is still open.
     Duplicate notify spam is collapsed (one card per dayOffId / block+surgeon).
     """
-    reconcile_stale_dayoff_notifications(db, admin_user_id)
-    reconcile_stale_schedule_flag_notifications(db, admin_user_id)
-    reconcile_ingest_correction_notifications(db, admin_user_id)
-    from .grok_lookahead_service import reconcile_stale_call_coverage_notifications
-    reconcile_stale_call_coverage_notifications(db, admin_user_id)
+    _reconcile_admin_notification_feed(db, admin_user_id)
     rows = (
         db.query(AdminNotification)
         .filter(AdminNotification.admin_user_id == admin_user_id)
@@ -330,6 +330,8 @@ def recent_admin_notifications(db: Session, admin_user_id: int, limit: int = 20)
     seen_corrections: set[str] = set()
     visible: list[AdminNotification] = []
     for row in rows:
+        if notification_is_bot_chatter(row):
+            continue
         if notification_is_informational(row) and row.read_at is not None:
             continue
         if row.kind == "day_off_request":
@@ -359,12 +361,17 @@ def recent_admin_notifications(db: Session, admin_user_id: int, limit: int = 20)
     return visible
 
 
-def unread_admin_notification_count(db: Session, admin_user_id: int) -> int:
+def _reconcile_admin_notification_feed(db: Session, admin_user_id: int) -> None:
     reconcile_stale_dayoff_notifications(db, admin_user_id)
     reconcile_stale_schedule_flag_notifications(db, admin_user_id)
     reconcile_ingest_correction_notifications(db, admin_user_id)
     from .grok_lookahead_service import reconcile_stale_call_coverage_notifications
     reconcile_stale_call_coverage_notifications(db, admin_user_id)
+    reconcile_bot_chatter_notifications(db, admin_user_id)
+
+
+def unread_admin_notification_count(db: Session, admin_user_id: int) -> int:
+    _reconcile_admin_notification_feed(db, admin_user_id)
     # Count distinct pending day-off requests + other unread kinds.
     rows = (
         db.query(AdminNotification)
@@ -379,6 +386,8 @@ def unread_admin_notification_count(db: Session, admin_user_id: int) -> int:
     seen_corrections: set[str] = set()
     count = 0
     for row in rows:
+        if notification_is_bot_chatter(row):
+            continue
         if row.kind == "day_off_request":
             dayoff_id = _dayoff_id_from_notification(row)
             if dayoff_id is not None:

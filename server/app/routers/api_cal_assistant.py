@@ -11,11 +11,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
+from ..admin_notification_ack import reconcile_bot_chatter_notifications
 from ..auth import get_current_admin
 from ..database import get_db
-from ..practice_time import practice_today
 from ..grok_lookahead_service import reconcile_stale_call_coverage_notifications
 from ..off_conflict_service import detect_off_conflicts
+from ..practice_time import practice_today
 
 router = APIRouter(prefix="/api")
 
@@ -53,6 +54,7 @@ def cal_assistant_conflicts(
         raise HTTPException(status_code=403, detail="Cal-BOT not available for scheduler role")
 
     reconcile_stale_call_coverage_notifications(db)
+    reconcile_bot_chatter_notifications(db)
     week_start, week_end = _week_bounds(week_offset)
     conflicts = detect_off_conflicts(db, week_start, week_end)
 

@@ -21,7 +21,10 @@ LOOKAHEAD_DAYS = 14
 def build_grok_lookahead(db: Session, *, today: date | None = None) -> dict:
     start = today or practice_today()
     end = start + timedelta(days=LOOKAHEAD_DAYS - 1)
+    from .admin_notification_ack import reconcile_bot_chatter_notifications
+
     cleared = reconcile_stale_call_coverage_notifications(db)
+    cleared += reconcile_bot_chatter_notifications(db)
     issues = _call_vs_time_off(db, start, end)
     issues.extend(_block_work_while_off(db, start, end))
     issues.sort(key=lambda row: (row["date"], row.get("kind") or "", row.get("message") or ""))

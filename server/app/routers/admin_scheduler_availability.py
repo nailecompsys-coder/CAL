@@ -1,4 +1,4 @@
-"""Scheduler board: Block OR capacity + non-PHI case warnings."""
+"""Needs-attention board: flags, missing fax fields, open Block OR, case warnings."""
 
 import json
 from datetime import date, timedelta
@@ -75,7 +75,6 @@ def scheduler_availability_page(
         blocks.append(payload)
 
     open_blocks = [row for row in blocks if row.get("status") == "open"]
-    assigned_blocks = [row for row in blocks if row.get("status") != "open"]
     case_rows = [
         row for row in scheduler_safe_rows(db, start_date, end_date, selected_surgeon_id)
         if row.get("warnings")
@@ -97,7 +96,7 @@ def scheduler_availability_page(
             selected = next((s for s in surgeons if s.id == selected_surgeon_id), None)
             if selected and row.get("surgeon") != selected.full_name:
                 continue
-    schedule_flags.append(row)
+        schedule_flags.append(row)
     from ..models import AdminNotification
     ingest_fixes = []
     for note in (
@@ -132,7 +131,6 @@ def scheduler_availability_page(
         selected_surgeon_id=selected_surgeon_id,
         surgeons=surgeons,
         open_blocks=open_blocks,
-        assigned_blocks=assigned_blocks,
         rows=case_rows,
         schedule_flags=schedule_flags,
         ingest_fixes=ingest_fixes,

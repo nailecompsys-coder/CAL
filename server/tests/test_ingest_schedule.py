@@ -121,6 +121,13 @@ class IngestScheduleTest(unittest.TestCase):
         self.assertTrue(cases[0]["procedure"].startswith("FOREIGN BODY"))
         self.assertTrue(cases[1]["procedure"].startswith("EXCISION"))
 
+    def test_five_digit_ocr_clock_recovers_the_real_hhmm(self):
+        """Fax #102 Wilkinson: 1015 OCR'd as 91015. Use 10:15, do not invent."""
+        cases = [{"start_time": "91015", "procedure": "ROBOTIC RIGHT INGUINAL HERNIA REPAIR"}]
+        start, _end = _block_window_for_cases(cases, "am")
+        self.assertEqual(start, time(10, 15))
+        self.assertEqual(cases[0]["start_time"], "10:15")
+
     def test_missing_time_goes_to_admin_correction_not_error(self):
         result = ingest_surgeon_schedule(
             self.db,

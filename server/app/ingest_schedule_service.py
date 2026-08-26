@@ -70,11 +70,17 @@ def _parse_time(raw: str | None, fallback: time | None = None) -> time | None:
         return parse_hhmm(s)
     except ValueError:
         digits = re.sub(r"\D", "", s)
+        chunks: list[str] = []
         if len(digits) == 4:
+            chunks = [digits]
+        elif len(digits) == 5:
+            # Fax OCR sometimes prefixes a junk digit: 91015 → 1015.
+            chunks = [digits[1:], digits[:4]]
+        for chunk in chunks:
             try:
-                return parse_hhmm(f"{digits[:2]}:{digits[2:]}")
+                return parse_hhmm(f"{chunk[:2]}:{chunk[2:]}")
             except ValueError:
-                return fallback
+                continue
         return fallback
 
 
@@ -84,13 +90,14 @@ def _salvage_start_time(case: dict) -> None:
     Rule: never invent a window; recover the clock that is already on the fax.
     Mutates the case so upsert also gets the recovered time.
     """
-    if _parse_time(case.get("start_time")):
+    parsed = _parse_time(case.get("start_time"))
+    if parsed:
+        case["start_time"] = parsed.strftime("%H:%M")
         proc = (case.get("procedure") or "").strip()
         glued = _LEADING_HHMM_RE.match(proc) or _LEADING_H_COLON_RE.match(proc)
         if glued:
             recovered = _parse_time(glued.group(0))
-            existing = _parse_time(case.get("start_time"))
-            if recovered == existing:
+            if recovered == parsed:
                 case["procedure"] = proc[len(glued.group(0)) :].strip()
         return
     proc = (case.get("procedure") or "").strip()

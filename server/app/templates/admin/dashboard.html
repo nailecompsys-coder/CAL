@@ -35,9 +35,18 @@
     <h1 class="font-bold">Dashboard</h1>
     <p class="text-xs text-slate-500">{{ today.strftime('%A, %B %-d, %Y') }}</p>
   </div>
-  <a href="/admin/call-schedule" class="bg-blue-600 text-white text-xs px-3 py-2 rounded-xl hover:bg-blue-700 bento-action flex items-center gap-2 font-bold">
-    <i class="fa-solid fa-bell"></i> Call Schedule
-  </a>
+  <div class="flex items-center gap-2 flex-shrink-0">
+    <button type="button" id="aprima-sync-now"
+      class="bg-teal-600 text-white text-xs px-3 py-2 rounded-xl hover:bg-teal-700 bento-action flex items-center gap-2 font-bold disabled:opacity-60 disabled:cursor-wait"
+      title="Read Aprima now and update CAL (hourly sync still runs at :05)"
+      {% if aprima_sync and aprima_sync.running %}disabled{% endif %}>
+      <i class="fa-solid fa-arrows-rotate {% if aprima_sync and aprima_sync.running %}fa-spin{% endif %}" data-aprima-sync-icon></i>
+      <span data-aprima-sync-label>{% if aprima_sync and aprima_sync.running %}Updating…{% else %}Update from Aprima{% endif %}</span>
+    </button>
+    <a href="/admin/call-schedule" class="bg-blue-600 text-white text-xs px-3 py-2 rounded-xl hover:bg-blue-700 bento-action flex items-center gap-2 font-bold">
+      <i class="fa-solid fa-bell"></i> Call Schedule
+    </a>
+  </div>
 </header>
 
 <div class="p-4 space-y-4">
@@ -461,17 +470,36 @@
 <script>
 (function () {
   const initialFingerprint = {{ (aprima_sync.fingerprint if aprima_sync else '')|tojson }};
+  const initialFinishedAt = {{ (aprima_sync.lastFinishedAt if aprima_sync else '')|tojson }};
   let lastFingerprint = initialFingerprint || '';
   const POLL_MS = 60000;
+  const MANUAL_POLL_MS = 2000;
+  const MANUAL_WAIT_MS = 180000;
+  const btn = document.getElementById('aprima-sync-now');
+  const icon = btn ? btn.querySelector('[data-aprima-sync-icon]') : null;
+  const label = btn ? btn.querySelector('[data-aprima-sync-label]') : null;
+  let watchingManual = false;
+
+  function setBusy(busy, text) {
+    if (!btn) return;
+    btn.disabled = busy;
+    if (icon) icon.classList.toggle('fa-spin', busy);
+    if (label) label.textContent = text || (busy ? 'Updating…' : 'Update from Aprima');
+  }
+
+  async function fetchAprimaStatus() {
+    const res = await fetch('/admin/aprima-sync-status', {
+      credentials: 'same-origin',
+      headers: { 'Accept': 'application/json' },
+    });
+    if (!res.ok) return null;
+    return res.json();
+  }
 
   async function pollAprimaSync() {
     try {
-      const res = await fetch('/admin/aprima-sync-status', {
-        credentials: 'same-origin',
-        headers: { 'Accept': 'application/json' },
-      });
-      if (!res.ok) return;
-      const data = await res.json();
+      const data = await fetchAprimaStatus();
+      if (!data) return;
       const next = data.fingerprint || '';
       if (lastFingerprint && next && next !== lastFingerprint) {
         if (window.CALAdmin && window.CALAdmin.isBusy && window.CALAdmin.isBusy()) return;
@@ -484,9 +512,63 @@
     }
   }
 
-  setInterval(pollAprimaSync, POLL_MS);
+  async function watchManualSync(startedFinishedAt) {
+    watchingManual = true;
+    const deadline = Date.now() + MANUAL_WAIT_MS;
+    while (Date.now() < deadline) {
+      await new Promise(function (resolve) { setTimeout(resolve, MANUAL_POLL_MS); });
+      let data;
+      try {
+        data = await fetchAprimaStatus();
+      } catch (_) {
+        continue;
+      }
+      if (!data) continue;
+      const finished = data.lastFinishedAt || '';
+      const done = data.status === 'ok' || data.status === 'error';
+      if (done && finished && finished !== (startedFinishedAt || '')) {
+        window.location.reload();
+        return;
+      }
+      if (done && !data.running && finished === (startedFinishedAt || '')) {
+        /* no change in Aprima — still refresh so the synced timestamp updates */
+        window.location.reload();
+        return;
+      }
+    }
+    watchingManual = false;
+    setBusy(false, 'Update from Aprima');
+    btn && (btn.title = 'Aprima is still updating. Try again or wait for the hourly sync.');
+  }
+
+  async function startManualSync() {
+    if (!btn || btn.disabled) return;
+    setBusy(true, 'Updating…');
+    try {
+      const res = await fetch('/admin/aprima-sync', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' },
+      });
+      if (!res.ok) throw new Error('sync failed');
+      const data = await res.json();
+      const startedAt = (data.status && data.status.lastFinishedAt) || initialFinishedAt || '';
+      await watchManualSync(startedAt);
+    } catch (_) {
+      watchingManual = false;
+      setBusy(false, 'Update failed');
+      setTimeout(function () { setBusy(false, 'Update from Aprima'); }, 4000);
+    }
+  }
+
+  if (btn) btn.addEventListener('click', startManualSync);
+  if (btn && btn.disabled) watchManualSync(initialFinishedAt || '');
+
+  setInterval(function () {
+    if (!watchingManual) pollAprimaSync();
+  }, POLL_MS);
   document.addEventListener('visibilitychange', function () {
-    if (document.visibilityState === 'visible') pollAprimaSync();
+    if (document.visibilityState === 'visible' && !watchingManual) pollAprimaSync();
   });
 })();
 </script>

@@ -39,8 +39,9 @@ class SchedulerPortalAuthTest(unittest.TestCase):
         token = create_admin_token(admin.id)
         db = MagicMock()
         db.get.return_value = admin
-        with self.assertRaises(HTTPException):
-            get_current_admin(self._request("/admin/clinic-schedule"), admin_token=token, db=db)
+        for path in ("/admin/clinic-schedule", "/admin/aprima-sync", "/admin/dashboard"):
+            with self.assertRaises(HTTPException):
+                get_current_admin(self._request(path), admin_token=token, db=db)
 
     def test_admin_can_open_clinic_schedule(self):
         admin = self._admin("admin")

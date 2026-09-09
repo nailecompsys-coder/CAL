@@ -3,13 +3,18 @@ import os
 import urllib.parse
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from ..admin_dashboard_stats_service import dashboard_today_volume_stats
-from ..aprima_cache_service import main_office_patients_by_weekday, sync_status_payload
+from ..aprima_cache_service import (
+    begin_manual_aprima_sync,
+    main_office_patients_by_weekday,
+    run_aprima_sync_job,
+    sync_status_payload,
+)
 from ..auth import (
     get_current_admin,
 )
@@ -196,6 +201,19 @@ def aprima_sync_status(
 ):
     """JSON fingerprint for portal soft-refresh (no PHI)."""
     return sync_status_payload(db)
+
+
+@router.post("/aprima-sync")
+def aprima_sync_now(
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    """Manual Aprima → CAL cache pull. Same job as the hourly cron. Never writes to Aprima."""
+    result = begin_manual_aprima_sync(db)
+    if result.get("started"):
+        background_tasks.add_task(run_aprima_sync_job)
+    return result
 
 
 # ── Calendar ─────────────────────────────────────────────────────────────────

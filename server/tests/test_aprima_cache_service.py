@@ -1,6 +1,6 @@
 import os
 import unittest
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
@@ -10,6 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.aprima_cache_service import (
+    begin_manual_aprima_sync,
     cache_is_usable,
     main_office_patients_by_weekday,
     patient_appointments_for_api,
@@ -228,6 +229,29 @@ class AprimaCacheServiceTest(unittest.TestCase):
         self.assertEqual(week["days"][4]["count"], 1)
         self.assertEqual(week["days"][4]["appointments"][0]["appointmentType"], "Surgery")
         fetch_patients.assert_not_called()
+
+    def test_begin_manual_aprima_sync_marks_running_once(self):
+        first = begin_manual_aprima_sync(self.db)
+        self.assertTrue(first["started"])
+        self.assertFalse(first["alreadyRunning"])
+        self.assertTrue(first["status"]["running"])
+        self.assertEqual(first["status"]["status"], "running")
+
+        second = begin_manual_aprima_sync(self.db)
+        self.assertFalse(second["started"])
+        self.assertTrue(second["alreadyRunning"])
+
+    def test_stale_running_sync_can_be_retried(self):
+        state = AprimaSyncState(
+            last_status="running",
+            last_started_at=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=20),
+        )
+        self.db.add(state)
+        self.db.commit()
+
+        result = begin_manual_aprima_sync(self.db)
+        self.assertTrue(result["started"])
+        self.assertTrue(sync_status_payload(self.db)["running"])
 
 
 if __name__ == "__main__":

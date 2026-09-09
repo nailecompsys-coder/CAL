@@ -61,6 +61,8 @@ Requires `APRIMA_CONNECTION_STRING` in the `cal_api` container env (same read-on
 
 Dashboard and Meetings poll `GET /admin/aprima-sync-status` every 60s. When `fingerprint` changes, the page reloads so Surgery One patients / meetings update without a manual refresh.
 
+Dashboard header **Update from Aprima** (`POST /admin/aprima-sync`) runs the same pull immediately. Hourly cron at `:05` is unchanged. CAL still never writes to Aprima.
+
 ## Mobile
 
 - App resume → reload schedule + patients.

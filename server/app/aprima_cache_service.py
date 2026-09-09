@@ -34,6 +34,8 @@ CACHE_KIND_MEETING = "meeting"
 DEFAULT_SYNC_DAYS_AHEAD = 21
 # Prefer cache if last successful sync is newer than this.
 CACHE_MAX_AGE = timedelta(hours=2)
+# Manual/hourly overlap: treat a sync as in-flight only this long, then allow retry.
+SYNC_RUNNING_MAX_AGE = timedelta(minutes=15)
 
 
 def _utc_now() -> datetime:
@@ -101,7 +103,52 @@ def sync_status_payload(db: Session) -> dict:
             and state.last_finished_at
             and (_utc_now() - state.last_finished_at) <= CACHE_MAX_AGE
         ),
+        "running": aprima_sync_is_running(db, state=state),
     }
+
+
+def aprima_sync_is_running(db: Session, *, state: AprimaSyncState | None = None) -> bool:
+    """True when a pull is in flight and not stale (stuck)."""
+    row = state or get_sync_state(db)
+    if (row.last_status or "") != "running" or not row.last_started_at:
+        return False
+    return (_utc_now() - row.last_started_at) <= SYNC_RUNNING_MAX_AGE
+
+
+def begin_manual_aprima_sync(db: Session) -> dict:
+    """Mark a manual pull started, or report that one is already running. No PHI."""
+    if aprima_sync_is_running(db):
+        return {
+            "ok": True,
+            "started": False,
+            "alreadyRunning": True,
+            "status": sync_status_payload(db),
+        }
+    state = get_sync_state(db)
+    state.last_started_at = _utc_now()
+    state.last_status = "running"
+    state.last_error = None
+    db.commit()
+    return {
+        "ok": True,
+        "started": True,
+        "alreadyRunning": False,
+        "status": sync_status_payload(db),
+    }
+
+
+def run_aprima_sync_job(*, notify: bool = True) -> dict:
+    """Own a DB session for a background / cron-style pull. Never writes to Aprima."""
+    from .database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        return run_aprima_sync(db, notify=notify)
+    except Exception:
+        log.exception("Aprima sync job failed")
+        raise
+    finally:
+        db.close()
 
 
 def _serialize_cached(row: AprimaCachedAppointment) -> dict:

@@ -102,7 +102,12 @@
                    {% elif block.status == 'assigned' %}bg-blue-50 border-blue-200 text-blue-900
                    {% else %}bg-amber-50 border-amber-200 text-amber-900{% endif %}">
                   <div class="flex items-center justify-between gap-1">
-                    <strong>{{ block.sessionTitle or (block.session|upper) }}</strong>
+                    <strong>
+                      {{ block.session|upper }}
+                      {% for row in block.sessionSurgeons or [] %}
+                      · {{ row.initials }}{% if row.isOff %} <span class="text-rose-600 font-extrabold">(OFF)</span>{% endif %}
+                      {% endfor %}
+                    </strong>
                     {% if block.room %}<span class="shrink-0">Rm {{ block.room }}</span>{% endif %}
                   </div>
                   <div>{{ block.caseCount }} case{{ '' if block.caseCount == 1 else 's' }}</div>
@@ -170,6 +175,9 @@
                 <div class="min-w-0">
                   <div class="text-sm text-slate-800 truncate">
                     <span class="font-extrabold">{{ group.surgeon.initials if group.surgeon else '—' }}</span>
+                    {% if group.isOff %}
+                    <span class="text-rose-600 font-extrabold"> (OFF)</span>
+                    {% endif %}
                     {% if group.surgeon and group.surgeon.full_name %}
                     <span class="font-semibold text-slate-600"> {{ group.surgeon.full_name }}</span>
                     {% endif %}

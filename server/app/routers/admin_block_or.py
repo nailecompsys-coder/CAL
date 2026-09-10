@@ -75,6 +75,8 @@ def block_or_page(
 ):
     today, week_days = week_days_for_offset(week_offset)
     workspace = block_workspace(db, week_days[0], week_days[-1])
+    from ..off_conflict_service import day_off_status_map
+    off_map = day_off_status_map(db, week_days[0], week_days[-1])
     surgeons = [
         row for row in db.query(Surgeon).filter(
             Surgeon.is_active == True,  # noqa: E712
@@ -132,6 +134,7 @@ def block_or_page(
                     "surgeon": row.surgeon,
                     "assignment": row,
                     "cases": grouped.get(sid, []),
+                    "isOff": bool(sid and off_map.get((sid, selected_block.date))),
                 }
             )
         for sid, cases in grouped.items():
@@ -142,6 +145,7 @@ def block_or_page(
                     "surgeon": cases[0].surgeon if cases else None,
                     "assignment": None,
                     "cases": cases,
+                    "isOff": bool(sid and off_map.get((sid, selected_block.date))),
                 }
             )
         if case_id:

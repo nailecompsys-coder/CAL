@@ -27,10 +27,12 @@ from app.models import (
 from app.or_block_service import (
     BlockORCreateInput,
     add_case_to_block,
+    annotate_serialized_block_off,
     assign_block,
     block_assignment_warnings,
     block_case_start_labels,
     block_session_card_title,
+    block_workspace,
     clear_block_assignment,
     collapse_extra_am_pm_cards,
     copy_or_block_capacity,
@@ -74,6 +76,70 @@ class ORBlockServiceTest(unittest.TestCase):
             block_case_start_labels([], [{"start": "12:30", "caseCount": 1}]),
             ["12:30"],
         )
+        self.assertEqual(
+            block_session_card_title("am", [
+                {"surgeonInitials": "AS", "isOff": True},
+                {"surgeonInitials": "JF"},
+            ]),
+            "AM · AS (OFF) · JF",
+        )
+
+    def test_workspace_marks_off_initials_for_approved_and_requested_time_off(self):
+        db = self.Session()
+        try:
+            hospital = self._location(db, "Winter Garden OR", "WG-OR")
+            alex = self._surgeon(db, "Alexander", "Schroeder")
+            jorge = self._surgeon(db, "Jorge", "Florin")
+            day = date(2026, 9, 18)
+            created = create_or_blocks(db, BlockORCreateInput(
+                name="WG AM",
+                start_date=day,
+                end_date=day,
+                weekdays=[day.weekday()],
+                location_ids=[hospital.id],
+                session="am",
+                start_time=time(7, 0),
+                end_time=time(12, 0),
+                recurrence="once",
+            ))
+            block_id = created["instance_ids"][0]
+            assign_block(db, block_id, jorge.id, assignment_note="Paper block schedule", notify=False)
+            assign_block(db, block_id, alex.id, assignment_note="Paper block schedule", notify=False)
+            db.add(DayOff(
+                surgeon_id=alex.id,
+                start_date=day,
+                end_date=day,
+                status="approved",
+                reason="CME / Conference",
+            ))
+            db.commit()
+
+            workspace = block_workspace(db, day, day)
+            cards = workspace["blocks_by_location"][hospital.id][day]
+            self.assertEqual(len(cards), 1)
+            by_initials = {row["initials"]: row for row in cards[0]["sessionSurgeons"]}
+            self.assertTrue(by_initials["AS"]["isOff"])
+            self.assertEqual(by_initials["AS"]["dayOffStatus"], "approved")
+            self.assertFalse(by_initials["JF"]["isOff"])
+            self.assertIn("AS (OFF)", cards[0]["sessionTitle"])
+            self.assertNotIn("JF (OFF)", cards[0]["sessionTitle"])
+
+            pending_day = date(2026, 9, 21)
+            payload = {
+                "date": pending_day.isoformat(),
+                "session": "am",
+                "assignments": [
+                    {"surgeonId": alex.id, "surgeonInitials": "AS"},
+                    {"surgeonId": jorge.id, "surgeonInitials": "JF"},
+                ],
+            }
+            annotate_serialized_block_off(payload, {
+                (alex.id, pending_day): {"status": "pending"},
+            })
+            self.assertTrue(payload["assignments"][0]["isOff"])
+            self.assertEqual(payload["sessionTitle"], "AM · AS (OFF) · JF")
+        finally:
+            db.close()
 
     def test_multi_location_block_creates_one_instance_per_location_day(self):
         db = self.Session()

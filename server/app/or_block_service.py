@@ -1077,20 +1077,67 @@ def block_assignment_payloads(block: ORBlockInstance) -> list[dict]:
     return [_assignment_payload(block, legacy)]
 
 
-def block_session_card_title(session: str, assignments: list[dict]) -> str:
-    """Grid identity is AM/PM plus surgeons, not 07:00–12:00."""
+def _session_label(session: str) -> str:
     label = (session or "").strip().upper()
     if label not in {"AM", "PM"}:
         label = "AM" if label in {"BOTH", "AM"} else (label or "AM")
-    seen: list[str] = []
+    return label
+
+
+def block_session_surgeons(assignments: list[dict]) -> list[dict]:
+    """Unique initials for the card header, with time-off flags when present."""
+    seen: dict[str, dict] = {}
     for row in assignments:
         initials = (row.get("surgeonInitials") or "").strip().upper()
-        if initials and initials not in seen:
-            seen.append(initials)
-    seen.sort()
-    if seen:
-        return f"{label} · " + " · ".join(seen)
+        if not initials:
+            continue
+        is_off = bool(row.get("isOff") or row.get("dayOffStatus"))
+        existing = seen.get(initials)
+        if existing is None:
+            seen[initials] = {
+                "initials": initials,
+                "surgeonId": row.get("surgeonId"),
+                "isOff": is_off,
+                "dayOffStatus": row.get("dayOffStatus"),
+            }
+        elif is_off:
+            existing["isOff"] = True
+            existing["dayOffStatus"] = row.get("dayOffStatus") or existing.get("dayOffStatus")
+    return [seen[key] for key in sorted(seen)]
+
+
+def block_session_card_title(session: str, assignments: list[dict]) -> str:
+    """Grid identity is AM/PM plus surgeons, not 07:00–12:00."""
+    label = _session_label(session)
+    parts = []
+    for row in block_session_surgeons(assignments):
+        bit = row["initials"]
+        if row.get("isOff"):
+            bit += " (OFF)"
+        parts.append(bit)
+    if parts:
+        return f"{label} · " + " · ".join(parts)
     return label
+
+
+def annotate_serialized_block_off(
+    payload: dict,
+    off_map: dict[tuple[int, date], dict] | None,
+) -> dict:
+    """Mark assigned surgeons who have approved or requested time off that day."""
+    day = date.fromisoformat(payload["date"])
+    for row in payload.get("assignments") or []:
+        surgeon_id = row.get("surgeonId")
+        info = off_map.get((surgeon_id, day)) if off_map and surgeon_id else None
+        status = info.get("status") if info else None
+        row["dayOffStatus"] = status
+        row["isOff"] = bool(status)
+    payload["sessionSurgeons"] = block_session_surgeons(payload.get("assignments") or [])
+    payload["sessionTitle"] = block_session_card_title(
+        payload.get("session") or "am",
+        payload.get("assignments") or [],
+    )
+    return payload
 
 
 def block_case_start_labels(cases: list[dict], assignments: list[dict]) -> list[str]:
@@ -1122,6 +1169,7 @@ def serialize_block_instance(block: ORBlockInstance, *, include_case_details: bo
         "date": block.date.isoformat(),
         "session": session,
         "sessionTitle": block_session_card_title(session, assignments),
+        "sessionSurgeons": block_session_surgeons(assignments),
         "start": block.start_time.strftime("%H:%M"),
         "end": block.end_time.strftime("%H:%M"),
         "status": status,
@@ -1430,10 +1478,15 @@ def block_workspace(db: Session, start_date: date, end_date: date) -> dict:
         .order_by(Location.name)
         .all()
     )
+    from .off_conflict_service import day_off_status_map
+
     blocks = block_instances_for_range(db, start_date, end_date)
+    off_map = day_off_status_map(db, start_date, end_date)
     blocks_by_location: dict[int, dict[date, list[dict]]] = defaultdict(lambda: defaultdict(list))
     for block in blocks:
-        blocks_by_location[block.location_id][block.date].append(serialize_block_instance(block))
+        payload = serialize_block_instance(block)
+        annotate_serialized_block_off(payload, off_map)
+        blocks_by_location[block.location_id][block.date].append(payload)
     return {
         "locations": locations,
         "blocks_by_location": blocks_by_location,

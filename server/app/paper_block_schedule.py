@@ -2,9 +2,11 @@
 
 This is hospital *block* time, not room inventory. One AM/PM window at a
 hospital; the scheduler places one surgeon or both, then patients go on that
-allocated window. Surgeons listed on the block must see that AM/PM on CAL even
-with zero cases. Call plus working the block is the same day's work, not a
-collision. A session with no block is unscheduled (free until clinic).
+allocated window. Surgeons listed on the block stay on that card even when they
+have approved or requested time off — the portal shows red (OFF) next to their
+initials. Clinic rows are not written on those days. Call plus working the
+block is the same day's work, not a collision. A session with no block is
+unscheduled (free until clinic).
 Clermont is clinic-only (no OR).
 
 Week 1 / 3 / 5 = nth weekday of the month (Sep 11 2026 is week 2).
@@ -411,10 +413,10 @@ def apply_paper_block_schedule(
     while day <= end:
         if day.weekday() <= 4:
             for initials, surgeon in surgeons.items():
-                if (surgeon.id, day) in off_dates:
+                is_off = (surgeon.id, day) in off_dates
+                if is_off:
                     skipped_off += 1
-                    continue
-                if write_clinic:
+                if write_clinic and not is_off:
                     created, cleared = _replace_clinic_day(db, surgeon, day, locations)
                     clinic_created += created
                     clinic_cleared += cleared

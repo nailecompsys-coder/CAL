@@ -172,6 +172,49 @@ class PaperBlockScheduleTest(unittest.TestCase):
         )
         self.assertEqual(assigned, ["CJ", "JF"])
 
+    def test_off_surgeon_still_placed_on_paper_or_block(self):
+        chris = self.db.query(Surgeon).filter_by(last_name="Johnson").one()
+        day = date(2026, 9, 21)
+        self.db.add(DayOff(
+            surgeon_id=chris.id,
+            start_date=day,
+            end_date=day,
+            status="approved",
+            reason="day_off",
+        ))
+        self.db.commit()
+
+        result = apply_paper_block_schedule(
+            self.db,
+            start=day,
+            end=day,
+            write_templates=False,
+            write_clinic=False,
+            write_blocks=True,
+        )
+        self.assertTrue(result["ok"])
+        self.assertGreater(result["skippedOff"], 0)
+        self.assertGreater(result["blocksAssigned"], 0)
+
+        clinic = (
+            self.db.query(ClinicSchedule)
+            .filter_by(surgeon_id=chris.id, date=day)
+            .all()
+        )
+        self.assertEqual(clinic, [])
+
+        mn = self.db.query(Location).filter_by(abbreviation="MN-OR").one()
+        blocks = (
+            self.db.query(ORBlockInstance)
+            .filter_by(location_id=mn.id, date=day)
+            .all()
+        )
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(
+            [self.db.get(Surgeon, row.surgeon_id).initials for row in blocks[0].assignments],
+            ["CJ"],
+        )
+
     def test_start_is_friday_sep_11(self):
         self.assertEqual(START, date(2026, 9, 11))
         self.assertEqual(month_week(date(2026, 9, 11)), 2)

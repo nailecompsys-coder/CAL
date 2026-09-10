@@ -527,7 +527,7 @@ def scheduler_add_block_case(
     except ValueError as exc:
         message = str(exc)
         status = 404 if "not found" in message.lower() else 422
-        if "not on this block" in message.lower():
+        if "before adding patients" in message.lower() or "not on this block" in message.lower():
             status = 409
         raise HTTPException(status, message)
     return {"ok": True, "block": serialize_block_instance(block), "warnings": warnings}

@@ -10,6 +10,8 @@ from sqlalchemy.orm import sessionmaker
 
 from app.models import (
     Base,
+    CallGroup,
+    CallRotation,
     ClinicGroup,
     ClinicGroupMember,
     ClinicSchedule,
@@ -259,6 +261,51 @@ class SchedulingGuardrailsTest(unittest.TestCase):
             self.assertEqual(len(rows), 2)
             for row in rows:
                 self.assertEqual(row["warnings"], [])
+        finally:
+            db.close()
+
+    def test_on_call_is_not_a_surgical_case_warning(self):
+        from app.models import ORBlockAssignment, ORBlockInstance
+
+        db = self.Session()
+        try:
+            surgeon = self._surgeon(db, "Lucy", "Woodley", 1)
+            hospital = Location(name="Winter Garden OR", abbreviation="WG-OR", location_type="hospital", is_active=True)
+            group = CallGroup(name="Winter Garden / Apopka / Minneola Hospital")
+            db.add_all([hospital, group])
+            db.flush()
+            case_day = date(2026, 9, 16)
+            db.add(CallRotation(surgeon_id=surgeon.id, call_group_id=group.id, date=case_day))
+            block = ORBlockInstance(
+                location_id=hospital.id,
+                date=case_day,
+                session="am",
+                start_time=time(7, 0),
+                end_time=time(12, 0),
+                status="assigned",
+            )
+            db.add(block)
+            db.flush()
+            db.add(ORBlockAssignment(
+                block_instance_id=block.id,
+                surgeon_id=surgeon.id,
+                start_time=time(7, 0),
+                case_count=0,
+            ))
+            db.commit()
+
+            warnings = surgical_case_warning_messages(
+                db,
+                surgeon.id,
+                case_day,
+                time(8, 0),
+                None,
+                hospital.id,
+                or_block_instance_id=block.id,
+            )
+            joined = " ".join(warnings).lower()
+            self.assertNotIn("on call", joined)
+            self.assertNotIn("on-call", joined)
         finally:
             db.close()
 

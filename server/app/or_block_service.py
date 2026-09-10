@@ -852,6 +852,13 @@ def _active_block_cases(block: ORBlockInstance) -> list[SurgicalCase]:
     ]
 
 
+def _assigned_surgeon_ids(block: ORBlockInstance) -> set[int]:
+    assigned_ids = {row.surgeon_id for row in (block.assignments or []) if row.surgeon_id}
+    if block.assigned_surgeon_id:
+        assigned_ids.add(block.assigned_surgeon_id)
+    return assigned_ids
+
+
 def _block_with_case_relations(db: Session, block_id: int) -> ORBlockInstance | None:
     return (
         db.query(ORBlockInstance)
@@ -951,27 +958,8 @@ def add_case_to_block(
     block = _block_with_case_relations(db, block_id)
     if not block:
         raise ValueError("Block not found")
-    assigned_ids = {row.surgeon_id for row in (block.assignments or []) if row.surgeon_id}
-    if block.assigned_surgeon_id:
-        assigned_ids.add(block.assigned_surgeon_id)
-    if surgeon_id not in assigned_ids:
-        # Adding a case places the surgeon on the block (same idea as reschedule).
-        db.add(
-            ORBlockAssignment(
-                block_instance_id=block.id,
-                surgeon_id=surgeon_id,
-                assigned_by_admin_id=admin_id,
-                start_time=start_time,
-                case_count=1,
-                note=None,
-            )
-        )
-        db.flush()
-        _sync_legacy_assignment_fields(db, block)
-        db.expire(block, ["assignments"])
-        block = _block_with_case_relations(db, block_id)
-        if not block:
-            raise ValueError("Block not found")
+    if surgeon_id not in _assigned_surgeon_ids(block):
+        raise ValueError("Place the surgeon on this AM or PM block before adding patients.")
     if start_time < block.start_time or start_time >= block.end_time:
         raise ValueError("Case start must fall inside the block window")
     if end_time is not None and end_time <= start_time:
@@ -1064,27 +1052,8 @@ def update_block_case(
     if next_end is not None and next_end <= next_start:
         next_end = None
 
-    assigned_ids = {row.surgeon_id for row in (dest.assignments or []) if row.surgeon_id}
-    if dest.assigned_surgeon_id:
-        assigned_ids.add(dest.assigned_surgeon_id)
-    if next_surgeon not in assigned_ids:
-        # Case placement implies the surgeon belongs on the destination block.
-        db.add(
-            ORBlockAssignment(
-                block_instance_id=dest.id,
-                surgeon_id=next_surgeon,
-                assigned_by_admin_id=admin_id,
-                start_time=next_start,
-                case_count=1,
-                note="Auto-added when case was rescheduled onto this block",
-            )
-        )
-        db.flush()
-        _sync_legacy_assignment_fields(db, dest)
-        db.expire(dest, ["assignments"])
-        dest = _block_with_case_relations(db, dest.id)
-        if not dest:
-            raise ValueError("Destination block not found")
+    if next_surgeon not in _assigned_surgeon_ids(dest):
+        raise ValueError("Place the surgeon on this AM or PM block before adding patients.")
 
     case.surgeon_id = next_surgeon
     case.or_block_instance_id = dest.id
@@ -1461,7 +1430,7 @@ def assign_block(
         surgeon_id=surgeon_id,
         assigned_by_admin_id=admin_id,
         start_time=assigned_start,
-        case_count=max(1, int(case_count or 1)),
+        case_count=max(0, int(1 if case_count is None else case_count)),
         note=note,
     )
     db.add(assignment)

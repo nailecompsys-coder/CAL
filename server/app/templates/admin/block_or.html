@@ -226,7 +226,7 @@
                 {% endfor %}
               </div>
             {% else %}
-              <p class="ml-1 sm:ml-10 text-xs text-slate-400">No cases yet — use Assign to add one.</p>
+              <p class="ml-1 sm:ml-10 text-xs text-slate-400">No patients yet — they assist or wrap until clinic, or the afternoon may be off.</p>
             {% endif %}
           </div>
           {% endfor %}
@@ -248,23 +248,26 @@
         {% endif %}
       {% else %}
         <p class="text-sm text-slate-500 text-center py-6 px-4">
-          No surgeons or cases on this block yet. Use <strong>Assign</strong> to add a case.
+          Place a surgeon on this AM or PM block first, then add patients.
         </p>
       {% endif %}
     </div>
 
     <div class="block-or-panel" data-panel="assign">
-      <form method="post" action="/admin/block-or/{{ selected_block.id }}/cases" class="rounded-xl border border-teal-200 bg-teal-50/40 p-4 space-y-3 max-w-xl">
+      {% set assigned_ids = assignments | map(attribute='surgeon_id') | list %}
+      <form method="post" action="/admin/block-or/{{ selected_block.id }}/assign" class="rounded-xl border border-slate-200 bg-white p-4 space-y-3 max-w-xl">
         <input type="hidden" name="week_offset" value="{{ week_offset }}" />
+        <input type="hidden" name="case_count" value="0" />
         <div>
-          <h3 class="font-extrabold text-slate-800">Add case</h3>
-          <p class="text-xs text-slate-500 mt-1">Places the case on this hospital window. If the surgeon is not on the block yet, they are added automatically.</p>
+          <h3 class="font-extrabold text-slate-800">Place surgeon</h3>
+          <p class="text-xs text-slate-500 mt-1">Allocate this AM or PM block first. Patients can be added after the surgeon is on it. On call the same day is not a conflict.</p>
         </div>
         <div>
           <label class="block text-xs font-semibold text-slate-500 mb-1">Surgeon</label>
           <select name="surgeon_id" id="assign-surgeon" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
             <option value="">Select surgeon…</option>
             {% for row in candidates %}
+            {% if row.surgeon.id not in assigned_ids %}
             <option value="{{ row.surgeon.id }}"
               data-status="{{ row.status }}"
               data-availability="{{ row.availability }}"
@@ -272,9 +275,39 @@
               {{ row.surgeon.initials }} — {{ row.surgeon.full_name }}
               {% if row.status != 'clear' %} ({{ row.availability }}){% endif %}
             </option>
+            {% endif %}
             {% endfor %}
           </select>
           <p id="assign-warning" class="hidden mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"></p>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Start time</label>
+          <input type="time" name="start_time" value="{{ selected_block.start_time.strftime('%H:%M') }}" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Note (required if there is a clinic or day-off warning)</label>
+          <input name="assignment_note" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Optional unless a warning appears" />
+        </div>
+        <button class="w-full bg-slate-800 text-white text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-slate-900">Place surgeon</button>
+      </form>
+
+      <form method="post" action="/admin/block-or/{{ selected_block.id }}/cases" class="rounded-xl border border-teal-200 bg-teal-50/40 p-4 space-y-3 max-w-xl mt-4">
+        <input type="hidden" name="week_offset" value="{{ week_offset }}" />
+        <div>
+          <h3 class="font-extrabold text-slate-800">Add patient</h3>
+          <p class="text-xs text-slate-500 mt-1">Only surgeons already on this AM or PM block. Empty lists are still their block — they assist or wrap until clinic.</p>
+        </div>
+        {% if assignments %}
+        <div>
+          <label class="block text-xs font-semibold text-slate-500 mb-1">Surgeon</label>
+          <select name="surgeon_id" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
+            <option value="">Select surgeon…</option>
+            {% for row in assignments %}
+            <option value="{{ row.surgeon_id }}">
+              {{ row.surgeon.initials if row.surgeon else '—' }} — {{ row.surgeon.full_name if row.surgeon else 'Surgeon' }}
+            </option>
+            {% endfor %}
+          </select>
         </div>
         <div>
           <label class="block text-xs font-semibold text-slate-500 mb-1">Start time</label>
@@ -288,7 +321,10 @@
           <label class="block text-xs font-semibold text-slate-500 mb-1">Procedure (optional)</label>
           <input name="procedure" class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" placeholder="Procedure" />
         </div>
-        <button class="w-full bg-teal-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-teal-800">Add case</button>
+        <button class="w-full bg-teal-700 text-white text-sm font-bold px-4 py-2.5 rounded-xl hover:bg-teal-800">Add patient</button>
+        {% else %}
+        <p class="text-sm text-slate-500">Place a surgeon on this AM or PM block before adding patients.</p>
+        {% endif %}
       </form>
       {% for row in assignments %}
       <form id="remove-assignment-{{ row.id }}" method="post" action="/admin/block-or/{{ selected_block.id }}/assignments/{{ row.id }}/remove" class="hidden">
@@ -311,9 +347,9 @@
         <div>
           <label class="block text-xs font-semibold text-slate-500 mb-1">Surgeon</label>
           <select name="surgeon_id" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm bg-white">
-            {% for row in candidates %}
-            <option value="{{ row.surgeon.id }}" {% if editing_case.surgeon_id == row.surgeon.id %}selected{% endif %}>
-              {{ row.surgeon.initials }} — {{ row.surgeon.full_name }}
+            {% for row in assignments %}
+            <option value="{{ row.surgeon_id }}" {% if editing_case.surgeon_id == row.surgeon_id %}selected{% endif %}>
+              {{ row.surgeon.initials if row.surgeon else '—' }} — {{ row.surgeon.full_name if row.surgeon else 'Surgeon' }}
             </option>
             {% endfor %}
           </select>

@@ -1,10 +1,12 @@
 """Paper weekly block schedule (surgeon AM/PM) → Clinics/OR + Block OR.
 
 This is hospital *block* time, not room inventory. One AM/PM window at a
-hospital; the scheduler places one surgeon or both. Surgeons listed on the
-block must see that window on CAL even with zero cases — they still report,
-because cases are often added early morning. A session with no block is off
-until clinic. Clermont is clinic-only (no OR).
+hospital; the scheduler places one surgeon or both, then patients go on that
+allocated window. Surgeons listed on the block must see that AM/PM on CAL even
+with zero cases — they are obligated to the block. If the list is empty they
+assist or wrap until the next clinic, or the rest of the day may be off. Call
+plus working the block is the same day's work, not a collision. A session with
+no block is unscheduled (free until clinic). Clermont is clinic-only (no OR).
 
 Week 1 / 3 / 5 = nth weekday of the month (Sep 14 2026 is week 2).
 """
@@ -292,6 +294,7 @@ def _place_or_block(
         db,
         target.id,
         surgeon.id,
+        case_count=0,
         assignment_note="Paper block schedule",
         notify=False,
     )

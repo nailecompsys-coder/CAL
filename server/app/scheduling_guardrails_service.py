@@ -328,6 +328,9 @@ def surgical_case_warning_messages(
         # Cases belong inside Block OR — overlapping own/same-facility capacity is not a warning.
         if conflict.rule_id == "OVERLAP_OR_BLOCK":
             continue
+        # On-call + Block OR / cases is the same day's work — not a collision.
+        if conflict.rule_id == "OVERLAP_CALL":
+            continue
         if conflict.rule_id.startswith("BUFFER_") or conflict.rule_id.startswith("LOCATION_"):
             warnings.append(conflict.message)
             continue
@@ -337,7 +340,6 @@ def surgical_case_warning_messages(
             "OVERLAP_DAY_OFF": "Overlaps approved day off",
             "OVERLAP_MEETING": "Overlaps assigned meeting",
             "OVERLAP_UNAVAILABLE": "Overlaps unavailable time",
-            "OVERLAP_CALL": "Surgeon is on call",
         }.get(conflict.rule_id, "Schedule warning")
         warnings.append(f"{label}: {conflict.message}")
 

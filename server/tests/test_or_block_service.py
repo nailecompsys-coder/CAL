@@ -26,6 +26,7 @@ from app.models import (
 )
 from app.or_block_service import (
     BlockORCreateInput,
+    add_case_to_block,
     assign_block,
     block_assignment_warnings,
     clear_block_assignment,
@@ -450,6 +451,86 @@ class ORBlockServiceTest(unittest.TestCase):
             warnings = block_assignment_warnings(db, block, surgeon.id)
             joined = " ".join(warnings).lower()
             self.assertFalse(any("on call" in row.lower() for row in warnings), warnings)
+            self.assertNotIn("on-call", joined)
+        finally:
+            db.close()
+
+    def test_add_case_requires_surgeon_already_on_block(self):
+        db = self.Session()
+        try:
+            surgeon = self._surgeon(db, "Jorge", "Florin")
+            hospital = self._location(db, "Advent Winter Garden", "WG")
+            block_day = date(2026, 9, 15)
+            block_id = create_or_blocks(db, BlockORCreateInput(
+                name="Open AM Block",
+                start_date=block_day,
+                end_date=block_day,
+                weekdays=[block_day.weekday()],
+                location_ids=[hospital.id],
+                session="am",
+                start_time=time(7, 0),
+                end_time=time(12, 0),
+                recurrence="once",
+            ))["instance_ids"][0]
+            with self.assertRaisesRegex(ValueError, "Place the surgeon on this AM or PM block"):
+                add_case_to_block(
+                    db,
+                    block_id,
+                    surgeon.id,
+                    time(8, 0),
+                    procedure="Hernia",
+                    patient_name="Test Patient",
+                )
+            with patch("app.or_block_service.send_push_to_surgeon"):
+                assign_block(db, block_id, surgeon.id, case_count=0, notify=False)
+            block, warnings = add_case_to_block(
+                db,
+                block_id,
+                surgeon.id,
+                time(8, 0),
+                procedure="Hernia",
+                patient_name="Test Patient",
+            )
+            self.assertEqual(len([c for c in (block.cases or []) if (c.status or "") != "cancelled"]), 1)
+            self.assertFalse(any("on call" in row.lower() for row in warnings))
+        finally:
+            db.close()
+
+    def test_add_case_while_on_call_is_not_a_warning(self):
+        db = self.Session()
+        try:
+            surgeon = self._surgeon(db, "Chris", "Johnson")
+            hospital = self._location(db, "Advent Winter Garden", "WG")
+            group = CallGroup(name="Winter Garden / Apopka / Minneola Hospital")
+            db.add(group)
+            db.flush()
+            block_day = date(2026, 9, 16)
+            db.add(CallRotation(
+                surgeon_id=surgeon.id,
+                call_group_id=group.id,
+                date=block_day,
+            ))
+            block_id = create_or_blocks(db, BlockORCreateInput(
+                name="Open AM Block",
+                start_date=block_day,
+                end_date=block_day,
+                weekdays=[block_day.weekday()],
+                location_ids=[hospital.id],
+                session="am",
+                start_time=time(7, 0),
+                end_time=time(12, 0),
+                recurrence="once",
+            ))["instance_ids"][0]
+            assign_block(db, block_id, surgeon.id, case_count=0, notify=False)
+            _, warnings = add_case_to_block(
+                db,
+                block_id,
+                surgeon.id,
+                time(9, 0),
+                procedure="Chole",
+            )
+            joined = " ".join(warnings).lower()
+            self.assertNotIn("on call", joined)
             self.assertNotIn("on-call", joined)
         finally:
             db.close()

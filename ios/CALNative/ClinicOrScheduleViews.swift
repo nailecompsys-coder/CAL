@@ -394,7 +394,7 @@ private struct ClinicOrFacilityBlock: View {
       if isExpanded {
         if group.details.isEmpty {
           Text(group.countStyle == .cases
-               ? "Block time — be there; cases are often added in the morning"
+               ? "No cases listed. Assist or wrap until your next clinic, or the rest of the day may be off."
                : "No visits listed")
             .font(.caption)
             .foregroundStyle(ClinicalPalette.muted)

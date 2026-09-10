@@ -47,8 +47,11 @@ data class ClinicOrFacilityGroup(
             val count = details.size
             return when (countStyle) {
                 CountStyle.Cases -> {
-                    val noun = if (count == 1) "Case" else "Cases"
-                    "$title - $count $noun"
+                    if (count == 0) "$title - Block"
+                    else {
+                        val noun = if (count == 1) "Case" else "Cases"
+                        "$title - $count $noun"
+                    }
                 }
                 CountStyle.Visits -> {
                     val noun = if (count == 1) "Visit" else "Visits"
@@ -67,20 +70,23 @@ data class ClinicOrDetailRow(
 
 /**
  * Port of iOS `ClinicOrScheduleBuilder` — facility headers with nested cases/visits.
- * Hides Block OR rows; Aprima Surgery One / IPA + hospital outpt nest under facilities.
+ * Block OR is the hospital AM/PM window — it still shows when no case is booked yet.
  */
 object ClinicOrScheduleBuilder {
     fun groups(from: List<ScheduleItemUi>): List<ClinicOrFacilityGroup> {
-        val visible = from.filter { it.kind != "block_or" }
-        val clinics = visible.filter { it.kind == "clinic" }
-        val surgeries = visible.filter { it.kind == "surgery" }
+        val clinics = from.filter { it.kind == "clinic" }
+        val surgeries = from.filter { it.kind == "surgery" }
+        val blocks = from.filter { it.isBlockOr }
         val claimed = mutableSetOf<String>()
+        val claimedBlocks = mutableSetOf<String>()
         val groups = mutableListOf<ClinicOrFacilityGroup>()
 
         for (clinic in clinics) {
             val matched = surgeries.filter { surgeryBelongs(it, to = clinic) }
             matched.forEach { claimed.add(it.id) }
             val isOR = looksLikeOperatingRoom(clinic.title)
+            val matchingBlock = blocks.firstOrNull { blockMatchesFacility(it, clinic.title) }
+            matchingBlock?.let { claimedBlocks.add(it.id) }
 
             val details = when {
                 isOR -> matched.sortedBy { it.start }.map { surgeryDetail(it) }
@@ -92,11 +98,12 @@ object ClinicOrScheduleBuilder {
                 else -> parseClinicVisits(clinic.notes)
             }
 
+            val timeAnchor = matchingBlock ?: clinic
             groups.add(
                 ClinicOrFacilityGroup(
                     id = clinic.id,
                     title = clinic.title,
-                    timeRange = expandedTimeRange(clinic, matched),
+                    timeRange = expandedTimeRange(timeAnchor, matched),
                     details = details,
                     countStyle = if (isOR) {
                         ClinicOrFacilityGroup.CountStyle.Cases
@@ -114,11 +121,14 @@ object ClinicOrScheduleBuilder {
             if (cases.isEmpty()) continue
             val sorted = cases.sortedBy { it.start }
             val isOR = looksLikeOperatingRoom(key)
+            val matchingBlock = blocks.firstOrNull { blockMatchesFacility(it, key) }
+            matchingBlock?.let { claimedBlocks.add(it.id) }
+            val timeRange = matchingBlock?.let { expandedTimeRange(it, sorted) } ?: timeSpan(sorted)
             groups.add(
                 ClinicOrFacilityGroup(
                     id = "loc-$key",
                     title = displayFacilityTitle(key),
-                    timeRange = timeSpan(sorted),
+                    timeRange = timeRange,
                     details = sorted.map { surgeryDetail(it) },
                     countStyle = if (isOR) {
                         ClinicOrFacilityGroup.CountStyle.Cases
@@ -129,7 +139,35 @@ object ClinicOrScheduleBuilder {
             )
         }
 
+        for (block in blocks) {
+            if (block.id in claimedBlocks) continue
+            val title = displayFacilityTitle(blockFacilityName(block))
+            if (groups.any { facilityKey(it.title) == facilityKey(title) }) continue
+            groups.add(
+                ClinicOrFacilityGroup(
+                    id = block.id,
+                    title = title,
+                    timeRange = expandedTimeRange(block, emptyList()),
+                    details = emptyList(),
+                    countStyle = ClinicOrFacilityGroup.CountStyle.Cases,
+                ),
+            )
+        }
+
         return groups
+    }
+
+    private fun blockFacilityName(block: ScheduleItemUi): String {
+        val loc = block.location.trim()
+        return loc.ifEmpty { block.title }
+    }
+
+    private fun facilityKey(value: String): String = canonicalFacility(normalizeFacility(value))
+
+    private fun blockMatchesFacility(block: ScheduleItemUi, facility: String): Boolean {
+        val blockKey = facilityKey(blockFacilityName(block))
+        val other = facilityKey(facility)
+        return blockKey.isNotEmpty() && blockKey == other
     }
 
     private fun surgeryBelongs(surgery: ScheduleItemUi, to: ScheduleItemUi): Boolean {
@@ -261,16 +299,16 @@ object ClinicOrScheduleBuilder {
 
     private fun canonicalFacility(normalized: String): String {
         val compact = normalized.replace(" ", "")
-        if (compact.contains("ahwg") || compact == "wgd" || compact.contains("wintergardenor")) {
+        if (compact.contains("ahwg") || compact == "wgd" || compact == "wgor" || compact.contains("wintergardenor")) {
             return "winter garden or"
         }
-        if (compact.contains("ahapop") || compact.contains("apk") || compact.contains("apopkaor")) {
+        if (compact.contains("ahapop") || compact.contains("apk") || compact == "apor" || compact.contains("apopkaor")) {
             return "apopka or"
         }
-        if (compact.contains("ahalt") || compact.contains("altamonteor")) {
+        if (compact.contains("ahalt") || compact == "alor" || compact.contains("altamonteor")) {
             return "altamonte or"
         }
-        if (compact.contains("ahmin") || compact.contains("minneolaor")) {
+        if (compact.contains("ahmin") || compact == "mnor" || compact.contains("minneolaor")) {
             return "minneola or"
         }
         if (compact.contains("clermont") || compact.contains("mainoffice") ||
@@ -409,7 +447,11 @@ private fun ClinicOrFacilityBlock(
         AnimatedVisibility(visible = isExpanded) {
             if (group.details.isEmpty()) {
                 Text(
-                    "No cases or visits listed",
+                    if (group.countStyle == ClinicOrFacilityGroup.CountStyle.Cases) {
+                        "No cases listed. Assist or wrap until your next clinic, or the rest of the day may be off."
+                    } else {
+                        "No visits listed"
+                    },
                     style = ClinicalTypography.caption,
                     color = ClinicalPalette.Muted,
                     modifier = Modifier.padding(start = 24.dp, bottom = 8.dp),

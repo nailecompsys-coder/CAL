@@ -47,11 +47,8 @@ data class ClinicOrFacilityGroup(
             val count = details.size
             return when (countStyle) {
                 CountStyle.Cases -> {
-                    if (count == 0) "$title - Block"
-                    else {
-                        val noun = if (count == 1) "Case" else "Cases"
-                        "$title - $count $noun"
-                    }
+                    val noun = if (count == 1) "Case" else "Cases"
+                    "$title - $count $noun"
                 }
                 CountStyle.Visits -> {
                     val noun = if (count == 1) "Visit" else "Visits"
@@ -446,16 +443,14 @@ private fun ClinicOrFacilityBlock(
 
         AnimatedVisibility(visible = isExpanded) {
             if (group.details.isEmpty()) {
-                Text(
-                    if (group.countStyle == ClinicOrFacilityGroup.CountStyle.Cases) {
-                        "No cases listed. Assist or wrap until your next clinic, or the rest of the day may be off."
-                    } else {
-                        "No visits listed"
-                    },
-                    style = ClinicalTypography.caption,
-                    color = ClinicalPalette.Muted,
-                    modifier = Modifier.padding(start = 24.dp, bottom = 8.dp),
-                )
+                if (group.countStyle != ClinicOrFacilityGroup.CountStyle.Cases) {
+                    Text(
+                        "No visits listed",
+                        style = ClinicalTypography.caption,
+                        color = ClinicalPalette.Muted,
+                        modifier = Modifier.padding(start = 24.dp, bottom = 8.dp),
+                    )
+                }
             } else {
                 Column(
                     modifier = Modifier.padding(start = 16.dp, end = 8.dp, bottom = 8.dp),

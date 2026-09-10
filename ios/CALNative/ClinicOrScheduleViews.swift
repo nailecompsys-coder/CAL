@@ -393,13 +393,13 @@ private struct ClinicOrFacilityBlock: View {
 
       if isExpanded {
         if group.details.isEmpty {
-          Text(group.countStyle == .cases
-               ? "No cases listed. Assist or wrap until your next clinic, or the rest of the day may be off."
-               : "No visits listed")
-            .font(.caption)
-            .foregroundStyle(ClinicalPalette.muted)
-            .padding(.leading, 106)
-            .padding(.bottom, 8)
+          if group.countStyle != .cases {
+            Text("No visits listed")
+              .font(.caption)
+              .foregroundStyle(ClinicalPalette.muted)
+              .padding(.leading, 106)
+              .padding(.bottom, 8)
+          }
         } else {
           VStack(alignment: .leading, spacing: 6) {
             ForEach(group.details) { row in

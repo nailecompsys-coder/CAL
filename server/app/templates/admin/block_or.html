@@ -226,7 +226,7 @@
                 {% endfor %}
               </div>
             {% else %}
-              <p class="ml-1 sm:ml-10 text-xs text-slate-400">No patients yet — they assist or wrap until clinic, or the afternoon may be off.</p>
+              <p class="ml-1 sm:ml-10 text-xs text-slate-400">0 cases</p>
             {% endif %}
           </div>
           {% endfor %}
@@ -295,7 +295,7 @@
         <input type="hidden" name="week_offset" value="{{ week_offset }}" />
         <div>
           <h3 class="font-extrabold text-slate-800">Add patient</h3>
-          <p class="text-xs text-slate-500 mt-1">Only surgeons already on this AM or PM block. Empty lists are still their block — they assist or wrap until clinic.</p>
+          <p class="text-xs text-slate-500 mt-1">Only surgeons already on this AM or PM block.</p>
         </div>
         {% if assignments %}
         <div>

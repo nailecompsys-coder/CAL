@@ -167,14 +167,11 @@ struct ClinicOrFacilityGroup: Identifiable {
   let details: [ClinicOrDetailRow]
   let countStyle: CountStyle
 
-  /// e.g. "Apopka OR - Block" / "Apopka OR - 2 Cases" / "Apopka Clinic - 7 Visits"
+  /// e.g. "Apopka OR - 0 Cases" / "Apopka OR - 2 Cases" / "Apopka Clinic - 7 Visits"
   var headerTitle: String {
     let count = details.count
     switch countStyle {
     case .cases:
-      if count == 0 {
-        return "\(title) - Block"
-      }
       let noun = count == 1 ? "Case" : "Cases"
       return "\(title) - \(count) \(noun)"
     case .visits:

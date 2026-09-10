@@ -309,6 +309,88 @@ class SchedulingGuardrailsTest(unittest.TestCase):
         finally:
             db.close()
 
+    def test_running_late_from_block_to_1pm_clinic_is_not_a_warning(self):
+        from app.models import ORBlockAssignment, ORBlockInstance
+        from app.rules_engine.buffer_checkers import (
+            check_buffer_surgery_to_clinic,
+            check_location_drive_time,
+        )
+
+        db = self.Session()
+        try:
+            surgeon = self._surgeon(db, "Chris", "Johnson", 1)
+            hospital = Location(name="Winter Garden OR", abbreviation="WG-OR", location_type="hospital", is_active=True)
+            clinic = Location(name="Winter Garden Clinic", abbreviation="WG-OV", location_type="clinic", is_active=True)
+            db.add_all([hospital, clinic])
+            db.flush()
+            case_day = date.today() + timedelta(days=14)
+            block = ORBlockInstance(
+                location_id=hospital.id,
+                date=case_day,
+                session="am",
+                start_time=time(7, 0),
+                end_time=time(12, 0),
+                status="assigned",
+            )
+            db.add(block)
+            db.flush()
+            db.add(ORBlockAssignment(
+                block_instance_id=block.id,
+                surgeon_id=surgeon.id,
+                start_time=time(7, 0),
+                case_count=1,
+            ))
+            db.add(ClinicSchedule(
+                surgeon_id=surgeon.id,
+                location_id=clinic.id,
+                date=case_day,
+                session="pm",
+            ))
+            db.add(SurgicalCase(
+                surgeon_id=surgeon.id,
+                date=case_day,
+                start_time=time(11, 30),
+                end_time=time(12, 30),
+                patient_name="Last AM case",
+                procedure="Hernia",
+                location_id=hospital.id,
+                or_block_instance_id=block.id,
+                status="scheduled",
+            ))
+            db.commit()
+
+            target = {
+                "type": "surgical_case",
+                "date": case_day,
+                "start_time": time(11, 30),
+                "end_time": time(12, 30),
+                "location_id": hospital.id,
+            }
+            buffers = list(check_buffer_surgery_to_clinic(
+                surgeon.id, case_day, case_day, db, {"minutes": 30}, None, target,
+            ))
+            drives = list(check_location_drive_time(
+                surgeon.id, case_day, case_day, db, {"minutes_between_sites": 60}, None, target,
+            ))
+            self.assertEqual(buffers, [])
+            self.assertEqual(drives, [])
+
+            warnings = surgical_case_warning_messages(
+                db,
+                surgeon.id,
+                case_day,
+                time(11, 30),
+                time(12, 30),
+                hospital.id,
+                or_block_instance_id=block.id,
+            )
+            joined = " ".join(warnings).lower()
+            self.assertNotIn("need ", joined)
+            self.assertNotIn("drive", joined)
+            self.assertNotIn("between last surgery and clinic", joined)
+        finally:
+            db.close()
+
     def _surgeon(self, db, first_name, last_name, sort_order):
         surgeon = Surgeon(
             first_name=first_name,

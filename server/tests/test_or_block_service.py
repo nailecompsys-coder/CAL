@@ -415,6 +415,55 @@ class ORBlockServiceTest(unittest.TestCase):
         finally:
             db.close()
 
+    def test_am_block_then_pm_clinic_is_not_a_warning(self):
+        """Block until noon + 1pm clinic is the scheduled day, not an overlap."""
+        db = self.Session()
+        try:
+            surgeon = self._surgeon(db, "Jorge", "Florin")
+            hospital = self._location(db, "Advent Winter Garden", "WG-OR")
+            clinic = self._location(db, "Winter Garden Clinic", "WG-OV", "clinic")
+            block_day = date.today() + timedelta(days=21)
+            while block_day.weekday() != 1:
+                block_day += timedelta(days=1)
+            block_id = create_or_blocks(db, BlockORCreateInput(
+                name="Open AM Block",
+                start_date=block_day,
+                end_date=block_day,
+                weekdays=[block_day.weekday()],
+                location_ids=[hospital.id],
+                session="am",
+                start_time=time(7, 0),
+                end_time=time(12, 0),
+                recurrence="once",
+            ))["instance_ids"][0]
+            db.add(ClinicSchedule(
+                surgeon_id=surgeon.id,
+                location_id=clinic.id,
+                date=block_day,
+                session="pm",
+            ))
+            db.add(SurgicalCase(
+                surgeon_id=surgeon.id,
+                date=block_day,
+                start_time=time(11, 30),
+                end_time=time(12, 30),
+                patient_name="Late AM case",
+                procedure="Hernia",
+                location_id=hospital.id,
+                or_block_instance_id=block_id,
+            ))
+            db.commit()
+
+            block = db.get(ORBlockInstance, block_id)
+            warnings = block_assignment_warnings(db, block, surgeon.id)
+            joined = " ".join(warnings).lower()
+            self.assertFalse(any("clinic" in row.lower() for row in warnings), warnings)
+            self.assertNotIn("buffer", joined)
+            self.assertNotIn("drive", joined)
+            self.assertNotIn("need ", joined)
+        finally:
+            db.close()
+
     def test_on_call_at_any_hospital_is_not_a_block_warning(self):
         """Docs work more than one hospital in an area — on-call + block is not a flag."""
         db = self.Session()

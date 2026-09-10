@@ -332,7 +332,10 @@ def surgical_case_warning_messages(
         if conflict.rule_id == "OVERLAP_CALL":
             continue
         if conflict.rule_id.startswith("BUFFER_") or conflict.rule_id.startswith("LOCATION_"):
-            warnings.append(conflict.message)
+            # Turn time between OR cases still matters. Clinic-after-block gaps do not —
+            # running late to a 1pm clinic is a phone call to the office, not a CAL flag.
+            if conflict.rule_id == "BUFFER_BETWEEN_CASES":
+                warnings.append(conflict.message)
             continue
         label = {
             "OVERLAP_SURGERY": "Overlaps another surgical case",

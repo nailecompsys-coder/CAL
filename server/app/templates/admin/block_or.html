@@ -2,12 +2,54 @@
 {% block title %}Block OR{% endblock %}
 {% block head %}
 <style>
-  .block-or-card {
-    height: 4.5rem;
+  .block-or-week {
+    table-layout: fixed;
+    width: 100%;
+    min-width: 980px;
+    border-collapse: collapse;
+  }
+  .block-or-week col.loc { width: 8.75rem; }
+  .block-or-week col.day { width: 11.5%; }
+  .block-or-week col.detail { width: 28%; }
+  .block-or-week th.day,
+  .block-or-week td.day {
+    width: 11.5%;
+    padding: 0.4rem;
+    vertical-align: top;
+  }
+  .block-or-day-stack {
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
+    gap: 0.35rem;
+  }
+  .block-or-card,
+  .block-or-empty {
+    box-sizing: border-box;
+    display: flex;
+    width: 100%;
+    height: 3.25rem;
+    min-height: 3.25rem;
+    max-height: 3.25rem;
     overflow: hidden;
+  }
+  .block-or-card {
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 0.35rem 0.4rem;
+  }
+  .block-or-empty {
+    align-items: center;
+    justify-content: center;
+  }
+  .block-or-detail {
+    vertical-align: top;
+  }
+  .block-or-detail-inner {
+    position: sticky;
+    top: 4.75rem;
+    max-height: calc(100vh - 6.5rem);
+    overflow: auto;
+    padding: 0.65rem 0.75rem;
   }
 </style>
 {% endblock %}
@@ -83,41 +125,60 @@
       <span class="text-xs text-slate-400">Click a block → surgeons → cases</span>
     </div>
     <div class="overflow-x-auto">
-      <table class="w-full min-w-[980px] border-collapse text-sm">
+      {% set weekday_days = week_days[:5] %}
+      {% set loc_count = locations|length %}
+      <table class="block-or-week text-sm">
+        <colgroup>
+          <col class="loc">
+          <col class="day">
+          <col class="day">
+          <col class="day">
+          <col class="day">
+          <col class="day">
+          <col class="detail">
+        </colgroup>
         <thead>
           <tr>
-            <th class="text-left px-3 py-3 border border-slate-200 bg-slate-50 text-xs font-semibold text-slate-500 uppercase w-44">Location</th>
-            {% for day in week_days %}
-            <th class="px-2 py-3 border border-slate-200 bg-slate-50 text-xs font-semibold text-slate-500 uppercase min-w-[150px]">
+            <th class="text-left px-3 py-3 border border-slate-200 bg-slate-50 text-xs font-semibold text-slate-500 uppercase">Location</th>
+            {% for day in weekday_days %}
+            <th class="day border border-slate-200 bg-slate-50 text-xs font-semibold text-slate-500 uppercase">
               {{ day.strftime('%a') }}<br><span class="font-normal normal-case">{{ day.strftime('%b %-d') }}</span>
             </th>
             {% endfor %}
+            <th class="detail border border-slate-200 bg-slate-50 text-xs font-semibold text-slate-500 uppercase text-left px-3">
+              {% if selected_block %}
+                {{ selected_block.location.abbreviation if selected_block.location else 'OR' }}
+                · {{ selected_block.date.strftime('%a %-m/%-d') }}
+              {% else %}
+                Block
+              {% endif %}
+            </th>
           </tr>
         </thead>
         <tbody>
           {% for location in locations %}
           <tr>
-            <td class="px-3 py-3 border border-slate-200 align-top bg-white">
+            <td class="px-3 py-2 border border-slate-200 align-top bg-white">
               <div class="font-bold text-slate-800">{{ location.abbreviation or location.name }}</div>
-              <div class="text-xs text-slate-400">{{ location.name }}</div>
+              <div class="text-xs text-slate-400 truncate">{{ location.name }}</div>
             </td>
-            {% for day in week_days %}
+            {% for day in weekday_days %}
             {% set blocks = workspace.blocks_by_location.get(location.id, {}).get(day, []) %}
-            <td class="px-2 py-2 border border-slate-200 align-top bg-white">
-              <div class="min-h-[4.5rem] space-y-1.5">
+            <td class="day border border-slate-200 bg-white">
+              <div class="block-or-day-stack">
                 {% for block in blocks %}
                 <a href="/admin/block-or?week_offset={{ week_offset }}&block_id={{ block.id }}"
-                   class="block-or-card rounded-lg border px-2 py-1.5 text-[11px] leading-tight shadow-sm hover:ring-2 hover:ring-blue-300 transition
+                   class="block-or-card rounded-lg border text-[11px] leading-tight shadow-sm hover:ring-2 hover:ring-blue-300 transition
                    {% if selected_block and selected_block.id == block.id %}ring-2 ring-blue-500{% endif %}
                    {% if block.status == 'open' %}bg-teal-50 border-teal-200 text-teal-900
                    {% elif block.status == 'assigned' %}bg-blue-50 border-blue-200 text-blue-900
                    {% else %}bg-amber-50 border-amber-200 text-amber-900{% endif %}">
-                  <div class="flex items-start justify-between gap-1 min-h-[1.15rem]">
+                  <div class="flex items-start justify-between gap-1">
                     <div class="min-w-0 truncate font-extrabold">
                       {{ block.session|upper }}{% if block.sessionSurgeons %} - {% for row in block.sessionSurgeons %}{% if not loop.first %} | {% endif %}{{ row.initials }}{% if row.isOff %} <span class="text-rose-600 font-extrabold">(OFF)</span>{% endif %}{% endfor %}{% endif %}
                     </div>
                     {% if block.cardRoomLabel %}
-                    <div class="shrink-0 truncate max-w-[46%] text-right font-semibold">Rm {{ block.cardRoomLabel }}</div>
+                    <div class="shrink-0 truncate max-w-[42%] text-right font-semibold">Rm {{ block.cardRoomLabel }}</div>
                     {% endif %}
                   </div>
                   <div class="truncate text-slate-700">
@@ -131,144 +192,108 @@
                   </div>
                 </a>
                 {% else %}
-                <div class="h-[4.5rem] text-slate-300 text-xs flex items-center justify-center">No block</div>
+                <div class="block-or-empty text-slate-300 text-xs">No block</div>
                 {% endfor %}
               </div>
             </td>
             {% endfor %}
+            {% if loop.first %}
+            <td class="block-or-detail border border-slate-200 bg-white" rowspan="{{ loc_count }}">
+              <div class="block-or-detail-inner">
+                {% if selected_block %}
+                <div class="flex items-start justify-between gap-2 mb-2">
+                  <div class="min-w-0">
+                    <p class="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Selected block</p>
+                    <p class="font-extrabold text-slate-800 text-sm leading-tight">
+                      {{ selected_block.location.abbreviation if selected_block.location else 'OR' }}
+                      · {{ selected_block.session|upper }}
+                      {% if selected_block.room_text %} · Rm {{ selected_block.room_text }}{% endif %}
+                    </p>
+                    <p class="text-[11px] text-slate-500">
+                      {{ selected_block.date.strftime('%a %b %-d') }}
+                      · {{ assignments|length }} surgeon{{ '' if assignments|length == 1 else 's' }}
+                      · {{ block_cases|length }} case{{ '' if block_cases|length == 1 else 's' }}
+                    </p>
+                  </div>
+                  <a href="/admin/block-or?week_offset={{ week_offset }}" class="text-[11px] font-semibold text-slate-500 hover:text-slate-700 shrink-0">Clear</a>
+                </div>
+                <div class="flex flex-wrap gap-1 mb-2" role="tablist" aria-label="Block actions">
+                  <button type="button" class="block-or-pill px-2.5 py-1 rounded-full text-[11px] font-bold border transition" data-panel="assign">Assign</button>
+                  <button type="button" class="block-or-pill px-2.5 py-1 rounded-full text-[11px] font-bold border transition" data-panel="edit">Edit</button>
+                  <button type="button" class="block-or-pill px-2.5 py-1 rounded-full text-[11px] font-bold border transition" data-panel="copy">Copy</button>
+                  <button type="button" class="block-or-pill px-2.5 py-1 rounded-full text-[11px] font-bold border transition" data-panel="remove">Remove</button>
+                </div>
+                <table class="w-full text-[11px] border-collapse">
+                  <thead>
+                    <tr class="text-left text-slate-500">
+                      <th class="py-1 pr-2 font-semibold">Surgeon</th>
+                      <th class="py-1 pr-2 font-semibold">Start</th>
+                      <th class="py-1 pr-2 font-semibold">Cases</th>
+                      <th class="py-1 font-semibold">Rm</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% if cases_by_surgeon %}
+                      {% for group in cases_by_surgeon %}
+                      <tr class="border-t border-slate-100">
+                        <td class="py-1.5 pr-2 font-extrabold text-slate-800">
+                          {{ group.surgeon.initials if group.surgeon else '—' }}
+                          {% if group.isOff %}<span class="text-rose-600">(OFF)</span>{% endif %}
+                        </td>
+                        <td class="py-1.5 pr-2 font-mono">
+                          {{ (group.assignment.start_time or selected_block.start_time).strftime('%H:%M') if group.assignment else '—' }}
+                        </td>
+                        <td class="py-1.5 pr-2">{{ group.cases|length }}</td>
+                        <td class="py-1.5">{{ (group.cases[0].room_text if group.cases and group.cases[0].room_text else selected_block.room_text) or '—' }}</td>
+                      </tr>
+                      {% for case in group.cases %}
+                      <tr class="border-t border-slate-50 bg-slate-50/70">
+                        <td class="py-1 pr-2 pl-3 text-slate-600 truncate" colspan="1">
+                          <a href="/admin/block-or?week_offset={{ week_offset }}&block_id={{ selected_block.id }}&panel=case&case_id={{ case.id }}" class="hover:text-teal-800">
+                            {{ case.patient_name or 'Case' }}
+                          </a>
+                        </td>
+                        <td class="py-1 pr-2 font-mono text-teal-800">{{ case.start_time.strftime('%H:%M') if case.start_time else '—' }}</td>
+                        <td class="py-1 pr-2 text-slate-500 truncate" colspan="2">{{ case.procedure or 'TBD' }}</td>
+                      </tr>
+                      {% endfor %}
+                      {% endfor %}
+                    {% else %}
+                      <tr>
+                        <td colspan="4" class="py-6 text-center text-slate-400">Place a surgeon on this AM or PM block first.</td>
+                      </tr>
+                    {% endif %}
+                  </tbody>
+                </table>
+                {% else %}
+                <p class="text-sm text-slate-500 leading-snug">Click a weekday card for surgeons, start times, rooms, and cases.</p>
+                <div class="flex flex-wrap gap-1 mt-3" role="tablist" aria-label="Block OR tools">
+                  <button type="button" class="block-or-pill px-2.5 py-1 rounded-full text-[11px] font-bold border transition" data-panel="create">Create</button>
+                  <button type="button" class="block-or-pill px-2.5 py-1 rounded-full text-[11px] font-bold border transition" data-panel="copy">Copy week</button>
+                </div>
+                {% endif %}
+              </div>
+            </td>
+            {% endif %}
           </tr>
           {% else %}
-          <tr><td colspan="8" class="px-4 py-8 text-center text-slate-400">Add hospital locations before creating Block OR time.</td></tr>
+          <tr><td colspan="7" class="px-4 py-8 text-center text-slate-400">Add hospital locations before creating Block OR time.</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
   </section>
 
-  <section class="clinical-panel p-4 space-y-4" id="block-or-tools">
+  <section class="clinical-panel p-4 space-y-4 hidden" id="block-or-tools">
     {% if selected_block %}
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div class="min-w-0">
-        <p class="text-[11px] font-extrabold uppercase tracking-widest text-slate-400">Selected block</p>
-        <p class="font-extrabold text-slate-800 text-sm sm:text-base">
-          {{ selected_block.date.strftime('%a %b %-d, %Y') }}
-          · {{ selected_block.location.abbreviation if selected_block.location else 'OR' }}
-          · {{ selected_block.start_time.strftime('%H:%M') }}-{{ selected_block.end_time.strftime('%H:%M') }}
-          {% if selected_block.room_text %} · Rm {{ selected_block.room_text }}{% endif %}
-        </p>
-        <p class="text-xs text-slate-500 mt-1">
-          {{ assignments|length }} surgeon{{ '' if assignments|length == 1 else 's' }}
-          · {{ block_cases|length }} case{{ '' if block_cases|length == 1 else 's' }}
-        </p>
-      </div>
-      <a href="/admin/block-or?week_offset={{ week_offset }}" class="text-xs font-semibold text-slate-500 hover:text-slate-700">Clear selection</a>
-    </div>
-
-    <div class="flex flex-wrap gap-2" role="tablist" aria-label="Block actions">
-      <button type="button" class="block-or-pill px-3.5 py-2 rounded-full text-sm font-bold border transition"
-              data-panel="assign">Assign</button>
-      <button type="button" class="block-or-pill px-3.5 py-2 rounded-full text-sm font-bold border transition"
-              data-panel="edit">Edit</button>
-      <button type="button" class="block-or-pill px-3.5 py-2 rounded-full text-sm font-bold border transition"
-              data-panel="copy">Copy</button>
-      <button type="button" class="block-or-pill px-3.5 py-2 rounded-full text-sm font-bold border transition"
-              data-panel="remove">Remove</button>
-    </div>
-
-    {# Primary: surgeons → cases (no "On this block" chrome) #}
-    <div class="rounded-xl border border-slate-200 bg-white overflow-hidden">
-      {% if cases_by_surgeon %}
-        <div class="divide-y divide-slate-100">
-          {% for group in cases_by_surgeon %}
-          {% set human_note = (group.assignment.note if group.assignment else '')|human_schedule_note %}
-          <div class="p-3 space-y-2">
-            <div class="flex items-center justify-between gap-2">
-              <div class="min-w-0 flex items-center gap-2">
-                <span class="inline-flex items-center justify-center min-w-[2.25rem] px-1.5 py-0.5 rounded-md bg-teal-700 text-white text-xs font-extrabold tracking-wide">
-                  {{ group.surgeon.initials if group.surgeon else '—' }}
-                </span>
-                <div class="min-w-0">
-                  <div class="text-sm text-slate-800 truncate">
-                    <span class="font-extrabold">{{ group.surgeon.initials if group.surgeon else '—' }}</span>
-                    {% if group.isOff %}
-                    <span class="text-rose-600 font-extrabold"> (OFF)</span>
-                    {% endif %}
-                    {% if group.surgeon and group.surgeon.full_name %}
-                    <span class="font-semibold text-slate-600"> {{ group.surgeon.full_name }}</span>
-                    {% endif %}
-                  </div>
-                  <div class="text-xs text-slate-500">
-                    {% if group.assignment %}
-                    {{ (group.assignment.start_time or selected_block.start_time).strftime('%H:%M') }}
-                    ·
-                    {% endif %}
-                    {{ group.cases|length }} case{{ '' if group.cases|length == 1 else 's' }}
-                    {% if human_note %}
-                    · {{ human_note }}
-                    {% endif %}
-                  </div>
-                </div>
-              </div>
-              {% if group.assignment %}
-                {% if group.cases %}
-                <span class="text-[11px] font-semibold text-slate-400 flex-shrink-0" title="Reschedule cases first">Remove blocked</span>
-                {% else %}
-                <button form="remove-assignment-{{ group.assignment.id }}" type="submit"
-                  class="text-xs font-semibold text-rose-600 hover:text-rose-800 flex-shrink-0"
-                  onclick="return confirm('Remove {{ group.surgeon.full_name if group.surgeon else 'this surgeon' }} from this block?');">
-                  Remove
-                </button>
-                {% endif %}
-              {% endif %}
-            </div>
-
-            {% if group.cases %}
-              <div class="ml-1 sm:ml-10 space-y-1.5">
-                {% for case in group.cases %}
-                <a href="/admin/block-or?week_offset={{ week_offset }}&block_id={{ selected_block.id }}&panel=case&case_id={{ case.id }}"
-                   class="flex gap-3 items-start rounded-lg border px-3 py-2 transition hover:border-teal-300 hover:bg-teal-50/40
-                   {% if editing_case and editing_case.id == case.id %}border-teal-400 bg-teal-50 ring-1 ring-teal-300{% else %}border-slate-100 bg-slate-50{% endif %}">
-                  <div class="w-12 flex-shrink-0 font-mono text-xs font-bold text-teal-800">
-                    {{ case.start_time.strftime('%H:%M') if case.start_time else '—' }}
-                  </div>
-                  <div class="min-w-0 flex-1">
-                    <div class="text-sm font-semibold text-slate-900 truncate">{{ case.patient_name or 'Case' }}</div>
-                    <div class="text-xs text-slate-600 truncate">{{ case.procedure or 'TBD' }}</div>
-                    {% if case.room_text %}
-                    <div class="text-[11px] font-semibold text-slate-500 mt-0.5">Rm {{ case.room_text }}</div>
-                    {% endif %}
-                  </div>
-                  <span class="text-[11px] font-bold text-teal-700 flex-shrink-0 self-center">Edit</span>
-                </a>
-                {% endfor %}
-              </div>
-            {% else %}
-              <p class="ml-1 sm:ml-10 text-xs text-slate-400">0 cases</p>
-            {% endif %}
-          </div>
-          {% endfor %}
-        </div>
-        {% if assignments %}
-        <div class="px-3 py-2 border-t border-slate-100 bg-slate-50/80">
-          {% if block_cases %}
-          <p class="text-xs text-amber-800 font-semibold">
-            Clear surgeons blocked — reschedule {{ block_cases|length }} linked case{{ '' if block_cases|length == 1 else 's' }} first.
-          </p>
-          {% else %}
-          <button form="clear-block-{{ selected_block.id }}" type="submit"
-            class="text-xs font-semibold text-amber-800 hover:text-amber-950"
-            onclick="return confirm('Clear ALL surgeons from this block?\n\nOnly allowed when there are no linked cases.\n\nThis cannot be undone from here.');">
-            Clear all surgeons…
-          </button>
-          {% endif %}
-        </div>
-        {% endif %}
-      {% else %}
-        <p class="text-sm text-slate-500 text-center py-6 px-4">
-          Place a surgeon on this AM or PM block first, then add patients.
-        </p>
-      {% endif %}
-    </div>
+    {% for row in assignments %}
+    <form id="remove-assignment-{{ row.id }}" method="post" action="/admin/block-or/{{ selected_block.id }}/assignments/{{ row.id }}/remove" class="hidden">
+      <input type="hidden" name="week_offset" value="{{ week_offset }}" />
+    </form>
+    {% endfor %}
+    <form id="clear-block-{{ selected_block.id }}" method="post" action="/admin/block-or/{{ selected_block.id }}/clear" class="hidden">
+      <input type="hidden" name="week_offset" value="{{ week_offset }}" />
+    </form>
 
     <div class="block-or-panel" data-panel="assign">
       {% set assigned_ids = assignments | map(attribute='surgeon_id') | list %}
@@ -342,14 +367,6 @@
         {% else %}
         <p class="text-sm text-slate-500">Place a surgeon on this AM or PM block before adding patients.</p>
         {% endif %}
-      </form>
-      {% for row in assignments %}
-      <form id="remove-assignment-{{ row.id }}" method="post" action="/admin/block-or/{{ selected_block.id }}/assignments/{{ row.id }}/remove" class="hidden">
-        <input type="hidden" name="week_offset" value="{{ week_offset }}" />
-      </form>
-      {% endfor %}
-      <form id="clear-block-{{ selected_block.id }}" method="post" action="/admin/block-or/{{ selected_block.id }}/clear" class="hidden">
-        <input type="hidden" name="week_offset" value="{{ week_offset }}" />
       </form>
     </div>
 
@@ -491,16 +508,6 @@
     </div>
 
     {% else %}
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <p class="text-xs text-slate-500">Click a block above to see surgeons and cases, or open a tool:</p>
-      <div class="flex flex-wrap gap-2" role="tablist" aria-label="Block OR tools">
-        <button type="button" class="block-or-pill px-3.5 py-2 rounded-full text-sm font-bold border transition"
-                data-panel="create">Create</button>
-        <button type="button" class="block-or-pill px-3.5 py-2 rounded-full text-sm font-bold border transition"
-                data-panel="copy">Copy week</button>
-      </div>
-    </div>
-
     <div class="block-or-panel" data-panel="create">
       <form method="post" action="/admin/block-or/create" class="grid gap-3 md:grid-cols-2 lg:grid-cols-4 max-w-6xl">
         <input type="hidden" name="week_offset" value="{{ week_offset }}" />
@@ -652,15 +659,16 @@
     panels.forEach(function (panel) {
       panel.classList.toggle('hidden', !open || panel.getAttribute('data-panel') !== name);
     });
+    var tools = document.getElementById('block-or-tools');
+    if (tools) tools.classList.toggle('hidden', !open);
     try {
       var url = new URL(window.location.href);
       if (open) url.searchParams.set('panel', name);
       else url.searchParams.delete('panel');
       window.history.replaceState({}, '', url.toString());
     } catch (e) {}
-    if (open && opts.scroll !== false) {
-      var tools = document.getElementById('block-or-tools');
-      if (tools) tools.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (open && opts.scroll !== false && tools) {
+      tools.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   }
 

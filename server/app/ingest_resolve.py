@@ -18,6 +18,7 @@ _SURGEON_TOKEN_ALIASES = {
     "wocdley": "woodley",
     "woedley": "woodley",
     "woodely": "woodley",
+    "woodtey": "woodley",
 }
 
 

@@ -163,7 +163,8 @@ class AdminClinicScheduleTest(unittest.TestCase):
             self.assertEqual(jason_blocks[0]["surgeonId"], jason.id)
             self.assertEqual(jason_blocks[0]["caseCount"], 2)
             self.assertEqual(jason_blocks[0]["assignedStart"], "09:00")
-            self.assertEqual(jason_blocks[0]["pillLabel"], "WG 0900 2 Cases")
+            self.assertEqual(jason_blocks[0]["pillLabel"], "WG")
+            self.assertEqual(jason_blocks[0]["pillCountLabel"], "2 cases")
             self.assertEqual(jason_blocks[0]["session"], "am")
             self.assertEqual(len(jason_blocks[0]["segments"]), 1)
         finally:
@@ -222,9 +223,11 @@ class AdminClinicScheduleTest(unittest.TestCase):
         pm = next(row for row in merged if row["session"] == "pm")
         self.assertEqual(am["caseCount"], 3)
         self.assertEqual(am["assignedStart"], "07:00")
-        self.assertEqual(am["pillLabel"], "WG-OR 0700 3 Cases")
+        self.assertEqual(am["pillLabel"], "WG-OR")
+        self.assertEqual(am["pillCountLabel"], "3 cases")
         self.assertEqual(len(am["segments"]), 2)
-        self.assertEqual(pm["pillLabel"], "WG-OR 1300 1 Case")
+        self.assertEqual(pm["pillLabel"], "WG-OR")
+        self.assertEqual(pm["pillCountLabel"], "1 case")
         self.assertEqual(pm["assignmentNote"], "late")
 
     def test_merge_or_block_into_clinic_grid_pill(self):
@@ -251,14 +254,16 @@ class AdminClinicScheduleTest(unittest.TestCase):
                     "session": "am",
                     "assignedStart": "08:30",
                     "caseCount": 2,
-                    "pillLabel": "AP-OR 0830 2 Cases",
+                    "pillLabel": "AP-OR",
+                    "pillCountLabel": "2 cases",
                     "startCompact": "0830",
                     "segments": [],
                 }]
             }
         }
         overlays, remaining = merge_or_blocks_into_clinic_grid(sched_map, assigned)
-        self.assertEqual(overlays[100]["pillLabel"], "AP-OR 0830 2 Cases")
+        self.assertEqual(overlays[100]["pillLabel"], "AP-OR")
+        self.assertEqual(overlays[100]["pillCountLabel"], "2 cases")
         self.assertEqual(remaining, {})
 
     def test_open_block_day_slots_one_pill_per_or(self):
@@ -306,10 +311,12 @@ class AdminClinicScheduleTest(unittest.TestCase):
         self.assertEqual(mn["locationAbbreviation"], "MN-OR")
         self.assertEqual(mn["timeLabel"], "7:00-12:00")
         self.assertEqual(mn["caseCount"], 0)
+        self.assertEqual(mn["caseCountLabel"], "0 cases")
         self.assertEqual(mn["blockId"], 50)
         wg = slots[3]
         self.assertEqual(wg["timeLabel"], "7:00-12:00")
         self.assertEqual(wg["caseCount"], 3)
+        self.assertEqual(wg["caseCountLabel"], "3 cases")
         self.assertEqual(wg["blockId"], 51)
 
     def test_clinic_fax_notes_include_patient_names(self):

@@ -108,7 +108,8 @@ def clinic_fax_overlay_from_notes(
         "caseCount": count,
         "kind": "clinic",
         "countLabel": visit_word,
-        "pillLabel": f"{abbr} {_hhmm_compact(start)} {count} {visit_word}",
+        "pillLabel": abbr,
+        "pillCountLabel": f"{count} {visit_word.lower()}",
         "segments": segments,
         "notes": notes,
     }
@@ -137,7 +138,7 @@ def _block_display_session(block: dict) -> str:
 def aggregate_assigned_or_blocks(blocks: list[dict]) -> list[dict]:
     """
     One pill per location + AM/PM for a surgeon/day.
-    Sums case counts; earliest start wins for the label (WG-OR 0700 3 Case).
+    Sums case counts; earliest start is kept for detail only.
     """
     groups: dict[tuple, dict] = {}
     for block in blocks:
@@ -184,7 +185,8 @@ def aggregate_assigned_or_blocks(blocks: list[dict]) -> list[dict]:
         start_compact = _hhmm_compact(group["assignedStart"])
         cases = group["caseCount"]
         case_word = "Case" if cases == 1 else "Cases"
-        group["pillLabel"] = f"{group['locationAbbreviation']} {start_compact} {cases} {case_word}".strip()
+        group["pillLabel"] = group["locationAbbreviation"]
+        group["pillCountLabel"] = f"{cases} {case_word.lower()}"
         group["startCompact"] = start_compact
         group["kind"] = "or"
         group["countLabel"] = case_word
@@ -244,7 +246,8 @@ def _enrich_or_block_with_live_cases(block: dict, cases: list[SurgicalCase]) -> 
     out["startCompact"] = start_compact
     out["countLabel"] = case_word
     out["kind"] = "or"
-    out["pillLabel"] = f"{abbr} {start_compact} {len(segments)} {case_word}".strip()
+    out["pillLabel"] = abbr
+    out["pillCountLabel"] = f"{len(segments)} {case_word.lower()}"
     return out
 
 
@@ -446,6 +449,7 @@ def open_block_day_slots(
             "end": end,
             "timeLabel": time_label,
             "caseCount": cases,
+            "caseCountLabel": f"{cases} case{'s' if cases != 1 else ''}",
             "status": primary.get("status") or "open",
             "pillTitle": f"{abbr} {time_label} · {cases} case{'s' if cases != 1 else ''}",
             "blocks": blocks,

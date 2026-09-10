@@ -1077,6 +1077,33 @@ def block_assignment_payloads(block: ORBlockInstance) -> list[dict]:
     return [_assignment_payload(block, legacy)]
 
 
+def block_session_card_title(session: str, assignments: list[dict]) -> str:
+    """Grid identity is AM/PM plus surgeons, not 07:00–12:00."""
+    label = (session or "").strip().upper()
+    if label not in {"AM", "PM"}:
+        label = "AM" if label in {"BOTH", "AM"} else (label or "AM")
+    seen: list[str] = []
+    for row in assignments:
+        initials = (row.get("surgeonInitials") or "").strip().upper()
+        if initials and initials not in seen:
+            seen.append(initials)
+    seen.sort()
+    if seen:
+        return f"{label} · " + " · ".join(seen)
+    return label
+
+
+def block_case_start_labels(cases: list[dict], assignments: list[dict]) -> list[str]:
+    starts = [row.get("start") for row in cases if row.get("start")]
+    if starts:
+        return starts
+    return [
+        row["start"]
+        for row in assignments
+        if row.get("caseCount") and row.get("start")
+    ]
+
+
 def serialize_block_instance(block: ORBlockInstance, *, include_case_details: bool = True) -> dict:
     assignments = block_assignment_payloads(block)
     cases = block_case_payloads(block, include_details=include_case_details)
@@ -1088,11 +1115,13 @@ def serialize_block_instance(block: ORBlockInstance, *, include_case_details: bo
     assignment_label = first_assignment["label"] if first_assignment else ""
     status = "assigned" if assignments else (block.status or "open")
     room = _display_room_label(block)
-    session = infer_session_label(block.start_time, block.end_time, block.session)
+    bucket = _session_bucket(block)
+    session = bucket if bucket in {"am", "pm"} else infer_session_label(block.start_time, block.end_time, block.session)
     return {
         "id": block.id,
         "date": block.date.isoformat(),
         "session": session,
+        "sessionTitle": block_session_card_title(session, assignments),
         "start": block.start_time.strftime("%H:%M"),
         "end": block.end_time.strftime("%H:%M"),
         "status": status,
@@ -1105,6 +1134,7 @@ def serialize_block_instance(block: ORBlockInstance, *, include_case_details: bo
         "surgeonInitials": first_assignment["surgeonInitials"] if first_assignment else _safe_surgeon_label(block.assigned_surgeon),
         "assignedStart": assigned_start.strftime("%H:%M") if assigned_start else None,
         "caseCount": total_cases,
+        "caseStarts": block_case_start_labels(cases, assignments),
         "assignmentNote": sanitize_schedule_note_for_humans(block.assignment_note),
         "assignmentLabel": assignment_label,
         "assignments": assignments,

@@ -7,26 +7,36 @@ with zero cases. Call plus working the block is the same day's work, not a
 collision. A session with no block is unscheduled (free until clinic).
 Clermont is clinic-only (no OR).
 
-Week 1 / 3 / 5 = nth weekday of the month (Sep 14 2026 is week 2).
+Week 1 / 3 / 5 = nth weekday of the month (Sep 11 2026 is week 2).
 """
 from __future__ import annotations
 
 from datetime import date, timedelta
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from .admin_schedule_template_clinic_service import save_template_cell_value
 from .admin_schedule_template_common import approved_off_dates
-from .models import ClinicSchedule, Location, ORBlockInstance, Surgeon, SurgeonLocationSchedule
+from .models import (
+    ClinicSchedule,
+    Location,
+    ORBlockAuditEvent,
+    ORBlockInstance,
+    Surgeon,
+    SurgeonLocationSchedule,
+)
 from .or_block_service import (
     BlockORCreateInput,
     SESSION_DEFAULTS,
+    _host_rank,
+    _session_bucket,
     assign_block,
+    collapse_extra_am_pm_cards,
     create_or_blocks,
 )
 from .surgeon_visibility import surgeon_is_visible
 
-START = date(2026, 9, 14)
+START = date(2026, 9, 11)
 END = date(2027, 6, 14)
 
 # (day_of_week 0=Mon, session) → (location abbreviation, weeks or None=every week)
@@ -133,6 +143,17 @@ def paper_cell(initials: str, day: date, session: str) -> str | None:
     return abbrev
 
 
+def paper_or_slots(day: date) -> set[tuple[str, str]]:
+    """Hospital abbreviation + AM/PM that paper allocates that weekday."""
+    slots: set[tuple[str, str]] = set()
+    for initials in PAPER:
+        for session in ("am", "pm"):
+            abbrev = paper_cell(initials, day, session)
+            if abbrev and abbrev.endswith("-OR"):
+                slots.add((abbrev, session))
+    return slots
+
+
 def _locations_by_abbrev(db: Session) -> dict[str, Location]:
     out: dict[str, Location] = {}
     for loc in db.query(Location).filter(Location.is_active == True).all():  # noqa: E712
@@ -159,6 +180,7 @@ def _blocks_for_slot(db: Session, location_id: int, day: date, session: str) -> 
     start, end = SESSION_DEFAULTS[session]
     rows = (
         db.query(ORBlockInstance)
+        .options(selectinload(ORBlockInstance.assignments))
         .filter(
             ORBlockInstance.location_id == location_id,
             ORBlockInstance.date == day,
@@ -179,11 +201,12 @@ def _surgeon_on_block(block: ORBlockInstance, surgeon_id: int) -> bool:
 
 
 def _shared_time_block(db: Session, location: Location, day: date, session: str) -> ORBlockInstance | None:
-    """One practice window per hospital + day + AM/PM. No room. Scheduler places one or both."""
+    """One practice window per hospital + day + AM/PM. Reuse any existing half; do not mint a second card."""
     blocks = _blocks_for_slot(db, location.id, day, session)
-    blanks = [row for row in blocks if not (row.room_text or "").strip()]
-    if blanks:
-        return blanks[0]
+    same = [row for row in blocks if _session_bucket(row) == session]
+    pool = same or list(blocks)
+    if pool:
+        return sorted(pool, key=_host_rank)[0]
     start, end = SESSION_DEFAULTS[session]
     try:
         created = create_or_blocks(
@@ -205,10 +228,62 @@ def _shared_time_block(db: Session, location: Location, day: date, session: str)
         created = {}
     if created.get("instance_ids"):
         row = db.get(ORBlockInstance, created["instance_ids"][0])
-        if row and not (row.room_text or "").strip():
+        if row:
             return row
-    blanks = [row for row in _blocks_for_slot(db, location.id, day, session) if not (row.room_text or "").strip()]
-    return blanks[0] if blanks else None
+    leftovers = _blocks_for_slot(db, location.id, day, session)
+    return leftovers[0] if leftovers else None
+
+
+def _block_is_empty(block: ORBlockInstance) -> bool:
+    if block.assigned_surgeon_id:
+        return False
+    if any(row.surgeon_id for row in (block.assignments or [])):
+        return False
+    cases = [case for case in (block.cases or []) if (case.status or "").lower() != "cancelled"]
+    return not cases
+
+
+def _prune_empty_non_paper_windows(db: Session, start: date, end: date) -> int:
+    """Drop empty Open shells at a hospital half that paper does not allocate."""
+    deleted = 0
+    day = start
+    while day <= end:
+        if day.weekday() <= 4:
+            wanted = paper_or_slots(day)
+            rows = (
+                db.query(ORBlockInstance)
+                .options(
+                    selectinload(ORBlockInstance.location),
+                    selectinload(ORBlockInstance.assignments),
+                    selectinload(ORBlockInstance.cases),
+                )
+                .filter(
+                    ORBlockInstance.date == day,
+                    ORBlockInstance.status.in_(("open", "assigned")),
+                )
+                .all()
+            )
+            for block in rows:
+                loc = block.location
+                if loc is None or loc.location_type != "hospital":
+                    continue
+                abbrev = (loc.abbreviation or "").strip().upper()
+                bucket = _session_bucket(block)
+                if bucket not in {"am", "pm"}:
+                    continue
+                if (abbrev, bucket) in wanted:
+                    continue
+                if not _block_is_empty(block):
+                    continue
+                db.query(ORBlockAuditEvent).filter(
+                    ORBlockAuditEvent.block_instance_id == block.id
+                ).delete(synchronize_session=False)
+                db.delete(block)
+                deleted += 1
+            if rows:
+                db.flush()
+        day += timedelta(days=1)
+    return deleted
 
 
 def sync_weekly_templates(db: Session, surgeons: dict[str, Surgeon], locations: dict[str, Location]) -> int:
@@ -355,6 +430,11 @@ def apply_paper_block_schedule(
                             blocks_already += 1
         day += timedelta(days=1)
 
+    folded = {"cardsFolded": 0}
+    pruned = 0
+    if write_blocks:
+        folded = collapse_extra_am_pm_cards(db, start=start, end=end)
+        pruned = _prune_empty_non_paper_windows(db, start, end)
     db.commit()
     return {
         "ok": True,
@@ -366,5 +446,7 @@ def apply_paper_block_schedule(
         "skippedOff": skipped_off,
         "blocksAssigned": blocks_assigned,
         "blocksAlready": blocks_already,
+        "cardsFolded": folded.get("cardsFolded", 0),
+        "blocksPruned": pruned,
         "physicians": sorted(surgeons),
     }

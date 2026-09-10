@@ -29,6 +29,8 @@ from app.or_block_service import (
     add_case_to_block,
     assign_block,
     block_assignment_warnings,
+    block_case_start_labels,
+    block_session_card_title,
     clear_block_assignment,
     collapse_extra_am_pm_cards,
     copy_or_block_capacity,
@@ -50,6 +52,28 @@ class ORBlockServiceTest(unittest.TestCase):
     def tearDown(self):
         Base.metadata.drop_all(bind=self.engine)
         self.engine.dispose()
+
+    def test_block_card_title_is_session_and_initials_not_clocks(self):
+        self.assertEqual(
+            block_session_card_title("am", [
+                {"surgeonInitials": "NF"},
+                {"surgeonInitials": "GY"},
+                {"surgeonInitials": "LN"},
+            ]),
+            "AM · GY · LN · NF",
+        )
+        self.assertEqual(block_session_card_title("pm", []), "PM")
+        self.assertEqual(
+            block_case_start_labels(
+                [{"start": "07:30"}, {"start": "09:15"}],
+                [{"start": "07:00", "caseCount": 1}],
+            ),
+            ["07:30", "09:15"],
+        )
+        self.assertEqual(
+            block_case_start_labels([], [{"start": "12:30", "caseCount": 1}]),
+            ["12:30"],
+        )
 
     def test_multi_location_block_creates_one_instance_per_location_day(self):
         db = self.Session()

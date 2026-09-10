@@ -102,18 +102,12 @@
                    {% elif block.status == 'assigned' %}bg-blue-50 border-blue-200 text-blue-900
                    {% else %}bg-amber-50 border-amber-200 text-amber-900{% endif %}">
                   <div class="flex items-center justify-between gap-1">
-                    <strong>{{ block.session|upper }}</strong>
-                    <span>{{ block.status.replace('_', ' ') }}</span>
+                    <strong>{{ block.sessionTitle or (block.session|upper) }}</strong>
+                    {% if block.room %}<span class="shrink-0">Rm {{ block.room }}</span>{% endif %}
                   </div>
-                  <div class="font-semibold">
-                    {{ block.start }}-{{ block.end }}{% if block.room %} · Rm {{ block.room }}{% endif %}
-                  </div>
-                  {% if block.assignments %}
-                    {% for row in block.assignments %}
-                    <div class="truncate">{{ row.start }} · {{ row.caseCount }} case{{ '' if row.caseCount == 1 else 's' }} · {{ row.surgeonInitials or '—' }}</div>
-                    {% endfor %}
-                  {% else %}
-                  <div class="truncate">Open</div>
+                  <div>{{ block.caseCount }} case{{ '' if block.caseCount == 1 else 's' }}</div>
+                  {% if block.caseStarts %}
+                    <div class="truncate">{{ block.caseStarts | join(' · ') }}</div>
                   {% endif %}
                 </a>
                 {% else %}

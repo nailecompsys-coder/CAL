@@ -1,6 +1,6 @@
 import os
 import unittest
-from datetime import date
+from datetime import date, time
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SECRET_KEY", "test-secret")
@@ -11,9 +11,11 @@ from sqlalchemy.orm import sessionmaker
 from app.models import Base, ClinicSchedule, DayOff, Location, ORBlockAssignment, ORBlockInstance, Surgeon
 from app.paper_block_schedule import (
     PAPER,
+    START,
     apply_paper_block_schedule,
     month_week,
     paper_cell,
+    paper_or_slots,
 )
 
 
@@ -169,6 +171,125 @@ class PaperBlockScheduleTest(unittest.TestCase):
             for row in blocks[0].assignments
         )
         self.assertEqual(assigned, ["CJ", "JF"])
+
+    def test_start_is_friday_sep_11(self):
+        self.assertEqual(START, date(2026, 9, 11))
+        self.assertEqual(month_week(date(2026, 9, 11)), 2)
+        self.assertEqual(
+            paper_or_slots(date(2026, 9, 11)),
+            {
+                ("WG-OR", "am"),
+                ("AL-OR", "am"),
+                ("AL-OR", "pm"),
+                ("MN-OR", "pm"),
+            },
+        )
+
+    def test_friday_sep_11_places_paper_or_and_drops_empty_shells(self):
+        al = self.db.query(Location).filter_by(abbreviation="AL-OR").one()
+        ap = self.db.query(Location).filter_by(abbreviation="AP-OR").one()
+        mn = self.db.query(Location).filter_by(abbreviation="MN-OR").one()
+        gy = self.db.query(Surgeon).filter_by(last_name="Yurcisin").one()
+        jp = self.db.query(Surgeon).filter_by(last_name="Putnick").one()
+        day = date(2026, 9, 11)
+
+        am = ORBlockInstance(
+            location_id=al.id,
+            date=day,
+            session="am",
+            start_time=time(7, 0),
+            end_time=time(12, 0),
+            status="assigned",
+            assigned_surgeon_id=gy.id,
+            assigned_start_time=time(7, 30),
+            assigned_case_count=1,
+        )
+        empty_ap = ORBlockInstance(
+            location_id=ap.id,
+            date=day,
+            session="am",
+            start_time=time(7, 0),
+            end_time=time(12, 0),
+            status="open",
+        )
+        mn_pm = ORBlockInstance(
+            location_id=mn.id,
+            date=day,
+            session="pm",
+            start_time=time(12, 0),
+            end_time=time(13, 30),
+            status="assigned",
+            room_text="MIN S05",
+            assigned_surgeon_id=jp.id,
+            assigned_start_time=time(12, 0),
+            assigned_case_count=1,
+        )
+        self.db.add_all([am, empty_ap, mn_pm])
+        self.db.flush()
+        self.db.add(ORBlockAssignment(
+            block_instance_id=am.id,
+            surgeon_id=gy.id,
+            start_time=time(7, 30),
+            case_count=1,
+        ))
+        self.db.add(ORBlockAssignment(
+            block_instance_id=mn_pm.id,
+            surgeon_id=jp.id,
+            start_time=time(12, 0),
+            case_count=1,
+        ))
+        self.db.commit()
+
+        result = apply_paper_block_schedule(
+            self.db,
+            start=day,
+            end=day,
+            write_templates=False,
+            write_clinic=False,
+            write_blocks=True,
+        )
+        self.assertTrue(result["ok"])
+        self.assertGreater(result["blocksAssigned"], 0)
+        self.assertGreaterEqual(result["blocksPruned"], 1)
+
+        self.assertEqual(
+            self.db.query(ORBlockInstance).filter_by(location_id=ap.id, date=day).count(),
+            0,
+        )
+
+        al_blocks = (
+            self.db.query(ORBlockInstance)
+            .filter_by(location_id=al.id, date=day)
+            .order_by(ORBlockInstance.start_time)
+            .all()
+        )
+        self.assertEqual(len(al_blocks), 2)
+        am_block = next(row for row in al_blocks if row.start_time < time(12, 0) and row.end_time <= time(12, 0))
+        pm_block = next(row for row in al_blocks if row.start_time >= time(12, 0))
+        self.assertEqual(
+            sorted(self.db.get(Surgeon, row.surgeon_id).initials for row in am_block.assignments),
+            ["GY", "LN", "NF"],
+        )
+        self.assertEqual(
+            sorted(self.db.get(Surgeon, row.surgeon_id).initials for row in pm_block.assignments),
+            ["GY", "JD", "LN", "NF"],
+        )
+
+        wg = self.db.query(Location).filter_by(abbreviation="WG-OR").one()
+        wg_blocks = self.db.query(ORBlockInstance).filter_by(location_id=wg.id, date=day).all()
+        self.assertEqual(len(wg_blocks), 1)
+        self.assertEqual(
+            sorted(self.db.get(Surgeon, row.surgeon_id).initials for row in wg_blocks[0].assignments),
+            ["JF"],
+        )
+
+        mn_blocks = self.db.query(ORBlockInstance).filter_by(location_id=mn.id, date=day).all()
+        self.assertEqual(len(mn_blocks), 1)
+        self.assertEqual(
+            [self.db.get(Surgeon, row.surgeon_id).initials for row in mn_blocks[0].assignments],
+            ["JP"],
+        )
+        self.assertEqual((mn_blocks[0].room_text or "").strip(), "MIN S05")
 
 
 if __name__ == "__main__":

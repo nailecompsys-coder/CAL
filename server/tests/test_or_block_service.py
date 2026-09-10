@@ -30,8 +30,10 @@ from app.or_block_service import (
     annotate_serialized_block_off,
     assign_block,
     block_assignment_warnings,
+    block_card_room_label,
     block_case_start_labels,
     block_session_card_title,
+    block_session_surgeons,
     block_workspace,
     clear_block_assignment,
     collapse_extra_am_pm_cards,
@@ -40,6 +42,7 @@ from app.or_block_service import (
     delete_or_block_instance,
     remove_block_assignment,
     scheduler_native_home,
+    short_room_label,
     update_block_assignment,
     update_or_block_instance,
 )
@@ -58,11 +61,11 @@ class ORBlockServiceTest(unittest.TestCase):
     def test_block_card_title_is_session_and_initials_not_clocks(self):
         self.assertEqual(
             block_session_card_title("am", [
-                {"surgeonInitials": "NF"},
                 {"surgeonInitials": "GY"},
                 {"surgeonInitials": "LN"},
+                {"surgeonInitials": "NF"},
             ]),
-            "AM · GY · LN · NF",
+            "AM - GY | LN | NF",
         )
         self.assertEqual(block_session_card_title("pm", []), "PM")
         self.assertEqual(
@@ -81,8 +84,22 @@ class ORBlockServiceTest(unittest.TestCase):
                 {"surgeonInitials": "AS", "isOff": True},
                 {"surgeonInitials": "JF"},
             ]),
-            "AM · AS (OFF) · JF",
+            "AM - AS (OFF) | JF",
         )
+        self.assertEqual(short_room_label("MIN S05"), "S05")
+        rows = block_session_surgeons(
+            [
+                {"surgeonId": 1, "surgeonInitials": "LN", "start": "07:00", "caseCount": 0, "room": "ALT S07"},
+                {"surgeonId": 2, "surgeonInitials": "NF", "start": "08:00", "caseCount": 1, "room": "ALT S08"},
+            ],
+            [{"surgeonId": 2, "start": "08:15", "room": "ALT S08"}],
+        )
+        self.assertEqual([row["initials"] for row in rows], ["LN", "NF"])
+        self.assertEqual(rows[0]["start"], "07:00")
+        self.assertEqual(rows[0]["caseCount"], 0)
+        self.assertEqual(rows[1]["start"], "08:15")
+        self.assertEqual(rows[1]["caseCount"], 1)
+        self.assertEqual(block_card_room_label(rows), "S07 | S08")
 
     def test_workspace_marks_off_initials_for_approved_and_requested_time_off(self):
         db = self.Session()
@@ -123,6 +140,7 @@ class ORBlockServiceTest(unittest.TestCase):
             self.assertFalse(by_initials["JF"]["isOff"])
             self.assertIn("AS (OFF)", cards[0]["sessionTitle"])
             self.assertNotIn("JF (OFF)", cards[0]["sessionTitle"])
+            self.assertIn(" - ", cards[0]["sessionTitle"])
 
             pending_day = date(2026, 9, 21)
             payload = {
@@ -137,7 +155,7 @@ class ORBlockServiceTest(unittest.TestCase):
                 (alex.id, pending_day): {"status": "pending"},
             })
             self.assertTrue(payload["assignments"][0]["isOff"])
-            self.assertEqual(payload["sessionTitle"], "AM · AS (OFF) · JF")
+            self.assertEqual(payload["sessionTitle"], "AM - AS (OFF) | JF")
         finally:
             db.close()
 

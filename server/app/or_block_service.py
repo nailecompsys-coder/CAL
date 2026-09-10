@@ -1084,39 +1084,92 @@ def _session_label(session: str) -> str:
     return label
 
 
-def block_session_surgeons(assignments: list[dict]) -> list[dict]:
-    """Unique initials for the card header, with time-off flags when present."""
-    seen: dict[str, dict] = {}
+def short_room_label(room: str | None) -> str:
+    """Card rooms are S05-style when the fax left a facility prefix."""
+    text = " ".join((room or "").strip().split())
+    if not text:
+        return ""
+    parts = text.split()
+    last = parts[-1]
+    if len(parts) >= 2 and last[:1].upper() == "S" and last[1:].isdigit():
+        return last.upper()
+    return text
+
+
+def block_session_surgeons(
+    assignments: list[dict],
+    cases: list[dict] | None = None,
+) -> list[dict]:
+    """One row per surgeon, in assignment order, with start / cases / room."""
+    by_surgeon: dict[int, list[dict]] = defaultdict(list)
+    for case in cases or []:
+        surgeon_id = case.get("surgeonId")
+        if surgeon_id:
+            by_surgeon[surgeon_id].append(case)
+
+    seen: set = set()
+    rows: list[dict] = []
     for row in assignments:
         initials = (row.get("surgeonInitials") or "").strip().upper()
-        if not initials:
+        surgeon_id = row.get("surgeonId")
+        key = surgeon_id if surgeon_id is not None else initials
+        if not initials or key in seen:
             continue
-        is_off = bool(row.get("isOff") or row.get("dayOffStatus"))
-        existing = seen.get(initials)
-        if existing is None:
-            seen[initials] = {
-                "initials": initials,
-                "surgeonId": row.get("surgeonId"),
-                "isOff": is_off,
-                "dayOffStatus": row.get("dayOffStatus"),
-            }
-        elif is_off:
-            existing["isOff"] = True
-            existing["dayOffStatus"] = row.get("dayOffStatus") or existing.get("dayOffStatus")
-    return [seen[key] for key in sorted(seen)]
+        seen.add(key)
+        surgeon_cases = sorted(
+            by_surgeon.get(surgeon_id) or [],
+            key=lambda item: (item.get("start") or "99:99", item.get("id") or 0),
+        )
+        rooms: list[str] = []
+        for case in surgeon_cases:
+            room = short_room_label(case.get("room") or "")
+            if room and room not in rooms:
+                rooms.append(room)
+        if surgeon_cases:
+            case_count = len(surgeon_cases)
+            start = surgeon_cases[0].get("start") or row.get("start") or ""
+            room = rooms[0] if len(rooms) == 1 else (" | ".join(rooms) if rooms else short_room_label(row.get("room") or ""))
+        else:
+            case_count = int(row.get("caseCount") or 0)
+            start = row.get("start") or ""
+            room = short_room_label(row.get("room") or "")
+        rows.append({
+            "initials": initials,
+            "surgeonId": surgeon_id,
+            "isOff": bool(row.get("isOff") or row.get("dayOffStatus")),
+            "dayOffStatus": row.get("dayOffStatus"),
+            "start": start,
+            "caseCount": case_count,
+            "room": room,
+        })
+    return rows
 
 
-def block_session_card_title(session: str, assignments: list[dict]) -> str:
+def block_card_room_label(surgeons: list[dict], fallback: str | None = None) -> str:
+    rooms = [row.get("room") or "" for row in surgeons]
+    filled = [room for room in rooms if room]
+    if not filled:
+        return short_room_label(fallback)
+    if len(set(filled)) == 1:
+        return filled[0]
+    return " | ".join(room or "—" for room in rooms)
+
+
+def block_session_card_title(
+    session: str,
+    assignments: list[dict],
+    cases: list[dict] | None = None,
+) -> str:
     """Grid identity is AM/PM plus surgeons, not 07:00–12:00."""
     label = _session_label(session)
     parts = []
-    for row in block_session_surgeons(assignments):
+    for row in block_session_surgeons(assignments, cases):
         bit = row["initials"]
         if row.get("isOff"):
             bit += " (OFF)"
         parts.append(bit)
     if parts:
-        return f"{label} · " + " · ".join(parts)
+        return f"{label} - " + " | ".join(parts)
     return label
 
 
@@ -1132,10 +1185,16 @@ def annotate_serialized_block_off(
         status = info.get("status") if info else None
         row["dayOffStatus"] = status
         row["isOff"] = bool(status)
-    payload["sessionSurgeons"] = block_session_surgeons(payload.get("assignments") or [])
+    surgeons = block_session_surgeons(
+        payload.get("assignments") or [],
+        payload.get("cases") or [],
+    )
+    payload["sessionSurgeons"] = surgeons
+    payload["cardRoomLabel"] = block_card_room_label(surgeons, payload.get("room") or "")
     payload["sessionTitle"] = block_session_card_title(
         payload.get("session") or "am",
         payload.get("assignments") or [],
+        payload.get("cases") or [],
     )
     return payload
 
@@ -1164,12 +1223,14 @@ def serialize_block_instance(block: ORBlockInstance, *, include_case_details: bo
     room = _display_room_label(block)
     bucket = _session_bucket(block)
     session = bucket if bucket in {"am", "pm"} else infer_session_label(block.start_time, block.end_time, block.session)
+    surgeons = block_session_surgeons(assignments, cases)
     return {
         "id": block.id,
         "date": block.date.isoformat(),
         "session": session,
-        "sessionTitle": block_session_card_title(session, assignments),
-        "sessionSurgeons": block_session_surgeons(assignments),
+        "sessionTitle": block_session_card_title(session, assignments, cases),
+        "sessionSurgeons": surgeons,
+        "cardRoomLabel": block_card_room_label(surgeons, room),
         "start": block.start_time.strftime("%H:%M"),
         "end": block.end_time.strftime("%H:%M"),
         "status": status,

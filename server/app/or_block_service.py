@@ -558,6 +558,175 @@ def update_or_block_instance(
     return block
 
 
+def _session_bucket(block: ORBlockInstance) -> str:
+    """AM or PM for one-card-per-half. A 07:00–12:00 'both' label is still morning."""
+    label = infer_session_label(block.start_time, block.end_time, block.session)
+    if label in {"am", "pm"}:
+        return label
+    if block.end_time <= SESSION_SPLIT_NOON:
+        return "am"
+    if block.start_time >= SESSION_SPLIT_NOON:
+        return "pm"
+    return "both"
+
+
+def _host_rank(block: ORBlockInstance) -> tuple:
+    """Prefer the slotted inventory window: blank room, then the widest clock."""
+    blank = 0 if not (block.room_text or "").strip() else 1
+    duration = (
+        datetime.combine(date.min, block.end_time)
+        - datetime.combine(date.min, block.start_time)
+    ).seconds
+    return (blank, -duration, block.id or 0)
+
+
+def fold_block_into_host(
+    db: Session,
+    fragment_id: int,
+    host_id: int,
+    *,
+    admin_id: int | None = None,
+) -> dict:
+    """Move surgeons and cases onto the existing AM/PM card, then drop the extra card."""
+    if fragment_id == host_id:
+        return {"ok": False, "reason": "same"}
+    host = db.get(ORBlockInstance, host_id)
+    fragment = db.get(ORBlockInstance, fragment_id)
+    if host is None or fragment is None:
+        return {"ok": False, "reason": "missing"}
+    if host.location_id != fragment.location_id or host.date != fragment.date:
+        return {"ok": False, "reason": "mismatch"}
+
+    moved_cases = 0
+    for case in db.query(SurgicalCase).filter(SurgicalCase.or_block_instance_id == fragment.id).all():
+        case.or_block_instance_id = host.id
+        case.location_id = host.location_id
+        moved_cases += 1
+
+    host_by_surgeon = {
+        row.surgeon_id: row
+        for row in db.query(ORBlockAssignment).filter(ORBlockAssignment.block_instance_id == host.id).all()
+        if row.surgeon_id
+    }
+    moved_assignments = 0
+    for assignment in (
+        db.query(ORBlockAssignment)
+        .filter(ORBlockAssignment.block_instance_id == fragment.id)
+        .all()
+    ):
+        existing = host_by_surgeon.get(assignment.surgeon_id)
+        if existing:
+            existing.case_count = (existing.case_count or 0) + (assignment.case_count or 0)
+            if assignment.start_time and (
+                existing.start_time is None or assignment.start_time < existing.start_time
+            ):
+                existing.start_time = assignment.start_time
+            db.delete(assignment)
+        else:
+            assignment.block_instance_id = host.id
+            host_by_surgeon[assignment.surgeon_id] = assignment
+        moved_assignments += 1
+
+    fragment.assigned_surgeon_id = None
+    fragment.assigned_by_admin_id = None
+    fragment.assigned_at = None
+    fragment.assigned_start_time = None
+    fragment.assigned_case_count = None
+    fragment.assignment_note = None
+    fragment.status = "open"
+    db.flush()
+    host = _block_with_case_relations(db, host.id) or host
+    _sync_assignment_case_counts_from_cases(db, host)
+    _sync_legacy_assignment_fields(db, host)
+    db.flush()
+
+    db.query(ORBlockAuditEvent).filter(ORBlockAuditEvent.block_instance_id == fragment.id).delete(
+        synchronize_session=False
+    )
+    leftover = db.get(ORBlockInstance, fragment_id)
+    if leftover is not None:
+        db.delete(leftover)
+    db.commit()
+    return {
+        "ok": True,
+        "hostId": host_id,
+        "fragmentId": fragment_id,
+        "movedAssignments": moved_assignments,
+        "movedCases": moved_cases,
+    }
+
+
+def collapse_extra_am_pm_cards(
+    db: Session,
+    *,
+    start: date | None = None,
+    end: date | None = None,
+) -> dict:
+    """Keep one AM and one PM Block OR card per hospital per day from `start`.
+
+    Fax-minted room slivers fold into the existing slotted window. Cases and
+    surgeons move with them. The extra card is removed.
+    """
+    from .models import Location
+
+    start = start or practice_today()
+    q = db.query(ORBlockInstance).filter(
+        ORBlockInstance.date >= start,
+        ORBlockInstance.status.in_(tuple(ACTIVE_BLOCK_STATUSES)),
+    )
+    if end is not None:
+        q = q.filter(ORBlockInstance.date <= end)
+    rows = q.order_by(ORBlockInstance.date, ORBlockInstance.location_id, ORBlockInstance.start_time).all()
+    spanning = [row for row in rows if _session_bucket(row) == "both"]
+    for row in spanning:
+        split_day_spanning_block(db, row, admin_id=None)
+    if spanning:
+        rows = q.order_by(ORBlockInstance.date, ORBlockInstance.location_id, ORBlockInstance.start_time).all()
+
+    groups: dict[tuple[int, date, str], list[ORBlockInstance]] = defaultdict(list)
+    for row in rows:
+        bucket = _session_bucket(row)
+        if bucket not in {"am", "pm"}:
+            continue
+        groups[(row.location_id, row.date, bucket)].append(row)
+
+    folded = 0
+    kept = 0
+    details = []
+    loc_names = {
+        loc.id: (loc.abbreviation or loc.name)
+        for loc in db.query(Location).all()
+    }
+    for (location_id, day, session), group in sorted(groups.items(), key=lambda item: (item[0][1], item[0][0])):
+        if len(group) == 1:
+            kept += 1
+            continue
+        host = sorted(group, key=_host_rank)[0]
+        for fragment in group:
+            if fragment.id == host.id:
+                continue
+            result = fold_block_into_host(db, fragment.id, host.id)
+            if result.get("ok"):
+                folded += 1
+                details.append({
+                    "date": day.isoformat(),
+                    "location": loc_names.get(location_id),
+                    "session": session,
+                    "hostId": host.id,
+                    "fragmentId": fragment.id,
+                    "movedAssignments": result.get("movedAssignments"),
+                    "movedCases": result.get("movedCases"),
+                })
+        kept += 1
+    return {
+        "ok": True,
+        "start": start.isoformat(),
+        "groupsKept": kept,
+        "cardsFolded": folded,
+        "details": details,
+    }
+
+
 def delete_or_block_instance(
     db: Session,
     block_id: int,

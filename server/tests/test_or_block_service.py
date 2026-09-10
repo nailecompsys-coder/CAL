@@ -30,6 +30,7 @@ from app.or_block_service import (
     assign_block,
     block_assignment_warnings,
     clear_block_assignment,
+    collapse_extra_am_pm_cards,
     copy_or_block_capacity,
     create_or_blocks,
     delete_or_block_instance,
@@ -1052,6 +1053,66 @@ class ORBlockServiceTest(unittest.TestCase):
             self.assertEqual(rooms["am"], "APK S05")
             self.assertEqual(rooms["pm"], "APK S03")
             self.assertTrue(all("No room" not in (row.get("room") or "") for row in home["blocks"]))
+        finally:
+            db.close()
+
+    def test_collapse_extra_pm_card_moves_surgeon_onto_existing_window(self):
+        db = self.Session()
+        try:
+            hospital = self._location(db, "Altamonte OR", "AL-OR")
+            nadia = self._surgeon(db, "Nadia", "Froehling")
+            day = date(2026, 9, 17)
+            host = ORBlockInstance(
+                location_id=hospital.id,
+                date=day,
+                session="pm",
+                start_time=time(12, 0),
+                end_time=time(16, 30),
+                status="open",
+            )
+            sliver = ORBlockInstance(
+                location_id=hospital.id,
+                date=day,
+                session="pm",
+                start_time=time(12, 30),
+                end_time=time(14, 0),
+                status="assigned",
+                room_text="ALT S07",
+                assigned_surgeon_id=nadia.id,
+            )
+            db.add_all([host, sliver])
+            db.flush()
+            db.add(ORBlockAssignment(
+                block_instance_id=sliver.id,
+                surgeon_id=nadia.id,
+                start_time=time(12, 30),
+                case_count=1,
+            ))
+            db.add(SurgicalCase(
+                surgeon_id=nadia.id,
+                date=day,
+                start_time=time(12, 30),
+                patient_name="Fax Patient",
+                procedure="Hernia",
+                location_id=hospital.id,
+                or_block_instance_id=sliver.id,
+                status="scheduled",
+            ))
+            db.commit()
+
+            result = collapse_extra_am_pm_cards(db, start=day, end=day)
+            self.assertEqual(result["cardsFolded"], 1)
+            rows = db.query(ORBlockInstance).filter(ORBlockInstance.date == day).all()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].id, host.id)
+            self.assertFalse((rows[0].room_text or "").strip())
+            self.assertEqual(rows[0].start_time, time(12, 0))
+            self.assertEqual(rows[0].end_time, time(16, 30))
+            assignment = db.query(ORBlockAssignment).one()
+            self.assertEqual(assignment.block_instance_id, host.id)
+            self.assertEqual(assignment.surgeon_id, nadia.id)
+            case = db.query(SurgicalCase).one()
+            self.assertEqual(case.or_block_instance_id, host.id)
         finally:
             db.close()
 

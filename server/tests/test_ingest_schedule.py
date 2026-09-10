@@ -33,6 +33,32 @@ class IngestScheduleTest(unittest.TestCase):
         self.hp_cl = Location(name="Health Park", abbreviation="HP-CL", location_type="clinic", color="#DDF2FC", is_active=True)
         self.db.add_all([self.surgeon, self.ap_or, self.ap_cl, self.hp_cl])
         self.db.commit()
+        for day in (
+            date(2026, 7, 27),
+            date(2026, 8, 10),
+            date(2026, 8, 17),
+            date(2026, 8, 24),
+            date(2026, 8, 25),
+            date(2026, 8, 27),
+            date(2026, 8, 28),
+        ):
+            self._open_block(day, "am")
+            self._open_block(day, "pm")
+
+    def _open_block(self, day, session="am", loc=None):
+        loc = loc or self.ap_or
+        start, end = (time(7, 0), time(12, 0)) if session == "am" else (time(12, 0), time(17, 0))
+        row = ORBlockInstance(
+            location_id=loc.id,
+            date=day,
+            session=session,
+            start_time=start,
+            end_time=end,
+            status="open",
+        )
+        self.db.add(row)
+        self.db.commit()
+        return row
 
     def tearDown(self):
         self.db.close()
@@ -263,37 +289,29 @@ class IngestScheduleTest(unittest.TestCase):
         )
         self.assertTrue(result["ok"], result)
         self.assertEqual(result["blocks_count"], 1)
-        self.assertEqual(result["blocks"][0]["action"], "created")
+        self.assertEqual(result["blocks"][0]["action"], "reused")
         self.assertEqual(result["cases_count"], 2)
         self.assertEqual(result["clinics_count"], 1)
 
-        block = self.db.query(ORBlockInstance).one()
-        self.assertEqual(block.location_id, self.ap_or.id)
-        self.assertEqual(block.start_time, time(8, 30))
+        am = (
+            self.db.query(ORBlockInstance)
+            .filter(ORBlockInstance.session == "am", ORBlockInstance.date == day)
+            .one()
+        )
+        self.assertEqual(am.location_id, self.ap_or.id)
+        self.assertEqual(am.start_time, time(7, 0))
+        self.assertEqual(am.end_time, time(12, 0))
         self.assertEqual(self.db.query(ORBlockAssignment).count(), 1)
         cases = self.db.query(SurgicalCase).order_by(SurgicalCase.start_time).all()
         self.assertEqual(len(cases), 2)
         self.assertEqual(cases[0].location_id, self.ap_or.id)
-        self.assertEqual(cases[0].or_block_instance_id, block.id)
+        self.assertEqual(cases[0].or_block_instance_id, am.id)
         clinic = self.db.query(ClinicSchedule).filter(ClinicSchedule.session == "pm").one()
         self.assertEqual(clinic.location_id, self.ap_cl.id)
         self.assertIn("13:00", clinic.notes or "")
 
-    def test_ingest_expands_existing_block(self):
+    def test_ingest_fits_existing_block_without_expanding_or_minting(self):
         day = date(2026, 7, 27)
-        existing = ORBlockInstance(
-            series_id=None,
-            location_id=self.ap_or.id,
-            date=day,
-            session="am",
-            start_time=time(7, 0),
-            end_time=time(10, 0),
-            status="open",
-            notes="seeded months out",
-        )
-        self.db.add(existing)
-        self.db.commit()
-
         result = ingest_surgeon_schedule(
             self.db,
             source_fax_id=3,
@@ -325,11 +343,15 @@ class IngestScheduleTest(unittest.TestCase):
             ],
         )
         self.assertTrue(result["ok"], result)
-        self.assertEqual(result["blocks"][0]["action"], "expanded")
-        self.assertEqual(self.db.query(ORBlockInstance).count(), 1)
-        block = self.db.query(ORBlockInstance).one()
-        self.assertEqual(block.start_time, time(7, 0))
-        self.assertEqual(block.end_time, time(12, 0))  # 10:30 + 90m
+        self.assertEqual(result["blocks"][0]["action"], "reused")
+        am = (
+            self.db.query(ORBlockInstance)
+            .filter(ORBlockInstance.date == day, ORBlockInstance.session == "am")
+            .one()
+        )
+        self.assertEqual(am.start_time, time(7, 0))
+        self.assertEqual(am.end_time, time(12, 0))
+        self.assertFalse((am.room_text or "").strip())
         self.assertEqual(self.db.query(ORBlockAssignment).count(), 1)
 
     def _co_surgeon_payload(self, surgeon_name, patient="Davenport, Keith"):
@@ -461,9 +483,13 @@ class IngestScheduleTest(unittest.TestCase):
         )
         self.assertTrue(result["ok"], result)
 
-        blocks = self.db.query(ORBlockInstance).order_by(ORBlockInstance.start_time).all()
+        blocks = (
+            self.db.query(ORBlockInstance)
+            .filter(ORBlockInstance.date == date(2026, 7, 27))
+            .order_by(ORBlockInstance.start_time)
+            .all()
+        )
         self.assertEqual([b.session for b in blocks], ["am", "pm"])
-        # Every card the fax claims carries the surgeon; none is left open.
         self.assertEqual(self.db.query(ORBlockAssignment).count(), 2)
         self.assertEqual({b.status for b in blocks}, {"assigned"})
 
@@ -503,9 +529,18 @@ class IngestScheduleTest(unittest.TestCase):
             ],
         )
         self.assertTrue(result["ok"], result)
-        blocks = self.db.query(ORBlockInstance).all()
-        self.assertEqual(len(blocks), 1)
-        self.assertEqual(blocks[0].end_time, time(12, 0))
+        blocks = (
+            self.db.query(ORBlockInstance)
+            .filter(ORBlockInstance.date == date(2026, 7, 27))
+            .order_by(ORBlockInstance.start_time)
+            .all()
+        )
+        self.assertEqual(len(blocks), 2)
+        am = next(row for row in blocks if row.session == "am")
+        pm = next(row for row in blocks if row.session == "pm")
+        self.assertEqual(am.end_time, time(12, 0))
+        self.assertEqual(am.status, "assigned")
+        self.assertEqual(pm.status, "open")
 
     def _florin_payload(self, cases, *, start="2026-07-27", end="2026-07-27", clinic=False):
         block = {
@@ -839,6 +874,98 @@ class IngestScheduleTest(unittest.TestCase):
         self.assertTrue(result["ok"], result)
         row = self.db.query(SurgicalCase).one()
         self.assertEqual(row.date, date(2026, 8, 27))
+
+    def test_fax_does_not_mint_a_block_when_none_exists(self):
+        admin = AdminUser(
+            username="shannon",
+            email="shannon@example.com",
+            password_hash="x",
+            is_active=True,
+            first_name="Shannon",
+        )
+        self.db.add(admin)
+        self.db.commit()
+        result = ingest_surgeon_schedule(
+            self.db,
+            source_fax_id=200,
+            surgeons=[{
+                "surgeon_name": "Jorge Luis Florin, MD",
+                "start_date": "2026-09-01",
+                "or_block": {
+                    "session": "pm",
+                    "room": "APK S03",
+                    "cases": [{
+                        "case_date": "2026-09-01",
+                        "start_time": "12:30",
+                        "patient_name": "Fax, Patient",
+                        "procedure": "Hernia",
+                        "room": "APK S03",
+                    }],
+                },
+            }],
+        )
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(self.db.query(ORBlockInstance).filter(
+            ORBlockInstance.date == date(2026, 9, 1)
+        ).count(), 0)
+        self.assertEqual(self.db.query(SurgicalCase).count(), 0)
+        reasons = [row["reason"] for row in result["corrections"]]
+        self.assertIn("block_not_found", reasons)
+        note = self.db.query(AdminNotification).filter(
+            AdminNotification.kind == "ingest_correction"
+        ).first()
+        self.assertIsNotNone(note)
+        self.assertIn("typo or bad OCR", note.body)
+
+    def test_fax_sliver_folds_into_existing_pm_card(self):
+        day = date(2026, 7, 27)
+        sliver = ORBlockInstance(
+            location_id=self.ap_or.id,
+            date=day,
+            session="pm",
+            start_time=time(12, 30),
+            end_time=time(14, 0),
+            status="assigned",
+            room_text="APK S03",
+        )
+        self.db.add(sliver)
+        self.db.flush()
+        self.db.add(ORBlockAssignment(
+            block_instance_id=sliver.id,
+            surgeon_id=self.surgeon.id,
+            start_time=time(12, 30),
+            case_count=1,
+        ))
+        self.db.commit()
+        result = ingest_surgeon_schedule(
+            self.db,
+            source_fax_id=201,
+            surgeons=[{
+                "surgeon_name": "Jorge Luis Florin, MD",
+                "start_date": "2026-07-27",
+                "or_block": {
+                    "session": "pm",
+                    "room": "APK S03",
+                    "cases": [{
+                        "case_date": "2026-07-27",
+                        "start_time": "12:30",
+                        "patient_name": "Fax, Patient",
+                        "procedure": "Hernia",
+                        "room": "APK S03",
+                    }],
+                },
+            }],
+        )
+        self.assertTrue(result["ok"], result)
+        pm_rows = (
+            self.db.query(ORBlockInstance)
+            .filter(ORBlockInstance.date == day, ORBlockInstance.session == "pm")
+            .all()
+        )
+        self.assertEqual(len(pm_rows), 1)
+        self.assertEqual(pm_rows[0].start_time, time(12, 0))
+        self.assertEqual(pm_rows[0].end_time, time(17, 0))
+        self.assertFalse((pm_rows[0].room_text or "").strip())
 
     def test_min_fax_site_maps_to_minneola_clinic(self):
         mn = Location(

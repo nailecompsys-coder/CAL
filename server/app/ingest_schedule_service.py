@@ -38,14 +38,12 @@ from .ingest_resolve import resolve_clinic_location, resolve_or_location, resolv
 from .models import ClinicSchedule, CoSurgeonPair, ORBlockAssignment, ORBlockInstance, SurgicalCase
 from .or_block_service import (
     ACTIVE_BLOCK_STATUSES,
-    BlockORCreateInput,
     assign_block,
     block_assignment_warnings,
-    create_or_blocks,
     log_schedule_change,
+    normalize_room_text,
     parse_hhmm,
     update_block_assignment,
-    update_or_block_instance,
 )
 from .practice_time import practice_today
 from .push import clear_block_or_schedule_flag_notifications, notify_admins
@@ -363,26 +361,22 @@ def _block_window_for_cases(
     return start, end
 
 
-def _same_day_facility_block(
+def _fax_session_for_clock(when: time) -> str:
+    return "pm" if when >= time(12, 0) else "am"
+
+
+def _existing_hospital_session_block(
     db: Session,
     *,
     block_date: date,
     location_id: int,
-    room_text: str | None = None,
-    start_time: time | None = None,
-    end_time: time | None = None,
-    allow_widen: bool = True,
+    start_time: time,
 ) -> ORBlockInstance | None:
-    """Prefer existing Block OR on that date/facility/room (dual rooms stay separate).
+    """Puzzle-piece: fax clock lands on an already-slotted hospital AM/PM window.
 
-    When the faxed window is known, pick the row that already covers it. A room can
-    hold several windows in one day, and widening the earliest one over a window a
-    later row already owns trips the duplicate guard and rejects the whole block.
-
-    allow_widen=False keeps an AM/PM half from swallowing its sibling: the caller
-    wants a card per half, not one card stretched across noon.
+    Room is ignored. Fax never mints a second card.
     """
-    from .or_block_service import block_times_overlap, normalize_room_text, rooms_collide
+    from .or_block_service import _host_rank, _session_bucket
 
     rows = (
         db.query(ORBlockInstance)
@@ -394,32 +388,15 @@ def _same_day_facility_block(
         .order_by(ORBlockInstance.start_time, ORBlockInstance.id)
         .all()
     )
-    room = normalize_room_text(room_text)
-    candidates = [row for row in rows if rooms_collide(row.room_text, room)]
-    if not candidates:
+    if not rows:
         return None
-    if start_time is None or end_time is None:
-        return candidates[0]
-
-    for row in candidates:
-        if row.start_time == start_time and row.end_time == end_time:
-            return row
-    for row in candidates:
-        if row.start_time <= start_time and row.end_time >= end_time:
-            return row
-    if not allow_widen:
+    want = _fax_session_for_clock(start_time)
+    containing = [row for row in rows if row.start_time <= start_time < row.end_time]
+    same_half = [row for row in rows if _session_bucket(row) == want]
+    pool = containing or same_half
+    if not pool:
         return None
-    # Only widen a row when the wider window stays clear of the other rows.
-    for row in candidates:
-        wide_start = min(row.start_time, start_time)
-        wide_end = max(row.end_time, end_time)
-        if not any(
-            block_times_overlap(other.start_time, other.end_time, wide_start, wide_end)
-            for other in candidates
-            if other.id != row.id
-        ):
-            return row
-    return candidates[0]
+    return sorted(pool, key=_host_rank)[0]
 
 
 def _ensure_or_blocks_for_fax(
@@ -434,121 +411,32 @@ def _ensure_or_blocks_for_fax(
     notes: str,
     room_text: str | None = None,
 ) -> list[tuple[ORBlockInstance, str]]:
-    """Cover the faxed window with CAL's AM/PM cards, newest fax winning.
+    """Fit faxed cases onto existing AM/PM cards. Never create Block OR.
 
-    CAL models a window crossing noon as two cards. Taking only the first left the
-    afternoon card unassigned, so afternoon cases hung off a block that ended at
-    noon and every re-send of the fax collided with the orphan.
-
-    Halves with no case are skipped: the block end is padded past the last case,
-    so keeping them would invent afternoon OR time the fax never claimed.
+    Halves with no case are skipped so a padded AM end does not demand a PM card.
     """
-    from .or_block_service import am_pm_windows
+    del end_time, session, notes, room_text
+    from .or_block_service import collapse_extra_am_pm_cards
 
+    collapse_extra_am_pm_cards(db, start=block_date, end=block_date)
     out: list[tuple[ORBlockInstance, str]] = []
-    windows = am_pm_windows(start_time, end_time)
-    for win_session, win_start, win_end in windows:
-        if len(windows) > 1 and not any(win_start <= t < win_end for t in case_times):
+    seen: set[int] = set()
+    needed = sorted({_fax_session_for_clock(t) for t in case_times}) or [
+        _fax_session_for_clock(start_time)
+    ]
+    for half in needed:
+        sample = next((t for t in case_times if _fax_session_for_clock(t) == half), start_time)
+        existing = _existing_hospital_session_block(
+            db,
+            block_date=block_date,
+            location_id=location_id,
+            start_time=sample,
+        )
+        if existing is None or existing.id in seen:
             continue
-        out.append(
-            _ensure_or_block_window(
-                db,
-                block_date=block_date,
-                location_id=location_id,
-                start_time=win_start,
-                end_time=win_end,
-                session=win_session or session,
-                notes=notes,
-                room_text=room_text,
-                allow_widen=len(windows) == 1,
-            )
-        )
-    if not out:
-        out.append(
-            _ensure_or_block_window(
-                db,
-                block_date=block_date,
-                location_id=location_id,
-                start_time=start_time,
-                end_time=end_time,
-                session=session,
-                notes=notes,
-                room_text=room_text,
-            )
-        )
+        seen.add(existing.id)
+        out.append((existing, "reused"))
     return out
-
-
-def _ensure_or_block_window(
-    db: Session,
-    *,
-    block_date: date,
-    location_id: int,
-    start_time: time,
-    end_time: time,
-    session: str,
-    notes: str,
-    room_text: str | None = None,
-    allow_widen: bool = True,
-) -> tuple[ORBlockInstance, str]:
-    """Create missing Block OR, or expand an existing one to fit fax SSOT times.
-
-    Room is part of identity: S03 and S08 at the same hospital/day/time are dual
-    capacity rows. Same room (or both blank) reuses/expands one row so two docs
-    in one room become two assignments on one block.
-
-    Returns (block, action) where action is created | expanded | reused.
-    """
-    from .or_block_service import normalize_room_text
-
-    room = normalize_room_text(room_text)
-    existing = _same_day_facility_block(
-        db,
-        block_date=block_date,
-        location_id=location_id,
-        room_text=room,
-        start_time=start_time,
-        end_time=end_time,
-        allow_widen=allow_widen,
-    )
-    if existing:
-        new_start = min(existing.start_time, start_time)
-        new_end = max(existing.end_time, end_time)
-        if new_start != existing.start_time or new_end != existing.end_time:
-            note = (existing.notes or "").strip()
-            merged = notes if not note else (note if notes in note else f"{note} · {notes}")
-            block = update_or_block_instance(
-                db,
-                existing.id,
-                start_time=new_start,
-                end_time=new_end,
-                notes=merged,
-                admin_id=None,
-            )
-            return block, "expanded"
-        return existing, "reused"
-
-    created = create_or_blocks(
-        db,
-        BlockORCreateInput(
-            name=f"Desk OR {block_date.isoformat()}",
-            start_date=block_date,
-            end_date=block_date,
-            weekdays=[block_date.weekday()],
-            location_ids=[location_id],
-            session=session if session in {"am", "pm", "both", "custom"} else "custom",
-            start_time=start_time,
-            end_time=end_time,
-            recurrence="once",
-            notes=notes,
-            room_text=room,
-        ),
-        admin_id=None,
-    )
-    block = db.get(ORBlockInstance, created["instance_ids"][0])
-    if not block:
-        raise ValueError("Failed to create Block OR instance")
-    return block, "created"
 
 
 def _assign_surgeon_to_block(
@@ -1227,206 +1115,287 @@ def ingest_surgeon_schedule(
                 .all()
             )
 
-            room = (
-                day_cases[0].get("room")
-                or or_block.get("room")
-                or (or_block.get("rooms") or [None])[0]
-            )
-            loc = resolve_or_location(
-                db,
-                room,
-                surgeon_id=surgeon.id,
-                day=day,
-                session=session,
-            )
-            if not loc:
-                _queue_ingest_correction(
+            # Resolve facility/room per case. Stamping the whole day with
+            # cases[0].room glued Apopka (APK) patients onto Winter Garden blocks.
+            by_facility_room: dict[tuple[int, str], dict[str, Any]] = {}
+            for case in day_cases:
+                room = (
+                    case.get("room")
+                    or or_block.get("room")
+                    or (or_block.get("rooms") or [None])[0]
+                )
+                loc = resolve_or_location(
                     db,
-                    corrections=corrections,
-                    reason="or_location_not_found",
-                    title="Desk ingest · OR location missing",
-                    body=(
-                        f"{surgeon.full_name} · {day.strftime('%m-%d-%y')} · "
-                        f"OR location not found for room: {room}"
-                    ),
-                    href=_clinic_href(
-                        day, surgeon.id, reason="or_location_not_found", room=str(room or ""),
-                    ),
-                    source_fax_id=source_fax_id,
+                    room,
                     surgeon_id=surgeon.id,
                     day=day,
-                    extra=str(room or ""),
-                    room=str(room or ""),
+                    session=session,
                 )
-                continue
-
-            timed: list[dict] = []
-            for case in day_cases:
-                _salvage_start_time(case)
-                if _parse_time(case.get("start_time")):
-                    timed.append(case)
-                else:
-                    patient_dob = _patient_dob_value(
-                        case,
-                        _parse_date(case.get("patient_dob") or case.get("case_date")),
-                        fax_window,
-                    )
+                if not loc:
                     _queue_ingest_correction(
                         db,
                         corrections=corrections,
-                        reason="missing_time",
-                        title="Desk ingest · case time missing",
+                        reason="or_location_not_found",
+                        title="Desk ingest · OR location missing",
                         body=(
                             f"{surgeon.full_name} · {day.strftime('%m-%d-%y')} · "
-                            f"{(case.get('patient_name') or 'Unknown').strip()} · "
-                            f"no start time on fax row"
-                            + (f" · {(case.get('procedure') or '')[:60]}" if case.get("procedure") else "")
+                            f"OR location not found for room: {room}"
                         ),
                         href=_clinic_href(
-                            day,
-                            surgeon.id,
-                            reason="missing_time",
-                            patient_name=case.get("patient_name"),
-                            procedure=case.get("procedure") or "",
-                            room=case.get("room") or room or "",
-                            patient_dob=patient_dob,
+                            day, surgeon.id, reason="or_location_not_found", room=str(room or ""),
                         ),
                         source_fax_id=source_fax_id,
                         surgeon_id=surgeon.id,
                         day=day,
-                        patient_name=case.get("patient_name"),
-                        extra=case.get("procedure") or "",
-                        procedure=case.get("procedure") or "",
-                        room=case.get("room") or room or "",
-                        patient_dob=patient_dob,
+                        extra=str(room or ""),
+                        room=str(room or ""),
                     )
-            if not timed:
-                continue
-            day_cases = timed
-
-            try:
-                start_t, end_t = _block_window_for_cases(
-                    day_cases,
-                    session,
-                    or_block.get("block_start") or or_block.get("start_time"),
-                    or_block.get("block_end") or or_block.get("end_time"),
+                    continue
+                key = (loc.id, normalize_room_text(room) or "")
+                bucket = by_facility_room.setdefault(
+                    key, {"loc": loc, "room": room, "cases": []}
                 )
-                parsed_starts = [_parse_time(c.get("start_time"), start_t) for c in day_cases]
-                case_times = [t for t in parsed_starts if t is not None]
-                earliest = min(case_times, default=start_t)
-                blocks = _ensure_or_blocks_for_fax(
-                    db,
-                    block_date=day,
-                    location_id=loc.id,
-                    case_times=case_times,
-                    start_time=start_t,
-                    end_time=end_t,
-                    session=session,
-                    notes=base_note,
-                    room_text=room,
-                )
+                bucket["cases"].append(case)
 
-                def _block_for(when: time, blocks=blocks) -> ORBlockInstance:
-                    for inst, _action in blocks:
-                        if inst.start_time <= when < inst.end_time:
-                            return inst
-                    return blocks[0][0]
+            for _fkey, bucket in sorted(
+                by_facility_room.items(),
+                key=lambda item: (
+                    item[1]["loc"].abbreviation or item[1]["loc"].name or "",
+                    item[0][1],
+                ),
+            ):
+                loc = bucket["loc"]
+                room = bucket["room"]
+                group_cases = bucket["cases"]
 
-                for instance, block_action in blocks:
-                    half_starts = [
-                        t for t in case_times
-                        if instance.start_time <= t < instance.end_time
+                timed: list[dict] = []
+                for case in group_cases:
+                    _salvage_start_time(case)
+                    if _parse_time(case.get("start_time")):
+                        timed.append(case)
+                    else:
+                        patient_dob = _patient_dob_value(
+                            case,
+                            _parse_date(case.get("patient_dob") or case.get("case_date")),
+                            fax_window,
+                        )
+                        _queue_ingest_correction(
+                            db,
+                            corrections=corrections,
+                            reason="missing_time",
+                            title="Desk ingest · case time missing",
+                            body=(
+                                f"{surgeon.full_name} · {day.strftime('%m-%d-%y')} · "
+                                f"{(case.get('patient_name') or 'Unknown').strip()} · "
+                                f"no start time on fax row"
+                                + (
+                                    f" · {(case.get('procedure') or '')[:60]}"
+                                    if case.get("procedure")
+                                    else ""
+                                )
+                            ),
+                            href=_clinic_href(
+                                day,
+                                surgeon.id,
+                                reason="missing_time",
+                                patient_name=case.get("patient_name"),
+                                procedure=case.get("procedure") or "",
+                                room=case.get("room") or room or "",
+                                patient_dob=patient_dob,
+                            ),
+                            source_fax_id=source_fax_id,
+                            surgeon_id=surgeon.id,
+                            day=day,
+                            patient_name=case.get("patient_name"),
+                            extra=case.get("procedure") or "",
+                            procedure=case.get("procedure") or "",
+                            room=case.get("room") or room or "",
+                            patient_dob=patient_dob,
+                        )
+                if not timed:
+                    continue
+                group_cases = timed
+
+                try:
+                    start_t, end_t = _block_window_for_cases(
+                        group_cases,
+                        session,
+                        or_block.get("block_start") or or_block.get("start_time"),
+                        or_block.get("block_end") or or_block.get("end_time"),
+                    )
+                    parsed_starts = [
+                        _parse_time(c.get("start_time"), start_t) for c in group_cases
                     ]
-                    warnings = _assign_surgeon_to_block(
+                    case_times = [t for t in parsed_starts if t is not None]
+                    earliest = min(case_times, default=start_t)
+                    blocks = _ensure_or_blocks_for_fax(
                         db,
-                        block=instance,
-                        surgeon_id=surgeon.id,
-                        assigned_start=min(half_starts, default=instance.start_time),
-                        case_count=len(half_starts) or len(day_cases),
-                        base_note=base_note,
+                        block_date=day,
+                        location_id=loc.id,
+                        case_times=case_times,
+                        start_time=start_t,
+                        end_time=end_t,
+                        session=session,
+                        notes=base_note,
+                        room_text=room,
                     )
-                    if warnings:
-                        flags.append({
-                            "surgeon_id": surgeon.id,
-                            "date": day.isoformat(),
+
+                    def _block_for(when: time, blocks=blocks) -> ORBlockInstance | None:
+                        for inst, _action in blocks:
+                            if inst.start_time <= when < inst.end_time:
+                                return inst
+                        want = _fax_session_for_clock(when)
+                        for inst, _action in blocks:
+                            from .or_block_service import _session_bucket
+                            if _session_bucket(inst) == want:
+                                return inst
+                        return None
+
+                    unfitted = [t for t in case_times if _block_for(t) is None]
+                    if unfitted:
+                        clock = ", ".join(t.strftime("%H:%M") for t in unfitted[:4])
+                        _queue_ingest_correction(
+                            db,
+                            corrections=corrections,
+                            reason="block_not_found",
+                            title="Scheduling flag · no matching Block OR",
+                            body=(
+                                f"{surgeon.full_name} · {day.strftime('%m-%d-%y')} · "
+                                f"{loc.abbreviation or loc.name} {clock} "
+                                "does not fit an existing AM/PM block. "
+                                "Check for a typo or bad OCR."
+                            ),
+                            href=_clinic_href(day, surgeon.id, reason="block_not_found"),
+                            source_fax_id=source_fax_id,
+                            surgeon_id=surgeon.id,
+                            day=day,
+                            extra=clock,
+                            room=str(room or ""),
+                        )
+                    if not blocks:
+                        continue
+
+                    for instance, block_action in blocks:
+                        half_starts = [
+                            t for t in case_times
+                            if instance.start_time <= t < instance.end_time
+                        ]
+                        warnings = _assign_surgeon_to_block(
+                            db,
+                            block=instance,
+                            surgeon_id=surgeon.id,
+                            assigned_start=min(half_starts, default=instance.start_time),
+                            case_count=len(half_starts) or len(group_cases),
+                            base_note=base_note,
+                        )
+                        if warnings:
+                            flags.append({
+                                "surgeon_id": surgeon.id,
+                                "date": day.isoformat(),
+                                "block_id": instance.id,
+                                "location": loc.abbreviation or loc.name,
+                                "warnings": warnings,
+                            })
+                        _flag_admin_schedule_issues(
+                            db,
+                            surgeon_id=surgeon.id,
+                            surgeon_name=surgeon.full_name,
+                            day=day,
+                            block=instance,
+                            location_label=loc.abbreviation or loc.name or "OR",
+                            warnings=warnings,
+                            fax_note=base_note,
+                        )
+                        created_blocks.append({
                             "block_id": instance.id,
+                            "action": block_action,
+                            "date": day.isoformat(),
                             "location": loc.abbreviation or loc.name,
+                            "start": instance.start_time.strftime("%H:%M"),
+                            "end": instance.end_time.strftime("%H:%M"),
+                            "surgeon_id": surgeon.id,
+                            "case_count": len(half_starts) or len(group_cases),
                             "warnings": warnings,
                         })
-                    _flag_admin_schedule_issues(
+                    for case in group_cases:
+                        st = _parse_time(case.get("start_time"), earliest)
+                        if st is None:
+                            continue
+                        host = _block_for(st)
+                        if host is None:
+                            continue
+                        result = _upsert_surgical_case(
+                            db,
+                            surgeon_id=surgeon.id,
+                            case_date=day,
+                            start_time=st,
+                            patient_name=case["patient_name"],
+                            procedure=case.get("procedure") or "TBD",
+                            location_id=loc.id,
+                            room_text=case.get("room") or room or "",
+                            notes=base_note,
+                            or_block_instance_id=host.id,
+                            notify=notify,
+                            day_candidates=day_candidates,
+                            claimed_ids=claimed_ids,
+                            patient_dob=case.get("patient_dob"),
+                        )
+                        case_results.append(result)
+                except ValueError as exc:
+                    _queue_ingest_correction(
                         db,
+                        corrections=corrections,
+                        reason="missing_block_window",
+                        title="Desk ingest · OR times missing",
+                        body=f"{surgeon.full_name} · {day.strftime('%m-%d-%y')} · {exc}",
+                        href=_clinic_href(day, surgeon.id, reason="missing_block_window"),
+                        source_fax_id=source_fax_id,
                         surgeon_id=surgeon.id,
-                        surgeon_name=surgeon.full_name,
                         day=day,
-                        block=instance,
-                        location_label=loc.abbreviation or loc.name or "OR",
-                        warnings=warnings,
-                        fax_note=base_note,
+                        extra="window",
                     )
-                    created_blocks.append({
-                        "block_id": instance.id,
-                        "action": block_action,
+                except Exception as exc:  # noqa: BLE001 — per-facility isolation
+                    errors.append({
+                        "index": idx,
                         "date": day.isoformat(),
                         "location": loc.abbreviation or loc.name,
-                        "start": instance.start_time.strftime("%H:%M"),
-                        "end": instance.end_time.strftime("%H:%M"),
-                        "surgeon_id": surgeon.id,
-                        "case_count": len(half_starts) or len(day_cases),
-                        "warnings": warnings,
+                        "error": str(exc),
                     })
-                for case in day_cases:
-                    st = _parse_time(case.get("start_time"), earliest)
-                    if st is None:
-                        continue
-                    result = _upsert_surgical_case(
-                        db,
-                        surgeon_id=surgeon.id,
-                        case_date=day,
-                        start_time=st,
-                        patient_name=case["patient_name"],
-                        procedure=case.get("procedure") or "TBD",
-                        location_id=loc.id,
-                        room_text=case.get("room") or room or "",
-                        notes=base_note,
-                        or_block_instance_id=_block_for(st).id,
-                        notify=notify,
-                        day_candidates=day_candidates,
-                        claimed_ids=claimed_ids,
-                        patient_dob=case.get("patient_dob"),
-                    )
-                    case_results.append(result)
-                case_results.extend(
-                    _cancel_missing_desk_cases(
-                        db,
-                        surgeon_id=surgeon.id,
-                        case_date=day,
-                        claimed_ids=claimed_ids,
-                    )
-                )
-            except ValueError as exc:
-                _queue_ingest_correction(
+
+            case_results.extend(
+                _cancel_missing_desk_cases(
                     db,
-                    corrections=corrections,
-                    reason="missing_block_window",
-                    title="Desk ingest · OR times missing",
-                    body=f"{surgeon.full_name} · {day.strftime('%m-%d-%y')} · {exc}",
-                    href=_clinic_href(day, surgeon.id, reason="missing_block_window"),
-                    source_fax_id=source_fax_id,
                     surgeon_id=surgeon.id,
-                    day=day,
-                    extra="window",
+                    case_date=day,
+                    claimed_ids=claimed_ids,
                 )
-            except Exception as exc:  # noqa: BLE001 — per-day isolation
-                errors.append({
-                    "index": idx,
-                    "date": day.isoformat(),
-                    "error": str(exc),
-                })
+            )
 
         clinic = block.get("clinic_rotation") or {}
         slots = list(clinic.get("slots") or [])
         clinic_session = (clinic.get("session") or "pm").lower()
         site = clinic.get("site_raw") or (slots[0].get("site_raw") if slots else None)
+
+        # Advent often reprints an OR patient as a same-clock "Post-op" clinic
+        # row (Hutchinson 09:50 OR WGD + 09:50 Post-op). That is not clinic.
+        or_identity: set[tuple[str, str, str]] = set()
+        for case in cases:
+            day_s = (case.get("case_date") or "").strip()
+            time_s = (case.get("start_time") or "").strip()
+            last, first = _normalize_patient_parts(case.get("patient_name"))
+            if day_s and time_s and last:
+                or_identity.add((day_s, time_s, f"{last}|{first}"))
+        if or_identity:
+            kept: list[dict] = []
+            for slot in slots:
+                day_s = (slot.get("case_date") or "").strip()
+                time_s = (slot.get("start_time") or "").strip()
+                last, first = _normalize_patient_parts(slot.get("patient_name"))
+                key = (day_s, time_s, f"{last}|{first}")
+                if day_s and time_s and last and key in or_identity:
+                    continue
+                kept.append(slot)
+            slots = kept
 
         clinic_by_date: dict[date, list[dict]] = defaultdict(list)
         for slot in slots:

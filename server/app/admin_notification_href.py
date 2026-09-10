@@ -121,6 +121,8 @@ def _ingest_href(payload: dict) -> str:
         room = room or extra
     elif reason in _CASE_FIXES:
         procedure = procedure or extra
+    elif reason == "block_not_found":
+        return _block_or_href({"date": payload.get("date")})
     return clinic_schedule_fix_href(
         day=_as_date(payload.get("date")),
         surgeon_id=_as_int(payload.get("surgeonId")),

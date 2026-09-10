@@ -2,19 +2,24 @@ import SwiftUI
 
 enum ClinicOrScheduleBuilder {
   /// Facility headers (clinic / OR / Surgery One…) with nested cases or clinic visits.
-  /// Hides Block OR rows — cases nest under the matching facility instead.
+  /// Block OR is the hospital time window — it still shows when no case is booked yet.
   /// Aprima Surgery One / IPA + hospital outpt (AHWG → Winter Garden OR) nest here too.
   static func groups(from items: [DoctorScheduleItem]) -> [ClinicOrFacilityGroup] {
-    let visible = items.filter { $0.kind != "block_or" }
-    let clinics = visible.filter { $0.kind == "clinic" }
-    let surgeries = visible.filter { $0.kind == "surgery" }
+    let clinics = items.filter { $0.kind == "clinic" }
+    let surgeries = items.filter { $0.kind == "surgery" }
+    let blocks = items.filter { $0.isBlockOr }
     var claimed = Set<String>()
+    var claimedBlocks = Set<String>()
     var groups: [ClinicOrFacilityGroup] = []
 
     for clinic in clinics {
       let matched = surgeries.filter { surgeryBelongs($0, to: clinic) }
       matched.forEach { claimed.insert($0.id) }
       let isOR = looksLikeOperatingRoom(clinic.title)
+      let matchingBlock = blocks.first { blockMatchesFacility($0, clinic.title) }
+      if let matchingBlock {
+        claimedBlocks.insert(matchingBlock.id)
+      }
 
       let details: [ClinicOrDetailRow]
       if isOR {
@@ -29,11 +34,12 @@ enum ClinicOrScheduleBuilder {
         details = parseClinicVisits(from: clinic.notes)
       }
 
+      let timeAnchor = matchingBlock ?? clinic
       groups.append(
         ClinicOrFacilityGroup(
           id: clinic.id,
           title: clinic.title,
-          timeRange: expandedTimeRange(facility: clinic, cases: matched),
+          timeRange: expandedTimeRange(facility: timeAnchor, cases: matched),
           details: details,
           countStyle: isOR ? .cases : .visits
         )
@@ -46,18 +52,55 @@ enum ClinicOrScheduleBuilder {
       guard let cases = byLocation[key], !cases.isEmpty else { continue }
       let sorted = cases.sorted { $0.start < $1.start }
       let isOR = looksLikeOperatingRoom(key)
+      let matchingBlock = blocks.first { blockMatchesFacility($0, key) }
+      if let matchingBlock {
+        claimedBlocks.insert(matchingBlock.id)
+      }
+      let timeRange = matchingBlock.map { expandedTimeRange(facility: $0, cases: sorted) } ?? timeSpan(for: sorted)
       groups.append(
         ClinicOrFacilityGroup(
           id: "loc-\(key)",
           title: displayFacilityTitle(key),
-          timeRange: timeSpan(for: sorted),
+          timeRange: timeRange,
           details: sorted.map(surgeryDetail(_:)),
           countStyle: isOR ? .cases : .visits
         )
       )
     }
 
+    for block in blocks where !claimedBlocks.contains(block.id) {
+      let title = displayFacilityTitle(blockFacilityName(block))
+      if groups.contains(where: { facilityKey($0.title) == facilityKey(title) }) {
+        continue
+      }
+      groups.append(
+        ClinicOrFacilityGroup(
+          id: block.id,
+          title: title,
+          timeRange: expandedTimeRange(facility: block, cases: []),
+          details: [],
+          countStyle: .cases
+        )
+      )
+    }
+
     return groups
+  }
+
+  private static func blockFacilityName(_ block: DoctorScheduleItem) -> String {
+    let loc = block.location.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !loc.isEmpty { return loc }
+    return block.title
+  }
+
+  private static func facilityKey(_ value: String) -> String {
+    canonicalFacility(normalizeFacility(value))
+  }
+
+  private static func blockMatchesFacility(_ block: DoctorScheduleItem, _ facility: String) -> Bool {
+    let blockKey = facilityKey(blockFacilityName(block))
+    let other = facilityKey(facility)
+    return !blockKey.isEmpty && blockKey == other
   }
 
   private static func surgeryBelongs(_ surgery: DoctorScheduleItem, to clinic: DoctorScheduleItem) -> Bool {
@@ -217,16 +260,16 @@ enum ClinicOrScheduleBuilder {
   /// Collapse Aprima site codes and CAL names onto one key for matching.
   private static func canonicalFacility(_ normalized: String) -> String {
     let compact = normalized.replacingOccurrences(of: " ", with: "")
-    if compact.contains("ahwg") || compact == "wgd" || compact.contains("wintergardenor") {
+    if compact.contains("ahwg") || compact == "wgd" || compact == "wgor" || compact.contains("wintergardenor") {
       return "winter garden or"
     }
-    if compact.contains("ahapop") || compact.contains("apk") || compact.contains("apopkaor") {
+    if compact.contains("ahapop") || compact.contains("apk") || compact == "apor" || compact.contains("apopkaor") {
       return "apopka or"
     }
-    if compact.contains("ahalt") || compact.contains("altamonteor") {
+    if compact.contains("ahalt") || compact == "alor" || compact.contains("altamonteor") {
       return "altamonte or"
     }
-    if compact.contains("ahmin") || compact.contains("minneolaor") {
+    if compact.contains("ahmin") || compact == "mnor" || compact.contains("minneolaor") {
       return "minneola or"
     }
     if compact.contains("clermont") || compact.contains("mainoffice") || compact.contains("mainclinic")
@@ -350,7 +393,9 @@ private struct ClinicOrFacilityBlock: View {
 
       if isExpanded {
         if group.details.isEmpty {
-          Text("No cases or visits listed")
+          Text(group.countStyle == .cases
+               ? "Block time — be there; cases are often added in the morning"
+               : "No visits listed")
             .font(.caption)
             .foregroundStyle(ClinicalPalette.muted)
             .padding(.leading, 106)

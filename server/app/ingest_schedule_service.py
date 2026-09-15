@@ -1009,6 +1009,26 @@ def _upsert_surgical_case(
         claimed_ids.add(existing.id)
         changed = False
         if existing.start_time != start_time:
+            collision = (
+                db.query(SurgicalCase)
+                .filter(
+                    SurgicalCase.id != existing.id,
+                    SurgicalCase.surgeon_id == existing.surgeon_id,
+                    SurgicalCase.date == case_date,
+                    SurgicalCase.status != "cancelled",
+                    SurgicalCase.start_time == start_time,
+                )
+                .first()
+            )
+            if collision is not None:
+                return {
+                    "id": existing.id,
+                    "action": "skipped_time_collision",
+                    "case_date": case_date.isoformat(),
+                    "patient_name": existing.patient_name,
+                    "start_time": (existing.start_time or start_time).strftime("%H:%M"),
+                    "conflicting_case_id": collision.id,
+                }
             existing.start_time = start_time
             changed = True
         if location_id and existing.location_id != location_id:

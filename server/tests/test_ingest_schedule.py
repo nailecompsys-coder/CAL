@@ -251,6 +251,76 @@ class IngestScheduleTest(unittest.TestCase):
         self.assertEqual(result["blocks_count"], 0)
         self.assertEqual(result["corrections"][0]["reason"], "duplicate_other_surgeon")
 
+    def test_existing_case_is_not_moved_onto_occupied_time(self):
+        day = date(2026, 7, 27)
+        block = (
+            self.db.query(ORBlockInstance)
+            .filter(ORBlockInstance.date == day, ORBlockInstance.session == "pm")
+            .one()
+        )
+        block.status = "assigned"
+        self.db.add(ORBlockAssignment(
+            block_instance_id=block.id,
+            surgeon_id=self.surgeon.id,
+            start_time=time(12, 30),
+            case_count=2,
+        ))
+        self.db.add_all([
+            SurgicalCase(
+                surgeon_id=self.surgeon.id,
+                date=day,
+                start_time=time(12, 30),
+                patient_name="Wortman, Jeanne Kay",
+                procedure="Mass excision",
+                location_id=self.ap_or.id,
+                room_text="APK S03",
+                status="scheduled",
+                notes="Manual correction",
+                or_block_instance_id=block.id,
+            ),
+            SurgicalCase(
+                surgeon_id=self.surgeon.id,
+                date=day,
+                start_time=time(13, 45),
+                patient_name="Zugelder, Donald Eugene Jr.",
+                procedure="Robotic ventral hernia repair",
+                location_id=self.ap_or.id,
+                room_text="APK S03",
+                status="scheduled",
+                notes="Manual correction",
+                or_block_instance_id=block.id,
+            ),
+        ])
+        self.db.commit()
+
+        result = ingest_surgeon_schedule(
+            self.db,
+            source_fax_id=162,
+            surgeons=[{
+                "surgeon_name": "Jorge Luis Florin, MD",
+                "start_date": day.isoformat(),
+                "or_block": {
+                    "session": "pm",
+                    "room": "APK S03",
+                    "cases": [{
+                        "case_date": day.isoformat(),
+                        "start_time": "12:30",
+                        "patient_name": "Zugelder, Donald Eugene Jr.",
+                        "procedure": "Robotic ventral hernia repair",
+                        "room": "APK S03",
+                    }],
+                },
+            }],
+        )
+
+        self.assertTrue(result["ok"], result)
+        zugelder = self.db.query(SurgicalCase).filter(
+            SurgicalCase.patient_name.like("Zugelder%")
+        ).one()
+        self.assertEqual(zugelder.start_time, time(13, 45))
+        actions = [row["action"] for row in result["cases"]]
+        self.assertIn("skipped_time_collision", actions)
+
     def test_ocr_misspelled_surgeon_still_resolves(self):
         woodley = Surgeon(
             first_name="Lucy",

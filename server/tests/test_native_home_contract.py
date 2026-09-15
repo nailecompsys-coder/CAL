@@ -115,7 +115,7 @@ class NativeHomeContractTest(unittest.TestCase):
             ])
             db.commit()
 
-            with patch("app.native_home_service.date", FixedDate):
+            with patch("app.native_home_service.date", FixedDate), patch("app.native_home_service.practice_today", return_value=date(2026, 6, 4)):
                 payload = build_native_home(db, surgeon, date(2026, 6, 4), date(2026, 6, 8))
 
             self.assertEqual(
@@ -155,6 +155,54 @@ class NativeHomeContractTest(unittest.TestCase):
             self.assertEqual(payload["alerts"]["unreadCount"], 1)
             self.assertEqual(payload["alerts"]["recent"][0]["title"], "Schedule updated")
             self.assertFalse(payload["alerts"]["recent"][0]["isRead"])
+        finally:
+            db.close()
+
+    @patch("app.aprima_cache_service.patient_appointments_for_api")
+    def test_native_home_includes_aprima_surgery_one_as_review_row(self, aprima_payload):
+        db = self.Session()
+        try:
+            surgeon = Surgeon(
+                first_name="Chris",
+                last_name="Johnson",
+                email="chris@example.com",
+                staff_type="physician",
+                sort_order=1,
+                is_active=True,
+            )
+            db.add(surgeon)
+            db.commit()
+
+            aprima_payload.return_value = {
+                "appointments": [
+                    {
+                        "id": "aprima-cbo-1",
+                        "date": "2026-09-16",
+                        "start": "11:00",
+                        "end": "11:10",
+                        "surgeonInitials": "CJ",
+                        "surgeonName": "Chris Johnson",
+                        "patientName": "Surgery One",
+                        "appointmentType": "Office Visit",
+                        "status": "Scheduled",
+                        "reason": "Surgery One",
+                        "serviceSite": "Clermont Office",
+                        "room": "CBO",
+                    }
+                ],
+            }
+
+            payload = build_native_home(db, surgeon, date(2026, 9, 16), date(2026, 9, 16))
+
+            items = payload["days"][0]["items"]
+            row = next(item for item in items if item["id"] == "aprima-surg-aprima-cbo-1")
+            self.assertEqual(row["type"], "surgery")
+            self.assertEqual(row["source"], "aprima")
+            self.assertTrue(row["readOnly"])
+            self.assertTrue(row["needsReview"])
+            self.assertEqual(row["location"], "Surgery One")
+            self.assertEqual(row["color"], "#dc2626")
+            self.assertEqual(row["notes"], "Aprima review needed")
         finally:
             db.close()
 

@@ -137,12 +137,14 @@ enum ClinicOrScheduleBuilder {
   private static func surgeryDetail(_ item: DoctorScheduleItem) -> ClinicOrDetailRow {
     let procedure = item.procedure.trimmingCharacters(in: .whitespacesAndNewlines)
     let room = item.room.trimmingCharacters(in: .whitespacesAndNewlines)
-    let secondary = [procedure, room].filter { !$0.isEmpty }.joined(separator: " · ")
+    let reviewLabel = item.needsReview ? "Aprima review" : ""
+    let secondary = [reviewLabel, procedure, room].filter { !$0.isEmpty }.joined(separator: " · ")
     return ClinicOrDetailRow(
       id: item.id,
       time: displayClock(item.start),
       primary: item.title,
-      secondary: secondary
+      secondary: secondary,
+      isReviewWarning: item.needsReview
     )
   }
 
@@ -426,13 +428,13 @@ private struct ClinicOrDetailLine: View {
       VStack(alignment: .leading, spacing: 2) {
         Text(row.primary)
           .font(.subheadline.weight(.semibold))
-          .foregroundStyle(ClinicalPalette.ink)
+          .foregroundStyle(row.isReviewWarning ? Color.red : ClinicalPalette.ink)
           .multilineTextAlignment(.leading)
 
         if !row.secondary.isEmpty {
           Text(row.secondary)
             .font(.caption2)
-            .foregroundStyle(ClinicalPalette.muted)
+            .foregroundStyle(row.isReviewWarning ? Color.red.opacity(0.82) : ClinicalPalette.muted)
             .lineLimit(1)
         }
       }

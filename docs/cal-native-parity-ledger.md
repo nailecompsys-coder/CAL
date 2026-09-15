@@ -1,6 +1,8 @@
 # CAL Native Parity Ledger
 
-Last updated: 2026-08-23
+Last updated: 2026-09-15
+
+Native schedule review rows (2026-09-15): `GET /api/native/home` includes Aprima-derived patient schedule rows again, separate from CAL clinic and Block OR cards. Surgery One / CBO-style Aprima rows are read-only, flagged `needsReview=true`, and carry red styling so SwiftUI can show them as Shannon-review items instead of verified CAL schedule. CAL clinic cards still summarize location, first visit time, and visit count; Block OR cards still show location, start time, and total cases.
 
 iOS test build target: `2.0 (23)` from the SwiftUI `ios/` lane.
 
@@ -30,7 +32,7 @@ Current tracked lane imports:
 |---|---|---|---|---|---|---|
 | Auth / OTP | `POST /api/native/otp/request`, `POST /api/native/otp/verify` (unified; legacy `/api/surgeon/otp*` + `/api/native/scheduler/otp*` kept) | Production: no Surgeon\|Scheduler login toggle; dual identity (AdminUser + Surgeon) returns both tokens/`roles`; in-app Schedule \| Scheduler switch; Face ID unlock | Temporary Android bridge (still role-split paths) | Debug lane (OTP + session; no biometrics yet) | iOS + Expo Android | One email/phone → OTP → sign in. Dual accounts (e.g. Don) land in Schedule by default; title menu / Scheduler principal switches mode. Surgeon-only and scheduler-only unchanged. Local OTP env vars still apply. |
 | Today | `GET /api/native/home` | Production | Temporary Android bridge | Debug lane (basic) | iOS + Expo Android | At-a-glance view must match backend data |
-| Daily Schedule | `GET /api/native/home` | Production | Temporary Android bridge | Debug lane (functional; UI thinner than iOS) | iOS + Expo Android | Shared date stepper + Day\|Week\|Month chrome. Day: On Call \| Off half-width pills; Clinic/OR + Personal sections; Cover from On Call |
+| Daily Schedule | `GET /api/native/home` | Production + Aprima review rows in SwiftUI | Temporary Android bridge | Debug lane (functional; UI thinner than iOS) | iOS + Expo Android | Shared date stepper + Day\|Week\|Month chrome. Day: On Call \| Off half-width pills; Clinic/OR + Personal sections; Cover from On Call. Aprima Surgery One/CBO rows are red read-only review details, not clean CAL cards |
 | Week | `GET /api/native/home` | Production | Temporary Android bridge | Debug lane (functional; UI thinner than iOS) | iOS + Expo Android | Cliff-note rows (ON/OFF/Clinic·OR + meeting); tap opens Day. Shared date-range stepper |
 | Month | `GET /api/native/home` | Production | Temporary Android bridge | Debug lane (letter marks; no heatmap yet) | iOS + Expo Android | Heatmap dots (call/off/clinic) + selected-day agenda below grid; Cover only from agenda; Open Day jumps to Day scope. Not a cramped 7-col text grid |
 | Time Off | `/api/native/request-off*` POST/PUT/DELETE, `GET /api/native/home` | Production | Temporary Android bridge | Debug lane (list + request/edit/cancel; Who’s Out gantt) | iOS + Expo Android | Multi-day/half-day request form. After submit: summary + OK. Pending and approved My Requests rows open Modify or Cancel. Editing approved time off returns it to pending. Surgeon is emailed on request, update, approve, deny, and cancel. Who’s Out is portal-style month Gantt with the full roster (empty rows dimmed) and a month stepper. Clinic-group warning on submit is non-blocking |

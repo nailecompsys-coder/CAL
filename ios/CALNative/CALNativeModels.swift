@@ -121,6 +121,8 @@ struct DoctorScheduleItem: Identifiable {
   let notes: String
   let start: String
   let end: String
+  let source: String
+  let needsReview: Bool
 
   var isBlockOr: Bool { kind == "block_or" }
   var isClinicOrSurgery: Bool { kind == "clinic" || kind == "surgery" }
@@ -137,7 +139,9 @@ struct DoctorScheduleItem: Identifiable {
     procedure: String = "",
     notes: String = "",
     start: String = "",
-    end: String = ""
+    end: String = "",
+    source: String = "",
+    needsReview: Bool = false
   ) {
     self.id = id
     self.period = period
@@ -151,6 +155,8 @@ struct DoctorScheduleItem: Identifiable {
     self.notes = notes
     self.start = start
     self.end = end
+    self.source = source
+    self.needsReview = needsReview
   }
 }
 
@@ -186,6 +192,15 @@ struct ClinicOrDetailRow: Identifiable {
   let time: String
   let primary: String
   let secondary: String
+  let isReviewWarning: Bool
+
+  init(id: String, time: String, primary: String, secondary: String, isReviewWarning: Bool = false) {
+    self.id = id
+    self.time = time
+    self.primary = primary
+    self.secondary = secondary
+    self.isReviewWarning = isReviewWarning
+  }
 }
 
 struct PersonalCalendarItem: Identifiable, Equatable {

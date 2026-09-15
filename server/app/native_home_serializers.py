@@ -198,6 +198,7 @@ def aprima_surgery_item_payload(row: dict) -> dict:
     appt_type = (row.get("appointmentType") or "Surgery").strip()
     is_surg = is_surgery_appointment(row)
     facility = resolve_aprima_facility_name(site, is_surgery=is_surg)
+    needs_review = facility.strip().lower() == "surgery one"
     return {
         "id": f"aprima-surg-{appt_id}",
         "type": "surgery",
@@ -208,10 +209,11 @@ def aprima_surgery_item_payload(row: dict) -> dict:
         "location": facility,
         "room": room or site,
         "status": (row.get("status") or "scheduled").strip().lower() or "scheduled",
-        "notes": reason,
+        "notes": "Aprima review needed" if needs_review else reason,
         "surgeonNotes": "",
-        "color": "#e0f2fe",
+        "color": "#dc2626" if needs_review else "#e0f2fe",
         "source": "aprima",
+        "needsReview": needs_review,
         "readOnly": True,
     }
 

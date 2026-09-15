@@ -186,6 +186,71 @@ class IngestScheduleTest(unittest.TestCase):
         self.assertEqual(result["corrections_count"], 1)
         self.assertEqual(result["corrections"][0]["reason"], "clinic_location_not_found")
 
+    def test_duplicate_other_surgeon_or_row_does_not_create_assignment(self):
+        day = date(2026, 7, 27)
+        lucy = Surgeon(
+            first_name="Lucy",
+            last_name="Woodley",
+            email="lw@example.com",
+            is_active=True,
+            staff_type="physician",
+        )
+        block = (
+            self.db.query(ORBlockInstance)
+            .filter(ORBlockInstance.date == day, ORBlockInstance.session == "am")
+            .one()
+        )
+        block.status = "assigned"
+        self.db.add(lucy)
+        self.db.flush()
+        self.db.add(ORBlockAssignment(
+            block_instance_id=block.id,
+            surgeon_id=self.surgeon.id,
+            start_time=time(7, 15),
+            case_count=1,
+        ))
+        self.db.add(SurgicalCase(
+            surgeon_id=self.surgeon.id,
+            date=day,
+            start_time=time(7, 15),
+            patient_name="Perez de Leon, Elvano Epifanio",
+            procedure="Robotic left inguinal hernia repair",
+            location_id=self.ap_or.id,
+            room_text="APK S03",
+            status="scheduled",
+            notes="Existing corrected row",
+            or_block_instance_id=block.id,
+        ))
+        self.db.commit()
+
+        result = ingest_surgeon_schedule(
+            self.db,
+            source_fax_id=162,
+            surgeons=[{
+                "surgeon_name": "Lucy Woodley, MD",
+                "start_date": day.isoformat(),
+                "or_block": {
+                    "session": "am",
+                    "room": "APK S03",
+                    "cases": [{
+                        "case_date": day.isoformat(),
+                        "start_time": "10:45",
+                        "patient_name": "Perez de Leon, Elvano Epifanio",
+                        "procedure": "Robotic left inguinal hernia repair",
+                        "room": "APK S03",
+                    }],
+                },
+            }],
+        )
+
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(self.db.query(SurgicalCase).count(), 1)
+        assignments = self.db.query(ORBlockAssignment).all()
+        self.assertEqual(len(assignments), 1)
+        self.assertEqual(assignments[0].surgeon_id, self.surgeon.id)
+        self.assertEqual(result["blocks_count"], 0)
+        self.assertEqual(result["corrections"][0]["reason"], "duplicate_other_surgeon")
+
     def test_ocr_misspelled_surgeon_still_resolves(self):
         woodley = Surgeon(
             first_name="Lucy",

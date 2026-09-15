@@ -1140,6 +1140,39 @@ def _upsert_surgical_case(
     }
 
 
+def _all_cases_duplicate_other_surgeon(
+    db: Session,
+    *,
+    surgeon_id: int,
+    case_date: date,
+    cases: list[dict[str, Any]],
+) -> bool:
+    """Avoid creating a surgeon/block assignment from OCR rows already owned elsewhere."""
+    others = (
+        db.query(SurgicalCase)
+        .filter(
+            SurgicalCase.date == case_date,
+            SurgicalCase.surgeon_id != surgeon_id,
+            SurgicalCase.status != "cancelled",
+        )
+        .all()
+    )
+    if not others:
+        return False
+    checked = 0
+    for case in cases:
+        patient_name = (case.get("patient_name") or "").strip()
+        if not patient_name:
+            continue
+        checked += 1
+        matches = [row for row in others if _patient_identity_match(row.patient_name, patient_name)]
+        if not matches:
+            return False
+        if any(_co_surgeon_role(db, surgeon_id, row.surgeon_id) is not None for row in matches):
+            return False
+    return checked > 0
+
+
 def _cancel_missing_desk_cases(
     db: Session,
     *,
@@ -1574,6 +1607,40 @@ def ingest_surgeon_schedule(
                             t for t in case_times
                             if instance.start_time <= t < instance.end_time
                         ]
+                        half_cases = [
+                            case for case in group_cases
+                            if (
+                                (st := _parse_time(case.get("start_time"), earliest))
+                                and instance.start_time <= st < instance.end_time
+                            )
+                        ]
+                        if _all_cases_duplicate_other_surgeon(
+                            db,
+                            surgeon_id=surgeon.id,
+                            case_date=day,
+                            cases=half_cases,
+                        ):
+                            for case in half_cases:
+                                st = _parse_time(case.get("start_time"), earliest)
+                                _park_unplaced_case(
+                                    db,
+                                    corrections=corrections,
+                                    surgeon=surgeon,
+                                    day=day,
+                                    case=case,
+                                    start_time=st,
+                                    location_id=loc.id,
+                                    room=str(room or ""),
+                                    base_note=base_note,
+                                    source_fax_id=source_fax_id,
+                                    day_candidates=day_candidates,
+                                    claimed_ids=claimed_ids,
+                                    reason="duplicate_other_surgeon",
+                                    body_extra=(
+                                        f"{loc.abbreviation or loc.name} — patient already exists under another surgeon"
+                                    ),
+                                )
+                            continue
                         existing_half = _surgeon_session_block_assignment(
                             db,
                             surgeon_id=surgeon.id,

@@ -457,6 +457,7 @@ struct NativeCALClient {
   func createDayItem(
     token: String,
     date: String,
+    endDate: String? = nil,
     title: String,
     notes: String,
     startTime: String?,
@@ -470,6 +471,7 @@ struct NativeCALClient {
     request.setValue(token, forHTTPHeaderField: "X-CAL-Device-Token")
     request.httpBody = try JSONEncoder().encode(DayItemWritePayload(
       date: date,
+      endDate: endDate,
       title: title,
       notes: notes,
       startTime: startTime,
@@ -599,6 +601,7 @@ private struct NativePushTokenPayload: Encodable {
 
 private struct DayItemWritePayload: Encodable {
   let date: String
+  let endDate: String?
   let title: String
   let notes: String
   let startTime: String?
@@ -606,8 +609,21 @@ private struct DayItemWritePayload: Encodable {
 
   enum CodingKeys: String, CodingKey {
     case date, title, notes
+    case endDate = "end_date"
     case startTime = "start_time"
     case endTime = "end_time"
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(date, forKey: .date)
+    if let endDate, endDate != date {
+      try container.encode(endDate, forKey: .endDate)
+    }
+    try container.encode(title, forKey: .title)
+    try container.encode(notes, forKey: .notes)
+    try container.encodeIfPresent(startTime, forKey: .startTime)
+    try container.encodeIfPresent(endTime, forKey: .endTime)
   }
 }
 

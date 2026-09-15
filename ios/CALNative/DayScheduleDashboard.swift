@@ -5,7 +5,7 @@ struct DayScheduleDashboard: View {
   let days: [ScheduleDay]
   let statusMessage: String?
   let coverAction: (ScheduleAssignment) -> Void
-  let onSavePersonalItem: (PersonalCalendarItem?, String, String, String?, String?) async throws -> Void
+  let onSavePersonalItem: (PersonalCalendarItem?, String, String, String?, String?, Date, Date) async throws -> Void
   let onDeletePersonalItem: (PersonalCalendarItem) async throws -> Void
 
   @State private var personalEditor: PersonalEditorTarget?
@@ -171,8 +171,8 @@ struct DayScheduleDashboard: View {
       PersonalItemEditorSheet(
         date: day.date,
         item: target.item,
-        onSave: { title, notes, start, end in
-          try await onSavePersonalItem(target.item, title, notes, start, end)
+        onSave: { title, notes, start, end, rangeStart, rangeEnd in
+          try await onSavePersonalItem(target.item, title, notes, start, end, rangeStart, rangeEnd)
         },
         onDelete: {
           guard let item = target.item else { return }
@@ -192,18 +192,37 @@ struct DayScheduleDashboard: View {
 private struct PersonalItemEditorSheet: View {
   let date: Date
   let item: PersonalCalendarItem?
-  let onSave: (String, String, String?, String?) async throws -> Void
+  let onSave: (String, String, String?, String?, Date, Date) async throws -> Void
   let onDelete: () async throws -> Void
 
   @Environment(\.dismiss) private var dismiss
   @State private var selectedType: String = PersonalItemPresets.titles[0]
   @State private var customTitle: String = ""
   @State private var notes: String = ""
+  @State private var startDate: Date
+  @State private var endDate: Date
   @State private var hasTime = false
   @State private var startTime = Date()
   @State private var endTime = Date()
   @State private var isSaving = false
   @State private var errorMessage: String?
+
+  init(
+    date: Date,
+    item: PersonalCalendarItem?,
+    onSave: @escaping (String, String, String?, String?, Date, Date) async throws -> Void,
+    onDelete: @escaping () async throws -> Void
+  ) {
+    self.date = date
+    self.item = item
+    self.onSave = onSave
+    self.onDelete = onDelete
+    let seed = Calendar.current.startOfDay(for: date)
+    _startDate = State(initialValue: seed)
+    _endDate = State(initialValue: seed)
+  }
+
+  private var isEditing: Bool { item != nil }
 
   private var resolvedTitle: String {
     if selectedType == PersonalItemPresets.other {
@@ -213,12 +232,41 @@ private struct PersonalItemEditorSheet: View {
   }
 
   private var canSave: Bool {
-    !resolvedTitle.isEmpty && !isSaving
+    !resolvedTitle.isEmpty && !isSaving && endDate >= Calendar.current.startOfDay(for: startDate)
+  }
+
+  private var rangeSummary: String {
+    let start = startDate.formatted(.dateTime.month(.abbreviated).day().year())
+    if Calendar.current.isDate(startDate, inSameDayAs: endDate) {
+      return start
+    }
+    let end = endDate.formatted(.dateTime.month(.abbreviated).day().year())
+    let days = (Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: startDate), to: Calendar.current.startOfDay(for: endDate)).day ?? 0) + 1
+    return "\(start) – \(end) · \(days) days"
   }
 
   var body: some View {
     CalNavigation {
       Form {
+        if isEditing {
+          Section {
+            Text(date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+              .foregroundStyle(.secondary)
+          }
+        } else {
+          Section {
+            DatePicker("Start", selection: $startDate, displayedComponents: .date)
+            DatePicker("End", selection: $endDate, displayedComponents: .date)
+            Text(rangeSummary)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          } header: {
+            Text("Dates")
+          } footer: {
+            Text("Same as time off — pick a range to place this personal item on each day.")
+          }
+        }
+
         Section {
           Picker("Type", selection: $selectedType) {
             ForEach(PersonalItemPresets.titles, id: \.self) { row in
@@ -232,8 +280,6 @@ private struct PersonalItemEditorSheet: View {
           }
 
           TextField("Notes (optional)", text: $notes)
-        } header: {
-          Text(date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
         }
 
         Section("Time (optional)") {
@@ -298,6 +344,20 @@ private struct PersonalItemEditorSheet: View {
         startTime = Self.dateForTime(item?.start ?? "07:00")
         endTime = Self.dateForTime(item?.end.isEmpty == false ? item!.end : "08:00")
       }
+      .onChange(of: startDate) { newValue in
+        let day = Calendar.current.startOfDay(for: newValue)
+        startDate = day
+        if endDate < day {
+          endDate = day
+        }
+      }
+      .onChange(of: endDate) { newValue in
+        let day = Calendar.current.startOfDay(for: newValue)
+        endDate = day
+        if day < Calendar.current.startOfDay(for: startDate) {
+          startDate = day
+        }
+      }
     }
   }
 
@@ -312,7 +372,9 @@ private struct PersonalItemEditorSheet: View {
         trimmed,
         notes.trimmingCharacters(in: .whitespacesAndNewlines),
         hasTime ? Self.hhmm(startTime) : nil,
-        hasTime ? Self.hhmm(endTime) : nil
+        hasTime ? Self.hhmm(endTime) : nil,
+        Calendar.current.startOfDay(for: isEditing ? date : startDate),
+        Calendar.current.startOfDay(for: isEditing ? date : endDate)
       )
       dismiss()
     } catch {

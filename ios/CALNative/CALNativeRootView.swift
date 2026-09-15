@@ -134,7 +134,7 @@ struct ScheduleHomeView: View {
                 coverAction: { assignment in
                   coveringAssignment = assignment
                 },
-                onSavePersonalItem: { existing, title, notes, start, end in
+                onSavePersonalItem: { existing, title, notes, start, end, rangeStart, rangeEnd in
                   if let existing {
                     try await store.updatePersonalItem(
                       itemId: existing.id,
@@ -146,7 +146,8 @@ struct ScheduleHomeView: View {
                     )
                   } else {
                     try await store.createPersonalItem(
-                      on: selectedDate,
+                      from: rangeStart,
+                      to: rangeEnd,
                       title: title,
                       notes: notes,
                       startTime: start,

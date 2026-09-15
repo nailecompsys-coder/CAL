@@ -377,7 +377,8 @@ final class NativeScheduleStore: ObservableObject {
   }
 
   func createPersonalItem(
-    on date: Date,
+    from startDate: Date,
+    to endDate: Date,
     title: String,
     notes: String,
     startTime: String?,
@@ -386,15 +387,21 @@ final class NativeScheduleStore: ObservableObject {
     guard let token = sessionToken, !token.isEmpty else {
       throw NativeCALError.missingSession
     }
+    let start = Calendar.current.startOfDay(for: startDate)
+    let end = Calendar.current.startOfDay(for: endDate)
     try await client.createDayItem(
       token: token,
-      date: NativeDayResponse.dateFormatter.string(from: date),
+      date: NativeDayResponse.dateFormatter.string(from: start),
+      endDate: NativeDayResponse.dateFormatter.string(from: end),
       title: title,
       notes: notes,
       startTime: startTime,
       endTime: endTime
     )
-    await load(containing: date, scope: .day)
+    await load(containing: start, scope: .day)
+    if !Calendar.current.isDate(start, inSameDayAs: end) {
+      await load(containing: end, scope: .day)
+    }
   }
 
   func updatePersonalItem(

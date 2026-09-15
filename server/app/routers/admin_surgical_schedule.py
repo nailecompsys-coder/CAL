@@ -1,5 +1,6 @@
 """Admin portal surgical schedule routes."""
 
+import urllib.parse
 from datetime import date
 from typing import Optional
 
@@ -73,7 +74,14 @@ def surgical_case_add(
         )
     except ValueError:
         return RedirectResponse("/admin/clinic-schedule?msg=invalid_date", status_code=303)
-    surgical_case, warn_query = add_surgical_case(db, fields)
+    try:
+        surgical_case, warn_query = add_surgical_case(db, fields)
+    except ValueError as exc:
+        offset = week_offset if week_offset is not None else week_offset_for_date(fields["date"])
+        return RedirectResponse(
+            f"/admin/clinic-schedule?week_offset={offset}&warn={urllib.parse.quote(str(exc))}",
+            status_code=303,
+        )
     offset = week_offset if week_offset is not None else week_offset_for_date(surgical_case.date)
     redirect = f"/admin/clinic-schedule?week_offset={offset}&msg=added"
     redirect += warn_query
@@ -116,7 +124,14 @@ def surgical_case_edit(
         status,
         notes,
     )
-    warn_query = update_surgical_case(db, surgical_case, fields)
+    try:
+        warn_query = update_surgical_case(db, surgical_case, fields)
+    except ValueError as exc:
+        offset = week_offset if week_offset is not None else week_offset_for_date(fields["date"])
+        return RedirectResponse(
+            f"/admin/clinic-schedule?week_offset={offset}&warn={urllib.parse.quote(str(exc))}",
+            status_code=303,
+        )
     offset = week_offset if week_offset is not None else week_offset_for_date(surgical_case.date)
     redirect = f"/admin/clinic-schedule?week_offset={offset}&msg=updated"
     redirect += warn_query

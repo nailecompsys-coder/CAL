@@ -44,6 +44,7 @@ from app.or_block_service import (
     scheduler_native_home,
     short_room_label,
     update_block_assignment,
+    update_block_case,
     update_or_block_instance,
 )
 
@@ -651,6 +652,47 @@ class ORBlockServiceTest(unittest.TestCase):
             )
             self.assertEqual(len([c for c in (block.cases or []) if (c.status or "") != "cancelled"]), 1)
             self.assertFalse(any("on call" in row.lower() for row in warnings))
+            with self.assertRaisesRegex(ValueError, "already has a case"):
+                add_case_to_block(
+                    db,
+                    block_id,
+                    surgeon.id,
+                    time(8, 0),
+                    procedure="Second",
+                    patient_name="Second Patient",
+                )
+        finally:
+            db.close()
+
+    def test_update_case_rejects_same_surgeon_same_time_collision(self):
+        db = self.Session()
+        try:
+            surgeon = self._surgeon(db, "Jorge", "Florin")
+            hospital = self._location(db, "Advent Minneola", "MN")
+            block_day = date(2026, 9, 16)
+            block_id = create_or_blocks(db, BlockORCreateInput(
+                name="Open AM Block",
+                start_date=block_day,
+                end_date=block_day,
+                weekdays=[block_day.weekday()],
+                location_ids=[hospital.id],
+                session="am",
+                start_time=time(7, 0),
+                end_time=time(12, 0),
+                recurrence="once",
+            ))["instance_ids"][0]
+            assign_block(db, block_id, surgeon.id, case_count=0, notify=False)
+            add_case_to_block(db, block_id, surgeon.id, time(7, 15), patient_name="First")
+            block, _warnings = add_case_to_block(db, block_id, surgeon.id, time(9, 15), patient_name="Second")
+            second = next(case for case in block.cases if case.patient_name == "Second")
+            with self.assertRaisesRegex(ValueError, "already has a case"):
+                update_block_case(
+                    db,
+                    block_id,
+                    second.id,
+                    start_time=time(7, 15),
+                    surgeon_id=surgeon.id,
+                )
         finally:
             db.close()
 

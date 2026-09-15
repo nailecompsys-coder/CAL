@@ -73,6 +73,77 @@ class IngestScheduleTest(unittest.TestCase):
         """AHMGGENSRG is the practice-wide general-surgery code, not a facility."""
         self.assertIsNone(resolve_clinic_location(self.db, "AHMGGENSRG"))
 
+    def test_cbo_is_not_a_desk_clinic_location(self):
+        """CBO / Surgery One comes from Aprima only, never Desk fax ingest."""
+        day = date(2026, 7, 27)
+        cbo = Location(
+            name="CBO Clinic", abbreviation="CBO-OV",
+            location_type="clinic", color="#DDF2FC", is_active=True,
+        )
+        self.db.add(cbo)
+        self.db.flush()
+        self.db.add(ClinicSchedule(
+            surgeon_id=self.surgeon.id,
+            location_id=cbo.id,
+            date=day,
+            session="pm",
+            assignment_type="assigned",
+        ))
+        self.db.commit()
+        self.assertIsNone(resolve_clinic_location(
+            self.db,
+            "CBO",
+            surgeon_id=self.surgeon.id,
+            day=day,
+            session="pm",
+        ))
+
+    def test_generic_ahmg_slot_inside_assigned_block_uses_block_location(self):
+        day = date(2026, 7, 27)
+        block = (
+            self.db.query(ORBlockInstance)
+            .filter(ORBlockInstance.date == day, ORBlockInstance.session == "am")
+            .one()
+        )
+        block.status = "assigned"
+        block.room_text = "APK S03"
+        self.db.add(ORBlockAssignment(
+            block_instance_id=block.id,
+            surgeon_id=self.surgeon.id,
+            start_time=time(7, 0),
+            case_count=1,
+        ))
+        self.db.commit()
+
+        result = ingest_surgeon_schedule(
+            self.db,
+            source_fax_id=151,
+            surgeons=[{
+                "surgeon_name": "Jorge Luis Florin, MD",
+                "start_date": day.isoformat(),
+                "clinic_rotation": {
+                    "session": "am",
+                    "site_raw": "AHMGGENSRG",
+                    "slots": [{
+                        "case_date": day.isoformat(),
+                        "start_time": "08:30",
+                        "patient_name": "Generic, Block",
+                        "procedure": "Procedure",
+                        "site_raw": "AHMGGENSRG",
+                    }],
+                },
+            }],
+        )
+
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["cases_created"], 1)
+        self.assertEqual(result["clinics_count"], 0)
+        self.assertEqual(self.db.query(ClinicSchedule).count(), 0)
+        case = self.db.query(SurgicalCase).one()
+        self.assertEqual(case.location_id, self.ap_or.id)
+        self.assertEqual(case.or_block_instance_id, block.id)
+        self.assertEqual(case.room_text, "APK S03")
+
     def test_ocr_misspelled_surgeon_still_resolves(self):
         woodley = Surgeon(
             first_name="Lucy",
@@ -108,7 +179,7 @@ class IngestScheduleTest(unittest.TestCase):
             self.assertIsNotNone(hit, msg=raw)
             self.assertEqual(hit.id, woodley.id, msg=raw)
 
-    def test_clinic_prefers_surgeon_schedule_over_fax_site(self):
+    def test_specific_clinic_prefers_surgeon_schedule_over_fax_site(self):
         day = date(2026, 7, 27)
         self.db.add_all([
             ClinicSchedule(
@@ -129,12 +200,19 @@ class IngestScheduleTest(unittest.TestCase):
         self.db.commit()
         loc = resolve_clinic_location(
             self.db,
-            "AHMGGENSRG",
+            "CLMMFLGS",
             surgeon_id=self.surgeon.id,
             day=day,
             session="pm",
         )
         self.assertEqual(loc.abbreviation, "AP-CL")
+        self.assertIsNone(resolve_clinic_location(
+            self.db,
+            "AHMGGENSRG",
+            surgeon_id=self.surgeon.id,
+            day=day,
+            session="pm",
+        ))
         or_loc = resolve_or_location(
             self.db,
             None,
@@ -200,6 +278,49 @@ class IngestScheduleTest(unittest.TestCase):
         self.assertGreaterEqual(result["corrections_count"], 1)
         self.assertEqual(result["corrections"][0]["reason"], "missing_time")
         self.assertEqual(self.db.query(SurgicalCase).count(), 0)
+
+    def test_uncertain_same_block_case_adds_possible_note_not_case(self):
+        day = date(2026, 8, 24)
+        block = (
+            self.db.query(ORBlockInstance)
+            .filter(ORBlockInstance.date == day, ORBlockInstance.session == "am")
+            .one()
+        )
+        block.status = "assigned"
+        self.db.add(ORBlockAssignment(
+            block_instance_id=block.id,
+            surgeon_id=self.surgeon.id,
+            start_time=time(7, 15),
+            case_count=1,
+            note="AP-OR - 07:15 - 1 Case",
+        ))
+        self.db.commit()
+
+        result = ingest_surgeon_schedule(
+            self.db,
+            source_fax_id=79,
+            surgeons=[{
+                "surgeon_name": "Jorge Luis Florin, MD",
+                "start_date": day.isoformat(),
+                "or_block": {
+                    "session": "am",
+                    "room": "APK S03",
+                    "cases": [{
+                        "case_date": day.isoformat(),
+                        "start_time": None,
+                        "patient_name": "OCR, Unclear",
+                        "procedure": "Possible case",
+                        "room": "APK S03",
+                    }],
+                },
+            }],
+        )
+
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(self.db.query(SurgicalCase).count(), 0)
+        assignment = self.db.query(ORBlockAssignment).one()
+        self.assertEqual(assignment.case_count, 1)
+        self.assertIn("Possible additional case at AP-OR - time/patient needs review.", assignment.note)
 
     def test_ocr_name_is_not_an_admin_correction(self):
         """Garbled / truncated names are a parser problem — do not dump them on Shannon."""
@@ -312,7 +433,7 @@ class IngestScheduleTest(unittest.TestCase):
         self.assertEqual(result["blocks_count"], 1)
         self.assertEqual(result["blocks"][0]["action"], "reused")
         self.assertEqual(result["cases_count"], 2)
-        self.assertEqual(result["clinics_count"], 1)
+        self.assertEqual(result["clinics_count"], 0)
 
         am = (
             self.db.query(ORBlockInstance)
@@ -329,7 +450,7 @@ class IngestScheduleTest(unittest.TestCase):
         self.assertEqual(cases[0].or_block_instance_id, am.id)
         clinic = self.db.query(ClinicSchedule).filter(ClinicSchedule.session == "pm").one()
         self.assertEqual(clinic.location_id, self.ap_cl.id)
-        self.assertIn("13:00", clinic.notes or "")
+        self.assertNotIn("13:00", clinic.notes or "")
 
     def test_ingest_fits_existing_block_without_expanding_or_minting(self):
         day = date(2026, 7, 27)
@@ -831,14 +952,6 @@ class IngestScheduleTest(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].date, date(2026, 8, 27))
         self.assertIn("Madden", rows[0].patient_name)
-        note = self.db.query(AdminNotification).filter(
-            AdminNotification.kind == "ingest_correction"
-        ).first()
-        self.assertIsNotNone(note)
-        payload = json.loads(note.payload)
-        self.assertEqual(payload["patientDob"], "1965-07-27")
-        self.assertEqual(payload["date"], "2026-08-25")
-        self.assertIn("dob=1965-07-27", payload.get("href") or "")
 
     def test_fax_case_date_with_dob_flags_missing_clock(self):
         """After reading fax #102: Wilkinson is 8/24/2026, DOB 7/27/65, time OCR junk."""
@@ -869,12 +982,12 @@ class IngestScheduleTest(unittest.TestCase):
         self.assertTrue(result["ok"], result)
         self.assertEqual(result["skipped_dates_count"], 0)
         self.assertEqual(self.db.query(SurgicalCase).count(), 0)
-        note = self.db.query(AdminNotification).one()
-        payload = json.loads(note.payload)
-        self.assertEqual(payload["reason"], "missing_time")
-        self.assertEqual(payload["date"], "2026-08-24")
-        self.assertEqual(payload["patientDob"], "1965-07-27")
-        self.assertIn("no start time", note.body)
+        correction = next(
+            row for row in result["corrections"]
+            if row["reason"] == "missing_time"
+        )
+        self.assertEqual(correction["date"], "2026-08-24")
+        self.assertIn("no start time", correction["body"])
 
     def test_ocr_future_year_snaps_into_the_fax_week(self):
         result = ingest_surgeon_schedule(
@@ -929,17 +1042,9 @@ class IngestScheduleTest(unittest.TestCase):
         self.assertEqual(self.db.query(ORBlockInstance).filter(
             ORBlockInstance.date == date(2026, 9, 1)
         ).count(), 0)
-        row = self.db.query(SurgicalCase).one()
-        self.assertIsNone(row.or_block_instance_id)
-        self.assertEqual(row.patient_name, "Fax, Patient")
+        self.assertEqual(self.db.query(SurgicalCase).count(), 0)
         reasons = [row["reason"] for row in result["corrections"]]
         self.assertIn("block_not_found", reasons)
-        note = self.db.query(AdminNotification).filter(
-            AdminNotification.kind == "ingest_correction"
-        ).first()
-        self.assertIsNotNone(note)
-        self.assertIn("drag onto the correct card", note.body)
-        self.assertIn("/admin/ingest-fixes", note.payload)
 
     def test_fax_sliver_folds_into_existing_pm_card(self):
         day = date(2026, 7, 27)
@@ -1016,9 +1121,8 @@ class IngestScheduleTest(unittest.TestCase):
             }],
         )
         self.assertTrue(result["ok"], result)
-        self.assertEqual(result["corrections_count"], 0)
-        clinic = self.db.query(ClinicSchedule).one()
-        self.assertEqual(clinic.location_id, mn.id)
+        self.assertEqual(result["corrections_count"], 1)
+        self.assertEqual(self.db.query(ClinicSchedule).count(), 0)
 
 
 if __name__ == "__main__":

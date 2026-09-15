@@ -5,7 +5,7 @@ from datetime import date, datetime, time, timedelta
 
 from sqlalchemy.orm import Session
 
-from .models import SurgicalCase
+from .models import Location, ORBlockAssignment, ORBlockInstance, SurgicalCase
 from .practice_time import practice_today
 from .push import send_push_to_surgeon
 from .scheduling_guardrails_service import surgical_case_warning_messages
@@ -66,9 +66,89 @@ def conflict_warning_query(db: Session, surgical_case: SurgicalCase, exclude_cas
     return "&warn=" + urllib.parse.quote(" · ".join(conflicts[:8]))
 
 
+def _is_cbo_location(loc: Location | None) -> bool:
+    if not loc:
+        return False
+    text = f"{loc.abbreviation or ''} {loc.name or ''}".upper()
+    compact = "".join(ch for ch in text if ch.isalnum())
+    return "CBO" in compact or "SURGERYONE" in compact or "SURGICALONE" in compact
+
+
+def _matching_assigned_block(db: Session, fields: dict, *, exclude_case_id: int | None = None) -> ORBlockInstance | None:
+    surgeon_id = int(fields.get("surgeon_id") or 0)
+    case_date = fields.get("date")
+    start_time = fields.get("start_time")
+    location_id = fields.get("location_id")
+    block_id = fields.get("or_block_instance_id")
+    if not surgeon_id or not case_date or not start_time or not location_id:
+        return None
+
+    q = (
+        db.query(ORBlockInstance)
+        .join(ORBlockAssignment, ORBlockAssignment.block_instance_id == ORBlockInstance.id)
+        .filter(
+            ORBlockAssignment.surgeon_id == surgeon_id,
+            ORBlockInstance.date == case_date,
+            ORBlockInstance.location_id == int(location_id),
+            ORBlockInstance.status == "assigned",
+            ORBlockInstance.start_time <= start_time,
+            ORBlockInstance.end_time > start_time,
+        )
+        .order_by(ORBlockInstance.start_time, ORBlockInstance.id)
+    )
+    if block_id:
+        q = q.filter(ORBlockInstance.id == int(block_id))
+    block = q.first()
+    if not block:
+        return None
+
+    overlap = (
+        db.query(SurgicalCase)
+        .filter(
+            SurgicalCase.id != exclude_case_id if exclude_case_id else True,
+            SurgicalCase.surgeon_id == surgeon_id,
+            SurgicalCase.date == case_date,
+            SurgicalCase.status != "cancelled",
+            SurgicalCase.start_time == start_time,
+        )
+        .first()
+    )
+    if overlap:
+        raise ValueError("Schedule collision: this surgeon already has a case at that time.")
+    return block
+
+
+def enforce_surgical_case_write_guardrails(
+    db: Session,
+    fields: dict,
+    *,
+    exclude_case_id: int | None = None,
+) -> dict:
+    """Hard write gate for portal, mobile scheduler, API ingest, and OCR.
+
+    Cases must fit a static assigned Block OR row. CBO / Surgery One is Aprima
+    only and may not be written as a manual/fax surgical case.
+    """
+    loc = db.get(Location, int(fields["location_id"])) if fields.get("location_id") else None
+    if _is_cbo_location(loc):
+        raise ValueError("CBO / Surgery One cases come from Aprima only.")
+
+    block = _matching_assigned_block(db, fields, exclude_case_id=exclude_case_id)
+    if not block:
+        raise ValueError("Case must fit an assigned static Block OR slot for that surgeon, location, date, and time.")
+
+    out = dict(fields)
+    out["or_block_instance_id"] = block.id
+    out["location_id"] = block.location_id
+    if block.room_text and not (out.get("room_text") or "").strip():
+        out["room_text"] = block.room_text
+    return out
+
+
 def add_surgical_case(
     db: Session, fields: dict, *, notify: bool = True
 ) -> tuple[SurgicalCase, str]:
+    fields = enforce_surgical_case_write_guardrails(db, fields)
     surgical_case = SurgicalCase(**fields)
     db.add(surgical_case)
     db.commit()
@@ -83,6 +163,7 @@ def add_surgical_case(
 
 
 def update_surgical_case(db: Session, surgical_case: SurgicalCase, fields: dict) -> str:
+    fields = enforce_surgical_case_write_guardrails(db, fields, exclude_case_id=surgical_case.id)
     for key, value in fields.items():
         setattr(surgical_case, key, value)
     db.commit()

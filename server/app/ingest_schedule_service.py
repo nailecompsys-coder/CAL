@@ -398,6 +398,40 @@ def _session_from_slots(slots: list[dict], fallback: str) -> str:
     return "full"
 
 
+def _is_generic_practice_site(raw: str | None) -> bool:
+    compact = re.sub(r"[^A-Z0-9]+", "", str(raw or "").upper())
+    return compact in {"AHMG", "AHMGGENSRG"}
+
+
+def _assigned_block_covering_time(
+    db: Session,
+    *,
+    surgeon_id: int,
+    day: date,
+    at_time: time,
+) -> ORBlockInstance | None:
+    """Find the surgeon's assigned Block OR row for a generic Advent slot.
+
+    AHMGGENSRG is a practice bucket, not a place. If Advent puts that bucket on
+    a timed row that lands inside an already assigned CAL block, the block is
+    the source of truth for the actual facility.
+    """
+    rows = (
+        db.query(ORBlockInstance)
+        .join(ORBlockAssignment, ORBlockAssignment.block_instance_id == ORBlockInstance.id)
+        .filter(
+            ORBlockAssignment.surgeon_id == surgeon_id,
+            ORBlockInstance.date == day,
+            ORBlockInstance.status.in_(ACTIVE_BLOCK_STATUSES),
+            ORBlockInstance.start_time <= at_time,
+            ORBlockInstance.end_time > at_time,
+        )
+        .order_by(ORBlockInstance.start_time, ORBlockInstance.id)
+        .all()
+    )
+    return rows[0] if rows else None
+
+
 def _block_window_for_cases(
     cases: list[dict],
     session: str,
@@ -526,36 +560,20 @@ def _park_unplaced_case(
     reason: str,
     body_extra: str,
 ) -> None:
-    """Keep OCR misfits on the board (no block) so Shannon can drag them onto the right card."""
+    """Queue OCR misfits for review without creating doctor-facing schedule rows."""
     patient_dob = _patient_dob_value(
         case,
         _parse_date(case.get("patient_dob") or case.get("case_date")),
         None,
     )
-    result = _upsert_surgical_case(
+    del base_note, day_candidates, claimed_ids
+    _append_possible_case_note_to_existing_block(
         db,
         surgeon_id=surgeon.id,
-        case_date=day,
-        start_time=start_time or time(7, 0),
-        patient_name=(case.get("patient_name") or "Unknown").strip() or "Unknown",
-        procedure=case.get("procedure") or "TBD",
+        day=day,
         location_id=location_id,
-        room_text=case.get("room") or room or "",
-        notes=base_note,
-        or_block_instance_id=None,
-        notify=False,
-        day_candidates=day_candidates,
-        claimed_ids=claimed_ids,
-        patient_dob=case.get("patient_dob"),
+        at_time=start_time,
     )
-    case_id = result.get("id")
-    row = db.get(SurgicalCase, case_id) if case_id else None
-    if row is not None:
-        # Explicit limbo: no Block OR until drag-save.
-        row.or_block_instance_id = None
-        if start_time is None:
-            row.start_time = None
-        db.flush()
     clock = start_time.strftime("%H:%M") if start_time else "no time"
     _queue_ingest_correction(
         db,
@@ -566,19 +584,76 @@ def _park_unplaced_case(
             f"{surgeon.full_name} · {day.strftime('%m-%d-%y')} · "
             f"{(case.get('patient_name') or 'Unknown').strip()} · {clock}"
             + (f" · {body_extra}" if body_extra else "")
-            + " — OCR likely wrong; drag onto the correct card, then Save."
+            + " — OCR/source does not match a static Block OR card. Review source before adding."
         ),
-        href=f"/admin/ingest-fixes?case_id={case_id}" if case_id else "/admin/ingest-fixes",
+        href=_clinic_href(
+            day,
+            surgeon.id,
+            reason=reason,
+            patient_name=case.get("patient_name"),
+            procedure=case.get("procedure") or "",
+            room=case.get("room") or room or "",
+            patient_dob=patient_dob,
+        ),
         source_fax_id=source_fax_id,
         surgeon_id=surgeon.id,
         day=day,
         patient_name=case.get("patient_name"),
-        case_id=case_id,
         extra=body_extra or clock,
         procedure=case.get("procedure") or "",
         room=case.get("room") or room or "",
         patient_dob=patient_dob,
     )
+
+
+def _append_possible_case_note_to_existing_block(
+    db: Session,
+    *,
+    surgeon_id: int,
+    day: date,
+    location_id: int | None,
+    at_time: time | None,
+) -> None:
+    """Tell the surgeon about uncertain OCR only when they already own the block.
+
+    This is not a confirmed case and does not change case_count. It only adds a
+    short note to the existing assignment so the phone can say there may be more
+    in the same block.
+    """
+    if not location_id:
+        return
+    rows = (
+        db.query(ORBlockAssignment, ORBlockInstance)
+        .join(ORBlockInstance, ORBlockAssignment.block_instance_id == ORBlockInstance.id)
+        .filter(
+            ORBlockAssignment.surgeon_id == surgeon_id,
+            ORBlockInstance.date == day,
+            ORBlockInstance.location_id == location_id,
+            ORBlockInstance.status.in_(ACTIVE_BLOCK_STATUSES),
+        )
+        .order_by(ORBlockInstance.start_time, ORBlockAssignment.start_time, ORBlockAssignment.id)
+        .all()
+    )
+    if not rows:
+        return
+    if at_time:
+        containing = [
+            (assignment, block)
+            for assignment, block in rows
+            if block.start_time <= at_time < block.end_time
+        ]
+        rows = containing or rows
+    assignment, block = rows[0]
+    loc = block.location.abbreviation if block.location and block.location.abbreviation else (
+        block.location.name if block.location else "OR"
+    )
+    time_part = f"around {at_time.strftime('%H:%M')} - patient needs review" if at_time else "time/patient needs review"
+    note = f"Possible additional case at {loc} - {time_part}."
+    existing = assignment.note or ""
+    if note in existing:
+        return
+    assignment.note = f"{existing}; {note}" if existing else note
+    db.commit()
 
 
 def _assign_surgeon_to_block(
@@ -1362,7 +1437,7 @@ def ingest_surgeon_schedule(
                             day=day,
                             case=case,
                             start_time=None,
-                            location_id=None,
+                            location_id=loc.id,
                             room=str(room or ""),
                             base_note=base_note,
                             source_fax_id=source_fax_id,
@@ -1669,6 +1744,61 @@ def ingest_surgeon_schedule(
                 clinic_by_date[day] = []
 
         for day, day_slots in sorted(clinic_by_date.items()):
+            claimed_ids: set[int] = set()
+            day_candidates = (
+                db.query(SurgicalCase)
+                .filter(
+                    SurgicalCase.surgeon_id == surgeon.id,
+                    SurgicalCase.date == day,
+                    SurgicalCase.status != "cancelled",
+                )
+                .order_by(SurgicalCase.start_time, SurgicalCase.id)
+                .all()
+            )
+            kept_clinic_slots: list[dict] = []
+            for slot in day_slots:
+                site_raw = slot.get("site_raw") or site
+                slot_time = _parse_time(slot.get("start_time"))
+                if not (_is_generic_practice_site(site_raw) and slot_time):
+                    kept_clinic_slots.append(slot)
+                    continue
+                host = _assigned_block_covering_time(
+                    db,
+                    surgeon_id=surgeon.id,
+                    day=day,
+                    at_time=slot_time,
+                )
+                if host is None:
+                    kept_clinic_slots.append(slot)
+                    continue
+                patient_name = (slot.get("patient_name") or "").strip()
+                if not patient_name:
+                    continue
+                result = _upsert_surgical_case(
+                    db,
+                    surgeon_id=surgeon.id,
+                    case_date=day,
+                    start_time=slot_time,
+                    patient_name=patient_name,
+                    procedure=slot.get("procedure") or "TBD",
+                    location_id=host.location_id,
+                    room_text=host.room_text or str(site_raw or ""),
+                    notes=(
+                        f"{base_note} · generic AHMGGENSRG row matched to assigned "
+                        f"Block OR {host.start_time.strftime('%H:%M')}-"
+                        f"{host.end_time.strftime('%H:%M')}"
+                    ),
+                    or_block_instance_id=host.id,
+                    notify=notify,
+                    day_candidates=day_candidates,
+                    claimed_ids=claimed_ids,
+                    patient_dob=slot.get("patient_dob"),
+                )
+                case_results.append(result)
+            day_slots = kept_clinic_slots
+            if not day_slots:
+                continue
+
             site_for_day = (day_slots[0].get("site_raw") if day_slots else None) or site
             day_session = _session_from_slots(day_slots, clinic_session)
             loc = resolve_clinic_location(

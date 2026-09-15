@@ -393,6 +393,72 @@ def resolve_or_location(
     return None
 
 
+def _weekly_clinic_location(
+    db: Session,
+    surgeon_id: int,
+    day: date,
+    *,
+    session: str | None = None,
+) -> Location | None:
+    """Master weekly TEMPLATES (*-OV only) for this weekday — never hospital/OR."""
+    from .models import SurgeonLocationSchedule
+
+    sess = (session or "am").lower()
+    if sess not in ("am", "pm"):
+        sess = "am"
+    rows = (
+        db.query(SurgeonLocationSchedule)
+        .filter(
+            SurgeonLocationSchedule.surgeon_id == surgeon_id,
+            SurgeonLocationSchedule.day_of_week == day.weekday(),
+            SurgeonLocationSchedule.assignment_type == "assigned",
+            SurgeonLocationSchedule.location_id.isnot(None),
+        )
+        .all()
+    )
+    # Prefer matching session, then the other half-day clinic.
+    ordered = sorted(
+        rows,
+        key=lambda r: 0 if (r.session or "").lower() == sess else 1,
+    )
+    for row in ordered:
+        loc = db.get(Location, row.location_id)
+        if loc and _is_clinic_location(loc):
+            return loc
+    return None
+
+
+def _campus_clinic_from_or_day(
+    db: Session,
+    surgeon_id: int,
+    day: date,
+) -> Location | None:
+    """If the day grid only has hospital OR, use the matching *-OV clinic on that campus."""
+    rows = (
+        db.query(ClinicSchedule)
+        .options(joinedload(ClinicSchedule.location))
+        .filter(
+            ClinicSchedule.surgeon_id == surgeon_id,
+            ClinicSchedule.date == day,
+            ClinicSchedule.assignment_type == "assigned",
+            ClinicSchedule.location_id.isnot(None),
+        )
+        .all()
+    )
+    for row in rows:
+        loc = row.location
+        if not loc or not _is_or_location(loc):
+            continue
+        abbr = (loc.abbreviation or "").strip().upper()
+        if not abbr.endswith("-OR"):
+            continue
+        clinic_abbr = f"{abbr[:-3]}-OV"
+        clinic = _loc_by_abbr(db, clinic_abbr)
+        if clinic and _is_clinic_location(clinic):
+            return clinic
+    return None
+
+
 def resolve_clinic_location(
     db: Session,
     site_raw: str | None,
@@ -404,19 +470,39 @@ def resolve_clinic_location(
     """Map Advent clinic site codes to CAL clinic locations.
 
     Prefer the surgeon's clinic grid for that date when present — fax site codes
-    like AHMGGENSRG are not always reliable facility labels.
+    like AHMGGENSRG are practice-wide labels, not facilities. Fall back to the
+    weekly *-OV template, then same-campus *-OV when the day only has Block OR.
     """
+    raw = str(site_raw or "").strip().upper()
+    compact = raw.replace(" ", "")
+
+    # Hard lane split:
+    # - AHMGGENSRG/AHMG is Advent's generic practice bucket, not a clinic.
+    # - CBO/Surgery One comes from Aprima only, never Desk/Advent fax ingest.
+    # Do not let these values fall through to "whatever clinic card exists"
+    # because that creates false CBO/clinic schedule data on phones.
+    if "AHMGGENSRG" in compact or compact == "AHMG":
+        return None
+    if compact in {"CBO", "SURGERYONE", "SURGICALONE"}:
+        return None
+
     if surgeon_id and day:
         scheduled = schedule_location_for_day(
             db, surgeon_id, day, want="clinic", session=session or "pm"
         )
         if scheduled:
             return scheduled
+        weekly = _weekly_clinic_location(
+            db, surgeon_id, day, session=session or "am"
+        )
+        if weekly:
+            return weekly
+        campus = _campus_clinic_from_or_day(db, surgeon_id, day)
+        if campus:
+            return campus
 
-    raw = str(site_raw or "").strip().upper()
     if not raw:
         return None
-    compact = raw.replace(" ", "")
     if compact in {"MIN", "MN"}:
         loc = _loc_by_abbr(db, "MN-OV")
         if loc and _is_clinic_location(loc):
@@ -438,8 +524,6 @@ def resolve_clinic_location(
         ("CLMMFLGS", "CL-OV"),
         ("CLMM", "CL-OV"),
         ("HEALTHPARK", "HP-OV"),
-        # AHMGGENSRG is the practice-wide "AdventHealth Medical Group General
-        # Surgery" code, not a facility — only the grid can place that day.
         ("DRPHILLIPS", "DP-OV"),
         ("DP-OV", "DP-OV"),
         # Legacy aliases still accepted if present in a DB

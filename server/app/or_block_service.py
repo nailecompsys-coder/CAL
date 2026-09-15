@@ -1272,6 +1272,18 @@ def add_case_to_block(
         raise ValueError("Case start must fall inside the block window")
     if end_time is not None and end_time <= start_time:
         raise ValueError("Case end must be after start")
+    duplicate_case = (
+        db.query(SurgicalCase)
+        .filter(
+            SurgicalCase.surgeon_id == surgeon_id,
+            SurgicalCase.date == block.date,
+            SurgicalCase.status != "cancelled",
+            SurgicalCase.start_time == start_time,
+        )
+        .first()
+    )
+    if duplicate_case:
+        raise ValueError("Schedule collision: this surgeon already has a case at that time.")
 
     case = SurgicalCase(
         surgeon_id=surgeon_id,
@@ -1362,6 +1374,19 @@ def update_block_case(
 
     if next_surgeon not in _assigned_surgeon_ids(dest):
         raise ValueError("Place the surgeon on this AM or PM block before adding patients.")
+    duplicate_case = (
+        db.query(SurgicalCase)
+        .filter(
+            SurgicalCase.id != case.id,
+            SurgicalCase.surgeon_id == next_surgeon,
+            SurgicalCase.date == dest.date,
+            SurgicalCase.status != "cancelled",
+            SurgicalCase.start_time == next_start,
+        )
+        .first()
+    )
+    if duplicate_case:
+        raise ValueError("Schedule collision: this surgeon already has a case at that time.")
 
     case.surgeon_id = next_surgeon
     case.or_block_instance_id = dest.id

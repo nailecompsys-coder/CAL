@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-23
 
-iOS test build target: `2.0 (22)` from the SwiftUI `ios/` lane.
+iOS test build target: `2.0 (23)` from the SwiftUI `ios/` lane.
 
 Time off manage (2026-08-23): pending and approved rows in My Requests are tappable. Modify reuses the request form; changing an approved row returns it to pending. Cancel deletes the row and emails the surgeon. Request, approve, deny, and cancel each send email. New requests opened from a future month seed Start/End to the 1st of that month (today if the viewed month is current or past). Who’s Out shows the full roster; rows with no time off stay visible and dimmed.
 

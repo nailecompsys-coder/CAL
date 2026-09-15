@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+import re
 
 from .native_support import date_label, fmt_time
 
@@ -123,8 +124,38 @@ def clinic_day_meeting_item_payload(meeting) -> dict:
     }
 
 
+_CLINIC_VISIT_RE = re.compile(r"\b([01]?\d|2[0-3]):([0-5]\d)\s+([^;]+)")
+
+
+def _clinic_visit_summary(notes: str | None) -> tuple[str | None, int]:
+    visits = []
+    for match in _CLINIC_VISIT_RE.finditer(notes or ""):
+        label = (match.group(3) or "").strip()
+        lower = label.lower()
+        if "desk fax" in lower or lower.startswith("source=") or lower.startswith("kno2"):
+            continue
+        visits.append(f"{int(match.group(1)):02d}:{match.group(2)}")
+    return (visits[0] if visits else None, len(visits))
+
+
 def clinic_item_payload(row, start_t: str | None, end_t: str | None) -> dict:
-    title = "OFF" if (row.assignment_type or "assigned") == "off" else (row.location.name if row.location else "Clinic")
+    is_off = (row.assignment_type or "assigned") == "off"
+    loc_label = (
+        row.location.abbreviation
+        if row.location and row.location.abbreviation
+        else row.location.name
+        if row.location
+        else "Clinic"
+    )
+    if is_off:
+        title = "OFF"
+    else:
+        first_visit, visit_count = _clinic_visit_summary(row.notes)
+        if visit_count:
+            noun = "patient" if visit_count == 1 else "patients"
+            title = f"{loc_label} - {first_visit} - {visit_count} {noun}"
+        else:
+            title = f"{loc_label} - {start_t or ''}".strip(" -")
     return {
         "id": f"clinic-{row.id}",
         "type": "clinic",

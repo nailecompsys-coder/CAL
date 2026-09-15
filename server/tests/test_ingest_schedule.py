@@ -87,6 +87,27 @@ class IngestScheduleTest(unittest.TestCase):
             resolve_surgeon(self.db, "Lucille Eugenie Woedley, MD").id, woodley.id
         )
 
+    def test_ocr_woedly_and_fuzzy_last_name_resolve_to_roster(self):
+        """OCR drift on known roster last names must map to the existing surgeon."""
+        woodley = Surgeon(
+            first_name="Lucy",
+            last_name="Woodley",
+            email="lw2@example.com",
+            is_active=True,
+            staff_type="physician",
+        )
+        self.db.add(woodley)
+        self.db.commit()
+        for raw in (
+            "Lucille Eugenie Woedly, MD",
+            "Woedly, MD",
+            "Woodly, MD",
+            "Lucille Eugenie Woodtey, MD",
+        ):
+            hit = resolve_surgeon(self.db, raw)
+            self.assertIsNotNone(hit, msg=raw)
+            self.assertEqual(hit.id, woodley.id, msg=raw)
+
     def test_clinic_prefers_surgeon_schedule_over_fax_site(self):
         day = date(2026, 7, 27)
         self.db.add_all([

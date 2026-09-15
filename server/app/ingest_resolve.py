@@ -6,19 +6,22 @@ from datetime import date
 
 from sqlalchemy.orm import Session, joinedload
 
-from .models import ClinicSchedule, Location, Surgeon
+from .models import ClinicSchedule, Location, Surgeon, SurgeonOcrAlias
 
 _CRED_RE = re.compile(
     r"\b(?:dr\.?|md|do|pa\s*-?\s*c|pac|np|aprn|facs|phd|mba|rn|lpn)\b",
     re.IGNORECASE,
 )
 
-# Common Advent fax OCR misspellings → CAL last-name tokens
+# Common Advent fax OCR misspellings → CAL last-name tokens.
+# Prefer fuzzy roster match for new typos; keep known Woodley OCR forms here.
 _SURGEON_TOKEN_ALIASES = {
     "wocdley": "woodley",
     "woedley": "woodley",
+    "woedly": "woodley",
     "woodely": "woodley",
     "woodtey": "woodley",
+    "woodly": "woodley",
 }
 
 
@@ -37,6 +40,47 @@ def _first_close(a: str, b: str) -> bool:
     return len(short) >= 3 and long.startswith(short)
 
 
+def _edit_distance(a: str, b: str) -> int:
+    """Levenshtein distance for short OCR tokens."""
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+    if abs(len(a) - len(b)) > 3:
+        return 99
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, start=1):
+        cur = [i]
+        for j, cb in enumerate(b, start=1):
+            ins = cur[j - 1] + 1
+            delete = prev[j] + 1
+            sub = prev[j - 1] + (0 if ca == cb else 1)
+            cur.append(min(ins, delete, sub))
+        prev = cur
+    return prev[-1]
+
+
+def _last_close(ocr: str, known: str) -> bool:
+    """True when OCR last name matches a known roster last name (small OCR drift).
+
+    Roster is the source of truth — we do not invent new surgeons from OCR.
+    """
+    if not ocr or not known:
+        return False
+    if ocr == known:
+        return True
+    # Same initial keeps Johnson / Nelson-style collisions down.
+    if ocr[0] != known[0]:
+        return False
+    dist = _edit_distance(ocr, known)
+    n = max(len(ocr), len(known))
+    if n <= 6:
+        return dist <= 1
+    return dist <= 2
+
+
 def _name_parts(raw: str) -> list[str]:
     s = str(raw or "").strip()
     if "," in s:
@@ -51,12 +95,72 @@ def _name_parts(raw: str) -> list[str]:
     return _tokens(s)
 
 
+def ocr_last_token(raw: str | None) -> str | None:
+    """Normalized last-name token from an OCR surgeon string (before alias map)."""
+    parts = _name_parts(str(raw or ""))
+    return parts[-1] if parts else None
+
+
+def _db_alias_surgeon(db: Session, token: str) -> Surgeon | None:
+    if not token:
+        return None
+    row = (
+        db.query(SurgeonOcrAlias)
+        .filter(SurgeonOcrAlias.token == token)
+        .first()
+    )
+    if not row:
+        return None
+    surgeon = db.get(Surgeon, row.surgeon_id)
+    if surgeon and surgeon.is_active:
+        return surgeon
+    return None
+
+
+def save_surgeon_ocr_alias(db: Session, raw_ocr_name: str, surgeon_id: int) -> str | None:
+    """Persist OCR last token → roster surgeon so the next fax resolves.
+
+    Returns the saved token, or None if nothing to store.
+    """
+    token = ocr_last_token(raw_ocr_name)
+    if not token:
+        return None
+    surgeon = db.get(Surgeon, surgeon_id)
+    if not surgeon or not surgeon.is_active:
+        raise ValueError("Surgeon not found")
+    tokens = {token, _SURGEON_TOKEN_ALIASES.get(token, token)}
+    for t in tokens:
+        existing = (
+            db.query(SurgeonOcrAlias)
+            .filter(SurgeonOcrAlias.token == t)
+            .first()
+        )
+        if existing:
+            existing.surgeon_id = surgeon_id
+        else:
+            db.add(SurgeonOcrAlias(token=t, surgeon_id=surgeon_id))
+    db.commit()
+    return token
+
+
 def resolve_surgeon(db: Session, raw: str | None) -> Surgeon | None:
+    """Map fax OCR surgeon text to an active roster surgeon.
+
+    Never creates surgeons. Unknown OCR either fuzzy-matches the roster or fails
+    so admins can map the OCR token to an existing doctor.
+    """
     if not raw or not str(raw).strip():
         return None
-    parts = [_SURGEON_TOKEN_ALIASES.get(p, p) for p in _name_parts(str(raw))]
-    if not parts:
+    raw_parts = _name_parts(str(raw))
+    if not raw_parts:
         return None
+
+    # Explicit admin-saved OCR → surgeon wins immediately.
+    db_hit = _db_alias_surgeon(db, raw_parts[-1])
+    if db_hit:
+        return db_hit
+
+    parts = [_SURGEON_TOKEN_ALIASES.get(p, p) for p in raw_parts]
     needle = " ".join(parts)
     surgeons = db.query(Surgeon).filter(Surgeon.is_active.is_(True)).all()
 
@@ -73,16 +177,29 @@ def resolve_surgeon(db: Session, raw: str | None) -> Surgeon | None:
             scored.append((100, s))
             continue
 
+        last_ocr = parts[-1]
+        last_exact = bool(last and last_ocr == last)
+        last_fuzzy = bool(last and not last_exact and _last_close(last_ocr, last))
+
         if len(parts) >= 2 and first and last:
-            if _first_close(parts[0], first) and parts[-1] == last:
+            if _first_close(parts[0], first) and last_exact:
                 scored.append((90, s))
                 continue
-            if parts[-1] == last and any(_first_close(p, first) for p in parts[:-1]):
+            if _first_close(parts[0], first) and last_fuzzy:
+                scored.append((88, s))
+                continue
+            if last_exact and any(_first_close(p, first) for p in parts[:-1]):
                 scored.append((85, s))
                 continue
+            if last_fuzzy and any(_first_close(p, first) for p in parts[:-1]):
+                scored.append((83, s))
+                continue
 
-        if last and parts[-1] == last:
+        if last_exact:
             scored.append((50, s))
+            continue
+        if last_fuzzy:
+            scored.append((48, s))
             continue
 
         if needle in full_s or (last and last in parts):

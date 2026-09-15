@@ -151,6 +151,18 @@ class Surgeon(Base):
         return f"{f[0] if f else '?'}{l[0] if l else '?'}".upper()
 
 
+class SurgeonOcrAlias(Base):
+    """OCR last-name token → existing roster surgeon (admin rematch; never a new doctor)."""
+    __tablename__ = "surgeon_ocr_aliases"
+    id = Column(Integer, primary_key=True)
+    token = Column(String(64), unique=True, nullable=False)  # normalized OCR last token
+    surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    surgeon = relationship("Surgeon")
+
+
 class MagicLink(Base):
     __tablename__ = "magic_links"
     id = Column(Integer, primary_key=True)

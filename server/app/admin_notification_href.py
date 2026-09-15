@@ -119,6 +119,8 @@ def _ingest_href(payload: dict) -> str:
         site = site or extra
     elif reason == "or_location_not_found":
         room = room or extra
+    elif reason == "ingest_digest":
+        return "/admin/ingest-fixes"
     elif reason in {"block_not_found", "missing_time", "missing_block_window"}:
         case_id = _as_int(payload.get("caseId"))
         if case_id:

@@ -230,8 +230,14 @@ def reconcile_ingest_correction_notifications(
         except (TypeError, ValueError):
             payload = {}
         reason = payload.get("reason") or ""
-        # Advent room codes and OCR-mangled names are not admin work.
-        if reason in {"incomplete_room", "truncated_name"}:
+        # Advent room codes / OCR name junk / per-case placement flags (board is SSOT).
+        if reason in {
+            "incomplete_room",
+            "truncated_name",
+            "block_not_found",
+            "missing_time",
+            "missing_block_window",
+        }:
             db.delete(row)
             removed += 1
             continue
@@ -479,12 +485,15 @@ def recent_admin_notifications(db: Session, admin_user_id: int, limit: int = 20)
                 seen_flags.add(key)
         elif row.kind == "ingest_correction":
             try:
-                fp = str((json.loads(row.payload or "{}") or {}).get("fingerprint") or row.id)
+                data = json.loads(row.payload or "{}") or {}
             except (TypeError, ValueError):
-                fp = str(row.id)
-            if fp in seen_corrections:
+                data = {}
+            # Only the one-line digest belongs on the dashboard. Cases live on Ingest fixes.
+            if (data.get("reason") or "") != "ingest_digest":
                 continue
-            seen_corrections.add(fp)
+            if "ingest_digest" in seen_corrections:
+                continue
+            seen_corrections.add("ingest_digest")
         visible.append(row)
         if len(visible) >= limit:
             break
@@ -539,12 +548,14 @@ def unread_admin_notification_count(db: Session, admin_user_id: int) -> int:
                 seen_flags.add(key)
         elif row.kind == "ingest_correction":
             try:
-                fp = str((json.loads(row.payload or "{}") or {}).get("fingerprint") or row.id)
+                data = json.loads(row.payload or "{}") or {}
             except (TypeError, ValueError):
-                fp = str(row.id)
-            if fp in seen_corrections:
+                data = {}
+            if (data.get("reason") or "") != "ingest_digest":
                 continue
-            seen_corrections.add(fp)
+            if "ingest_digest" in seen_corrections:
+                continue
+            seen_corrections.add("ingest_digest")
         count += 1
     return count
 

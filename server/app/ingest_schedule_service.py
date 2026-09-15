@@ -113,6 +113,13 @@ def _salvage_start_time(case: dict) -> None:
     case["procedure"] = proc[len(glued.group(0)) :].strip() or case.get("procedure")
 
 
+_PLACEABLE_CORRECTION_REASONS = frozenset({
+    "block_not_found",
+    "missing_time",
+    "missing_block_window",
+})
+
+
 def _correction_fingerprint(
     *,
     source_fax_id: int | None,
@@ -131,6 +138,61 @@ def _correction_fingerprint(
             (patient_name or "").strip().lower(),
             (extra or "").strip().lower(),
         ]
+    )
+
+
+def _ensure_ingest_placement_digest(
+    db: Session,
+    *,
+    source_fax_id: int | None,
+    count: int,
+) -> None:
+    """One dashboard card per fax for all parked OCR placements — not one per case × admin spam."""
+    if count <= 0:
+        return
+    fingerprint = f"ingest_digest:{source_fax_id or 'none'}"
+    title = "Desk ingest · place on Block OR"
+    body = (
+        f"Fax #{source_fax_id or '?'} · {count} case"
+        f"{'' if count == 1 else 's'} need drag-drop onto the right card, then Save."
+    )
+    payload = {
+        "flagType": "ingest_correction",
+        "reason": "ingest_digest",
+        "fingerprint": fingerprint,
+        "href": "/admin/ingest-fixes",
+        "sourceFaxId": source_fax_id,
+        "count": count,
+    }
+    from .models import AdminNotification
+
+    existing = (
+        db.query(AdminNotification)
+        .filter(AdminNotification.kind == "ingest_correction")
+        .all()
+    )
+    updated = False
+    for row in existing:
+        try:
+            data = json.loads(row.payload or "{}") if row.payload else {}
+        except (TypeError, ValueError):
+            data = {}
+        if data.get("fingerprint") != fingerprint:
+            continue
+        row.title = title
+        row.body = body
+        row.payload = json.dumps(payload)
+        row.read_at = None
+        updated = True
+    if updated:
+        db.commit()
+        return
+    notify_admins(
+        title=title,
+        body=body,
+        db=db,
+        kind="ingest_correction",
+        payload=payload,
     )
 
 
@@ -153,7 +215,7 @@ def _queue_ingest_correction(
     room: str | None = None,
     patient_dob: str | None = None,
 ) -> dict[str, Any]:
-    """Park missing Desk fields on the admin portal instead of failing the fax."""
+    """Park missing Desk fields. Placeable OCR misfits stay silent — board is SSOT."""
     fingerprint = _correction_fingerprint(
         source_fax_id=source_fax_id,
         reason=reason,
@@ -179,6 +241,20 @@ def _queue_ingest_correction(
         "room": room,
     }
     payload["href"] = admin_notification_href("ingest_correction", payload)
+    item = {
+        "reason": reason,
+        "body": body,
+        "href": href,
+        "date": day.isoformat() if day else None,
+        "patient_name": patient_name,
+        "case_id": case_id,
+    }
+    corrections.append(item)
+
+    # Drag-drop board owns these. Per-case × per-admin cards are noise.
+    if reason in _PLACEABLE_CORRECTION_REASONS:
+        return item
+
     from .models import AdminNotification
 
     existing = (
@@ -209,15 +285,6 @@ def _queue_ingest_correction(
             kind="ingest_correction",
             payload=payload,
         )
-    item = {
-        "reason": reason,
-        "body": body,
-        "href": href,
-        "date": day.isoformat() if day else None,
-        "patient_name": patient_name,
-        "case_id": case_id,
-    }
-    corrections.append(item)
     return item
 
 
@@ -1578,6 +1645,14 @@ def ingest_surgeon_schedule(
 
     def _count(action: str) -> int:
         return sum(1 for row in case_results if row.get("action") == action)
+
+    placeable_n = sum(
+        1 for row in corrections if row.get("reason") in _PLACEABLE_CORRECTION_REASONS
+    )
+    if placeable_n:
+        _ensure_ingest_placement_digest(
+            db, source_fax_id=source_fax_id, count=placeable_n
+        )
 
     payload = {
         "ok": len(errors) == 0,

@@ -117,6 +117,8 @@ _PLACEABLE_CORRECTION_REASONS = frozenset({
     "block_not_found",
     "missing_time",
     "missing_block_window",
+    "session_card_taken",
+    "clinic_card_not_found",
 })
 
 
@@ -1088,7 +1090,7 @@ def _upsert_clinic_day(
     location_id: int,
     notes: str,
 ) -> dict[str, Any]:
-    """Write clinic lane without staff push spam; ignore identical resends."""
+    """Fill an existing AM/PM clinic card only. Fax never creates new cards."""
     sess = (session or "pm").lower()
     if sess not in {"am", "pm", "full"}:
         sess = "pm"
@@ -1102,63 +1104,80 @@ def _upsert_clinic_day(
         .order_by(ClinicSchedule.id)
         .first()
     )
-    if existing:
-        same_loc = existing.location_id == location_id
-        same_visits = _clinic_visit_fingerprint(existing.notes) == _clinic_visit_fingerprint(notes)
-        if same_loc and same_visits and existing.session == sess:
-            return {
-                "id": existing.id,
-                "action": "unchanged",
-                "date": day.isoformat(),
-                "session": sess,
-                "location_id": location_id,
-                "warnings": [],
-            }
-        existing.location_id = location_id
-        existing.session = sess
-        existing.assignment_type = "assigned"
-        existing.notes = notes
-        # Drop duplicate session rows for the same day (legacy full/pm collisions).
-        extras = (
-            db.query(ClinicSchedule)
-            .filter(
-                ClinicSchedule.surgeon_id == surgeon_id,
-                ClinicSchedule.date == day,
-                ClinicSchedule.session.in_([sess, "full"]),
-                ClinicSchedule.id != existing.id,
-            )
-            .all()
-        )
-        for row in extras:
-            db.delete(row)
-        db.commit()
+    if existing is None:
+        return {
+            "id": None,
+            "action": "skipped_no_card",
+            "date": day.isoformat(),
+            "session": sess,
+            "location_id": location_id,
+            "warnings": ["no existing AM/PM clinic card"],
+        }
+    same_loc = existing.location_id == location_id
+    same_visits = _clinic_visit_fingerprint(existing.notes) == _clinic_visit_fingerprint(notes)
+    if same_loc and same_visits and existing.session == sess:
         return {
             "id": existing.id,
-            "action": "updated",
+            "action": "unchanged",
             "date": day.isoformat(),
             "session": sess,
             "location_id": location_id,
             "warnings": [],
         }
-
-    row = ClinicSchedule(
-        surgeon_id=surgeon_id,
-        location_id=location_id,
-        date=day,
-        session=sess,
-        assignment_type="assigned",
-        notes=notes,
+    existing.location_id = location_id
+    existing.session = sess
+    existing.assignment_type = "assigned"
+    existing.notes = notes
+    # Drop duplicate session rows for the same day (legacy full/pm collisions).
+    extras = (
+        db.query(ClinicSchedule)
+        .filter(
+            ClinicSchedule.surgeon_id == surgeon_id,
+            ClinicSchedule.date == day,
+            ClinicSchedule.session.in_([sess, "full"]),
+            ClinicSchedule.id != existing.id,
+        )
+        .all()
     )
-    db.add(row)
+    for row in extras:
+        db.delete(row)
     db.commit()
     return {
-        "id": row.id,
-        "action": "created",
+        "id": existing.id,
+        "action": "updated",
         "date": day.isoformat(),
         "session": sess,
         "location_id": location_id,
         "warnings": [],
     }
+
+
+def _surgeon_session_block_assignment(
+    db: Session,
+    *,
+    surgeon_id: int,
+    day: date,
+    session: str,
+) -> ORBlockAssignment | None:
+    """Existing AM or PM Block OR placement for this surgeon that day (max one half)."""
+    from .or_block_service import _session_bucket
+
+    want = (session or "am").lower()
+    rows = (
+        db.query(ORBlockAssignment, ORBlockInstance)
+        .join(ORBlockInstance, ORBlockAssignment.block_instance_id == ORBlockInstance.id)
+        .filter(
+            ORBlockAssignment.surgeon_id == surgeon_id,
+            ORBlockInstance.date == day,
+            ORBlockInstance.status.in_(ACTIVE_BLOCK_STATUSES),
+        )
+        .order_by(ORBlockInstance.start_time, ORBlockAssignment.id)
+        .all()
+    )
+    for assign, block in rows:
+        if _session_bucket(block) == want:
+            return assign
+    return None
 
 
 def ingest_surgeon_schedule(
@@ -1442,10 +1461,49 @@ def ingest_surgeon_schedule(
                         )
 
                     for instance, block_action in blocks:
+                        from .or_block_service import _session_bucket
+
+                        half = _session_bucket(instance)
                         half_starts = [
                             t for t in case_times
                             if instance.start_time <= t < instance.end_time
                         ]
+                        existing_half = _surgeon_session_block_assignment(
+                            db,
+                            surgeon_id=surgeon.id,
+                            day=day,
+                            session=half,
+                        )
+                        if (
+                            existing_half is not None
+                            and existing_half.block_instance_id != instance.id
+                        ):
+                            # One AM + one PM card per surgeon/day. Fax may not add a second hospital.
+                            for case in group_cases:
+                                st = _parse_time(case.get("start_time"), earliest)
+                                if st is None or _fax_session_for_clock(st) != half:
+                                    continue
+                                _park_unplaced_case(
+                                    db,
+                                    corrections=corrections,
+                                    surgeon=surgeon,
+                                    day=day,
+                                    case=case,
+                                    start_time=st,
+                                    location_id=loc.id,
+                                    room=str(room or ""),
+                                    base_note=base_note,
+                                    source_fax_id=source_fax_id,
+                                    day_candidates=day_candidates,
+                                    claimed_ids=claimed_ids,
+                                    reason="session_card_taken",
+                                    body_extra=(
+                                        f"{loc.abbreviation or loc.name} {half.upper()} — "
+                                        "surgeon already has that half on another Block OR"
+                                    ),
+                                )
+                            continue
+
                         warnings = _assign_surgeon_to_block(
                             db,
                             block=instance,
@@ -1491,6 +1549,14 @@ def ingest_surgeon_schedule(
                             continue
                         host = _block_for(st)
                         if host is None:
+                            continue
+                        # Only land cases on the surgeon's allowed half card.
+                        from .or_block_service import _session_bucket as _sb
+                        half = _sb(host)
+                        owned = _surgeon_session_block_assignment(
+                            db, surgeon_id=surgeon.id, day=day, session=half
+                        )
+                        if owned is None or owned.block_instance_id != host.id:
                             continue
                         result = _upsert_surgical_case(
                             db,
@@ -1645,16 +1711,39 @@ def ingest_surgeon_schedule(
             if time_bits:
                 notes = f"{base_note} · " + "; ".join(time_bits[:12])
             try:
-                created_clinics.append(
-                    _upsert_clinic_day(
+                clinic_result = _upsert_clinic_day(
+                    db,
+                    surgeon_id=surgeon.id,
+                    day=day,
+                    session=day_session,
+                    location_id=loc.id,
+                    notes=notes,
+                )
+                if clinic_result.get("action") == "skipped_no_card":
+                    _queue_ingest_correction(
                         db,
+                        corrections=corrections,
+                        reason="clinic_card_not_found",
+                        title="Desk ingest · no AM/PM clinic card",
+                        body=(
+                            f"{surgeon.full_name} · {day.strftime('%m-%d-%y')} · "
+                            f"{loc.abbreviation or loc.name} {day_session.upper()} — "
+                            "no existing clinic card. Fax cannot create cards; add AM/PM first."
+                        ),
+                        href=_clinic_href(
+                            day,
+                            surgeon.id,
+                            reason="clinic_card_not_found",
+                            site=str(site_for_day or ""),
+                        ),
+                        source_fax_id=source_fax_id,
                         surgeon_id=surgeon.id,
                         day=day,
-                        session=day_session,
-                        location_id=loc.id,
-                        notes=notes,
+                        extra=f"{loc.abbreviation or loc.name}:{day_session}",
+                        site=str(site_for_day or ""),
                     )
-                )
+                else:
+                    created_clinics.append(clinic_result)
             except Exception as exc:  # noqa: BLE001
                 errors.append({
                     "index": idx,

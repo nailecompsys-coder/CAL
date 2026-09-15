@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
 _EASTERN = ZoneInfo("America/New_York")
@@ -29,6 +29,22 @@ def coerce_datetime(value) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def format_usa_date(value) -> str:
+    """mm-dd-yy. Accepts date, datetime, or ISO YYYY-MM-DD string."""
+    if value is None or value == "":
+        return "—"
+    if isinstance(value, datetime):
+        day = value.astimezone(_EASTERN).date() if value.tzinfo else value.date()
+        return day.strftime("%m-%d-%y")
+    if isinstance(value, date):
+        return value.strftime("%m-%d-%y")
+    raw = str(value).strip()[:10]
+    try:
+        return date.fromisoformat(raw).strftime("%m-%d-%y")
+    except ValueError:
+        return raw
 
 
 def format_us_datetime(value) -> str:

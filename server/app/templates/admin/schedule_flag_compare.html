@@ -6,7 +6,7 @@
   <div class="min-w-0">
     <h1 class="font-bold">CAL vs fax OCR</h1>
     <p class="text-xs text-slate-500">
-      {{ compare.surgeonInitials }} {{ compare.surgeonName }} · {{ compare.date }} · {{ compare.blockLabel or 'Block OR' }}
+      {{ compare.surgeonInitials }} {{ compare.surgeonName }} · {{ compare.date|usa_date }} · {{ compare.blockLabel or 'Block OR' }}
       {% if compare.sourceFaxId %} · Desk fax #{{ compare.sourceFaxId }}{% endif %}
     </p>
   </div>
@@ -76,7 +76,7 @@
       <ul class="space-y-1.5">
         {% for r in compare.ocrRows %}
         <li class="rounded-lg border border-violet-200 bg-violet-50/50 px-2.5 py-1.5 text-xs">
-          {% if r.caseDate %}<span class="font-bold tabular-nums">{{ r.caseDate }}</span> · {% endif %}
+          {% if r.caseDate %}<span class="font-bold tabular-nums">{{ r.caseDate|usa_date }}</span> · {% endif %}
           <span class="font-bold tabular-nums">{{ r.startTime or 'no time' }}</span>
           {% if r.room %}<span class="font-semibold text-violet-900"> · {{ r.room }}</span>{% endif %}
           · {{ r.patientName or '—' }}

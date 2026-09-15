@@ -12,7 +12,7 @@ from .admin_notification_ack import notification_is_informational
 from .device_names import readable_device_name
 from .or_block_service import sanitize_schedule_note_for_humans
 from .paths import TEMPLATES_DIR
-from .us_datetime import format_us_datetime
+from .us_datetime import format_us_datetime, format_usa_date
 from .version_display import release_channel, release_label
 
 
@@ -60,6 +60,7 @@ templates.env.filters["from_json"] = _json.loads
 templates.env.filters["urlquote"] = lambda s: _url_quote(str(s or ""), safe="")
 templates.env.filters["eastern_time"] = _eastern_time
 templates.env.filters["us_datetime"] = format_us_datetime
+templates.env.filters["usa_date"] = format_usa_date
 templates.env.filters["phone"] = _format_phone
 templates.env.filters["bytes"] = _format_bytes
 templates.env.filters["device_name"] = readable_device_name

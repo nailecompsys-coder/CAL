@@ -8,7 +8,6 @@ from .conflicts import check_conflicts
 from .models import ClinicSchedule, Location, Surgeon
 from .practice_time import practice_today
 from .or_block_service import log_schedule_change
-from .push import send_push_to_surgeon
 
 
 def schedule_rows_for_slot(query, session: str):
@@ -76,12 +75,7 @@ def assign_clinic(
             body=f"{surgeon.initials}: OFF",
         )
         db.commit()
-        send_push_to_surgeon(
-            surgeon_id,
-            "Schedule Updated",
-            f"{schedule_date.strftime('%b %d')}: OFF",
-            db,
-        )
+        # No surgeon push/SMS/email for clinic assigns until notification prefs exist.
         return []
     if not loc:
         return []
@@ -94,12 +88,7 @@ def assign_clinic(
         body=f"{surgeon.initials}: {loc.abbreviation or loc.name} {session.upper()}",
     )
     db.commit()
-    send_push_to_surgeon(
-        surgeon_id,
-        "Clinic Schedule Updated",
-        f"{schedule_date.strftime('%b %d')}: {loc.name}",
-        db,
-    )
+    # No surgeon push/SMS/email for clinic assigns until notification prefs exist.
     raw = check_conflicts(
         surgeon_id, schedule_date, schedule_date, db,
         exclude_clinic_schedule_id=schedule.id,

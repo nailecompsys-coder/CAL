@@ -76,6 +76,7 @@
       <ul class="space-y-1.5">
         {% for r in compare.ocrRows %}
         <li class="rounded-lg border border-violet-200 bg-violet-50/50 px-2.5 py-1.5 text-xs">
+          {% if r.caseDate %}<span class="font-bold tabular-nums">{{ r.caseDate }}</span> · {% endif %}
           <span class="font-bold tabular-nums">{{ r.startTime or 'no time' }}</span>
           {% if r.room %}<span class="font-semibold text-violet-900"> · {{ r.room }}</span>{% endif %}
           · {{ r.patientName or '—' }}

@@ -42,6 +42,7 @@ def serialize_ocr_rows(cases: list[dict[str, Any]], *, source_fax_id: int | None
     for case in cases:
         rows.append({
             "patientName": (case.get("patient_name") or "").strip(),
+            "caseDate": (case.get("case_date") or "").strip()[:10],
             "startTime": (case.get("start_time") or "").strip(),
             "room": (case.get("room") or "").strip(),
             "procedure": ((case.get("procedure") or "").strip())[:120],

@@ -212,7 +212,7 @@ def reconcile_ingest_correction_notifications(
     db: Session,
     admin_user_id: int | None = None,
 ) -> int:
-    """Re-read ingest cards. Drop ones that were never real work (DOB dates, already fixed)."""
+    """Drop fixed / junk / duplicate ingest cards. Keep unplaced cases for drag-save."""
     from .ingest_date_rules import parse_iso_date, plausible_schedule_date
     from .ingest_resolve import resolve_clinic_location
     from .models import SurgicalCase
@@ -223,7 +223,8 @@ def reconcile_ingest_correction_notifications(
     if admin_user_id is not None:
         q = q.filter(AdminNotification.admin_user_id == admin_user_id)
     removed = 0
-    for row in q.all():
+    seen_fp: set[tuple[int, str]] = set()
+    for row in q.order_by(AdminNotification.id.asc()).all():
         try:
             payload = json.loads(row.payload or "{}") if row.payload else {}
         except (TypeError, ValueError):
@@ -234,6 +235,14 @@ def reconcile_ingest_correction_notifications(
             db.delete(row)
             removed += 1
             continue
+        fingerprint = str(payload.get("fingerprint") or "").strip()
+        if fingerprint:
+            key = (int(row.admin_user_id), fingerprint)
+            if key in seen_fp:
+                db.delete(row)
+                removed += 1
+                continue
+            seen_fp.add(key)
         day = parse_iso_date(payload.get("date"))
         if day and not plausible_schedule_date(day, today):
             db.delete(row)
@@ -250,20 +259,28 @@ def reconcile_ingest_correction_notifications(
                 db.delete(row)
                 removed += 1
                 continue
+        case_id = payload.get("caseId")
+        if case_id:
+            case = db.get(SurgicalCase, int(case_id))
+            if case is None or (case.status or "") == "cancelled":
+                db.delete(row)
+                removed += 1
+                continue
+            # Drag-saved onto a Block OR card — done.
+            if (
+                reason in {"block_not_found", "missing_time", "missing_block_window"}
+                and case.or_block_instance_id
+            ):
+                db.delete(row)
+                removed += 1
+                continue
+            continue
         if reason == "missing_time" and day:
             patient = payload.get("patientName") or ""
             if _timed_case_already_on_board(db, day, patient):
                 db.delete(row)
                 removed += 1
                 continue
-        case_id = payload.get("caseId")
-        if not case_id:
-            continue
-        case = db.get(SurgicalCase, int(case_id))
-        if case is None or (case.status or "") == "cancelled":
-            db.delete(row)
-            removed += 1
-            continue
     if removed:
         db.commit()
     return removed

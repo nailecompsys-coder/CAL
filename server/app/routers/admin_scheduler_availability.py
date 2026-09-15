@@ -98,10 +98,18 @@ def scheduler_availability_page(
                 continue
         schedule_flags.append(row)
     from ..models import AdminNotification
+    from ..admin_settings_page_service import reconcile_ingest_correction_notifications
+
+    reconcile_ingest_correction_notifications(db)
     ingest_fixes = []
+    seen_fp: set[str] = set()
     for note in (
         db.query(AdminNotification)
-        .filter(AdminNotification.kind == "ingest_correction", AdminNotification.read_at.is_(None))
+        .filter(
+            AdminNotification.kind == "ingest_correction",
+            AdminNotification.read_at.is_(None),
+            AdminNotification.admin_user_id == admin.id,
+        )
         .order_by(AdminNotification.created_at.asc())
         .all()
     ):
@@ -109,6 +117,10 @@ def scheduler_availability_page(
             payload = json.loads(note.payload or "{}") if note.payload else {}
         except (TypeError, ValueError):
             payload = {}
+        fp = str(payload.get("fingerprint") or note.id)
+        if fp in seen_fp:
+            continue
+        seen_fp.add(fp)
         if selected_surgeon_id and payload.get("surgeonId") not in (None, selected_surgeon_id, str(selected_surgeon_id)):
             try:
                 if int(payload.get("surgeonId")) != selected_surgeon_id:

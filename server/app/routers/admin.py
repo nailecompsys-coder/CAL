@@ -147,7 +147,7 @@ def dashboard(
         if not is_clinic_day_meeting(row)
     ][:5]
     from ..admin_settings_page_service import recent_admin_notifications, unread_admin_notification_count
-    admin_notifications = recent_admin_notifications(db, admin.id, limit=8)
+    admin_notifications = recent_admin_notifications(db, admin.id, limit=20)
     admin_unread_notifications = unread_admin_notification_count(db, admin.id)
 
     surgeons = [row for row in db.query(Surgeon).filter(Surgeon.is_active == True).all() if surgeon_is_visible(row)]

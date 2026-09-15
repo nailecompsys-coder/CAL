@@ -896,7 +896,7 @@ class IngestScheduleTest(unittest.TestCase):
         row = self.db.query(SurgicalCase).one()
         self.assertEqual(row.date, date(2026, 8, 27))
 
-    def test_fax_does_not_mint_a_block_when_none_exists(self):
+    def test_fax_parks_case_when_no_block_exists(self):
         admin = AdminUser(
             username="shannon",
             email="shannon@example.com",
@@ -929,14 +929,17 @@ class IngestScheduleTest(unittest.TestCase):
         self.assertEqual(self.db.query(ORBlockInstance).filter(
             ORBlockInstance.date == date(2026, 9, 1)
         ).count(), 0)
-        self.assertEqual(self.db.query(SurgicalCase).count(), 0)
+        row = self.db.query(SurgicalCase).one()
+        self.assertIsNone(row.or_block_instance_id)
+        self.assertEqual(row.patient_name, "Fax, Patient")
         reasons = [row["reason"] for row in result["corrections"]]
         self.assertIn("block_not_found", reasons)
         note = self.db.query(AdminNotification).filter(
             AdminNotification.kind == "ingest_correction"
         ).first()
         self.assertIsNotNone(note)
-        self.assertIn("typo or bad OCR", note.body)
+        self.assertIn("drag onto the correct card", note.body)
+        self.assertIn("/admin/ingest-fixes", note.payload)
 
     def test_fax_sliver_folds_into_existing_pm_card(self):
         day = date(2026, 7, 27)

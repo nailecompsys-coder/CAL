@@ -413,7 +413,8 @@ def _ensure_or_blocks_for_fax(
 ) -> list[tuple[ORBlockInstance, str]]:
     """Fit faxed cases onto existing AM/PM cards. Never create Block OR.
 
-    Halves with no case are skipped so a padded AM end does not demand a PM card.
+    Missing fit usually means OCR wrong (site/day/time) — park the case for
+    drag-drop placement instead of minting capacity. Halves with no case are skipped.
     """
     del end_time, session, notes, room_text
     from .or_block_service import collapse_extra_am_pm_cards
@@ -437,6 +438,78 @@ def _ensure_or_blocks_for_fax(
         seen.add(existing.id)
         out.append((existing, "reused"))
     return out
+
+
+def _park_unplaced_case(
+    db: Session,
+    *,
+    corrections: list[dict[str, Any]],
+    surgeon,
+    day: date,
+    case: dict[str, Any],
+    start_time: time | None,
+    location_id: int | None,
+    room: str,
+    base_note: str,
+    source_fax_id: int | None,
+    day_candidates: list[SurgicalCase],
+    claimed_ids: set[int],
+    reason: str,
+    body_extra: str,
+) -> None:
+    """Keep OCR misfits on the board (no block) so Shannon can drag them onto the right card."""
+    patient_dob = _patient_dob_value(
+        case,
+        _parse_date(case.get("patient_dob") or case.get("case_date")),
+        None,
+    )
+    result = _upsert_surgical_case(
+        db,
+        surgeon_id=surgeon.id,
+        case_date=day,
+        start_time=start_time or time(7, 0),
+        patient_name=(case.get("patient_name") or "Unknown").strip() or "Unknown",
+        procedure=case.get("procedure") or "TBD",
+        location_id=location_id,
+        room_text=case.get("room") or room or "",
+        notes=base_note,
+        or_block_instance_id=None,
+        notify=False,
+        day_candidates=day_candidates,
+        claimed_ids=claimed_ids,
+        patient_dob=case.get("patient_dob"),
+    )
+    case_id = result.get("id")
+    row = db.get(SurgicalCase, case_id) if case_id else None
+    if row is not None:
+        # Explicit limbo: no Block OR until drag-save.
+        row.or_block_instance_id = None
+        if start_time is None:
+            row.start_time = None
+        db.flush()
+    clock = start_time.strftime("%H:%M") if start_time else "no time"
+    _queue_ingest_correction(
+        db,
+        corrections=corrections,
+        reason=reason,
+        title="Desk ingest · place on Block OR",
+        body=(
+            f"{surgeon.full_name} · {day.strftime('%m-%d-%y')} · "
+            f"{(case.get('patient_name') or 'Unknown').strip()} · {clock}"
+            + (f" · {body_extra}" if body_extra else "")
+            + " — OCR likely wrong; drag onto the correct card, then Save."
+        ),
+        href=f"/admin/ingest-fixes?case_id={case_id}" if case_id else "/admin/ingest-fixes",
+        source_fax_id=source_fax_id,
+        surgeon_id=surgeon.id,
+        day=day,
+        patient_name=case.get("patient_name"),
+        case_id=case_id,
+        extra=body_extra or clock,
+        procedure=case.get("procedure") or "",
+        room=case.get("room") or room or "",
+        patient_dob=patient_dob,
+    )
 
 
 def _assign_surgeon_to_block(
@@ -1179,39 +1252,23 @@ def ingest_surgeon_schedule(
                             _parse_date(case.get("patient_dob") or case.get("case_date")),
                             fax_window,
                         )
-                        _queue_ingest_correction(
+                        _park_unplaced_case(
                             db,
                             corrections=corrections,
-                            reason="missing_time",
-                            title="Desk ingest · case time missing",
-                            body=(
-                                f"{surgeon.full_name} · {day.strftime('%m-%d-%y')} · "
-                                f"{(case.get('patient_name') or 'Unknown').strip()} · "
-                                f"no start time on fax row"
-                                + (
-                                    f" · {(case.get('procedure') or '')[:60]}"
-                                    if case.get("procedure")
-                                    else ""
-                                )
-                            ),
-                            href=_clinic_href(
-                                day,
-                                surgeon.id,
-                                reason="missing_time",
-                                patient_name=case.get("patient_name"),
-                                procedure=case.get("procedure") or "",
-                                room=case.get("room") or room or "",
-                                patient_dob=patient_dob,
-                            ),
-                            source_fax_id=source_fax_id,
-                            surgeon_id=surgeon.id,
+                            surgeon=surgeon,
                             day=day,
-                            patient_name=case.get("patient_name"),
-                            extra=case.get("procedure") or "",
-                            procedure=case.get("procedure") or "",
-                            room=case.get("room") or room or "",
-                            patient_dob=patient_dob,
+                            case=case,
+                            start_time=None,
+                            location_id=None,
+                            room=str(room or ""),
+                            base_note=base_note,
+                            source_fax_id=source_fax_id,
+                            day_candidates=day_candidates,
+                            claimed_ids=claimed_ids,
+                            reason="missing_time",
+                            body_extra="no start time on fax row",
                         )
+                        del patient_dob
                 if not timed:
                     continue
                 group_cases = timed
@@ -1251,29 +1308,54 @@ def ingest_surgeon_schedule(
                                 return inst
                         return None
 
-                    unfitted = [t for t in case_times if _block_for(t) is None]
-                    if unfitted:
-                        clock = ", ".join(t.strftime("%H:%M") for t in unfitted[:4])
-                        _queue_ingest_correction(
+                    unfitted_cases = [
+                        c for c in group_cases
+                        if _block_for(_parse_time(c.get("start_time"), earliest) or earliest) is None
+                    ]
+                    if not blocks:
+                        for case in group_cases:
+                            st = _parse_time(case.get("start_time"), earliest)
+                            _park_unplaced_case(
+                                db,
+                                corrections=corrections,
+                                surgeon=surgeon,
+                                day=day,
+                                case=case,
+                                start_time=st,
+                                location_id=loc.id,
+                                room=str(room or ""),
+                                base_note=base_note,
+                                source_fax_id=source_fax_id,
+                                day_candidates=day_candidates,
+                                claimed_ids=claimed_ids,
+                                reason="block_not_found",
+                                body_extra=(
+                                    f"{loc.abbreviation or loc.name} — no matching AM/PM card"
+                                ),
+                            )
+                        continue
+
+                    for case in unfitted_cases:
+                        st = _parse_time(case.get("start_time"), earliest)
+                        _park_unplaced_case(
                             db,
                             corrections=corrections,
-                            reason="block_not_found",
-                            title="Scheduling flag · no matching Block OR",
-                            body=(
-                                f"{surgeon.full_name} · {day.strftime('%m-%d-%y')} · "
-                                f"{loc.abbreviation or loc.name} {clock} "
-                                "does not fit an existing AM/PM block. "
-                                "Check for a typo or bad OCR."
-                            ),
-                            href=_clinic_href(day, surgeon.id, reason="block_not_found"),
-                            source_fax_id=source_fax_id,
-                            surgeon_id=surgeon.id,
+                            surgeon=surgeon,
                             day=day,
-                            extra=clock,
+                            case=case,
+                            start_time=st,
+                            location_id=loc.id,
                             room=str(room or ""),
+                            base_note=base_note,
+                            source_fax_id=source_fax_id,
+                            day_candidates=day_candidates,
+                            claimed_ids=claimed_ids,
+                            reason="block_not_found",
+                            body_extra=(
+                                f"{loc.abbreviation or loc.name} "
+                                f"{(st or earliest).strftime('%H:%M')} — does not fit card"
+                            ),
                         )
-                    if not blocks:
-                        continue
 
                     for instance, block_action in blocks:
                         half_starts = [

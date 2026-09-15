@@ -73,10 +73,13 @@
   <section class="clinical-panel clinical-table overflow-hidden">
     <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-3">
       <div>
-        <h2 class="font-extrabold text-sm text-slate-800">Fax ingest — missing fields</h2>
-        <p class="text-xs text-slate-500">A desk fax came in without a time, surgeon, or clinic/OR location</p>
+        <h2 class="font-extrabold text-sm text-slate-800">Fax ingest — place on Block OR</h2>
+        <p class="text-xs text-slate-500">OCR misfits wait unplaced. Open Ingest fixes, drag onto the right card, then Save.</p>
       </div>
-      <span class="text-xs font-bold text-slate-500">{{ ingest_fixes|length }}</span>
+      <div class="flex items-center gap-2">
+        <a href="/admin/ingest-fixes" class="text-xs font-bold text-teal-700 hover:underline">Open board</a>
+        <span class="text-xs font-bold text-slate-500">{{ ingest_fixes|length }}</span>
+      </div>
     </div>
     <table class="w-full text-sm">
       <thead>
@@ -92,7 +95,7 @@
           <td class="px-4 py-3 font-semibold text-slate-700">{{ row.date or '—' }}</td>
           <td class="px-4 py-3 text-amber-900 text-xs">{{ row.body }}</td>
           <td class="px-4 py-3">
-            <a class="text-xs font-bold text-blue-700 hover:underline" href="{{ row.href or '/admin/clinic-schedule' }}">Edit</a>
+            <a class="text-xs font-bold text-blue-700 hover:underline" href="{{ row.href or '/admin/ingest-fixes' }}">Place</a>
           </td>
         </tr>
         {% else %}

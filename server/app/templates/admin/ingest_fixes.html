@@ -1,0 +1,298 @@
+{% extends "base_admin.html" %}
+{% block title %}Ingest fixes{% endblock %}
+
+{% block head %}
+<style>
+  .ingest-chip {
+    cursor: grab;
+    user-select: none;
+    touch-action: none;
+  }
+  .ingest-chip:active { cursor: grabbing; }
+  .ingest-chip.is-staged {
+    outline: 2px solid #0d9488;
+    outline-offset: 1px;
+    opacity: 0.55;
+  }
+  .ingest-drop {
+    min-height: 3.25rem;
+    transition: background .12s, border-color .12s;
+  }
+  .ingest-drop.is-over {
+    background: rgba(13, 148, 136, 0.12);
+    border-color: #0d9488;
+  }
+  .ingest-staged-pill {
+    font-size: 10px;
+    line-height: 1.2;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<header class="portal-header px-5 py-3 sticky top-0 z-10 flex-shrink-0 flex items-center justify-between gap-3">
+  <div class="min-w-0">
+    <h1 class="font-bold">Ingest fixes</h1>
+    <p class="text-xs text-slate-500">OCR misfits land here unplaced. Drag each case onto the correct Block OR card, fix time/surgeon if needed, then Save.</p>
+  </div>
+  <div class="flex items-center gap-2 flex-shrink-0">
+    <a href="/admin/scheduler-availability" class="text-xs font-bold text-slate-600 px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50">Needs attention</a>
+    <button type="button" id="ingest-save" disabled
+      class="bg-teal-700 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-teal-800 disabled:opacity-40 disabled:cursor-not-allowed">
+      Save <span id="ingest-save-count"></span>
+    </button>
+  </div>
+</header>
+
+{% set msg = request.query_params.get('msg') %}
+{% if msg == 'dismissed' %}
+<div class="mx-5 mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">Case dismissed.</div>
+{% endif %}
+<div id="ingest-banner" class="mx-5 mt-3 hidden rounded-xl border px-3 py-2 text-xs"></div>
+
+<div class="p-5 grid grid-cols-1 xl:grid-cols-12 gap-4">
+  <section class="xl:col-span-4 clinical-panel overflow-hidden flex flex-col min-h-[28rem]">
+    <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-2">
+      <div>
+        <h2 class="font-extrabold text-sm text-slate-800">Unplaced fax cases</h2>
+        <p class="text-[11px] text-slate-500">{{ parked|length }} waiting · drag onto a card →</p>
+      </div>
+    </div>
+    <div id="ingest-parked" class="p-3 space-y-2 overflow-y-auto flex-1">
+      {% for row in parked %}
+      <div class="ingest-chip rounded-xl border border-amber-200 bg-amber-50/90 px-3 py-2 {% if focus_case_id == row.id %}ring-2 ring-teal-500{% endif %}"
+           draggable="true"
+           data-case-id="{{ row.id }}"
+           data-surgeon-id="{{ row.surgeonId }}"
+           data-start="{{ row.startTime }}"
+           data-room="{{ row.room | e }}"
+           data-patient="{{ row.patientName | e }}">
+        <div class="flex items-start justify-between gap-2">
+          <div class="min-w-0">
+            <p class="text-xs font-bold text-slate-800 truncate">{{ row.patientName }}</p>
+            <p class="text-[11px] text-slate-600 mt-0.5">
+              <span class="font-semibold">{{ row.surgeonInitials or '—' }}</span>
+              · {{ row.date or '—' }}
+              · {% if row.startTime %}{{ row.startTime }}{% else %}<span class="text-amber-800 font-bold">no time</span>{% endif %}
+              {% if row.location %} · {{ row.location }}{% endif %}
+              {% if row.room %} · {{ row.room }}{% endif %}
+            </p>
+            {% if row.procedure %}
+            <p class="text-[10px] text-slate-500 mt-0.5 line-clamp-1">{{ row.procedure }}</p>
+            {% endif %}
+          </div>
+          <form method="post" action="/admin/ingest-fixes/{{ row.id }}/dismiss" onsubmit="return confirm('Dismiss this unplaced case?');">
+            <button type="submit" class="text-[10px] font-bold text-slate-400 hover:text-red-600" title="Dismiss">✕</button>
+          </form>
+        </div>
+        <div class="mt-2 flex flex-wrap items-center gap-2">
+          <label class="text-[10px] text-slate-500 font-semibold">Time
+            <input type="time" class="ingest-time ml-1 px-1.5 py-0.5 rounded border border-slate-200 text-[11px]"
+                   value="{{ row.startTime }}" data-case-id="{{ row.id }}">
+          </label>
+          <label class="text-[10px] text-slate-500 font-semibold">Surgeon
+            <select class="ingest-surgeon ml-1 px-1.5 py-0.5 rounded border border-slate-200 text-[11px] bg-white max-w-[9rem]"
+                    data-case-id="{{ row.id }}">
+              {% for s in surgeons %}
+              <option value="{{ s.id }}" {% if s.id == row.surgeonId %}selected{% endif %}>{{ s.initials or s.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+        </div>
+        <p class="ingest-stage-label text-[10px] text-teal-800 font-semibold mt-1.5 hidden"></p>
+      </div>
+      {% else %}
+      <p class="text-sm text-slate-400 text-center py-10">Nothing waiting — faxes that fit existing cards land directly.</p>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="xl:col-span-8 clinical-panel overflow-hidden flex flex-col min-h-[28rem]">
+    <div class="px-4 py-3 border-b border-slate-100">
+      <h2 class="font-extrabold text-sm text-slate-800">Block OR drop targets</h2>
+      <p class="text-[11px] text-slate-500">{{ start_date.strftime('%b %-d') }} – {{ end_date.strftime('%b %-d') }} · drop a case on the right hospital / day / session</p>
+    </div>
+    <div class="p-3 overflow-y-auto flex-1 space-y-2">
+      {% set ns = namespace(prev='') %}
+      {% for b in blocks %}
+      {% if b.date != ns.prev %}
+      {% set ns.prev = b.date %}
+      <p class="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 pt-2">{{ b.date }}</p>
+      {% endif %}
+      <div class="ingest-drop rounded-xl border border-slate-200 bg-white px-3 py-2"
+           data-block-id="{{ b.id }}"
+           data-block-label="{{ b.location }} {{ b.session }} {{ b.start }}–{{ b.end }}">
+        <div class="flex items-center justify-between gap-2">
+          <div class="min-w-0">
+            <p class="text-xs font-bold text-slate-800">
+              {{ b.location or 'OR' }}
+              <span class="text-slate-500 font-semibold">{{ b.session }}</span>
+              <span class="tabular-nums text-slate-500">{{ b.start }}–{{ b.end }}</span>
+            </p>
+            <p class="text-[11px] text-slate-500 truncate">
+              {% if b.surgeons %}
+                {% for s in b.surgeons %}{{ s.initials or s.name }}{% if not loop.last %}, {% endif %}{% endfor %}
+              {% else %}
+                open
+              {% endif %}
+              {% if b.room %} · {{ b.room }}{% endif %}
+            </p>
+          </div>
+          <span class="text-[10px] font-bold text-slate-400">#{{ b.id }}</span>
+        </div>
+        <div class="ingest-drop-staged mt-1.5 flex flex-wrap gap-1"></div>
+      </div>
+      {% else %}
+      <p class="text-sm text-slate-400 text-center py-10">No Block OR cards in this window. Create capacity in Block OR first, then place cases here.</p>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+
+<script>
+(function () {
+  var staged = {}; // caseId -> { caseId, blockId, surgeonId, startTime, room, label }
+  var draggingId = null;
+
+  function $(sel, root) { return (root || document).querySelector(sel); }
+  function $all(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+
+  function chipMeta(chip) {
+    var id = Number(chip.getAttribute('data-case-id'));
+    var timeInput = $('.ingest-time[data-case-id="' + id + '"]');
+    var surgSelect = $('.ingest-surgeon[data-case-id="' + id + '"]');
+    return {
+      caseId: id,
+      surgeonId: Number(surgSelect && surgSelect.value || chip.getAttribute('data-surgeon-id')),
+      startTime: (timeInput && timeInput.value) || chip.getAttribute('data-start') || '',
+      room: chip.getAttribute('data-room') || '',
+      patient: chip.getAttribute('data-patient') || ''
+    };
+  }
+
+  function refreshSave() {
+    var n = Object.keys(staged).length;
+    var btn = $('#ingest-save');
+    var count = $('#ingest-save-count');
+    btn.disabled = n === 0;
+    count.textContent = n ? '(' + n + ')' : '';
+  }
+
+  function renderStaged() {
+    $all('.ingest-chip').forEach(function (chip) {
+      var id = chip.getAttribute('data-case-id');
+      var label = $('.ingest-stage-label', chip);
+      if (staged[id]) {
+        chip.classList.add('is-staged');
+        label.textContent = '→ ' + staged[id].label;
+        label.classList.remove('hidden');
+      } else {
+        chip.classList.remove('is-staged');
+        label.textContent = '';
+        label.classList.add('hidden');
+      }
+    });
+    $all('.ingest-drop').forEach(function (drop) {
+      var bid = Number(drop.getAttribute('data-block-id'));
+      var box = $('.ingest-drop-staged', drop);
+      box.innerHTML = '';
+      Object.keys(staged).forEach(function (cid) {
+        if (staged[cid].blockId !== bid) return;
+        var pill = document.createElement('span');
+        pill.className = 'ingest-staged-pill inline-flex items-center gap-1 rounded-md bg-teal-50 border border-teal-200 text-teal-900 px-1.5 py-0.5';
+        pill.textContent = staged[cid].patient || ('#' + cid);
+        box.appendChild(pill);
+      });
+    });
+    refreshSave();
+  }
+
+  $all('.ingest-chip').forEach(function (chip) {
+    chip.addEventListener('dragstart', function (e) {
+      draggingId = chip.getAttribute('data-case-id');
+      e.dataTransfer.setData('text/plain', draggingId);
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    chip.addEventListener('dragend', function () { draggingId = null; });
+  });
+
+  $all('.ingest-drop').forEach(function (drop) {
+    drop.addEventListener('dragover', function (e) {
+      e.preventDefault();
+      drop.classList.add('is-over');
+      e.dataTransfer.dropEffect = 'move';
+    });
+    drop.addEventListener('dragleave', function () { drop.classList.remove('is-over'); });
+    drop.addEventListener('drop', function (e) {
+      e.preventDefault();
+      drop.classList.remove('is-over');
+      var id = e.dataTransfer.getData('text/plain') || draggingId;
+      var chip = $('.ingest-chip[data-case-id="' + id + '"]');
+      if (!chip) return;
+      var meta = chipMeta(chip);
+      if (!meta.startTime) {
+        showBanner('Set a start time on the case before placing it.', true);
+        return;
+      }
+      staged[id] = {
+        caseId: meta.caseId,
+        blockId: Number(drop.getAttribute('data-block-id')),
+        surgeonId: meta.surgeonId,
+        startTime: meta.startTime,
+        room: meta.room,
+        patient: meta.patient,
+        label: drop.getAttribute('data-block-label') || ('block #' + drop.getAttribute('data-block-id'))
+      };
+      renderStaged();
+    });
+  });
+
+  function showBanner(text, isError) {
+    var el = $('#ingest-banner');
+    el.textContent = text;
+    el.classList.remove('hidden', 'border-green-200', 'bg-green-50', 'text-green-800', 'border-red-200', 'bg-red-50', 'text-red-800');
+    if (isError) {
+      el.classList.add('border-red-200', 'bg-red-50', 'text-red-800');
+    } else {
+      el.classList.add('border-green-200', 'bg-green-50', 'text-green-800');
+    }
+  }
+
+  $('#ingest-save').addEventListener('click', async function () {
+    var placements = Object.keys(staged).map(function (k) {
+      var row = staged[k];
+      var chip = $('.ingest-chip[data-case-id="' + k + '"]');
+      var live = chip ? chipMeta(chip) : row;
+      return {
+        caseId: row.caseId,
+        blockId: row.blockId,
+        surgeonId: live.surgeonId,
+        startTime: live.startTime,
+        room: live.room
+      };
+    });
+    if (!placements.length) return;
+    var btn = $('#ingest-save');
+    btn.disabled = true;
+    try {
+      var res = await fetch('/admin/ingest-fixes/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ placements: placements })
+      });
+      var data = await res.json();
+      if (!res.ok || !data.ok) {
+        showBanner((data.errors && data.errors.join(' · ')) || 'Save failed', true);
+        btn.disabled = false;
+        return;
+      }
+      showBanner('Saved ' + data.placed + ' placement' + (data.placed === 1 ? '' : 's') + '.', false);
+      window.setTimeout(function () { window.location.reload(); }, 600);
+    } catch (err) {
+      showBanner(String(err), true);
+      btn.disabled = false;
+    }
+  });
+})();
+</script>
+{% endblock %}

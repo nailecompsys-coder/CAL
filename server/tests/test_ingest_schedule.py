@@ -128,7 +128,7 @@ class IngestScheduleTest(unittest.TestCase):
                         "case_date": day.isoformat(),
                         "start_time": "08:30",
                         "patient_name": "Generic, Block",
-                        "procedure": "Procedure",
+                        "procedure": "Robotic hernia repair",
                         "site_raw": "AHMGGENSRG",
                     }],
                 },
@@ -143,6 +143,48 @@ class IngestScheduleTest(unittest.TestCase):
         self.assertEqual(case.location_id, self.ap_or.id)
         self.assertEqual(case.or_block_instance_id, block.id)
         self.assertEqual(case.room_text, "APK S03")
+
+    def test_generic_ahmg_clinic_visit_does_not_become_or_case(self):
+        day = date(2026, 7, 27)
+        block = (
+            self.db.query(ORBlockInstance)
+            .filter(ORBlockInstance.date == day, ORBlockInstance.session == "am")
+            .one()
+        )
+        block.status = "assigned"
+        self.db.add(ORBlockAssignment(
+            block_instance_id=block.id,
+            surgeon_id=self.surgeon.id,
+            start_time=time(7, 0),
+            case_count=1,
+        ))
+        self.db.commit()
+
+        result = ingest_surgeon_schedule(
+            self.db,
+            source_fax_id=162,
+            surgeons=[{
+                "surgeon_name": "Jorge Luis Florin, MD",
+                "start_date": day.isoformat(),
+                "clinic_rotation": {
+                    "session": "am",
+                    "site_raw": "AHMGGENSRG",
+                    "slots": [{
+                        "case_date": day.isoformat(),
+                        "start_time": "08:30",
+                        "patient_name": "Generic, Clinic",
+                        "procedure": "Post-op",
+                        "site_raw": "AHMGGENSRG",
+                    }],
+                },
+            }],
+        )
+
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["cases_created"], 0)
+        self.assertEqual(self.db.query(SurgicalCase).count(), 0)
+        self.assertEqual(result["corrections_count"], 1)
+        self.assertEqual(result["corrections"][0]["reason"], "clinic_location_not_found")
 
     def test_ocr_misspelled_surgeon_still_resolves(self):
         woodley = Surgeon(

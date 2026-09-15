@@ -403,6 +403,37 @@ def _is_generic_practice_site(raw: str | None) -> bool:
     return compact in {"AHMG", "AHMGGENSRG"}
 
 
+def _looks_like_surgical_case(slot: dict) -> bool:
+    """True only for generic rows that read like OR cases, not clinic visits."""
+    text = f"{slot.get('procedure') or ''} {slot.get('visit_type') or ''}".upper()
+    clinic_terms = (
+        "POST-OP",
+        "POST OP",
+        "OFFICE VISIT",
+        "SPEC OFFICE",
+        "GEN SURG NEW",
+        "REFERRAL",
+        "TELEMEDICINE",
+        "US ",
+        "ULTRASOUND",
+    )
+    if any(term in text for term in clinic_terms):
+        return False
+    surgical_terms = (
+        "ROBOTIC",
+        "REPAIR",
+        "CHOLECYSTECTOMY",
+        "EXCISION",
+        "PLACEMENT",
+        "BIOPSY",
+        "COLECTOMY",
+        "HERNIA",
+        "MASS",
+        "CYST",
+    )
+    return any(term in text for term in surgical_terms)
+
+
 def _assigned_block_covering_time(
     db: Session,
     *,
@@ -1760,6 +1791,9 @@ def ingest_surgeon_schedule(
                 site_raw = slot.get("site_raw") or site
                 slot_time = _parse_time(slot.get("start_time"))
                 if not (_is_generic_practice_site(site_raw) and slot_time):
+                    kept_clinic_slots.append(slot)
+                    continue
+                if not _looks_like_surgical_case(slot):
                     kept_clinic_slots.append(slot)
                     continue
                 host = _assigned_block_covering_time(

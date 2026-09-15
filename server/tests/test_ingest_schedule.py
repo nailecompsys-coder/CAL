@@ -186,6 +186,44 @@ class IngestScheduleTest(unittest.TestCase):
         self.assertEqual(result["corrections_count"], 1)
         self.assertEqual(result["corrections"][0]["reason"], "clinic_location_not_found")
 
+    def test_manual_repair_clinic_card_is_not_overwritten_by_desk(self):
+        day = date(2026, 7, 27)
+        self.db.add(ClinicSchedule(
+            surgeon_id=self.surgeon.id,
+            location_id=self.ap_cl.id,
+            date=day,
+            session="am",
+            assignment_type="assigned",
+            notes="Desk fax manual repair 2026-09-15 · 08:30 A; 08:40 B",
+        ))
+        self.db.commit()
+
+        result = ingest_surgeon_schedule(
+            self.db,
+            source_fax_id=162,
+            surgeons=[{
+                "surgeon_name": "Jorge Luis Florin, MD",
+                "start_date": day.isoformat(),
+                "clinic_rotation": {
+                    "session": "am",
+                    "site_raw": "MGWGDGS",
+                    "slots": [{
+                        "case_date": day.isoformat(),
+                        "start_time": "08:30",
+                        "patient_name": "Overwrite, Attempt",
+                        "procedure": "Spec Office Visit",
+                        "site_raw": "MGWGDGS",
+                    }],
+                },
+            }],
+        )
+
+        self.assertTrue(result["ok"], result)
+        clinic = self.db.query(ClinicSchedule).one()
+        self.assertIn("manual repair", clinic.notes.lower())
+        self.assertNotIn("Overwrite", clinic.notes)
+        self.assertEqual(result["clinics"][0]["action"], "preserved_manual_repair")
+
     def test_duplicate_other_surgeon_or_row_does_not_create_assignment(self):
         day = date(2026, 7, 27)
         lucy = Surgeon(

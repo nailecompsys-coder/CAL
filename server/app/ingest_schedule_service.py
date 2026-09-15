@@ -1272,6 +1272,15 @@ def _upsert_clinic_day(
             "location_id": location_id,
             "warnings": ["no existing AM/PM clinic card"],
         }
+    if "manual repair" in (existing.notes or "").lower():
+        return {
+            "id": existing.id,
+            "action": "preserved_manual_repair",
+            "date": day.isoformat(),
+            "session": existing.session,
+            "location_id": existing.location_id,
+            "warnings": ["manual repair preserved"],
+        }
     same_loc = existing.location_id == location_id
     same_visits = _clinic_visit_fingerprint(existing.notes) == _clinic_visit_fingerprint(notes)
     if same_loc and same_visits and existing.session == sess:

@@ -1,0 +1,100 @@
+{% extends "base_admin.html" %}
+{% block title %}CAL vs OCR{% endblock %}
+
+{% block content %}
+<header class="portal-header px-5 py-3 sticky top-0 z-10 flex-shrink-0 flex items-center justify-between gap-3">
+  <div class="min-w-0">
+    <h1 class="font-bold">CAL vs fax OCR</h1>
+    <p class="text-xs text-slate-500">
+      {{ compare.surgeonInitials }} {{ compare.surgeonName }} · {{ compare.date }} · {{ compare.blockLabel or 'Block OR' }}
+      {% if compare.sourceFaxId %} · Desk fax #{{ compare.sourceFaxId }}{% endif %}
+    </p>
+  </div>
+  <div class="flex items-center gap-2 flex-shrink-0">
+    <a href="/admin/scheduler-availability" class="text-xs font-bold text-slate-600 px-3 py-2 rounded-xl border border-slate-200">Back</a>
+    <a href="{{ compare.hrefBlockOr }}" class="text-xs font-bold text-white bg-blue-600 px-3 py-2 rounded-xl hover:bg-blue-700">Open Block OR</a>
+  </div>
+</header>
+
+<div class="px-5 pt-3">
+  <div class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+    {{ compare.body }}
+  </div>
+</div>
+
+<div class="p-5 grid grid-cols-1 lg:grid-cols-2 gap-4">
+  <section class="clinical-panel overflow-hidden">
+    <div class="px-4 py-3 border-b border-slate-100 bg-slate-50">
+      <h2 class="font-extrabold text-sm text-slate-800">In CAL now</h2>
+      <p class="text-[11px] text-slate-500">What the board has for this surgeon on this day</p>
+    </div>
+    <div class="p-4 space-y-3">
+      <div>
+        <p class="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 mb-1.5">Block OR assignments</p>
+        {% if compare.calAssignments %}
+        <ul class="space-y-1.5">
+          {% for a in compare.calAssignments %}
+          <li class="rounded-lg border px-2.5 py-1.5 text-xs {% if a.flagged %}border-amber-300 bg-amber-50 font-semibold{% else %}border-slate-200 bg-white{% endif %}">
+            {{ a.location }} {{ a.session }} {{ a.start }}–{{ a.end }}
+            <span class="text-slate-500 font-normal">assign @ {{ a.assignStart or '—' }}</span>
+            {% if a.flagged %}<span class="text-amber-800"> · flagged</span>{% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-xs text-slate-400">No Block OR assignments.</p>
+        {% endif %}
+      </div>
+      <div>
+        <p class="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 mb-1.5">Cases</p>
+        {% if compare.calCases %}
+        <ul class="space-y-1.5">
+          {% for c in compare.calCases %}
+          <li class="rounded-lg border px-2.5 py-1.5 text-xs {% if c.onFlaggedBlock %}border-teal-300 bg-teal-50/60{% else %}border-slate-200{% endif %}">
+            <span class="font-bold">{{ c.primary }}{% if c.assist %}+{{ c.assist }}{% endif %}</span>
+            {{ c.startTime or '—' }} · {{ c.patientName }}
+            {% if c.room %}<span class="text-slate-500">· {{ c.room }}</span>{% endif %}
+            {% if c.faxId %}<span class="text-slate-400">· fax #{{ c.faxId }}</span>{% endif %}
+            {% if c.procedure %}<p class="text-[10px] text-slate-500 mt-0.5 line-clamp-1">{{ c.procedure }}</p>{% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="text-xs text-slate-400">No cases on this day for this surgeon/block.</p>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  <section class="clinical-panel overflow-hidden">
+    <div class="px-4 py-3 border-b border-slate-100 bg-slate-50">
+      <h2 class="font-extrabold text-sm text-slate-800">Fax OCR (what Desk pulled)</h2>
+      <p class="text-[11px] text-slate-500">Raw rows under this surgeon when the flag was raised — prove OCR right or wrong here</p>
+    </div>
+    <div class="p-4">
+      {% if compare.ocrRows %}
+      <ul class="space-y-1.5">
+        {% for r in compare.ocrRows %}
+        <li class="rounded-lg border border-violet-200 bg-violet-50/50 px-2.5 py-1.5 text-xs">
+          <span class="font-bold tabular-nums">{{ r.startTime or 'no time' }}</span>
+          {% if r.room %}<span class="font-semibold text-violet-900"> · {{ r.room }}</span>{% endif %}
+          · {{ r.patientName or '—' }}
+          {% if r.sourceFaxId %}<span class="text-slate-400"> · fax #{{ r.sourceFaxId }}</span>{% endif %}
+          {% if r.procedure %}<p class="text-[10px] text-slate-600 mt-0.5 line-clamp-2">{{ r.procedure }}</p>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="text-sm text-slate-600 leading-relaxed">
+        No OCR snapshot was stored on this older flag.
+        {% if compare.sourceFaxId %}
+        Re-send Desk fax #{{ compare.sourceFaxId }} to capture OCR on the next flag, or check Desk extract for that fax.
+        {% else %}
+        Re-ingest the fax so the next flag keeps the OCR rows.
+        {% endif %}
+      </p>
+      {% endif %}
+    </div>
+  </section>
+</div>
+{% endblock %}

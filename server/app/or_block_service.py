@@ -2127,10 +2127,18 @@ def recent_schedule_changes(db: Session, hours: int = 24) -> list[dict]:
             "surgeon": row.surgeon.full_name if row.surgeon else "",
             "surgeonInitials": row.surgeon.initials if row.surgeon else "",
             "createdAt": row.created_at.isoformat() if row.created_at else "",
+            "payload": payload,
             "href": payload.get("href") or (
-                f"/admin/block-or?block_id={payload['blockId']}" if payload.get("blockId") else "/admin/block-or"
+                f"/admin/schedule-flags/{row.id}"
+                if row.event_type == "desk_or_schedule_flag"
+                else (
+                    f"/admin/block-or?block_id={payload['blockId']}"
+                    if payload.get("blockId")
+                    else "/admin/block-or"
+                )
             ),
             "blockId": payload.get("blockId"),
+            "ocrPreview": "",
         })
     return out
 

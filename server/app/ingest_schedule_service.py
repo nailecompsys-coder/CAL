@@ -685,6 +685,8 @@ def _flag_admin_schedule_issues(
     location_label: str,
     warnings: list[str],
     fax_note: str,
+    source_fax_id: int | None = None,
+    ocr_cases: list[dict[str, Any]] | None = None,
 ) -> None:
     # Always replace prior flags for this placement. Fixed ⇒ gone.
     clear_block_or_schedule_flag_notifications(db, block.id, surgeon_id)
@@ -694,26 +696,39 @@ def _flag_admin_schedule_issues(
         return
     if not warnings:
         return
+    from .models import ScheduleChangeEvent
+    from .schedule_flag_compare_service import serialize_ocr_rows
+
+    ocr_rows = serialize_ocr_rows(list(ocr_cases or []), source_fax_id=source_fax_id)
     body = (
         f"{surgeon_name} · {day.strftime('%m-%d-%y')} · {location_label} "
         f"{block.start_time.strftime('%H:%M')}-{block.end_time.strftime('%H:%M')}: "
         + "; ".join(warnings[:5])
     )
-    log_schedule_change(
-        db,
+    event = ScheduleChangeEvent(
         event_type="desk_or_schedule_flag",
+        surgeon_id=surgeon_id,
+        date=day,
         title="Desk OR schedule flag",
         body=body,
-        surgeon_id=surgeon_id,
-        event_date=day,
-        payload={
-            "blockId": block.id,
-            "location": location_label,
-            "warnings": warnings,
-            "source": fax_note,
-            "href": f"/admin/block-or?block_id={block.id}",
-        },
+        payload="{}",
     )
+    db.add(event)
+    db.flush()
+    payload = {
+        "blockId": block.id,
+        "surgeonId": surgeon_id,
+        "date": day.isoformat(),
+        "location": location_label,
+        "warnings": warnings,
+        "source": fax_note,
+        "sourceFaxId": source_fax_id,
+        "ocrRows": ocr_rows,
+        "href": f"/admin/schedule-flags/{event.id}",
+        "eventId": event.id,
+    }
+    event.payload = json.dumps(payload, default=str)
+    db.commit()
     notify_admins(
         title="Scheduling flag · Block OR",
         body=body,
@@ -724,8 +739,10 @@ def _flag_admin_schedule_issues(
             "surgeonId": surgeon_id,
             "date": day.isoformat(),
             "warnings": warnings,
-            "href": f"/admin/block-or?block_id={block.id}",
-            "date": day.isoformat(),
+            "sourceFaxId": source_fax_id,
+            "ocrRows": ocr_rows,
+            "href": payload["href"],
+            "eventId": event.id,
         },
         require_schedule_opt_in=True,
     )
@@ -1454,6 +1471,8 @@ def ingest_surgeon_schedule(
                             location_label=loc.abbreviation or loc.name or "OR",
                             warnings=warnings,
                             fax_note=base_note,
+                            source_fax_id=source_fax_id,
+                            ocr_cases=group_cases,
                         )
                         created_blocks.append({
                             "block_id": instance.id,

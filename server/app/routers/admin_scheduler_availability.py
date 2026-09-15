@@ -1,6 +1,5 @@
-"""Needs-attention board: flags, missing fax fields, open Block OR, case warnings."""
+"""Needs attention: schedule flags with CAL vs OCR compare."""
 
-import json
 from datetime import date, timedelta
 from typing import Optional
 
@@ -8,14 +7,14 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
-from ..admin_notification_href import admin_notification_href
 from ..auth import get_current_admin
-from ..practice_time import practice_today
 from ..database import get_db
+from ..ingest_fix_service import parked_ingest_cases
 from ..jinja_env import templates
 from ..models import Surgeon
-from ..or_block_service import ACTIVE_BLOCK_STATUSES, block_instances_for_range, recent_schedule_changes, serialize_block_instance
-from ..scheduling_guardrails_service import scheduler_safe_rows
+from ..or_block_service import recent_schedule_changes
+from ..practice_time import practice_today
+from ..schedule_flag_compare_service import enrich_flag_list_row
 from ..surgeon_visibility import surgeon_is_visible
 from .admin import _base, _sort_surgeons_physicians_first
 
@@ -52,35 +51,14 @@ def scheduler_availability_page(
     selected_surgeon_id = _optional_int(surgeon_id)
 
     surgeons = [
-        row for row in db.query(Surgeon).filter(Surgeon.is_active == True).order_by(Surgeon.last_name).all()
+        row for row in db.query(Surgeon).filter(Surgeon.is_active == True).order_by(Surgeon.last_name).all()  # noqa: E712
         if surgeon_is_visible(row) and (row.staff_type or "physician") == "physician"
     ]
     surgeons = _sort_surgeons_physicians_first(surgeons)
 
-    blocks = []
-    for block in block_instances_for_range(db, start_date, end_date):
-        if (block.status or "") not in ACTIVE_BLOCK_STATUSES:
-            continue
-        payload = serialize_block_instance(block)
-        if selected_surgeon_id and payload.get("status") != "open":
-            assigned_ids = {
-                row.get("surgeonId")
-                for row in (payload.get("assignments") or [])
-                if row.get("surgeonId")
-            }
-            if payload.get("surgeonId"):
-                assigned_ids.add(payload["surgeonId"])
-            if selected_surgeon_id not in assigned_ids:
-                continue
-        blocks.append(payload)
-
-    open_blocks = [row for row in blocks if row.get("status") == "open"]
-    case_rows = [
-        row for row in scheduler_safe_rows(db, start_date, end_date, selected_surgeon_id)
-        if row.get("warnings")
-    ]
     from ..admin_settings_page_service import reconcile_stale_schedule_flag_notifications
     reconcile_stale_schedule_flag_notifications(db)
+
     schedule_flags = []
     for row in recent_schedule_changes(db, hours=24 * 90):
         if row.get("type") != "desk_or_schedule_flag":
@@ -96,43 +74,9 @@ def scheduler_availability_page(
             selected = next((s for s in surgeons if s.id == selected_surgeon_id), None)
             if selected and row.get("surgeon") != selected.full_name:
                 continue
-        schedule_flags.append(row)
-    from ..models import AdminNotification
-    from ..admin_settings_page_service import reconcile_ingest_correction_notifications
+        schedule_flags.append(enrich_flag_list_row(db, row))
 
-    reconcile_ingest_correction_notifications(db)
-    ingest_fixes = []
-    seen_fp: set[str] = set()
-    for note in (
-        db.query(AdminNotification)
-        .filter(
-            AdminNotification.kind == "ingest_correction",
-            AdminNotification.read_at.is_(None),
-            AdminNotification.admin_user_id == admin.id,
-        )
-        .order_by(AdminNotification.created_at.asc())
-        .all()
-    ):
-        try:
-            payload = json.loads(note.payload or "{}") if note.payload else {}
-        except (TypeError, ValueError):
-            payload = {}
-        fp = str(payload.get("fingerprint") or note.id)
-        if fp in seen_fp:
-            continue
-        seen_fp.add(fp)
-        if selected_surgeon_id and payload.get("surgeonId") not in (None, selected_surgeon_id, str(selected_surgeon_id)):
-            try:
-                if int(payload.get("surgeonId")) != selected_surgeon_id:
-                    continue
-            except (TypeError, ValueError):
-                continue
-        ingest_fixes.append({
-            "date": payload.get("date") or (note.created_at.date().isoformat() if note.created_at else None),
-            "body": note.body,
-            "href": admin_notification_href("ingest_correction", payload) or "/admin/clinic-schedule",
-            "title": note.title,
-        })
+    parked_count = len(parked_ingest_cases(db, start=start_date, end=end_date))
     return templates.TemplateResponse("admin/scheduler_availability.html", _base(
         request,
         admin,
@@ -142,8 +86,6 @@ def scheduler_availability_page(
         days=days,
         selected_surgeon_id=selected_surgeon_id,
         surgeons=surgeons,
-        open_blocks=open_blocks,
-        rows=case_rows,
         schedule_flags=schedule_flags,
-        ingest_fixes=ingest_fixes,
+        parked_count=parked_count,
     ))

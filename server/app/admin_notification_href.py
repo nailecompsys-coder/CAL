@@ -94,10 +94,15 @@ def _dayoff_href(payload: dict) -> str:
 
 
 def _block_or_href(payload: dict) -> str:
+    event_id = _as_int(payload.get("eventId"))
+    if event_id:
+        return f"/admin/schedule-flags/{event_id}"
     block_id = _as_int(payload.get("blockId"))
     day = _as_date(payload.get("date"))
     if not block_id:
         stored = (payload.get("href") or "").strip()
+        if stored.startswith("/admin/schedule-flags/"):
+            return stored
         return stored or "/admin/block-or"
     params = {"block_id": str(block_id), "panel": "assign"}
     if day:

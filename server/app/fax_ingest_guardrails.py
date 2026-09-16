@@ -13,8 +13,9 @@ from datetime import date, time
 
 from sqlalchemy.orm import Session
 
-from .models import ClinicSchedule, Location, ORBlockAssignment, ORBlockInstance
+from .models import AdminUser, ClinicSchedule, Location, ORBlockAssignment, ORBlockInstance
 from .or_block_service import ACTIVE_BLOCK_STATUSES, _host_rank, _session_bucket
+from .push import create_admin_notification
 
 
 PLACEHOLDER_CLINIC_ROOMS = frozenset({"AHMGGENSRG"})
@@ -205,3 +206,20 @@ def fax_may_update_clinic_location(card: ClinicSchedule, loc: Location | None, r
     """Placeholder rooms are not locations; otherwise a mapped clinic can update."""
     del card
     return loc is not None and not is_placeholder_clinic_room(room)
+
+
+def create_admin_ingest_notice(
+    db: Session,
+    *,
+    title: str,
+    body: str,
+    kind: str,
+    payload: dict | None = None,
+    require_schedule_opt_in: bool = False,
+) -> None:
+    """Admin portal notice only. Fax ingest never uses SMS/email/push."""
+    admins = db.query(AdminUser).filter(AdminUser.is_active == True).all()  # noqa: E712
+    for admin in admins:
+        if require_schedule_opt_in and not admin.notify_schedule_changes:
+            continue
+        create_admin_notification(admin.id, title, body, db, kind, payload)

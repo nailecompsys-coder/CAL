@@ -1,8 +1,8 @@
-"""Desk → CAL schedule ingest: Block OR capacity + surgical cases + clinic day lanes.
+"""Desk → CAL schedule ingest: overlay Epic/Advent fax rows onto CAL cards.
 
-OR fax times become Block OR windows (practice capacity) with cases under them.
-Clinic fax times become ClinicSchedule day/session assignments (notes carry clock times
-until ClinicSchedule has real start/end columns).
+Fax rows update surgical cases and clinic visit counts/details only when they
+fit existing CAL master cards. Ingest never creates Clinic / OR cards, never
+creates Block OR capacity, and never sends surgeon/admin SMS or email blasts.
 
 Re-ingest semantics (daily 1–2 week lookahead faxes):
 - identical case → ignore (no overlay, no second row)
@@ -30,6 +30,7 @@ from .admin_surgical_schedule_service import add_surgical_case
 from .fax_ingest_guardrails import (
     PLACEABLE_REVIEW_REASONS,
     assigned_block_covering_time,
+    create_admin_ingest_notice,
     existing_clinic_card,
     existing_hospital_session_block,
     is_generic_practice_site,
@@ -43,7 +44,7 @@ from .ingest_date_rules import (
     parse_iso_date,
 )
 from .ingest_resolve import resolve_clinic_location, resolve_or_location, resolve_surgeon
-from .models import AdminUser, ClinicSchedule, CoSurgeonPair, ORBlockAssignment, ORBlockInstance, SurgicalCase
+from .models import ClinicSchedule, CoSurgeonPair, ORBlockAssignment, ORBlockInstance, SurgicalCase
 from .or_block_service import (
     ACTIVE_BLOCK_STATUSES,
     assign_block,
@@ -54,7 +55,7 @@ from .or_block_service import (
     update_block_assignment,
 )
 from .practice_time import practice_today
-from .push import clear_block_or_schedule_flag_notifications, create_admin_notification
+from .push import clear_block_or_schedule_flag_notifications
 
 _DESK_SOURCE_RE = re.compile(r"(Desk fax\s*#|source=desk)", re.IGNORECASE)
 _PATIENT_NOISE_RE = re.compile(
@@ -64,23 +65,6 @@ _PATIENT_NOISE_RE = re.compile(
 # Advent OCR dumps the clock into Procedure: "0715 FOREIGN BODY…" / "07:15 EXCISION…"
 _LEADING_HHMM_RE = re.compile(r"^([01]\d|2[0-3])[0-5]\d(?=\s|[A-Za-z]|$)")
 _LEADING_H_COLON_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)(?=\s|[A-Za-z]|$)")
-
-
-def _notify_admins_in_app_only(
-    *,
-    title: str,
-    body: str,
-    db: Session,
-    kind: str,
-    payload: dict | None = None,
-    require_schedule_opt_in: bool = False,
-) -> None:
-    """Create portal/admin inbox notices only. Fax ingest must not SMS/email/push."""
-    admins = db.query(AdminUser).filter(AdminUser.is_active == True).all()  # noqa: E712
-    for admin in admins:
-        if require_schedule_opt_in and not admin.notify_schedule_changes:
-            continue
-        create_admin_notification(admin.id, title, body, db, kind, payload)
 
 
 def _parse_date(raw: str | None) -> date | None:
@@ -205,7 +189,7 @@ def _ensure_ingest_placement_digest(
     if updated:
         db.commit()
         return
-    _notify_admins_in_app_only(
+    create_admin_ingest_notice(
         title=title,
         body=body,
         db=db,
@@ -296,7 +280,7 @@ def _queue_ingest_correction(
     if updated:
         db.commit()
     else:
-        _notify_admins_in_app_only(
+        create_admin_ingest_notice(
             title=title,
             body=body,
             db=db,
@@ -754,7 +738,7 @@ def _flag_admin_schedule_issues(
     }
     event.payload = json.dumps(payload, default=str)
     db.commit()
-    _notify_admins_in_app_only(
+    create_admin_ingest_notice(
         title="Scheduling flag · Block OR",
         body=body,
         db=db,
@@ -1971,6 +1955,5 @@ def ingest_surgeon_schedule(
             "requiresExistingClinicCard": True,
             "smsEmailQuiet": True,
         },
-        "grok_cleared": 0,
     }
     return payload

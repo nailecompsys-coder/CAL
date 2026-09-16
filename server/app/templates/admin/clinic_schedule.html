@@ -190,13 +190,11 @@
         <!-- Day cells -->
         {% for day in week_days %}
         {% set is_today = day == today %}
-        {% set day_entries = sched_map.get(surgeon.id, {}).get(day, []) %}
         {% set day_slots = clinic_grid_slots.get(surgeon.id, {}).get(day, {}) if clinic_grid_slots is defined else {} %}
         {% set am_slot = day_slots.get('am', {'label': 'AM', 'session': 'am', 'entry': none, 'block': none}) %}
         {% set pm_slot = day_slots.get('pm', {'label': 'PM', 'session': 'pm', 'entry': none, 'block': none}) %}
         {% set primary_entry = am_slot.entry or pm_slot.entry %}
         {% set day_surgeries = surgical_map.get(surgeon.id, {}).get(day, []) %}
-        {% set day_block_assignments = assigned_or_blocks.get(surgeon.id, {}).get(day, []) %}
         {% set day_off_info = off_map.get((surgeon.id, day)) if off_map is defined else none %}
         {% set day_has_off_conflict = conflict_keys and (surgeon.id, day) in conflict_keys %}
         <td id="sched-cell-{{ surgeon.id }}-{{ day.isoformat() }}"

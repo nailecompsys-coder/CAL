@@ -224,7 +224,7 @@ class AdminClinicScheduleTest(unittest.TestCase):
         finally:
             db.close()
 
-    def test_page_data_surfaces_unlinked_surgical_cases_as_or_pills(self):
+    def test_page_data_does_not_surface_unlinked_surgical_cases_as_or_pills(self):
         db = self.Session()
         try:
             hospital = Location(
@@ -274,23 +274,14 @@ class AdminClinicScheduleTest(unittest.TestCase):
 
             data = page_data(db, week_offset=0)
             blocks = data["assigned_or_blocks"].get(surgeon.id, {}).get(monday, [])
+            slots = data["clinic_grid_slots"].get(surgeon.id, {}).get(monday, {})
 
-            self.assertEqual(len(blocks), 2)
-            am = next(row for row in blocks if row["session"] == "am")
-            pm = next(row for row in blocks if row["session"] == "pm")
-            self.assertEqual(am["pillLabel"], "MN-OR")
-            self.assertEqual(am["caseCount"], 2)
-            self.assertEqual(am["pillCountLabel"], "2 cases")
-            self.assertEqual([seg["patient"] for seg in am["segments"]], ["Bishop, David", "Vercamen, Donald"])
-            self.assertEqual(pm["pillLabel"], "MN-OR")
-            self.assertEqual(pm["caseCount"], 1)
-            self.assertEqual(pm["pillCountLabel"], "1 case")
-            self.assertEqual([seg["patient"] for seg in pm["segments"]], ["Torres, Carla"])
-            self.assertLessEqual(len(blocks), 2)
+            self.assertEqual(blocks, [])
+            self.assertEqual(slots, {})
         finally:
             db.close()
 
-    def test_page_data_does_not_double_count_pm_case_against_am_block(self):
+    def test_page_data_does_not_create_pm_pill_for_unlinked_case_against_am_block(self):
         db = self.Session()
         try:
             hospital = Location(
@@ -333,13 +324,10 @@ class AdminClinicScheduleTest(unittest.TestCase):
 
             data = page_data(db, week_offset=0)
             blocks = data["assigned_or_blocks"].get(surgeon.id, {}).get(monday, [])
+            slots = data["clinic_grid_slots"].get(surgeon.id, {}).get(monday, {})
 
-            self.assertEqual(len(blocks), 1)
-            self.assertEqual(blocks[0]["pillLabel"], "AL-OR")
-            self.assertEqual(blocks[0]["caseCount"], 1)
-            self.assertEqual(blocks[0]["pillCountLabel"], "1 case")
-            self.assertEqual(len(blocks[0]["segments"]), 1)
-            self.assertEqual([seg.get("patient") for seg in blocks[0]["segments"] if seg.get("patient")], ["Colon, Nancy"])
+            self.assertEqual(blocks, [])
+            self.assertEqual(slots, {})
         finally:
             db.close()
 

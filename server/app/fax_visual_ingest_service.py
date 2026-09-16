@@ -24,7 +24,7 @@ import sqlite3
 import subprocess
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -86,6 +86,48 @@ class BackupReceipt:
     label: str
     path_or_key: str = ""
     metadata: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class VisualFaxIngestRun:
+    fax_id: int
+    pdf_path: str
+    workdir: str
+    temp_db: str
+    reviewed_rows_json: str
+    page_pngs: list[str]
+    ocr_text: list[str]
+    manifest_path: str
+    status: str = "prepared_review_required"
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "fax_id": self.fax_id,
+            "pdf": self.pdf_path,
+            "workdir": self.workdir,
+            "temp_db": self.temp_db,
+            "reviewed_rows_json": self.reviewed_rows_json,
+            "page_pngs": self.page_pngs,
+            "ocr_text": self.ocr_text,
+            "manifest_path": self.manifest_path,
+            "status": self.status,
+            "engine": "pdf_to_png_to_ocr_tempdb_v1",
+            "rule": "Fax ingest stages visual OCR rows only; writes must pass CAL guardrails and a successful backup.",
+            "no_blasts": True,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+
+def _visual_temp_db_path(workdir: Path) -> Path:
+    return workdir / "visual_temp.sqlite"
+
+
+def _reviewed_rows_path(workdir: Path) -> Path:
+    return workdir / "reviewed_rows.json"
+
+
+def _manifest_path(workdir: Path) -> Path:
+    return workdir / "manifest.json"
 
 
 def normalize_patient_name(value: str | None) -> str:
@@ -172,6 +214,112 @@ def ocr_png_pages(page_paths: Iterable[Path], output_dir: Path) -> list[Path]:
         txt = out_base.with_suffix(".txt")
         outputs.append(txt)
     return outputs
+
+
+def prepare_visual_fax_ingest(
+    *,
+    fax_id: int,
+    pdf_path: Path,
+    workdir: Path | None = None,
+) -> VisualFaxIngestRun:
+    """Canonical visual ingest entrypoint.
+
+    Every raw fax ingest starts here: the original PDF is rendered to one PNG
+    per page, those PNGs are OCR'd, and a temp SQLite database is created for
+    reviewed rows. This function does not parse into production rows and never
+    writes CAL schedule data.
+    """
+    source_pdf = pdf_path.resolve()
+    if not source_pdf.exists():
+        raise FileNotFoundError(f"Fax PDF not found: {source_pdf}")
+    root = (workdir or Path(f"fax-{fax_id}-visual")).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    pages = render_pdf_to_pngs(source_pdf, root / "pages")
+    texts = ocr_png_pages(pages, root / "ocr")
+    temp_db = _visual_temp_db_path(root)
+    create_visual_temp_db(temp_db)
+    run = VisualFaxIngestRun(
+        fax_id=fax_id,
+        pdf_path=str(source_pdf),
+        workdir=str(root),
+        temp_db=str(temp_db),
+        reviewed_rows_json=str(_reviewed_rows_path(root)),
+        page_pngs=[str(path) for path in pages],
+        ocr_text=[str(path) for path in texts],
+        manifest_path=str(_manifest_path(root)),
+    )
+    _manifest_path(root).write_text(json.dumps(run.as_dict(), indent=2) + "\n")
+    return run
+
+
+def stage_visual_fax_review(workdir: Path, reviewed_rows: Path | None = None) -> dict[str, Any]:
+    """Load reviewed OCR rows into the temp DB created by prepare."""
+    root = workdir.resolve()
+    reviewed = (reviewed_rows or _reviewed_rows_path(root)).resolve()
+    rows = rows_from_review_json(reviewed)
+    load_reviewed_rows(_visual_temp_db_path(root), rows, replace=True)
+    return {
+        "ok": True,
+        "rows": len(rows),
+        "db": str(_visual_temp_db_path(root)),
+        "reviewed_rows_json": str(reviewed),
+    }
+
+
+def report_visual_fax_overlay(db: Session, workdir: Path) -> dict[str, Any]:
+    """Generate duplicate-first and CAL overlay reports from staged rows."""
+    root = workdir.resolve()
+    rows = rows_from_temp_db(_visual_temp_db_path(root))
+    dates = [row.case_date for row in rows]
+    prod_cases: list[SurgicalCase] = []
+    if dates:
+        prod_cases = (
+            db.query(SurgicalCase)
+            .filter(SurgicalCase.date >= min(dates), SurgicalCase.date <= max(dates), SurgicalCase.status != "cancelled")
+            .all()
+        )
+    analysis = duplicate_first_analysis(rows, prod_cases)
+    duplicate_report = root / "duplicate_first_report.md"
+    overlay_report = root / "overlay_report.json"
+    write_duplicate_report(duplicate_report, analysis)
+    overlay = overlay_against_prod(db, rows)
+    overlay_report.write_text(json.dumps(overlay, default=str, indent=2) + "\n")
+    return {
+        "ok": True,
+        "rows": len(rows),
+        "duplicate_report": str(duplicate_report),
+        "overlay_report": str(overlay_report),
+        "overlay_summary": overlay.get("summary", {}),
+    }
+
+
+def apply_visual_fax_workdir(
+    db: Session,
+    *,
+    workdir: Path,
+    backup_dir: Path,
+    source_label: str = "visual PNG SOT",
+) -> dict[str, Any]:
+    """Backup and apply staged visual fax rows through CAL guardrails."""
+    root = workdir.resolve()
+    rows = rows_from_temp_db(_visual_temp_db_path(root))
+    if not rows:
+        raise ValueError("No staged visual fax rows found.")
+    fax_ids = {row.fax_id for row in rows}
+    if len(fax_ids) != 1:
+        raise ValueError(f"Expected exactly one fax id, got {sorted(fax_ids)}")
+    source_fax_id = next(iter(fax_ids))
+    backup = run_local_backup(backup_dir.resolve(), label=f"fax{source_fax_id}_visual")
+    if not backup.success:
+        raise ValueError(f"Backup failed; write refused: {backup.metadata}")
+    result = apply_visual_schedule(
+        db,
+        rows,
+        backup=backup,
+        source_fax_id=source_fax_id,
+        source_label=source_label,
+    )
+    return {"backup": backup.__dict__, "result": result}
 
 
 def create_visual_temp_db(db_path: Path) -> None:

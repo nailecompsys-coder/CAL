@@ -1,6 +1,10 @@
 import os
+import json
+import tempfile
 import unittest
 from datetime import date, time
+from pathlib import Path
+from unittest.mock import patch
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SECRET_KEY", "test-secret")
@@ -13,6 +17,7 @@ from app.fax_visual_ingest_service import (
     FaxVisualRow,
     apply_visual_schedule,
     duplicate_first_analysis,
+    prepare_visual_fax_ingest,
 )
 from app.models import (
     AdminNotification,
@@ -81,6 +86,46 @@ class FaxVisualIngestServiceTest(unittest.TestCase):
         )
         defaults.update(kw)
         return FaxVisualRow(**defaults)
+
+    def test_prepare_engine_renders_pdf_to_png_then_ocr_and_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pdf = root / "fax162.pdf"
+            pdf.write_text("placeholder")
+            calls = []
+
+            def fake_render(pdf_path, output_dir):
+                calls.append(("render", pdf_path, output_dir))
+                output_dir.mkdir(parents=True, exist_ok=True)
+                page = output_dir / "page-1.png"
+                page.write_text("png")
+                return [page]
+
+            def fake_ocr(page_paths, output_dir):
+                calls.append(("ocr", list(page_paths), output_dir))
+                output_dir.mkdir(parents=True, exist_ok=True)
+                txt = output_dir / "page-1.txt"
+                txt.write_text("ocr text")
+                return [txt]
+
+            with (
+                patch("app.fax_visual_ingest_service.render_pdf_to_pngs", side_effect=fake_render),
+                patch("app.fax_visual_ingest_service.ocr_png_pages", side_effect=fake_ocr),
+            ):
+                run = prepare_visual_fax_ingest(
+                    fax_id=162,
+                    pdf_path=pdf,
+                    workdir=root / "fax-162-visual",
+                )
+
+            self.assertEqual([call[0] for call in calls], ["render", "ocr"])
+            self.assertTrue(Path(run.temp_db).exists())
+            self.assertEqual(len(run.page_pngs), 1)
+            self.assertEqual(len(run.ocr_text), 1)
+            manifest = json.loads(Path(run.manifest_path).read_text())
+            self.assertEqual(manifest["engine"], "pdf_to_png_to_ocr_tempdb_v1")
+            self.assertEqual(manifest["status"], "prepared_review_required")
+            self.assertTrue(manifest["no_blasts"])
 
     def test_write_requires_backup_receipt(self):
         with self.assertRaisesRegex(ValueError, "backup"):

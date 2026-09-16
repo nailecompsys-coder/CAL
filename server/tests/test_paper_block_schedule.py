@@ -21,6 +21,7 @@ from app.models import (
     ORBlockInstance,
     Surgeon,
     SurgeonLocationSchedule,
+    SurgicalCase,
 )
 from app.paper_block_schedule import (
     PAPER,
@@ -29,6 +30,10 @@ from app.paper_block_schedule import (
     month_week,
     paper_cell,
     paper_or_slots,
+)
+from app.schedule_build_backup_service import (
+    create_schedule_build_backup,
+    revert_schedule_build_backup,
 )
 
 
@@ -387,6 +392,79 @@ class PaperBlockScheduleTest(unittest.TestCase):
             ["JP"],
         )
         self.assertEqual((mn_blocks[0].room_text or "").strip(), "MIN S05")
+
+    def test_build_backup_restores_cards_and_block_assignments(self):
+        jorge = self.db.query(Surgeon).filter_by(last_name="Florin").one()
+        ap = self.db.query(Location).filter_by(abbreviation="AP-OR").one()
+        wg = self.db.query(Location).filter_by(abbreviation="WG-OR").one()
+        day = date(2026, 9, 14)
+        clinic = ClinicSchedule(
+            surgeon_id=jorge.id,
+            location_id=ap.id,
+            date=day,
+            session="am",
+            assignment_type="assigned",
+        )
+        block = ORBlockInstance(
+            location_id=ap.id,
+            date=day,
+            session="am",
+            start_time=time(7, 0),
+            end_time=time(12, 0),
+            status="assigned",
+        )
+        self.db.add_all([clinic, block])
+        self.db.flush()
+        self.db.add(ORBlockAssignment(
+            block_instance_id=block.id,
+            surgeon_id=jorge.id,
+            start_time=time(7, 0),
+            case_count=1,
+        ))
+        self.db.commit()
+
+        backup = create_schedule_build_backup(self.db, admin_id=None, start=day, end=day)
+        clinic.location_id = wg.id
+        self.db.query(ORBlockAssignment).delete()
+        self.db.query(ORBlockInstance).delete()
+        self.db.commit()
+
+        result = revert_schedule_build_backup(self.db, backup_id=backup.id, admin_id=None)
+        self.assertTrue(result["ok"])
+        restored_clinic = self.db.query(ClinicSchedule).filter_by(surgeon_id=jorge.id, date=day).one()
+        self.assertEqual(restored_clinic.location_id, ap.id)
+        restored_block = self.db.query(ORBlockInstance).filter_by(location_id=ap.id, date=day).one()
+        self.assertEqual(restored_block.assignments[0].surgeon_id, jorge.id)
+
+    def test_build_backup_revert_blocks_when_cases_are_linked(self):
+        jorge = self.db.query(Surgeon).filter_by(last_name="Florin").one()
+        ap = self.db.query(Location).filter_by(abbreviation="AP-OR").one()
+        day = date(2026, 9, 14)
+        block = ORBlockInstance(
+            location_id=ap.id,
+            date=day,
+            session="am",
+            start_time=time(7, 0),
+            end_time=time(12, 0),
+            status="open",
+        )
+        self.db.add(block)
+        self.db.flush()
+        backup = create_schedule_build_backup(self.db, admin_id=None, start=day, end=day)
+        self.db.add(SurgicalCase(
+            surgeon_id=jorge.id,
+            date=day,
+            start_time=time(7, 15),
+            patient_name="Test Patient",
+            procedure="Test",
+            location_id=ap.id,
+            or_block_instance_id=block.id,
+        ))
+        self.db.commit()
+
+        result = revert_schedule_build_backup(self.db, backup_id=backup.id, admin_id=None)
+        self.assertFalse(result["ok"])
+        self.assertIn("surgical cases", result["reason"])
 
 
 if __name__ == "__main__":

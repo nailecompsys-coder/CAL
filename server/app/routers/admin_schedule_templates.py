@@ -1,6 +1,7 @@
 """Admin schedule template and call rotation builder routes."""
 from datetime import date
 from typing import Optional
+from urllib.parse import quote_plus
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -21,6 +22,7 @@ from ..database import get_db
 from ..jinja_env import templates
 from ..paper_block_schedule import apply_paper_block_schedule
 from ..practice_time import practice_today
+from ..schedule_build_backup_service import create_schedule_build_backup, revert_schedule_build_backup
 from .admin import _base, _sort_surgeons_physicians_first
 
 router = APIRouter(prefix="/admin")
@@ -127,15 +129,43 @@ async def build_master_schedule_cards(
         return RedirectResponse("/admin/schedule-templates?msg=bad_date", status_code=303)
     if d_to < d_from or (d_to - d_from).days > 550:
         return RedirectResponse("/admin/schedule-templates?msg=bad_range", status_code=303)
+    backup = create_schedule_build_backup(db, admin_id=getattr(admin, "id", None), start=d_from, end=d_to)
     result = apply_paper_block_schedule(db, start=d_from, end=d_to)
     return RedirectResponse(
         "/admin/schedule-templates?msg=master_built"
         f"&from={d_from.isoformat()}&to={d_to.isoformat()}"
+        f"&backup_id={backup.id}"
         f"&clinic={result.get('clinicCreated', 0)}"
         f"&blocks={result.get('blocksAssigned', 0)}"
         f"&already={result.get('blocksAlready', 0)}"
         f"&folded={result.get('cardsFolded', 0)}"
         f"&pruned={result.get('blocksPruned', 0)}",
+        status_code=303,
+    )
+
+
+@router.post("/schedule-templates/build-backups/{backup_id}/revert")
+async def revert_master_schedule_cards(
+    backup_id: int,
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    result = revert_schedule_build_backup(
+        db,
+        backup_id=backup_id,
+        admin_id=getattr(admin, "id", None),
+    )
+    if not result.get("ok"):
+        reason = quote_plus(str(result.get("reason") or "Revert failed."))
+        return RedirectResponse(
+            f"/admin/schedule-templates?msg=revert_blocked&reason={reason}",
+            status_code=303,
+        )
+    return RedirectResponse(
+        "/admin/schedule-templates?msg=reverted"
+        f"&backup_id={backup_id}"
+        f"&from={result.get('from', '')}&to={result.get('to', '')}"
+        f"&clinic={result.get('clinic', 0)}&blocks={result.get('blocks', 0)}",
         status_code=303,
     )
 

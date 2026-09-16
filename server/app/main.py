@@ -17,6 +17,7 @@ from . import migrate_scheduling_guardrails
 from . import migrate_site_settings_tools
 from . import migrate_co_surgeon
 from . import migrate_schedule_template_week_pattern
+from . import migrate_schedule_build_backups
 from .routers import (
     admin_otp_audit,
     admin_block_or,
@@ -49,6 +50,7 @@ async def lifespan(app: FastAPI):
     migrate_site_settings_tools.run_migration()
     migrate_co_surgeon.run_migration()
     migrate_schedule_template_week_pattern.run_migration()
+    migrate_schedule_build_backups.run_migration()
     migrate_grok_bot_rules.run_migration()
     db = SessionLocal()
     try:

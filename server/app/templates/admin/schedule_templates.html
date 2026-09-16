@@ -23,16 +23,32 @@
 {% elif msg == 'bad_date' or msg == 'bad_range' %}
 <div class="mx-6 mt-4 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3 text-rose-700 text-sm">Invalid date range.</div>
 {% elif msg == 'master_built' %}
-<div class="mx-6 mt-4 bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-green-700 text-sm">
-  ✓ Master cards built for
-  {% set from_parts = request.query_params.get('from','').split('-') %}
-  {% set to_parts = request.query_params.get('to','').split('-') %}
-  {% if from_parts|length == 3 %}{{ from_parts[1]|int }}/{{ from_parts[2]|int }}/{{ from_parts[0] }}{% else %}{{ request.query_params.get('from','') }}{% endif %}
-  –
-  {% if to_parts|length == 3 %}{{ to_parts[1]|int }}/{{ to_parts[2]|int }}/{{ to_parts[0] }}{% else %}{{ request.query_params.get('to','') }}{% endif %}.
-  {{ request.query_params.get('clinic','0') }} clinic cards written,
-  {{ request.query_params.get('blocks','0') }} block assignments written,
-  {{ request.query_params.get('already','0') }} already present.
+<div class="mx-6 mt-4 bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-green-700 text-sm flex flex-wrap items-center justify-between gap-3">
+  <div>
+    ✓ Master cards built for
+    {% set from_parts = request.query_params.get('from','').split('-') %}
+    {% set to_parts = request.query_params.get('to','').split('-') %}
+    {% if from_parts|length == 3 %}{{ from_parts[1]|int }}/{{ from_parts[2]|int }}/{{ from_parts[0] }}{% else %}{{ request.query_params.get('from','') }}{% endif %}
+    –
+    {% if to_parts|length == 3 %}{{ to_parts[1]|int }}/{{ to_parts[2]|int }}/{{ to_parts[0] }}{% else %}{{ request.query_params.get('to','') }}{% endif %}.
+    {{ request.query_params.get('clinic','0') }} clinic cards written,
+    {{ request.query_params.get('blocks','0') }} block assignments written,
+    {{ request.query_params.get('already','0') }} already present.
+    Backup #{{ request.query_params.get('backup_id','') }} was created first.
+  </div>
+  {% if request.query_params.get('backup_id') %}
+  <form method="post" action="/admin/schedule-templates/build-backups/{{ request.query_params.get('backup_id') }}/revert" onsubmit="return confirm('Revert this Build Cards run for this date range? This will not send notifications.');">
+    <button type="submit" class="bg-white border border-green-300 text-green-800 text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-green-100">Revert this build</button>
+  </form>
+  {% endif %}
+</div>
+{% elif msg == 'reverted' %}
+<div class="mx-6 mt-4 bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-blue-700 text-sm">
+  ✓ Build Cards backup #{{ request.query_params.get('backup_id','') }} reverted. Restored {{ request.query_params.get('clinic','0') }} clinic cards and {{ request.query_params.get('blocks','0') }} Block OR cards.
+</div>
+{% elif msg == 'revert_blocked' %}
+<div class="mx-6 mt-4 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3 text-rose-700 text-sm">
+  Revert blocked: {{ request.query_params.get('reason','This date range has linked surgical cases.') }}
 </div>
 {% endif %}
 
@@ -66,7 +82,7 @@
         <i class="fa-solid fa-calendar-check"></i> Build Cards
       </button>
     </form>
-    <p class="text-xs text-slate-500 mt-2">Blank slots stay blank. Rows without a matching card are parked in Ingest fixes.</p>
+    <p class="text-xs text-slate-500 mt-2">Blank slots stay blank. Rows without a matching card are parked in Ingest fixes. A restore point is created before cards are written.</p>
   </div>
 
   {# ── Template grid — one surgeon at a time ── #}

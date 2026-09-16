@@ -651,6 +651,23 @@ class ORBlockAuditEvent(Base):
     admin_user = relationship("AdminUser")
 
 
+class ScheduleBuildBackup(Base):
+    """Point-in-time schedule snapshot created before Build Cards changes a date range."""
+    __tablename__ = "schedule_build_backups"
+    id = Column(Integer, primary_key=True)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    payload_json = Column(Text, nullable=False)
+    created_by_admin_id = Column(Integer, ForeignKey("admin_users.id"))
+    created_at = Column(DateTime, server_default=func.now())
+    reverted_by_admin_id = Column(Integer, ForeignKey("admin_users.id"))
+    reverted_at = Column(DateTime)
+    note = Column(Text)
+
+    created_by_admin = relationship("AdminUser", foreign_keys=[created_by_admin_id])
+    reverted_by_admin = relationship("AdminUser", foreign_keys=[reverted_by_admin_id])
+
+
 class ScheduleChangeEvent(Base):
     """Non-PHI audit stream used for scheduler availability digests."""
     __tablename__ = "schedule_change_events"

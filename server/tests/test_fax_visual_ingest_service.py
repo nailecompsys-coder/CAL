@@ -40,8 +40,9 @@ class FaxVisualIngestServiceTest(unittest.TestCase):
         self.ln = Surgeon(first_name="Lars", last_name="Nelson", email="ln@example.com", is_active=True)
         self.mn = Location(name="Minneola OR", abbreviation="MN-OR", location_type="hospital", is_active=True)
         self.al = Location(name="Altamonte OR", abbreviation="AL-OR", location_type="hospital", is_active=True)
+        self.ap = Location(name="Apopka OR", abbreviation="AP-OR", location_type="hospital", is_active=True)
         self.cl = Location(name="HP Clermont Clinic", abbreviation="CL-OV", location_type="clinic", is_active=True)
-        self.db.add_all([self.jf, self.jb, self.ln, self.mn, self.al, self.cl])
+        self.db.add_all([self.jf, self.jb, self.ln, self.mn, self.al, self.ap, self.cl])
         self.db.commit()
         self._block(self.jf, self.mn, date(2026, 9, 16), time(7, 0), time(12, 0))
         self._block(self.ln, self.al, date(2026, 9, 17), time(7, 0), time(12, 0))
@@ -142,6 +143,18 @@ class FaxVisualIngestServiceTest(unittest.TestCase):
         self.assertEqual(case.surgeon_id, self.jf.id)
         self.assertEqual(case.assisting_surgeon_id, self.jb.id)
 
+    def test_surgical_row_without_matching_block_is_parked(self):
+        result = apply_visual_schedule(
+            self.db,
+            [self.row(room="APK S03")],
+            backup=BackupReceipt(True, "unit-test", "/tmp/backup.dump"),
+            source_fax_id=162,
+        )
+        self.assertEqual(result["surgical_created"], 0)
+        self.assertEqual(result["surgical_skipped"], 1)
+        self.assertEqual(self.db.query(SurgicalCase).count(), 0)
+        self.assertIn("no matching static OR block", result["redflags"][0])
+
     def test_duplicate_first_flags_exact_shared_rows(self):
         rows = [self.row(surgeon_initials="JF"), self.row(surgeon_initials="JB")]
         analysis = duplicate_first_analysis(rows)
@@ -150,6 +163,14 @@ class FaxVisualIngestServiceTest(unittest.TestCase):
         self.assertEqual(len(analysis["fax_exact_duplicate_groups"]), 1)
 
     def test_clinic_rows_update_one_card(self):
+        self.db.add(ClinicSchedule(
+            surgeon_id=self.jb.id,
+            date=date(2026, 9, 16),
+            session="am",
+            location_id=self.cl.id,
+            assignment_type="assigned",
+        ))
+        self.db.commit()
         rows = [
             self.row(
                 surgeon_initials="JB",
@@ -176,11 +197,36 @@ class FaxVisualIngestServiceTest(unittest.TestCase):
             backup=BackupReceipt(True, "unit-test", "/tmp/backup.dump"),
             source_fax_id=162,
         )
-        self.assertEqual(result["clinic_created"], 1)
+        self.assertEqual(result["clinic_created"], 0)
+        self.assertEqual(result["clinic_updated"], 1)
         self.assertEqual(self.db.query(ClinicSchedule).count(), 1)
         card = self.db.query(ClinicSchedule).one()
         self.assertIn("08:30 Flores", card.notes)
         self.assertIn("08:40 Damon", card.notes)
+
+    def test_clinic_rows_without_master_card_are_parked(self):
+        rows = [
+            self.row(
+                surgeon_initials="JB",
+                case_date=date(2026, 9, 16),
+                start_time=time(8, 30),
+                row_type="clinic",
+                room="CLMMFLGS",
+                patient_name="Flores, Anna",
+                procedure="Visit",
+            ),
+        ]
+        result = apply_visual_schedule(
+            self.db,
+            rows,
+            backup=BackupReceipt(True, "unit-test", "/tmp/backup.dump"),
+            source_fax_id=162,
+        )
+        self.assertEqual(result["clinic_created"], 0)
+        self.assertEqual(result["clinic_updated"], 0)
+        self.assertEqual(result["clinic_skipped_rows"], 1)
+        self.assertEqual(self.db.query(ClinicSchedule).count(), 0)
+        self.assertIn("no existing CAL card", result["redflags"][0])
 
 
 if __name__ == "__main__":

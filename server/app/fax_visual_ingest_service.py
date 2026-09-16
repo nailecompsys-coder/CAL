@@ -30,12 +30,15 @@ from typing import Any, Iterable
 
 from sqlalchemy.orm import Session
 
+from .fax_ingest_guardrails import (
+    PLACEHOLDER_CLINIC_ROOMS,
+    existing_clinic_card,
+    fax_may_update_clinic_location,
+    matching_assigned_or_block,
+)
 from .models import (
-    ClinicSchedule,
     CoSurgeonPair,
     Location,
-    ORBlockAssignment,
-    ORBlockInstance,
     ScheduleChangeEvent,
     Surgeon,
     SurgicalCase,
@@ -59,9 +62,6 @@ CLINIC_ROOM_TO_ABBR = {
     "MGALTGS": "AL-OV",
     "MGWGDGS": "WG-OV",
 }
-
-PLACEHOLDER_CLINIC_ROOMS = {"AHMGGENSRG"}
-
 
 @dataclass(frozen=True)
 class FaxVisualRow:
@@ -369,31 +369,6 @@ def _location_maps(db: Session) -> dict[str, Location]:
     return {row.abbreviation: row for row in db.query(Location).all()}
 
 
-def _matching_block(
-    db: Session,
-    *,
-    surgeon_id: int,
-    day: date,
-    location_id: int,
-    start_time: time | None,
-) -> ORBlockInstance | None:
-    if not start_time:
-        return None
-    return (
-        db.query(ORBlockInstance)
-        .join(ORBlockAssignment, ORBlockAssignment.block_instance_id == ORBlockInstance.id)
-        .filter(
-            ORBlockAssignment.surgeon_id == surgeon_id,
-            ORBlockInstance.date == day,
-            ORBlockInstance.location_id == location_id,
-            ORBlockInstance.start_time <= start_time,
-            ORBlockInstance.end_time > start_time,
-        )
-        .order_by(ORBlockInstance.start_time, ORBlockInstance.id)
-        .first()
-    )
-
-
 def _choose_primary_and_assist(
     db: Session,
     group: list[FaxVisualRow],
@@ -471,7 +446,13 @@ def overlay_against_prod(db: Session, rows: list[FaxVisualRow]) -> dict[str, Any
                 status = "same_patient_date_existing"
             elif not loc:
                 status = "red_flag_unknown_or_location"
-            elif _matching_block(db, surgeon_id=surgeon.id, day=row.case_date, location_id=loc.id, start_time=row.start_time):
+            elif matching_assigned_or_block(
+                db,
+                surgeon_id=surgeon.id,
+                day=row.case_date,
+                location_id=loc.id,
+                start_time=row.start_time,
+            ):
                 status = "would_add_fits_assigned_block"
             else:
                 status = "red_flag_no_matching_block"
@@ -548,13 +529,20 @@ def apply_visual_schedule(
             .all()
         )
         matches = [case for case in existing if normalize_patient_name(case.patient_name) == normalize_patient_name(first.patient_name)]
-        block = _matching_block(
+        block = matching_assigned_or_block(
             db,
             surgeon_id=primary_id,
             day=first.case_date,
             location_id=loc.id,
             start_time=first.start_time,
         )
+        if not block:
+            skipped += 1
+            redflags.append(
+                f"park surgical {first.case_date} {format_time(first.start_time)} "
+                f"{first.room} {first.patient_name}: no matching static OR block"
+            )
+            continue
         if matches:
             case = matches[0]
             old = f"case {case.id} old surgeon={case.surgeon_id} time={format_time(case.start_time)} room={case.room_text}"
@@ -565,7 +553,7 @@ def apply_visual_schedule(
             case.location_id = loc.id
             case.room_text = normalize_room(first.room)
             case.procedure = first.procedure or case.procedure or "TBD"
-            case.or_block_instance_id = block.id if block else None
+            case.or_block_instance_id = block.id
             case.notes = append_internal_note(case.notes, f"{note} Updated from {old}.")
             updated += 1
         else:
@@ -579,7 +567,7 @@ def apply_visual_schedule(
                 procedure=first.procedure or "TBD",
                 location_id=loc.id,
                 room_text=normalize_room(first.room),
-                or_block_instance_id=block.id if block else None,
+                or_block_instance_id=block.id,
                 status="scheduled",
                 notes=note,
             )
@@ -588,9 +576,6 @@ def apply_visual_schedule(
             created += 1
         if assist_id:
             assist_cases += 1
-        if not block:
-            redflags.append(f"case {case.id} {first.case_date} {format_time(first.start_time)} {first.room} {first.patient_name}: no matching static OR block")
-
     clinic_created = clinic_updated = clinic_skipped_rows = 0
     clinic_groups: dict[tuple[int, date, str, str], list[FaxVisualRow]] = defaultdict(list)
     for row in rows:
@@ -605,44 +590,32 @@ def apply_visual_schedule(
 
     for (surgeon_id, day, session, room), group in clinic_groups.items():
         loc = loc_by_abbr.get(clinic_abbr_for_room(room) or "")
-        cards = (
-            db.query(ClinicSchedule)
-            .filter(ClinicSchedule.surgeon_id == surgeon_id, ClinicSchedule.date == day, ClinicSchedule.session == session)
-            .order_by(ClinicSchedule.id)
-            .all()
+        match = existing_clinic_card(
+            db,
+            surgeon_id=surgeon_id,
+            day=day,
+            session=session,
+            location_id=loc.id if loc else None,
         )
-        card = None
-        if loc:
-            same = [row for row in cards if row.location_id == loc.id]
-            card = same[0] if same else (cards[0] if cards else None)
-        elif room in PLACEHOLDER_CLINIC_ROOMS:
-            card = cards[0] if cards else None
+        card = match.card
+        if room in PLACEHOLDER_CLINIC_ROOMS:
             loc = db.get(Location, card.location_id) if card and card.location_id else None
-        if not card and not loc:
+        if not card:
             clinic_skipped_rows += len(group)
-            redflags.append(f"skip clinic {surgeon_id} {day} {session} {room}: no location/card")
+            redflags.append(
+                f"park clinic {surgeon_id} {day} {session} {room}: no existing CAL card"
+            )
             continue
         visits = "; ".join(
             f"{format_time(row.start_time)} {row.patient_name}"
             for row in sorted(group, key=lambda item: format_time(item.start_time))
         )
         clinic_note = f"Fax {source_fax_id} visual SOT · {visits}"
-        if card:
-            if loc and room not in PLACEHOLDER_CLINIC_ROOMS:
-                card.location_id = loc.id
-            card.assignment_type = "assigned"
-            card.notes = clinic_note
-            clinic_updated += 1
-        else:
-            db.add(ClinicSchedule(
-                surgeon_id=surgeon_id,
-                date=day,
-                session=session,
-                assignment_type="assigned",
-                location_id=loc.id if loc else None,
-                notes=clinic_note,
-            ))
-            clinic_created += 1
+        if fax_may_update_clinic_location(card, loc, room):
+            card.location_id = loc.id
+        card.assignment_type = "assigned"
+        card.notes = clinic_note
+        clinic_updated += 1
 
     db.add(ScheduleChangeEvent(
         event_type="fax_visual_import_internal",

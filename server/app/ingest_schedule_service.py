@@ -27,6 +27,14 @@ from sqlalchemy.orm import Session
 
 from .admin_notification_href import admin_notification_href, clinic_schedule_fix_href
 from .admin_surgical_schedule_service import add_surgical_case
+from .fax_ingest_guardrails import (
+    PLACEABLE_REVIEW_REASONS,
+    assigned_block_covering_time,
+    existing_clinic_card,
+    existing_hospital_session_block,
+    is_generic_practice_site,
+    looks_like_surgical_case,
+)
 from .ingest_date_rules import (
     date_allowed_for_fax,
     format_dob_display,
@@ -35,7 +43,7 @@ from .ingest_date_rules import (
     parse_iso_date,
 )
 from .ingest_resolve import resolve_clinic_location, resolve_or_location, resolve_surgeon
-from .models import ClinicSchedule, CoSurgeonPair, ORBlockAssignment, ORBlockInstance, SurgicalCase
+from .models import AdminUser, ClinicSchedule, CoSurgeonPair, ORBlockAssignment, ORBlockInstance, SurgicalCase
 from .or_block_service import (
     ACTIVE_BLOCK_STATUSES,
     assign_block,
@@ -46,7 +54,7 @@ from .or_block_service import (
     update_block_assignment,
 )
 from .practice_time import practice_today
-from .push import clear_block_or_schedule_flag_notifications, notify_admins
+from .push import clear_block_or_schedule_flag_notifications, create_admin_notification
 
 _DESK_SOURCE_RE = re.compile(r"(Desk fax\s*#|source=desk)", re.IGNORECASE)
 _PATIENT_NOISE_RE = re.compile(
@@ -56,6 +64,23 @@ _PATIENT_NOISE_RE = re.compile(
 # Advent OCR dumps the clock into Procedure: "0715 FOREIGN BODY…" / "07:15 EXCISION…"
 _LEADING_HHMM_RE = re.compile(r"^([01]\d|2[0-3])[0-5]\d(?=\s|[A-Za-z]|$)")
 _LEADING_H_COLON_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)(?=\s|[A-Za-z]|$)")
+
+
+def _notify_admins_in_app_only(
+    *,
+    title: str,
+    body: str,
+    db: Session,
+    kind: str,
+    payload: dict | None = None,
+    require_schedule_opt_in: bool = False,
+) -> None:
+    """Create portal/admin inbox notices only. Fax ingest must not SMS/email/push."""
+    admins = db.query(AdminUser).filter(AdminUser.is_active == True).all()  # noqa: E712
+    for admin in admins:
+        if require_schedule_opt_in and not admin.notify_schedule_changes:
+            continue
+        create_admin_notification(admin.id, title, body, db, kind, payload)
 
 
 def _parse_date(raw: str | None) -> date | None:
@@ -111,15 +136,6 @@ def _salvage_start_time(case: dict) -> None:
         return
     case["start_time"] = recovered.strftime("%H:%M")
     case["procedure"] = proc[len(glued.group(0)) :].strip() or case.get("procedure")
-
-
-_PLACEABLE_CORRECTION_REASONS = frozenset({
-    "block_not_found",
-    "missing_time",
-    "missing_block_window",
-    "session_card_taken",
-    "clinic_card_not_found",
-})
 
 
 def _correction_fingerprint(
@@ -189,7 +205,7 @@ def _ensure_ingest_placement_digest(
     if updated:
         db.commit()
         return
-    notify_admins(
+    _notify_admins_in_app_only(
         title=title,
         body=body,
         db=db,
@@ -254,7 +270,7 @@ def _queue_ingest_correction(
     corrections.append(item)
 
     # Drag-drop board owns these. Per-case × per-admin cards are noise.
-    if reason in _PLACEABLE_CORRECTION_REASONS:
+    if reason in PLACEABLE_REVIEW_REASONS:
         return item
 
     from .models import AdminNotification
@@ -280,7 +296,7 @@ def _queue_ingest_correction(
     if updated:
         db.commit()
     else:
-        notify_admins(
+        _notify_admins_in_app_only(
             title=title,
             body=body,
             db=db,
@@ -398,71 +414,6 @@ def _session_from_slots(slots: list[dict], fallback: str) -> str:
     return "full"
 
 
-def _is_generic_practice_site(raw: str | None) -> bool:
-    compact = re.sub(r"[^A-Z0-9]+", "", str(raw or "").upper())
-    return compact in {"AHMG", "AHMGGENSRG"}
-
-
-def _looks_like_surgical_case(slot: dict) -> bool:
-    """True only for generic rows that read like OR cases, not clinic visits."""
-    text = f"{slot.get('procedure') or ''} {slot.get('visit_type') or ''}".upper()
-    clinic_terms = (
-        "POST-OP",
-        "POST OP",
-        "OFFICE VISIT",
-        "SPEC OFFICE",
-        "GEN SURG NEW",
-        "REFERRAL",
-        "TELEMEDICINE",
-        "US ",
-        "ULTRASOUND",
-    )
-    if any(term in text for term in clinic_terms):
-        return False
-    surgical_terms = (
-        "ROBOTIC",
-        "REPAIR",
-        "CHOLECYSTECTOMY",
-        "EXCISION",
-        "PLACEMENT",
-        "BIOPSY",
-        "COLECTOMY",
-        "HERNIA",
-        "MASS",
-        "CYST",
-    )
-    return any(term in text for term in surgical_terms)
-
-
-def _assigned_block_covering_time(
-    db: Session,
-    *,
-    surgeon_id: int,
-    day: date,
-    at_time: time,
-) -> ORBlockInstance | None:
-    """Find the surgeon's assigned Block OR row for a generic Advent slot.
-
-    AHMGGENSRG is a practice bucket, not a place. If Advent puts that bucket on
-    a timed row that lands inside an already assigned CAL block, the block is
-    the source of truth for the actual facility.
-    """
-    rows = (
-        db.query(ORBlockInstance)
-        .join(ORBlockAssignment, ORBlockAssignment.block_instance_id == ORBlockInstance.id)
-        .filter(
-            ORBlockAssignment.surgeon_id == surgeon_id,
-            ORBlockInstance.date == day,
-            ORBlockInstance.status.in_(ACTIVE_BLOCK_STATUSES),
-            ORBlockInstance.start_time <= at_time,
-            ORBlockInstance.end_time > at_time,
-        )
-        .order_by(ORBlockInstance.start_time, ORBlockInstance.id)
-        .all()
-    )
-    return rows[0] if rows else None
-
-
 def _block_window_for_cases(
     cases: list[dict],
     session: str,
@@ -499,40 +450,6 @@ def _fax_session_for_clock(when: time) -> str:
     return "pm" if when >= time(12, 0) else "am"
 
 
-def _existing_hospital_session_block(
-    db: Session,
-    *,
-    block_date: date,
-    location_id: int,
-    start_time: time,
-) -> ORBlockInstance | None:
-    """Puzzle-piece: fax clock lands on an already-slotted hospital AM/PM window.
-
-    Room is ignored. Fax never mints a second card.
-    """
-    from .or_block_service import _host_rank, _session_bucket
-
-    rows = (
-        db.query(ORBlockInstance)
-        .filter(
-            ORBlockInstance.date == block_date,
-            ORBlockInstance.location_id == location_id,
-            ORBlockInstance.status.in_(ACTIVE_BLOCK_STATUSES),
-        )
-        .order_by(ORBlockInstance.start_time, ORBlockInstance.id)
-        .all()
-    )
-    if not rows:
-        return None
-    want = _fax_session_for_clock(start_time)
-    containing = [row for row in rows if row.start_time <= start_time < row.end_time]
-    same_half = [row for row in rows if _session_bucket(row) == want]
-    pool = containing or same_half
-    if not pool:
-        return None
-    return sorted(pool, key=_host_rank)[0]
-
-
 def _ensure_or_blocks_for_fax(
     db: Session,
     *,
@@ -561,7 +478,7 @@ def _ensure_or_blocks_for_fax(
     ]
     for half in needed:
         sample = next((t for t in case_times if _fax_session_for_clock(t) == half), start_time)
-        existing = _existing_hospital_session_block(
+        existing = existing_hospital_session_block(
             db,
             block_date=block_date,
             location_id=location_id,
@@ -837,7 +754,7 @@ def _flag_admin_schedule_issues(
     }
     event.payload = json.dumps(payload, default=str)
     db.commit()
-    notify_admins(
+    _notify_admins_in_app_only(
         title="Scheduling flag · Block OR",
         body=body,
         db=db,
@@ -1253,16 +1170,13 @@ def _upsert_clinic_day(
     sess = (session or "pm").lower()
     if sess not in {"am", "pm", "full"}:
         sess = "pm"
-    existing = (
-        db.query(ClinicSchedule)
-        .filter(
-            ClinicSchedule.surgeon_id == surgeon_id,
-            ClinicSchedule.date == day,
-            ClinicSchedule.session.in_([sess, "full"]),
-        )
-        .order_by(ClinicSchedule.id)
-        .first()
-    )
+    existing = existing_clinic_card(
+        db,
+        surgeon_id=surgeon_id,
+        day=day,
+        session=sess,
+        location_id=location_id,
+    ).card
     if existing is None:
         return {
             "id": None,
@@ -1886,13 +1800,13 @@ def ingest_surgeon_schedule(
             for slot in day_slots:
                 site_raw = slot.get("site_raw") or site
                 slot_time = _parse_time(slot.get("start_time"))
-                if not (_is_generic_practice_site(site_raw) and slot_time):
+                if not (is_generic_practice_site(site_raw) and slot_time):
                     kept_clinic_slots.append(slot)
                     continue
-                if not _looks_like_surgical_case(slot):
+                if not looks_like_surgical_case(slot):
                     kept_clinic_slots.append(slot)
                     continue
-                host = _assigned_block_covering_time(
+                host = assigned_block_covering_time(
                     db,
                     surgeon_id=surgeon.id,
                     day=day,
@@ -2015,7 +1929,7 @@ def ingest_surgeon_schedule(
         return sum(1 for row in case_results if row.get("action") == action)
 
     placeable_n = sum(
-        1 for row in corrections if row.get("reason") in _PLACEABLE_CORRECTION_REASONS
+        1 for row in corrections if row.get("reason") in PLACEABLE_REVIEW_REASONS
     )
     if placeable_n:
         _ensure_ingest_placement_digest(
@@ -2051,11 +1965,12 @@ def ingest_surgeon_schedule(
         "error_count": len(errors),
         "errors": errors,
         "created": case_results,
+        "guardrails": {
+            "faxCreatesCards": False,
+            "requiresExistingOrBlock": True,
+            "requiresExistingClinicCard": True,
+            "smsEmailQuiet": True,
+        },
         "grok_cleared": 0,
     }
-    try:
-        from .grok_lookahead_service import run_grok_rules
-        payload["grok_cleared"] = run_grok_rules(db).get("cleared", 0)
-    except Exception:
-        payload["grok_cleared"] = 0
     return payload

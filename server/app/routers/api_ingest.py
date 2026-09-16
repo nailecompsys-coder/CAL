@@ -1,23 +1,28 @@
-"""Service-to-service ingest for Desk (fax triage) → CAL schedules / surgical cases.
+"""Service-to-service Desk ingest using the visual fax SOT path only.
 
 Auth: Authorization: Bearer <CAL_INGEST_TOKEN> (or CAL_API_TOKEN).
-Does not mark anything in Kno2.
+Desk must send reviewed PNG/OCR rows. Legacy parser payloads are retired and
+cannot write CAL schedules.
 """
 
 from __future__ import annotations
 
 import os
+from datetime import date, time
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from ..admin_surgical_schedule_service import add_surgical_case, surgery_fields
 from ..database import get_db
-from ..ingest_resolve import resolve_surgeon
-from ..ingest_schedule_service import ingest_surgeon_schedule
-from ..models import Surgeon
+from ..fax_visual_ingest_service import (
+    BackupReceipt,
+    FaxVisualRow,
+    apply_visual_schedule,
+    run_local_backup,
+)
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 
@@ -37,207 +42,130 @@ def require_ingest_token(authorization: str | None = Header(default=None)) -> No
         raise HTTPException(403, "Invalid ingest token")
 
 
-class SurgicalCaseIn(BaseModel):
+class VisualFaxRowIn(BaseModel):
+    fax_id: int | None = None
+    page: int = 0
+    surgeon_initials: str
     surgeon_name: str | None = None
-    surgeon_id: int | None = None
     case_date: str
-    start_time: str = "08:00"
-    end_time: str = ""
+    start_time: str | None = None
+    row_type: str
+    room: str = ""
     patient_name: str
-    patient_dob: str = ""
-    patient_phone: str = ""
     procedure: str = ""
-    room_text: str = ""
-    location_id: int | None = None
-    status: str = "scheduled"
+    visual_confidence: str = "reviewed"
+    placement_status: str = "reviewed"
     notes: str = ""
 
 
-class SurgicalCasesBatch(BaseModel):
-    source: str = "desk"
-    source_fax_id: int | None = None
-    source_message_id: str | None = None
-    notify: bool = False
-    cases: list[SurgicalCaseIn] = Field(default_factory=list)
+class VisualScheduleBatch(BaseModel):
+    source_fax_id: int
+    source_label: str = "Desk visual PNG SOT"
+    backup_label: str | None = None
+    rows: list[VisualFaxRowIn] = Field(default_factory=list)
 
 
-class OrCaseIn(BaseModel):
-    case_date: str | None = None
-    start_time: str | None = None
-    patient_name: str
-    procedure: str = ""
-    room: str = ""
-    patient_dob: str = ""
+def _parse_day(raw: str) -> date:
+    try:
+        return date.fromisoformat(str(raw)[:10])
+    except ValueError as exc:
+        raise HTTPException(400, f"Invalid case_date: {raw}") from exc
 
 
-class OrBlockIn(BaseModel):
-    session: str = "am"
-    room: str | None = None
-    rooms: list[str] = Field(default_factory=list)
-    block_start: str | None = None
-    block_end: str | None = None
-    cases: list[OrCaseIn] = Field(default_factory=list)
+def _parse_clock(raw: str | None) -> time | None:
+    if not raw:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    try:
+        parts = text.split(":")
+        if len(parts) == 2:
+            return time(int(parts[0]), int(parts[1]))
+        digits = "".join(ch for ch in text if ch.isdigit())
+        if len(digits) == 4:
+            return time(int(digits[:2]), int(digits[2:]))
+    except ValueError as exc:
+        raise HTTPException(400, f"Invalid start_time: {raw}") from exc
+    raise HTTPException(400, f"Invalid start_time: {raw}")
 
 
-class ClinicSlotIn(BaseModel):
-    case_date: str | None = None
-    start_time: str | None = None
-    patient_name: str = ""
-    procedure: str = ""
-    site_raw: str | None = None
-    visit_type: str | None = None
+def _visual_row(source_fax_id: int, item: VisualFaxRowIn) -> FaxVisualRow:
+    row_type = (item.row_type or "").strip().lower()
+    if row_type not in {"surgical", "clinic"}:
+        raise HTTPException(400, "row_type must be surgical or clinic")
+    return FaxVisualRow(
+        fax_id=item.fax_id or source_fax_id,
+        page=item.page,
+        surgeon_initials=item.surgeon_initials.strip().upper(),
+        surgeon_name=(item.surgeon_name or "").strip() or None,
+        case_date=_parse_day(item.case_date),
+        start_time=_parse_clock(item.start_time),
+        row_type=row_type,
+        room=item.room or "",
+        patient_name=item.patient_name.strip(),
+        procedure=item.procedure or "",
+        visual_confidence=item.visual_confidence or "reviewed",
+        placement_status=item.placement_status or "reviewed",
+        notes=item.notes or "",
+    )
 
 
-class ClinicRotationIn(BaseModel):
-    session: str = "pm"
-    site_raw: str | None = None
-    slots: list[ClinicSlotIn] = Field(default_factory=list)
+def _backup_dir() -> Path:
+    return Path(os.environ.get("CAL_FAX_BACKUP_DIR") or "/tmp/cal-fax-backups")
 
 
-class SurgeonScheduleIn(BaseModel):
-    surgeon_name: str | None = None
-    surgeon_raw: str | None = None
-    start_date: str | None = None
-    end_date: str | None = None
-    or_block: OrBlockIn | None = None
-    clinic_rotation: ClinicRotationIn | None = None
-
-
-class SurgeonScheduleBatch(BaseModel):
-    source: str = "desk"
-    source_fax_id: int | None = None
-    source_message_id: str | None = None
-    notify: bool = False
-    window_start: str | None = None
-    window_end: str | None = None
-    surgeons: list[SurgeonScheduleIn] = Field(default_factory=list)
-
-
-@router.post("/surgical-cases")
-def ingest_surgical_cases(
-    body: SurgicalCasesBatch,
+@router.post("/visual-schedule")
+def ingest_visual_schedule_route(
+    body: VisualScheduleBatch,
     db: Session = Depends(get_db),
     _: None = Depends(require_ingest_token),
 ) -> dict[str, Any]:
-    """Legacy: OR patients only as surgical_cases (no Block OR / clinic lanes)."""
-    if not body.cases:
-        raise HTTPException(400, "cases required")
-    if len(body.cases) > 200:
-        raise HTTPException(400, "too many cases (max 200)")
+    """Desk reviewed-PNG/OCR publish path.
 
-    created: list[dict[str, Any]] = []
-    errors: list[dict[str, Any]] = []
-
-    for idx, item in enumerate(body.cases):
-        surgeon = None
-        if item.surgeon_id:
-            surgeon = db.query(Surgeon).filter(Surgeon.id == item.surgeon_id).first()
-        if not surgeon:
-            surgeon = resolve_surgeon(db, item.surgeon_name)
-        if not surgeon:
-            errors.append(
-                {
-                    "index": idx,
-                    "patient_name": item.patient_name,
-                    "error": f"surgeon not found: {item.surgeon_name or item.surgeon_id}",
-                }
-            )
-            continue
-
-        loc_id = ""
-        if item.location_id:
-            loc_id = str(item.location_id)
-        else:
-            from ..ingest_resolve import resolve_or_location
-            from datetime import date as date_cls
-
-            case_day = None
-            try:
-                case_day = date_cls.fromisoformat(str(item.case_date)[:10])
-            except ValueError:
-                case_day = None
-            loc = resolve_or_location(
-                db,
-                item.room_text,
-                surgeon_id=surgeon.id,
-                day=case_day,
-            )
-            # Never fall back to clinic locations (e.g. HP-CL) for OR cases
-            if loc:
-                loc_id = str(loc.id)
-
-        note_parts = [item.notes.strip()] if item.notes.strip() else []
-        if body.source_fax_id:
-            note_parts.append(f"Desk fax #{body.source_fax_id}")
-        if body.source_message_id:
-            note_parts.append(f"Kno2 {body.source_message_id}")
-        note_parts.append(f"source={body.source}")
-        notes = " · ".join(note_parts)
-
-        try:
-            fields = surgery_fields(
-                surgeon.id,
-                item.case_date,
-                item.start_time or "08:00",
-                item.patient_name,
-                item.procedure or "TBD",
-                item.end_time or "",
-                item.patient_dob or "",
-                item.patient_phone or "",
-                loc_id,
-                item.room_text or "",
-                item.status or "scheduled",
-                notes,
-            )
-            surgical_case, _warn = add_surgical_case(db, fields, notify=body.notify)
-            created.append(
-                {
-                    "id": surgical_case.id,
-                    "surgeon_id": surgical_case.surgeon_id,
-                    "case_date": str(surgical_case.date),
-                    "patient_name": surgical_case.patient_name,
-                    "start_time": surgical_case.start_time.strftime("%H:%M"),
-                }
-            )
-        except ValueError as exc:
-            errors.append({"index": idx, "patient_name": item.patient_name, "error": str(exc)})
-        except Exception as exc:  # noqa: BLE001
-            errors.append({"index": idx, "patient_name": item.patient_name, "error": str(exc)})
-
+    This is the only Desk schedule write route. It requires a DB backup before
+    applying rows and uses the same guardrails as the manual visual ingest CLI.
+    """
+    if not body.rows:
+        raise HTTPException(400, "rows required")
+    if len(body.rows) > 1000:
+        raise HTTPException(400, "too many rows (max 1000)")
+    rows = [_visual_row(body.source_fax_id, item) for item in body.rows]
+    fax_ids = {row.fax_id for row in rows}
+    if fax_ids != {body.source_fax_id}:
+        raise HTTPException(400, "all rows must match source_fax_id")
+    backup = run_local_backup(_backup_dir(), label=body.backup_label or f"desk_fax{body.source_fax_id}_visual")
+    if not backup.success:
+        raise HTTPException(500, f"Backup failed; write refused: {backup.metadata}")
+    result = apply_visual_schedule(
+        db,
+        rows,
+        backup=backup,
+        source_fax_id=body.source_fax_id,
+        source_label=body.source_label or "Desk visual PNG SOT",
+    )
     return {
-        "ok": len(errors) == 0,
-        "created": created,
-        "created_count": len(created),
-        "error_count": len(errors),
-        "errors": errors,
+        "ok": True,
+        "backup": {
+            "label": backup.label,
+            "path_or_key": backup.path_or_key,
+            "metadata": backup.metadata or {},
+        },
+        "result": result,
     }
 
 
+@router.post("/surgical-cases")
+def retired_surgical_cases_route(_: None = Depends(require_ingest_token)) -> None:
+    raise HTTPException(
+        410,
+        "Retired. Desk must use /api/ingest/visual-schedule with reviewed PNG/OCR rows.",
+    )
+
+
 @router.post("/surgeon-schedule")
-def ingest_surgeon_schedule_route(
-    body: SurgeonScheduleBatch,
-    db: Session = Depends(get_db),
-    _: None = Depends(require_ingest_token),
-) -> dict[str, Any]:
-    """Full Desk schedule publish: Block OR + cases + clinic day lanes."""
-    if not body.surgeons:
-        raise HTTPException(400, "surgeons required")
-    if len(body.surgeons) > 50:
-        raise HTTPException(400, "too many surgeons (max 50)")
-
-    payload = [s.model_dump() for s in body.surgeons]
-    # Normalize names for resolver
-    for row in payload:
-        if not row.get("surgeon_name") and row.get("surgeon_raw"):
-            row["surgeon_name"] = row["surgeon_raw"]
-
-    return ingest_surgeon_schedule(
-        db,
-        surgeons=payload,
-        source=body.source or "desk",
-        source_fax_id=body.source_fax_id,
-        source_message_id=body.source_message_id,
-        notify=body.notify,
-        window_start=body.window_start,
-        window_end=body.window_end,
+def retired_surgeon_schedule_route(_: None = Depends(require_ingest_token)) -> None:
+    raise HTTPException(
+        410,
+        "Retired. Desk must use /api/ingest/visual-schedule with reviewed PNG/OCR rows.",
     )

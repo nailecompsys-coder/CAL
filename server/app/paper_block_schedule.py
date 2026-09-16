@@ -17,7 +17,7 @@ from datetime import date, timedelta
 
 from sqlalchemy.orm import Session, selectinload
 
-from .admin_schedule_template_clinic_service import save_template_cell_value
+from .admin_schedule_template_clinic_service import normalize_week_pattern, save_template_cell_value
 from .admin_schedule_template_common import approved_off_dates
 from .models import (
     ClinicSchedule,
@@ -289,28 +289,32 @@ def _prune_empty_non_paper_windows(db: Session, start: date, end: date) -> int:
     return deleted
 
 
-def weekly_or_cells() -> dict[str, dict[tuple[int, str], str]]:
-    """Every-week Block OR only (hospital -OR). Cadence weeks stay off the weekly template."""
-    out: dict[str, dict[tuple[int, str], str]] = {}
+def _week_pattern_value(weeks: frozenset[int] | None) -> str:
+    if weeks is None:
+        return "all"
+    return normalize_week_pattern(",".join(str(week) for week in sorted(weeks)))
+
+
+def weekly_or_cells() -> dict[str, dict[tuple[int, str], tuple[str, str]]]:
+    """Block OR cells keyed by surgeon/day/session, including cadence weeks."""
+    out: dict[str, dict[tuple[int, str], tuple[str, str]]] = {}
     for initials, cells in PAPER.items():
         for (dow, session), (abbrev, weeks) in cells.items():
-            if weeks is not None:
-                continue
             if not str(abbrev).upper().endswith("-OR"):
                 continue
-            out.setdefault(initials, {})[(dow, session)] = abbrev
+            out.setdefault(initials, {})[(dow, session)] = (abbrev, _week_pattern_value(weeks))
     return out
 
 
-def master_weekly_cells() -> dict[str, dict[tuple[int, str], str]]:
+def master_weekly_cells() -> dict[str, dict[tuple[int, str], tuple[str, str]]]:
     """Clinic grid + Block OR. OR wins if both claim the same half-day (should be rare)."""
     clinic = clinic_cells_by_surgeon()
     or_cells = weekly_or_cells()
     initials = set(clinic) | set(or_cells)
-    merged: dict[str, dict[tuple[int, str], str]] = {}
+    merged: dict[str, dict[tuple[int, str], tuple[str, str]]] = {}
     for key in initials:
-        cells: dict[tuple[int, str], str] = {}
-        cells.update(clinic.get(key, {}))
+        cells: dict[tuple[int, str], tuple[str, str]] = {}
+        cells.update({slot: (abbrev, "all") for slot, abbrev in clinic.get(key, {}).items()})
         # OR overlays clinic for that session
         cells.update(or_cells.get(key, {}))
         merged[key] = cells
@@ -331,13 +335,14 @@ def sync_weekly_templates(db: Session, surgeons: dict[str, Surgeon], locations: 
             continue
         for dow in range(5):
             for session in ("am", "pm"):
-                abbrev = cells.get((dow, session))
-                if abbrev:
+                spec = cells.get((dow, session))
+                if spec:
+                    abbrev, week_pattern = spec
                     loc = locations.get(abbrev) or locations.get(abbrev.upper())
                     if not loc:
                         continue
                     save_template_cell_value(
-                        db, surgeon.id, dow, session, loc.id, "assigned",
+                        db, surgeon.id, dow, session, loc.id, "assigned", week_pattern,
                     )
                 else:
                     existing = db.query(SurgeonLocationSchedule).filter(

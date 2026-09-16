@@ -98,26 +98,37 @@
             {% set cell = surg_tpls.get(dow, {}).get(sess) %}
             <td class="px-2 py-2">
               <div class="master-cell">
-                <select
-                  class="master-cell-select w-full rounded-lg border px-2 py-1.5 text-xs font-bold bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-400"
-                  data-surgeon="{{ surgeon.id }}"
-                  data-dow="{{ dow }}"
-                  data-session="{{ sess }}"
-                >
-                  <option value="blank"{% if not cell %} selected{% endif %}>BLANK</option>
-                  <option value="off"{% if cell and cell.assignment_type == 'off' %} selected{% endif %}>OFF</option>
-                  <option value="float"{% if cell and cell.assignment_type == 'float' %} selected{% endif %}>FLOAT</option>
-                  <optgroup label="Hospitals / OR">
-                    {% for loc in all_locations if loc.location_type == 'hospital' %}
-                    <option value="location:{{ loc.id }}"{% if cell and cell.assignment_type == 'assigned' and cell.location_id == loc.id %} selected{% endif %}>{{ loc.abbreviation or loc.name }}</option>
+                <div class="flex gap-1.5">
+                  <select
+                    class="master-cell-select min-w-0 flex-1 rounded-lg border px-2 py-1.5 text-xs font-bold bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    data-surgeon="{{ surgeon.id }}"
+                    data-dow="{{ dow }}"
+                    data-session="{{ sess }}"
+                  >
+                    <option value="blank"{% if not cell %} selected{% endif %}>BLANK</option>
+                    <option value="off"{% if cell and cell.assignment_type == 'off' %} selected{% endif %}>OFF</option>
+                    <option value="float"{% if cell and cell.assignment_type == 'float' %} selected{% endif %}>FLOAT</option>
+                    <optgroup label="Hospitals / OR">
+                      {% for loc in all_locations if loc.location_type == 'hospital' %}
+                      <option value="location:{{ loc.id }}"{% if cell and cell.assignment_type == 'assigned' and cell.location_id == loc.id %} selected{% endif %}>{{ loc.abbreviation or loc.name }}</option>
+                      {% endfor %}
+                    </optgroup>
+                    <optgroup label="Clinics">
+                      {% for loc in all_locations if loc.location_type == 'clinic' %}
+                      <option value="location:{{ loc.id }}"{% if cell and cell.assignment_type == 'assigned' and cell.location_id == loc.id %} selected{% endif %}>{{ loc.abbreviation or loc.name }}</option>
+                      {% endfor %}
+                    </optgroup>
+                  </select>
+                  <select
+                    class="master-week-select w-20 rounded-lg border border-slate-200 px-1.5 py-1.5 text-xs font-semibold bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    title="Week of month"
+                  >
+                    {% set current_pattern = (cell.week_pattern if cell else 'all') or 'all' %}
+                    {% for value, label in week_pattern_options %}
+                    <option value="{{ value }}"{% if current_pattern == value %} selected{% endif %}>{{ label }}</option>
                     {% endfor %}
-                  </optgroup>
-                  <optgroup label="Clinics">
-                    {% for loc in all_locations if loc.location_type == 'clinic' %}
-                    <option value="location:{{ loc.id }}"{% if cell and cell.assignment_type == 'assigned' and cell.location_id == loc.id %} selected{% endif %}>{{ loc.abbreviation or loc.name }}</option>
-                    {% endfor %}
-                  </optgroup>
-                </select>
+                  </select>
+                </div>
                 <p class="master-save text-[10px] text-slate-400 mt-1 h-3"></p>
               </div>
             </td>
@@ -136,6 +147,8 @@
 <script>
 (function () {
   function postCell(selectEl, statusEl) {
+    var cell = selectEl.closest('.master-cell');
+    var weekEl = cell.querySelector('.master-week-select');
     var value = selectEl.value || 'blank';
     var assignmentType = value;
     var locationId = '';
@@ -147,7 +160,8 @@
       surgeon_id: selectEl.dataset.surgeon,
       day_of_week: selectEl.dataset.dow,
       session: selectEl.dataset.session,
-      assignment_type: assignmentType
+      assignment_type: assignmentType,
+      week_pattern: weekEl ? weekEl.value : 'all'
     });
     if (locationId) body.set('location_id', locationId);
     statusEl.textContent = 'Saving...';
@@ -172,6 +186,12 @@
     selectEl.addEventListener('change', function () {
       var cell = selectEl.closest('.master-cell');
       postCell(selectEl, cell.querySelector('.master-save'));
+    });
+  });
+  document.querySelectorAll('.master-week-select').forEach(function (weekEl) {
+    weekEl.addEventListener('change', function () {
+      var cell = weekEl.closest('.master-cell');
+      postCell(cell.querySelector('.master-cell-select'), cell.querySelector('.master-save'));
     });
   });
 })();

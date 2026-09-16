@@ -8,7 +8,20 @@ os.environ.setdefault("SECRET_KEY", "test-secret")
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models import Base, ClinicSchedule, DayOff, Location, ORBlockAssignment, ORBlockInstance, Surgeon
+from app.admin_schedule_template_clinic_service import (
+    apply_clinic_schedule_templates,
+    save_template_cell_value,
+)
+from app.models import (
+    Base,
+    ClinicSchedule,
+    DayOff,
+    Location,
+    ORBlockAssignment,
+    ORBlockInstance,
+    Surgeon,
+    SurgeonLocationSchedule,
+)
 from app.paper_block_schedule import (
     PAPER,
     START,
@@ -91,6 +104,47 @@ class PaperBlockScheduleTest(unittest.TestCase):
         self.assertEqual(paper_cell("AS", date(2026, 9, 21), "am"), "WG-OR")
         self.assertEqual(paper_cell("AS", date(2026, 9, 18), "am"), "WG-OR")
         self.assertIsNone(paper_cell("AS", date(2026, 9, 11), "am"))
+
+    def test_sync_writes_week_pattern_for_cadence_cell(self):
+        result = apply_paper_block_schedule(
+            self.db,
+            start=date(2026, 9, 14),
+            end=date(2026, 9, 14),
+            write_templates=True,
+            write_clinic=False,
+            write_blocks=False,
+        )
+        self.assertTrue(result["ok"])
+        alex = self.db.query(Surgeon).filter_by(last_name="Schroeder").one()
+        row = (
+            self.db.query(SurgeonLocationSchedule)
+            .filter_by(surgeon_id=alex.id, day_of_week=0, session="am")
+            .one()
+        )
+        self.assertEqual(row.location.abbreviation, "WG-OR")
+        self.assertEqual(row.week_pattern, "1,3,5")
+
+    def test_template_apply_respects_week_pattern(self):
+        alex = self.db.query(Surgeon).filter_by(last_name="Schroeder").one()
+        wg = self.db.query(Location).filter_by(abbreviation="WG-OR").one()
+        save_template_cell_value(self.db, alex.id, 0, "am", wg.id, "assigned", "1,3,5")
+
+        result = apply_clinic_schedule_templates(
+            self.db,
+            date(2026, 9, 14),
+            date(2026, 9, 21),
+            str(alex.id),
+            False,
+            False,
+        )
+        self.assertEqual(result["created"], 1)
+        rows = (
+            self.db.query(ClinicSchedule)
+            .filter_by(surgeon_id=alex.id, session="am")
+            .order_by(ClinicSchedule.date)
+            .all()
+        )
+        self.assertEqual([row.date for row in rows], [date(2026, 9, 21)])
 
     def test_clermont_is_clinic_never_or(self):
         self.assertEqual(paper_cell("JB", date(2026, 9, 14), "am"), "CL-OV")

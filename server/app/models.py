@@ -219,6 +219,8 @@ class SurgeonLocationSchedule(Base):
     session = Column(String(4), nullable=False, default="am")  # am | pm
     # assigned = has location; float = available wherever needed; off = not working that session
     assignment_type = Column(String(16), nullable=False, default="assigned", server_default="assigned")
+    # all, 1, 2, 3, 4, 5, 1,3,5, 2,4. Week means nth weekday in the month.
+    week_pattern = Column(String(16), nullable=False, default="all", server_default="all")
 
     surgeon = relationship("Surgeon", back_populates="location_schedules")
     location = relationship("Location")

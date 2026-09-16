@@ -401,6 +401,7 @@ def _weekly_clinic_location(
     session: str | None = None,
 ) -> Location | None:
     """Master weekly TEMPLATES (*-OV only) for this weekday — never hospital/OR."""
+    from .admin_schedule_template_clinic_service import week_pattern_matches
     from .models import SurgeonLocationSchedule
 
     sess = (session or "am").lower()
@@ -422,6 +423,8 @@ def _weekly_clinic_location(
         key=lambda r: 0 if (r.session or "").lower() == sess else 1,
     )
     for row in ordered:
+        if not week_pattern_matches(day, getattr(row, "week_pattern", "all")):
+            continue
         loc = db.get(Location, row.location_id)
         if loc and _is_clinic_location(loc):
             return loc

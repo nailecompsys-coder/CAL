@@ -73,11 +73,14 @@ async def save_template_cell(
     session: str = Form(...),
     location_id: Optional[int] = Form(None),
     assignment_type: str = Form("assigned"),
+    week_pattern: str = Form("all"),
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
     """Save a single cell in the weekly template grid (called via fetch)."""
-    result = save_template_cell_value(db, surgeon_id, day_of_week, session, location_id, assignment_type)
+    result = save_template_cell_value(
+        db, surgeon_id, day_of_week, session, location_id, assignment_type, week_pattern
+    )
     return JSONResponse(result)
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from datetime import timedelta
 
 from sqlalchemy.orm import Session
@@ -7,6 +8,41 @@ from sqlalchemy.orm import Session
 from .admin_schedule_template_common import approved_off_dates, parse_target_surgeon_ids
 from .models import CallGroup, CallRotationTemplate, ClinicSchedule, Location, Surgeon, SurgeonLocationSchedule
 from .surgeon_visibility import surgeon_is_visible
+
+
+WEEK_PATTERN_OPTIONS = [
+    ("all", "Every"),
+    ("1", "1"),
+    ("2", "2"),
+    ("3", "3"),
+    ("4", "4"),
+    ("5", "5"),
+    ("1,3,5", "1,3,5"),
+    ("2,4", "2,4"),
+]
+
+
+def normalize_week_pattern(value: str | None) -> str:
+    raw = (value or "all").strip().lower()
+    if raw in {"", "all", "every", "*"}:
+        return "all"
+    parts: list[str] = []
+    for part in raw.replace("/", ",").replace(" ", "").split(","):
+        if part in {"1", "2", "3", "4", "5"} and part not in parts:
+            parts.append(part)
+    return ",".join(parts) if parts else "all"
+
+
+def month_week(day: date) -> int:
+    """1-5 occurrence of this weekday inside the month."""
+    return (day.day - 1) // 7 + 1
+
+
+def week_pattern_matches(day: date, pattern: str | None) -> bool:
+    normalized = normalize_week_pattern(pattern)
+    if normalized == "all":
+        return True
+    return str(month_week(day)) in normalized.split(",")
 
 
 def template_cells_by_surgeon(db: Session, surgeon_ids: list[int]) -> dict:
@@ -41,6 +77,7 @@ def template_grid_context(db: Session, sort_surgeons) -> dict:
         .order_by(Location.location_type.desc(), Location.name)
         .all(),
         "tpl_map": tpl_map,
+        "week_pattern_options": WEEK_PATTERN_OPTIONS,
         "call_groups": db.query(CallGroup).order_by(CallGroup.sort_order).all(),
         "rotation_by_group": rotation_by_group,
         "days": ["Mon", "Tue", "Wed", "Thu", "Fri"],
@@ -54,8 +91,10 @@ def save_template_cell_value(
     session: str,
     location_id: int | None,
     assignment_type: str,
+    week_pattern: str | None = "all",
 ) -> dict:
     assignment_type = (assignment_type or "assigned").lower().strip()
+    week_pattern = normalize_week_pattern(week_pattern)
     existing = db.query(SurgeonLocationSchedule).filter(
         SurgeonLocationSchedule.surgeon_id == surgeon_id,
         SurgeonLocationSchedule.day_of_week == day_of_week,
@@ -72,6 +111,7 @@ def save_template_cell_value(
     if existing:
         existing.location_id = location_id if assignment_type == "assigned" else None
         existing.assignment_type = assignment_type
+        existing.week_pattern = week_pattern
     else:
         db.add(SurgeonLocationSchedule(
             surgeon_id=surgeon_id,
@@ -79,6 +119,7 @@ def save_template_cell_value(
             session=session,
             location_id=location_id if assignment_type == "assigned" else None,
             assignment_type=assignment_type,
+            week_pattern=week_pattern,
         ))
     db.commit()
     return {"ok": True, "action": "updated" if existing else "created"}
@@ -124,6 +165,8 @@ def apply_clinic_schedule_templates(
 
             day_tpls = tpl_by_surgeon.get(sid, {}).get(dow, {})
             for session, template in day_tpls.items():
+                if not week_pattern_matches(cur_date, getattr(template, "week_pattern", "all")):
+                    continue
                 if template.assignment_type == "float":
                     skipped_float += 1
                     continue

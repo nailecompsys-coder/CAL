@@ -461,6 +461,66 @@ class AdminClinicScheduleTest(unittest.TestCase):
         finally:
             db.close()
 
+    def test_page_data_never_returns_full_as_third_visible_card(self):
+        db = self.Session()
+        try:
+            clinic = Location(
+                name="Winter Garden Clinic",
+                abbreviation="WG-OV",
+                location_type="clinic",
+                color="#BFDBFE",
+                is_active=True,
+            )
+            hospital = Location(
+                name="Winter Garden OR",
+                abbreviation="WG-OR",
+                location_type="hospital",
+                color="#E48EA6",
+                is_active=True,
+            )
+            db.add_all([clinic, hospital])
+            surgeon = self._surgeon(db, "Jorge", "Florin")
+            db.flush()
+            monday = date.today() - timedelta(days=date.today().weekday())
+            db.add_all([
+                ClinicSchedule(
+                    surgeon_id=surgeon.id,
+                    location_id=hospital.id,
+                    date=monday,
+                    session="full",
+                    assignment_type="assigned",
+                ),
+                ClinicSchedule(
+                    surgeon_id=surgeon.id,
+                    location_id=clinic.id,
+                    date=monday,
+                    session="pm",
+                    assignment_type="assigned",
+                ),
+                SurgicalCase(
+                    surgeon_id=surgeon.id,
+                    date=monday,
+                    start_time=time(7, 15),
+                    patient_name="Case One",
+                    procedure="Procedure",
+                    location_id=hospital.id,
+                    room_text="WG S01",
+                    status="scheduled",
+                ),
+            ])
+            db.commit()
+
+            data = page_data(db, week_offset=0)
+            entries = data["sched_map"].get(surgeon.id, {}).get(monday, [])
+            blocks = data["assigned_or_blocks"].get(surgeon.id, {}).get(monday, [])
+            sessions = [row.session for row in entries]
+
+            self.assertEqual(len(entries) + len(blocks), 2)
+            self.assertEqual(sessions, ["am", "pm"])
+            self.assertEqual(data["or_block_overlays"][entries[0].id]["pillCountLabel"], "1 case")
+        finally:
+            db.close()
+
     def test_existing_hospital_card_gets_case_count_without_extra_card(self):
         db = self.Session()
         try:

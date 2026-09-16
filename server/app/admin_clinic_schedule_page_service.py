@@ -335,28 +335,30 @@ def enforce_two_card_daily_limit(
     or_block_overlays: dict[int, dict],
     clinic_fax_overlays: dict[int, dict],
 ) -> tuple[dict, dict, dict, dict]:
-    """Clinic / OR grid invariant: at most one AM card and one PM card per surgeon/day."""
+    """Clinic / OR grid invariant: exactly AM/PM display buckets, never a third full-day card."""
     limited_sched: dict = {}
     kept_schedule_ids: set[int] = set()
     for surgeon_id, by_day in sched_map.items():
         for day, schedules in by_day.items():
             groups: dict[str, list[ClinicSchedule]] = {}
             for schedule in schedules:
-                session = (schedule.session or "full").lower()
+                raw_session = (schedule.session or "am").lower()
+                session = raw_session if raw_session in {"am", "pm"} else "am"
                 groups.setdefault(session, []).append(schedule)
 
             kept_rows = []
-            for session in ("am", "pm", "full"):
+            for session in ("am", "pm"):
                 group = groups.get(session) or []
                 ordered = sorted(group, key=clinic_schedule_sort_key)
                 if ordered:
+                    ordered[0].session = session
                     kept_rows.append(ordered[0])
             if not kept_rows:
                 continue
             kept_rows = sorted(
                 kept_rows,
                 key=lambda schedule: (
-                    SESSION_SORT_ORDER.get((schedule.session or "full").lower(), 9),
+                    SESSION_SORT_ORDER.get((schedule.session or "am").lower(), 9),
                     1 if _is_hospital_schedule_location(schedule.location) else 0,
                     *clinic_schedule_sort_key(schedule),
                 ),
@@ -371,15 +373,13 @@ def enforce_two_card_daily_limit(
     for surgeon_id, by_day in assigned_or_blocks.items():
         for day, blocks in by_day.items():
             occupied_sessions = {
-                (schedule.session or "full").lower()
+                (schedule.session or "am").lower()
                 for schedule in limited_sched.get(surgeon_id, {}).get(day, [])
             }
-            if "full" in occupied_sessions:
-                occupied_sessions.update({"am", "pm"})
             ordered = sorted(
                 blocks,
                 key=lambda row: (
-                    SESSION_SORT_ORDER.get((row.get("session") or "full").lower(), 9),
+                    SESSION_SORT_ORDER.get((row.get("session") or "am").lower(), 9),
                     row.get("assignedStart") or "",
                     row.get("detailId") or "",
                 ),
@@ -387,11 +387,13 @@ def enforce_two_card_daily_limit(
             kept: list[dict] = []
             used_sessions: set[str] = set()
             for row in ordered:
-                session = (row.get("session") or "full").lower()
+                raw_session = (row.get("session") or "am").lower()
+                session = raw_session if raw_session in {"am", "pm"} else _block_display_session(row)
                 if session in occupied_sessions:
                     continue
                 if session in used_sessions:
                     continue
+                row["session"] = session
                 kept.append(row)
                 used_sessions.add(session)
                 if len(kept) == 2:

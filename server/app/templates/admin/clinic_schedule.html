@@ -153,8 +153,6 @@
         {% set day_entries = sched_map.get(surgeon.id, {}).get(day, []) %}
         {% set am_entries = day_entries|selectattr('session', 'equalto', 'am')|list %}
         {% set pm_entries = day_entries|selectattr('session', 'equalto', 'pm')|list %}
-        {% set full_entries = day_entries|rejectattr('session', 'equalto', 'am')|rejectattr('session', 'equalto', 'pm')|list %}
-        {% set full_off_entries = full_entries|selectattr('assignment_type', 'equalto', 'off')|list %}
         {% set day_surgeries = surgical_map.get(surgeon.id, {}).get(day, []) %}
         {% set day_block_assignments = assigned_or_blocks.get(surgeon.id, {}).get(day, []) %}
         {% set hide_or_for_off = hide_empty_or_blocks.get((surgeon.id, day), false) if hide_empty_or_blocks is defined else false %}
@@ -182,29 +180,12 @@
           {% endif %}
           onclick='openAssignModal({"surgeonId": {{ surgeon.id }}, "date": {{ day.isoformat()|tojson }}, "surgeonName": {{ surgeon.full_name|tojson }}, "dateLabel": {{ day.strftime("%a, %b %-d")|tojson }}})'>
 
-          <div class="min-h-[82px] space-y-1">
-            {% if day_has_off_conflict %}
-            <div class="flex items-center gap-1 text-[10px] font-bold text-rose-700 px-1">
-              <i class="fa-solid fa-triangle-exclamation text-[9px]"></i>
-              <span>OFF conflict</span>
-              {% if day_off_info and day_off_info.status == 'pending' %}<span class="font-semibold text-amber-700">(pending)</span>{% endif %}
-            </div>
-            {% elif show_synthetic_off or (day_off_info and not day_entries and hide_or_for_off) %}
-            <div class="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-md bg-slate-200 text-slate-700 shadow-sm w-full">
-              <i class="fa-solid fa-bed text-[8px] opacity-90 flex-shrink-0"></i>
-              <span>OFF{% if day_off_info and day_off_info.status == 'pending' %}?{% endif %}</span>
-            </div>
-            {% elif day_off_info and not day_entries and not day_block_assignments %}
-            <div class="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-md bg-slate-200 text-slate-700 shadow-sm w-full">
-              <i class="fa-solid fa-bed text-[8px] opacity-90 flex-shrink-0"></i>
-              <span>OFF{% if day_off_info.status == 'pending' %}?{% endif %}</span>
-            </div>
-            {% endif %}
+          <div class="min-h-[104px] space-y-1">
             {% for slot in [
-              {'label': 'AM', 'entries': am_entries if am_entries else full_off_entries, 'blocks': am_blocks},
-              {'label': 'PM', 'entries': pm_entries if pm_entries else full_off_entries, 'blocks': pm_blocks}
+              {'label': 'AM', 'entries': am_entries, 'blocks': am_blocks},
+              {'label': 'PM', 'entries': pm_entries, 'blocks': pm_blocks}
             ] %}
-            <div class="min-h-[38px] space-y-0.5">
+            <div class="min-h-[46px] space-y-0.5">
             {% if slot.entries or slot.blocks %}
               {% for entry in slot.entries %}
               {% set off_overlay = show_off_schedule_ids is defined and entry.id in show_off_schedule_ids %}
@@ -214,7 +195,7 @@
               {% set clinic_overlay = clinic_fax_overlays.get(entry.id) if clinic_fax_overlays is defined else none %}
               {% set pill_overlay = or_overlay or clinic_overlay %}
               <div class="flex items-center gap-1 group/entry relative w-full">
-                <span class="flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-md leading-tight w-full min-w-0 min-h-[38px] cursor-pointer hover:opacity-90 {% if entry_is_off %}bg-slate-200 text-slate-700 shadow-sm{% else %}block-gradient shadow-sm{% endif %}"
+                <span class="flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-md leading-tight w-full min-w-0 min-h-[46px] cursor-pointer hover:opacity-90 {% if entry_is_off %}bg-slate-200 text-slate-700 shadow-sm{% else %}block-gradient shadow-sm{% endif %}"
                   style="{% if not entry_is_off and entry.assignment_type == 'assigned' %}--block-c: {{ entry.location.color or '#0ea5e9' }};color:#1e293b{% endif %}"
                   title="{% if entry_is_off %}OFF{% elif entry.location %}{{ entry.location.name }} — {{ entry.session }}{% endif %}{% if off_overlay %} · OFF{% if day_off_info and day_off_info.status == 'pending' %} requested{% endif %}{% endif %}{% if pill_overlay %} · {{ pill_overlay.assignedStart }} · {{ pill_overlay.caseCount }}{% endif %}{% if entry.notes %} · {{ entry.notes }}{% endif %}"
                   {% if pill_overlay %}
@@ -261,10 +242,11 @@
               </div>
               {% endfor %}
 
+              {% if not slot.entries %}
               {% for block in slot.blocks %}
               <div class="w-full">
                 <button type="button"
-                  class="flex items-center gap-1 w-full text-xs font-medium px-2 py-1 rounded-md leading-tight min-h-[38px] cursor-pointer hover:opacity-90 block-gradient shadow-sm text-left"
+                  class="flex items-center gap-1 w-full text-xs font-medium px-2 py-1 rounded-md leading-tight min-h-[46px] cursor-pointer hover:opacity-90 block-gradient shadow-sm text-left"
                   style="--block-c: {{ block.locationColor or '#A7F3D0' }};color:#1e293b"
                   title="{{ block.location }} · {{ block.assignedStart }} · {{ block.caseCount }} case{{ '' if block.caseCount == 1 else 's' }} — click for detail"
                   onclick='event.stopPropagation(); openPillDetailModal({{ {"kind": "or", "title": block.location or block.locationAbbreviation, "abbr": block.locationAbbreviation or "", "session": (block.session or "")|upper, "earliest": block.assignedStart or "", "count": block.caseCount or 0, "countLabel": block.countLabel or "Cases", "pillLabel": block.pillLabel or "", "segments": block.segments or [], "surgeonId": surgeon.id, "date": day.isoformat(), "locationId": block.locationId} | tojson }})'>
@@ -275,9 +257,10 @@
                 </button>
               </div>
               {% endfor %}
+              {% endif %}
             {% else %}
               {% set blank_off = day_off_info and slot.label|lower in (day_off_info.sessions or ['am', 'pm']) %}
-              <div class="min-h-[38px] rounded-md border {% if blank_off %}border-slate-300 bg-slate-100 text-slate-700{% else %}border-dashed border-slate-200 bg-white/45{% endif %} flex items-center justify-end px-2">
+              <div class="min-h-[46px] rounded-md border {% if blank_off %}border-slate-300 bg-slate-100 text-slate-700 shadow-sm{% else %}border-dashed border-slate-200 bg-white/45{% endif %} flex items-center justify-end px-2">
                 {% if blank_off %}
                 <span class="rounded bg-slate-900/10 px-1.5 py-0.5 text-[10px] font-extrabold tracking-wide">OFF{% if day_off_info.status == 'pending' %}?{% endif %}</span>
                 {% endif %}

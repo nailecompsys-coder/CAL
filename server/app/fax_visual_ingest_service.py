@@ -39,12 +39,15 @@ from .fax_ingest_guardrails import (
     matching_assigned_or_block,
 )
 from .models import (
+    ClinicSchedule,
     CoSurgeonPair,
     Location,
+    ORBlockAssignment,
     ScheduleChangeEvent,
     Surgeon,
     SurgicalCase,
 )
+from .or_block_service import assign_block
 
 ROOM_PREFIX_TO_OR_ABBR = {
     "ALT": "AL-OR",
@@ -544,6 +547,51 @@ def _choose_primary_and_assist(
     return ids[0], ids[1]
 
 
+def _fill_na_or_card(
+    db: Session,
+    *,
+    surgeon_id: int,
+    day: date,
+    start_time: time,
+    location: Location,
+    block_id: int,
+    source_note: str,
+) -> None:
+    """Convert a master-created NA session into its confirmed fax OR slot."""
+    session = session_for_time(start_time)
+    card = (
+        db.query(ClinicSchedule)
+        .filter(
+            ClinicSchedule.surgeon_id == surgeon_id,
+            ClinicSchedule.date == day,
+            ClinicSchedule.session == session,
+        )
+        .first()
+    )
+    if card and (card.assignment_type or "").lower() == "na":
+        card.location_id = location.id
+        card.assignment_type = "assigned"
+        card.notes = append_internal_note(card.notes, source_note)
+
+    already_assigned = (
+        db.query(ORBlockAssignment)
+        .filter(
+            ORBlockAssignment.block_instance_id == block_id,
+            ORBlockAssignment.surgeon_id == surgeon_id,
+        )
+        .first()
+    )
+    if not already_assigned:
+        # This attaches to a pre-existing Block OR capacity row. It never
+        # creates a hospital block or sends a surgeon notification.
+        assign_block(
+            db,
+            block_id,
+            surgeon_id,
+            case_count=0,
+            assignment_note=source_note,
+            notify=False,
+        )
 def overlay_against_prod(db: Session, rows: list[FaxVisualRow]) -> dict[str, Any]:
     """Read-only overlay before write."""
     surgeons_by_initial = _surgeon_maps(db)
@@ -695,6 +743,15 @@ def apply_visual_schedule(
                 f"{first.room} {first.patient_name}: no matching static OR block"
             )
             continue
+        _fill_na_or_card(
+            db,
+            surgeon_id=primary_id,
+            day=first.case_date,
+            start_time=first.start_time,
+            location=loc,
+            block_id=block.id,
+            source_note=f"Fax {source_fax_id} visual SOT filled master NA capacity.",
+        )
         if matches:
             case = matches[0]
             old = f"case {case.id} old surgeon={case.surgeon_id} time={format_time(case.start_time)} room={case.room_text}"

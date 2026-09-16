@@ -246,7 +246,7 @@
                   {% else %}
                   <span class="min-w-0 flex-1 leading-tight {% if off_overlay %}line-through decoration-2 decoration-slate-700/70{% endif %}">
                     <span class="cal-pill-label">
-                      {{ entry.location.abbreviation or entry.location.name }}
+                      {% if entry.assignment_type == 'na' %}NA{% else %}{{ entry.location.abbreviation or entry.location.name }}{% endif %}
                     </span>
                     {% if entry.assignment_type == 'assigned' %}
                     {% if entry.location and (entry.location.location_type == 'hospital' or (entry.location.abbreviation or '')[-3:] == '-OR') %}

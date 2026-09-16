@@ -15,6 +15,9 @@ from .paper_block_schedule import _place_or_block
 from .surgeon_visibility import surgeon_is_visible
 
 
+NA_ASSIGNMENT_TYPE = "na"
+
+
 def _session_rows(db: Session, surgeon_id: int, day: date) -> dict[str, ClinicSchedule]:
     rows = db.query(ClinicSchedule).filter(
         ClinicSchedule.surgeon_id == surgeon_id,
@@ -152,15 +155,39 @@ def build_missing_master_cards(db: Session, *, start: date, end: date) -> dict:
                     skipped_off += 1
                     continue
                 existing = _session_rows(db, surgeon.id, day)
-                for template in by_surgeon_day.get((surgeon.id, day.weekday()), []):
+                applicable = {
+                    (template.session or "").lower(): template
+                    for template in by_surgeon_day.get((surgeon.id, day.weekday()), [])
+                    if (template.session or "").lower() in {"am", "pm"}
+                    and week_pattern_matches(day, template.week_pattern)
+                }
+                for session in ("am", "pm"):
+                    template = applicable.get(session)
+                    current = existing.get(session) or existing.get("full")
+
+                    # Every non-OFF weekday session is a real dated card. A
+                    # locationless NA card is capacity the fax may fill; it is
+                    # not a missing card and it is never an OFF day.
+                    if template is None or template.assignment_type in {"float", "na"}:
+                        if current is None:
+                            db.add(ClinicSchedule(
+                                surgeon_id=surgeon.id,
+                                location_id=None,
+                                date=day,
+                                session=session,
+                                assignment_type=NA_ASSIGNMENT_TYPE,
+                                notes=None,
+                            ))
+                            existing[session] = ClinicSchedule(location_id=None, assignment_type=NA_ASSIGNMENT_TYPE)
+                            clinic_created += 1
+                        else:
+                            skipped_existing += 1
+                        continue
+
+                    if template.assignment_type == "off":
+                        continue
                     if template.assignment_type != "assigned" or not template.location_id:
                         continue
-                    if not week_pattern_matches(day, template.week_pattern):
-                        continue
-                    session = (template.session or "").lower()
-                    if session not in {"am", "pm"}:
-                        continue
-                    current = existing.get(session) or existing.get("full")
                     if current is not None:
                         skipped_existing += 1
                         if current.location_id != template.location_id:

@@ -95,14 +95,16 @@ def matching_assigned_or_block(
     location_id: int,
     start_time: time | None,
 ) -> ORBlockInstance | None:
-    """Return the existing assigned block that can receive a fax case.
+    """Return the existing OR capacity that can receive a fax case.
 
-    This is deliberately read-only. If no block exists, the row must be parked
-    for review; ingest cannot create a Block OR card.
+    An explicitly materialized ``NA`` session is dated capacity, not a missing
+    card. It may use an existing hospital/session capacity row and be converted
+    to the fax's actual OR location by the guarded writer. No OR capacity row is
+    created here or by fax ingest.
     """
     if not start_time:
         return None
-    return (
+    assigned = (
         db.query(ORBlockInstance)
         .join(ORBlockAssignment, ORBlockAssignment.block_instance_id == ORBlockInstance.id)
         .filter(
@@ -115,6 +117,28 @@ def matching_assigned_or_block(
         )
         .order_by(ORBlockInstance.start_time, ORBlockInstance.id)
         .first()
+    )
+    if assigned:
+        return assigned
+
+    session = "am" if start_time < time(12, 0) else "pm"
+    na_card = (
+        db.query(ClinicSchedule)
+        .filter(
+            ClinicSchedule.surgeon_id == surgeon_id,
+            ClinicSchedule.date == day,
+            ClinicSchedule.session == session,
+            ClinicSchedule.assignment_type == "na",
+        )
+        .first()
+    )
+    if not na_card:
+        return None
+    return existing_hospital_session_block(
+        db,
+        block_date=day,
+        location_id=location_id,
+        start_time=start_time,
     )
 
 

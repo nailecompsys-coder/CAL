@@ -227,10 +227,26 @@ class PaperBlockScheduleTest(unittest.TestCase):
         self.assertEqual(am.location_id, wg.id)
         self.assertEqual(am.notes, "Keep this scheduled card exactly as entered.")
         self.assertEqual(pm.location_id, ap.id)
-        self.assertEqual(result["clinicCreated"], 1)
+        # The remaining unassigned weekday sessions are materialized as NA
+        # capacity instead of being left without a dated card.
+        self.assertGreaterEqual(result["clinicCreated"], 1)
         self.assertGreaterEqual(result["conflicts"], 1)
         self.assertEqual(result["cardsFolded"], 0)
         self.assertEqual(result["blocksPruned"], 0)
+
+    def test_master_builder_materializes_blank_sessions_as_na_cards(self):
+        jorge = self.db.query(Surgeon).filter_by(last_name="Florin").one()
+        day = date(2026, 9, 14)
+
+        result = build_missing_master_cards(self.db, start=day, end=day)
+
+        cards = self.db.query(ClinicSchedule).filter_by(
+            surgeon_id=jorge.id, date=day,
+        ).order_by(ClinicSchedule.session).all()
+        self.assertEqual([card.session for card in cards], ["am", "pm"])
+        self.assertEqual([card.assignment_type for card in cards], ["na", "na"])
+        self.assertEqual([card.location_id for card in cards], [None, None])
+        self.assertGreaterEqual(result["clinicCreated"], 2)
 
     def test_master_builder_attaches_exact_parked_case_after_creating_card(self):
         jorge = self.db.query(Surgeon).filter_by(last_name="Florin").one()

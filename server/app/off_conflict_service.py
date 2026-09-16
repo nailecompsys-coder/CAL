@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 
 from sqlalchemy.orm import Session, joinedload
 
 from .admin_clinic_schedule_page_service import parse_clinic_fax_visit_segments
 from .models import ClinicSchedule, DayOff, Surgeon, SurgicalCase
+from .native_dayoff_support import segment_for_date
 from .surgeon_visibility import surgeon_is_visible
+
+
+AM_END = time(12, 0)
+DAY_START = time(0, 0)
+DAY_END = time(23, 59, 59)
 
 
 @dataclass(frozen=True)
@@ -78,14 +84,54 @@ def day_off_status_map(
                 current += timedelta(days=1)
                 continue
             if row.status == "approved" or not existing:
+                segment = segment_for_date(row, current) or {}
                 out[key] = {
                     "status": row.status,
                     "day_off_id": row.id,
                     "reason": row.reason,
                     "surgeon": row.surgeon,
+                    "sessions": day_off_sessions(segment),
                 }
             current += timedelta(days=1)
     return out
+
+
+def _parse_segment_time(value, fallback: time | None = None) -> time | None:
+    if isinstance(value, time):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            hour, minute = value.split(":", 1)
+            return time(int(hour), int(minute[:2]))
+        except (TypeError, ValueError):
+            return fallback
+    return fallback
+
+
+def day_off_sessions(segment: dict | None) -> set[str]:
+    """Return schedule sessions affected by a day-off segment."""
+    if not segment or segment.get("isFullDay", True):
+        return {"am", "pm"}
+    start = _parse_segment_time(segment.get("start"), DAY_START)
+    end = _parse_segment_time(segment.get("end"), DAY_END)
+    if not start or not end or end <= start:
+        return {"am", "pm"}
+    sessions: set[str] = set()
+    if start < AM_END and end > DAY_START:
+        sessions.add("am")
+    if end > AM_END:
+        sessions.add("pm")
+    return sessions or {"am", "pm"}
+
+
+def schedule_matches_off_session(schedule: ClinicSchedule, off_info: dict | None) -> bool:
+    if not off_info:
+        return False
+    sessions = set(off_info.get("sessions") or {"am", "pm"})
+    schedule_session = (schedule.session or "full").lower()
+    if schedule_session in {"full", "both"}:
+        return bool(sessions)
+    return schedule_session in sessions
 
 
 def clinic_patient_count_for_schedules(schedules: list[ClinicSchedule]) -> int:
@@ -262,7 +308,7 @@ def should_show_as_off(
     off_map: dict[tuple[int, date], dict],
     workloads: dict[tuple[int, date], OffWorkload],
 ) -> bool:
-    """True when day-off/requested-off and zero patients/cases — show OFF instead of empty clinic/OR."""
+    """True when day-off/requested-off and zero patients/cases — show a synthetic OFF placeholder."""
     if (surgeon_id, day) not in off_map:
         return False
     load = workloads.get((surgeon_id, day), OffWorkload())
@@ -315,32 +361,23 @@ def build_clinic_off_display(
         or_case_map=or_case_map or None,
     )
 
-    # schedule_id -> show as OFF (empty slot on off day)
+    # schedule_id -> overlay OFF on top of the fixed master schedule card.
     show_off_schedule_ids: set[int] = set()
     for surgeon_id, by_day in sched_map.items():
         for day, schedules in by_day.items():
-            if not should_show_as_off(surgeon_id, day, off_map, workloads):
+            off_info = off_map.get((surgeon_id, day))
+            if not off_info:
                 continue
             for schedule in schedules:
                 if (schedule.assignment_type or "assigned").lower() == "off":
                     continue
-                # Empty clinic/OR location pill → display as OFF
-                show_off_schedule_ids.add(schedule.id)
+                if schedule_matches_off_session(schedule, off_info):
+                    show_off_schedule_ids.add(schedule.id)
 
-    # OR block pills with zero cases on off days → hide / show OFF
+    # Legacy keys remain in the template context, but day-off display must not hide
+    # the master OR/clinic card. OFF is an overlay, not a replacement.
     show_off_or_keys: set[tuple[int, date]] = set()
     hide_empty_or_blocks: dict[tuple[int, date], bool] = {}
-    for surgeon_id, by_day in (assigned_or_blocks or {}).items():
-        for day, blocks in by_day.items():
-            if (surgeon_id, day) not in off_map:
-                continue
-            load = workloads.get((surgeon_id, day), OffWorkload())
-            if load.has_work:
-                continue
-            total_cases = sum(int(b.get("caseCount") or 0) for b in blocks)
-            if total_cases == 0:
-                show_off_or_keys.add((surgeon_id, day))
-                hide_empty_or_blocks[(surgeon_id, day)] = True
 
     conflict_keys = {(c.surgeon_id, c.day) for c in conflicts}
     synthetic_off_days = {

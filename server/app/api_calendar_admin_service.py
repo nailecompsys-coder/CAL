@@ -94,10 +94,10 @@ def add_clinic_schedule_events(
     for clinic_schedule in clinic_schedules:
         if not surgeon_is_visible(clinic_schedule.surgeon):
             continue
-        # Empty clinic/OR on OFF day → omit location pill (OFF row covers it)
-        if clinic_schedule.id in show_off_schedule_ids:
-            continue
         event = clinic_schedule_event(clinic_schedule)
+        if clinic_schedule.id in show_off_schedule_ids:
+            event["extendedProps"]["off_overlay"] = True
+            event["title"] = f"{event['title']} OFF"
         if (clinic_schedule.surgeon_id, clinic_schedule.date) in conflict_keys:
             event["extendedProps"]["off_conflict"] = True
             event["title"] = f"⚠ {event['title']}"

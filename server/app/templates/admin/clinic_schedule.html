@@ -207,16 +207,16 @@
             <div class="min-h-[38px] space-y-0.5">
             {% if slot.entries or slot.blocks %}
               {% for entry in slot.entries %}
-              {% set force_off = show_off_schedule_ids is defined and entry.id in show_off_schedule_ids %}
-              {% set entry_is_off = entry.assignment_type == 'off' or force_off %}
+              {% set off_overlay = show_off_schedule_ids is defined and entry.id in show_off_schedule_ids %}
+              {% set entry_is_off = entry.assignment_type == 'off' %}
               {% set entry_location_choice = '__off__' if entry_is_off else entry.location_id|string %}
-              {% set or_overlay = none if force_off else (or_block_overlays.get(entry.id) if or_block_overlays is defined else none) %}
-              {% set clinic_overlay = none if force_off else (clinic_fax_overlays.get(entry.id) if clinic_fax_overlays is defined else none) %}
+              {% set or_overlay = or_block_overlays.get(entry.id) if or_block_overlays is defined else none %}
+              {% set clinic_overlay = clinic_fax_overlays.get(entry.id) if clinic_fax_overlays is defined else none %}
               {% set pill_overlay = or_overlay or clinic_overlay %}
               <div class="flex items-center gap-1 group/entry relative w-full">
                 <span class="flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-md leading-tight w-full min-w-0 min-h-[38px] cursor-pointer hover:opacity-90 {% if entry_is_off %}bg-slate-200 text-slate-700 shadow-sm{% else %}block-gradient shadow-sm{% endif %}"
                   style="{% if not entry_is_off and entry.assignment_type == 'assigned' %}--block-c: {{ entry.location.color or '#0ea5e9' }};color:#1e293b{% endif %}"
-                  title="{% if entry_is_off %}OFF{% if day_off_info and day_off_info.status == 'pending' %} (requested){% endif %}{% else %}{{ entry.location.name }} — {{ entry.session }}{% endif %}{% if pill_overlay %} · {{ pill_overlay.assignedStart }} · {{ pill_overlay.caseCount }}{% endif %}{% if entry.notes %} · {{ entry.notes }}{% endif %}"
+                  title="{% if entry_is_off %}OFF{% elif entry.location %}{{ entry.location.name }} — {{ entry.session }}{% endif %}{% if off_overlay %} · OFF{% if day_off_info and day_off_info.status == 'pending' %} requested{% endif %}{% endif %}{% if pill_overlay %} · {{ pill_overlay.assignedStart }} · {{ pill_overlay.caseCount }}{% endif %}{% if entry.notes %} · {{ entry.notes }}{% endif %}"
                   {% if pill_overlay %}
                   onclick='event.stopPropagation(); event.preventDefault(); openPillDetailModal({{ {"kind": pill_overlay.kind or ("or" if or_overlay else "clinic"), "title": pill_overlay.location or pill_overlay.locationAbbreviation or entry.location.name, "abbr": pill_overlay.locationAbbreviation or entry.location.abbreviation or "", "session": (pill_overlay.session or entry.session or "")|upper, "earliest": pill_overlay.assignedStart or "", "count": pill_overlay.caseCount or 0, "countLabel": pill_overlay.countLabel or ("Cases" if or_overlay else "Visits"), "pillLabel": pill_overlay.pillLabel or "", "segments": pill_overlay.segments or [], "surgeonId": surgeon.id, "date": day.isoformat(), "locationId": pill_overlay.locationId or entry.location_id, "edit": {"scheduleId": entry.id, "surgeonId": surgeon.id, "date": day.isoformat(), "surgeonName": surgeon.full_name, "dateLabel": day.strftime("%a, %b %-d"), "locationChoice": entry_location_choice, "session": entry.session or "full", "notes": entry.notes or ""}} | tojson }})'
                   {% elif not entry_is_off and entry.assignment_type == 'assigned' and entry.location and (entry.location.location_type == 'hospital' or (entry.location.abbreviation or '')[-3:] == '-OR') and day_surgeries %}
@@ -225,12 +225,15 @@
                   onclick='event.stopPropagation(); event.preventDefault(); openAssignModal({"scheduleId": {{ entry.id }}, "surgeonId": {{ surgeon.id }}, "date": {{ day.isoformat()|tojson }}, "surgeonName": {{ surgeon.full_name|tojson }}, "dateLabel": {{ day.strftime("%a, %b %-d")|tojson }}, "locationChoice": {{ entry_location_choice|tojson }}, "session": {{ (entry.session or "full")|tojson }}, "notes": {{ (entry.notes or "")|tojson }}});'
                   {% endif %}>
                   {% if pill_overlay %}
-                  <span class="min-w-0 flex-1 leading-tight">
+                  <span class="min-w-0 flex-1 leading-tight {% if off_overlay %}line-through decoration-2 decoration-slate-700/70{% endif %}">
                     <span class="block truncate font-extrabold">{{ pill_overlay.pillLabel }}</span>
                     <span class="block truncate text-[9px] font-semibold opacity-80">{{ pill_overlay.pillCountLabel or (pill_overlay.caseCount ~ ' cases') }}</span>
                   </span>
+                  {% if off_overlay %}
+                  <span class="ml-auto shrink-0 rounded bg-slate-900/10 px-1.5 py-0.5 text-[10px] font-extrabold tracking-wide text-slate-800">OFF{% if day_off_info and day_off_info.status == 'pending' %}?{% endif %}</span>
+                  {% endif %}
                   {% else %}
-                  <span class="min-w-0 flex-1 leading-tight">
+                  <span class="min-w-0 flex-1 leading-tight {% if off_overlay %}line-through decoration-2 decoration-slate-700/70{% endif %}">
                     <span class="block truncate font-extrabold">
                       {% if entry_is_off %}OFF{% if day_off_info and day_off_info.status == 'pending' %}?{% endif %}{% else %}{{ entry.location.abbreviation or entry.location.name }}{% endif %}
                     </span>
@@ -242,6 +245,9 @@
                     {% endif %}
                     {% endif %}
                   </span>
+                  {% if off_overlay %}
+                  <span class="ml-auto shrink-0 rounded bg-slate-900/10 px-1.5 py-0.5 text-[10px] font-extrabold tracking-wide text-slate-800">OFF{% if day_off_info and day_off_info.status == 'pending' %}?{% endif %}</span>
+                  {% endif %}
                   {% endif %}
                 </span>
                 <form method="post" action="/admin/clinic-schedule/clear" class="js-preserve-scroll absolute right-0.5 top-1/2 -translate-y-1/2 z-10" onclick="event.stopPropagation()">
@@ -270,7 +276,12 @@
               </div>
               {% endfor %}
             {% else %}
-              <div class="min-h-[38px] rounded-md border border-dashed border-slate-200 bg-white/45"></div>
+              {% set blank_off = day_off_info and slot.label|lower in (day_off_info.sessions or ['am', 'pm']) %}
+              <div class="min-h-[38px] rounded-md border {% if blank_off %}border-slate-300 bg-slate-100 text-slate-700{% else %}border-dashed border-slate-200 bg-white/45{% endif %} flex items-center justify-end px-2">
+                {% if blank_off %}
+                <span class="rounded bg-slate-900/10 px-1.5 py-0.5 text-[10px] font-extrabold tracking-wide">OFF{% if day_off_info.status == 'pending' %}?{% endif %}</span>
+                {% endif %}
+              </div>
             {% endif %}
             </div>
             {% endfor %}

@@ -14,6 +14,7 @@ from app.off_conflict_service import (
     should_show_as_off,
     build_clinic_off_display,
     day_off_status_map,
+    schedule_matches_off_session,
 )
 
 
@@ -71,6 +72,57 @@ class OffConflictServiceTest(unittest.TestCase):
             self.assertEqual(len(display["off_conflicts"]), 0)
             self.assertTrue(should_show_as_off(chris.id, day, display["off_map"], display["workloads"]))
             self.assertTrue(display["show_off_schedule_ids"])
+            self.assertFalse(display["hide_empty_or_blocks"])
+        finally:
+            db.close()
+
+    def test_partial_day_off_only_overlays_matching_session(self):
+        db = self.Session()
+        try:
+            chris = self._surgeon(db, "Chris", "Johnson")
+            clinic = Location(name="Clermont Office", abbreviation="CL-OV", location_type="clinic", is_active=True)
+            hospital = Location(name="Minneola OR", abbreviation="MN-OR", location_type="hospital", is_active=True)
+            db.add_all([clinic, hospital])
+            db.flush()
+            day = date.today() + timedelta(days=1)
+            db.add(DayOff(
+                surgeon_id=chris.id,
+                start_date=day,
+                end_date=day,
+                status="approved",
+                reason="AM appointment",
+                is_full_day=False,
+                start_time=time(7, 0),
+                end_time=time(12, 0),
+            ))
+            am = ClinicSchedule(
+                surgeon_id=chris.id,
+                location_id=hospital.id,
+                date=day,
+                session="am",
+                assignment_type="assigned",
+            )
+            pm = ClinicSchedule(
+                surgeon_id=chris.id,
+                location_id=clinic.id,
+                date=day,
+                session="pm",
+                assignment_type="assigned",
+            )
+            db.add_all([am, pm])
+            db.commit()
+            schedules = db.query(ClinicSchedule).order_by(ClinicSchedule.session).all()
+            display = build_clinic_off_display(
+                db, day, day,
+                sched_map={chris.id: {day: schedules}},
+                surgical_map={},
+            )
+            off_info = display["off_map"][(chris.id, day)]
+            self.assertEqual(off_info["sessions"], {"am"})
+            self.assertTrue(schedule_matches_off_session(am, off_info))
+            self.assertFalse(schedule_matches_off_session(pm, off_info))
+            self.assertIn(am.id, display["show_off_schedule_ids"])
+            self.assertNotIn(pm.id, display["show_off_schedule_ids"])
         finally:
             db.close()
 

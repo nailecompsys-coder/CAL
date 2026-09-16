@@ -306,10 +306,12 @@ def _sessions_compatible(schedule_session: str | None, block_session: str | None
 def _enrich_or_block_with_live_cases(block: dict, cases: list[SurgicalCase]) -> dict:
     """Replace assignment caseCount/segments with real SurgicalCase rows for the pill."""
     loc_id = block.get("locationId")
+    session = _block_display_session(block)
     matching = [
         case
         for case in cases
         if not loc_id or case.location_id == loc_id
+        if _case_display_session(case) == session
     ]
     if not matching:
         return block

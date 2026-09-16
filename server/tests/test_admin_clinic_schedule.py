@@ -229,6 +229,58 @@ class AdminClinicScheduleTest(unittest.TestCase):
         finally:
             db.close()
 
+    def test_page_data_does_not_double_count_pm_case_against_am_block(self):
+        db = self.Session()
+        try:
+            hospital = Location(
+                name="Altamonte OR",
+                abbreviation="AL-OR",
+                location_type="hospital",
+                color="#A7F3D0",
+                is_active=True,
+            )
+            db.add(hospital)
+            surgeon = self._surgeon(db, "Nadia", "Froehling")
+            db.flush()
+            monday = date.today() - timedelta(days=date.today().weekday())
+            block_id = create_or_blocks(
+                db,
+                BlockORCreateInput(
+                    name="AM block",
+                    start_date=monday,
+                    end_date=monday,
+                    weekdays=[monday.weekday()],
+                    location_ids=[hospital.id],
+                    session="am",
+                    start_time=time(7, 0),
+                    end_time=time(12, 0),
+                    recurrence="once",
+                ),
+            )["instance_ids"][0]
+            assign_block(db, block_id, surgeon.id, assigned_start_time=time(7, 0), case_count=0, notify=False)
+            db.add(SurgicalCase(
+                surgeon_id=surgeon.id,
+                date=monday,
+                start_time=time(12, 30),
+                patient_name="Colon, Nancy",
+                procedure="Case 1",
+                location_id=hospital.id,
+                room_text="ALT S04",
+                status="scheduled",
+            ))
+            db.commit()
+
+            data = page_data(db, week_offset=0)
+            blocks = data["assigned_or_blocks"].get(surgeon.id, {}).get(monday, [])
+
+            self.assertEqual(len(blocks), 1)
+            self.assertEqual(blocks[0]["pillLabel"], "AL-OR")
+            self.assertEqual(blocks[0]["caseCount"], 1)
+            self.assertEqual(blocks[0]["pillCountLabel"], "1 case")
+            self.assertEqual([seg.get("patient") for seg in blocks[0]["segments"] if seg.get("patient")], ["Colon, Nancy"])
+        finally:
+            db.close()
+
     def test_aggregate_assigned_or_blocks_merges_same_location_session(self):
         merged = aggregate_assigned_or_blocks([
             {

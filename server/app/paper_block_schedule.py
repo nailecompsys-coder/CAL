@@ -36,6 +36,7 @@ from .or_block_service import (
     collapse_extra_am_pm_cards,
     create_or_blocks,
 )
+from .paper_clinic_schedule import clinic_cells_by_surgeon
 from .surgeon_visibility import surgeon_is_visible
 
 START = date(2026, 9, 11)
@@ -288,22 +289,53 @@ def _prune_empty_non_paper_windows(db: Session, start: date, end: date) -> int:
     return deleted
 
 
-def sync_weekly_templates(db: Session, surgeons: dict[str, Surgeon], locations: dict[str, Location]) -> int:
-    """Write repeating weekly cells. Week 1/3/5 cells stay off the weekly template."""
-    updated = 0
+def weekly_or_cells() -> dict[str, dict[tuple[int, str], str]]:
+    """Every-week Block OR only (hospital -OR). Cadence weeks stay off the weekly template."""
+    out: dict[str, dict[tuple[int, str], str]] = {}
     for initials, cells in PAPER.items():
+        for (dow, session), (abbrev, weeks) in cells.items():
+            if weeks is not None:
+                continue
+            if not str(abbrev).upper().endswith("-OR"):
+                continue
+            out.setdefault(initials, {})[(dow, session)] = abbrev
+    return out
+
+
+def master_weekly_cells() -> dict[str, dict[tuple[int, str], str]]:
+    """Clinic grid + Block OR. OR wins if both claim the same half-day (should be rare)."""
+    clinic = clinic_cells_by_surgeon()
+    or_cells = weekly_or_cells()
+    initials = set(clinic) | set(or_cells)
+    merged: dict[str, dict[tuple[int, str], str]] = {}
+    for key in initials:
+        cells: dict[tuple[int, str], str] = {}
+        cells.update(clinic.get(key, {}))
+        # OR overlays clinic for that session
+        cells.update(or_cells.get(key, {}))
+        merged[key] = cells
+    return merged
+
+
+def sync_weekly_templates(db: Session, surgeons: dict[str, Surgeon], locations: dict[str, Location]) -> int:
+    """Write repeating weekly TEMPLATES: pure clinic grid + every-week Block OR.
+
+    Week 1/3/5 OR cadence stays off the weekly template (handled when applying paper OR).
+    CBO / Surgery One is not part of this master.
+    """
+    updated = 0
+    master = master_weekly_cells()
+    for initials, cells in master.items():
         surgeon = surgeons.get(initials)
         if not surgeon:
             continue
-        weekly: dict[tuple[int, str], str] = {}
-        for (dow, session), (abbrev, weeks) in cells.items():
-            if weeks is None:
-                weekly[(dow, session)] = abbrev
         for dow in range(5):
             for session in ("am", "pm"):
-                abbrev = weekly.get((dow, session))
+                abbrev = cells.get((dow, session))
                 if abbrev:
-                    loc = locations[abbrev]
+                    loc = locations.get(abbrev) or locations.get(abbrev.upper())
+                    if not loc:
+                        continue
                     save_template_cell_value(
                         db, surgeon.id, dow, session, loc.id, "assigned",
                     )

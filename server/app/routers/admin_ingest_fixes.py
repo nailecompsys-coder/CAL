@@ -60,6 +60,15 @@ def ingest_fixes_page(
     if focus_case and not any(row["id"] == focus_case for row in parked):
         extra = parked_ingest_cases(db, case_id=focus_case)
         parked = extra + parked
+    reason_counts = {}
+    for row in parked:
+        key = row.get("reasonKey") or "other"
+        reason_counts.setdefault(key, {
+            "title": row.get("reasonTitle") or "Needs review",
+            "detail": row.get("reasonDetail") or "Review before placing.",
+            "count": 0,
+        })
+        reason_counts[key]["count"] += 1
     return templates.TemplateResponse(
         "admin/ingest_fixes.html",
         _base(
@@ -67,6 +76,7 @@ def ingest_fixes_page(
             admin,
             db=db,
             parked=parked,
+            reason_counts=list(reason_counts.values()),
             blocks=placement_blocks(db, start=start, end=end),
             surgeons=surgeons_for_fix(db),
             focus_case_id=focus_case,

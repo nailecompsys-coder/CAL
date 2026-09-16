@@ -15,6 +15,7 @@ from .or_block_service import (
     block_instances_for_range,
     serialize_block_instance,
 )
+from .paper_block_schedule import paper_cell
 from .practice_time import practice_today
 from .surgeon_visibility import surgeon_is_visible
 
@@ -27,6 +28,71 @@ def _parse_hhmm(raw: str | None) -> time | None:
         return datetime.strptime(text, "%H:%M").time()
     except ValueError:
         return None
+
+
+def _us_date_label(value: date | None) -> str:
+    if value is None:
+        return ""
+    return f"{value.month}/{value.day}/{value.year}"
+
+
+def _session_for_time(value: time | None) -> str | None:
+    if value is None:
+        return None
+    return "am" if value < time(12, 0) else "pm"
+
+
+def _classify_parked_case(case: SurgicalCase) -> dict[str, str]:
+    surgeon = case.surgeon
+    loc = case.location
+    initials = (surgeon.initials or "").strip().upper() if surgeon else ""
+    day = case.date
+    session = _session_for_time(case.start_time)
+    location_abbrev = (loc.abbreviation or loc.name or "").strip().upper() if loc else ""
+    if not initials or day is None or session is None:
+        return {
+            "key": "missing-data",
+            "title": "Missing fax data",
+            "detail": "Fix this because CAL needs surgeon, date, time, and location before it can place the row.",
+        }
+
+    master_abbrev = paper_cell(initials, day, session)
+    if not master_abbrev:
+        return {
+            "key": "blank-master-slot",
+            "title": "Blank master slot",
+            "detail": (
+                f"Fix this because the fax says {initials} has {location_abbrev or 'an OR case'} "
+                f"on {_us_date_label(day)} {session.upper()}, but the master schedule is blank."
+            ),
+        }
+    master_abbrev = master_abbrev.upper()
+    if master_abbrev == location_abbrev:
+        return {
+            "key": "master-card-missing",
+            "title": "Master card missing",
+            "detail": (
+                f"Fix this because the master schedule says {initials} should have "
+                f"{master_abbrev} on {_us_date_label(day)} {session.upper()}, but the card is missing."
+            ),
+        }
+    if master_abbrev.endswith("-OR") and location_abbrev.endswith("-OR"):
+        return {
+            "key": "wrong-or-location",
+            "title": "Facility mismatch",
+            "detail": (
+                f"Fix this because the fax says {location_abbrev}, but the master schedule says "
+                f"{master_abbrev} for {initials} on {_us_date_label(day)} {session.upper()}."
+            ),
+        }
+    return {
+        "key": "master-conflict",
+        "title": "Master schedule conflict",
+        "detail": (
+            f"Fix this because the fax says {location_abbrev or 'OR'}, but the master schedule says "
+            f"{master_abbrev} for {initials} on {_us_date_label(day)} {session.upper()}."
+        ),
+    }
 
 
 def parked_ingest_cases(
@@ -76,9 +142,11 @@ def parked_ingest_cases(
             pass
         loc = case.location
         surgeon = case.surgeon
+        reason = _classify_parked_case(case)
         rows.append({
             "id": case.id,
             "date": case.date.isoformat() if case.date else None,
+            "dateLabel": _us_date_label(case.date),
             "startTime": case.start_time.strftime("%H:%M") if case.start_time else "",
             "patientName": case.patient_name,
             "procedure": (case.procedure or "")[:80],
@@ -89,6 +157,9 @@ def parked_ingest_cases(
             "surgeonInitials": (surgeon.initials or "") if surgeon else "",
             "notes": notes[:120],
             "needsTime": case.start_time is None,
+            "reasonKey": reason["key"],
+            "reasonTitle": reason["title"],
+            "reasonDetail": reason["detail"],
         })
     return rows
 

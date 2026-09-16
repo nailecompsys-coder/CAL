@@ -33,7 +33,7 @@
 <header class="portal-header px-5 py-3 sticky top-0 z-10 flex-shrink-0 flex items-center justify-between gap-3">
   <div class="min-w-0">
     <h1 class="font-bold">Ingest fixes</h1>
-    <p class="text-xs text-slate-500">OCR misfits land here unplaced. Drag each case onto the correct Block OR card, fix time/surgeon if needed, then Save.</p>
+    <p class="text-xs text-slate-500">Fax rows that cannot safely attach to a master schedule card land here. Fix the card problem first, then place the case.</p>
   </div>
   <div class="flex items-center gap-2 flex-shrink-0">
     <a href="/admin/scheduler-availability" class="text-xs font-bold text-slate-600 px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50">Needs attention</a>
@@ -50,12 +50,26 @@
 {% endif %}
 <div id="ingest-banner" class="mx-5 mt-3 hidden rounded-xl border px-3 py-2 text-xs"></div>
 
+{% if reason_counts %}
+<div class="mx-5 mt-3 grid gap-2 md:grid-cols-3">
+  {% for reason in reason_counts %}
+  <div class="rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2">
+    <div class="flex items-center justify-between gap-2">
+      <p class="text-xs font-extrabold text-slate-800">{{ reason.title }}</p>
+      <span class="text-[10px] font-black text-amber-800 bg-white/70 border border-amber-200 rounded-full px-2 py-0.5">{{ reason.count }}</span>
+    </div>
+    <p class="text-[11px] text-slate-600 mt-1">{{ reason.detail }}</p>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
 <div class="p-5 grid grid-cols-1 xl:grid-cols-12 gap-4">
   <section class="xl:col-span-4 clinical-panel overflow-hidden flex flex-col min-h-[28rem]">
     <div class="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-2">
       <div>
-        <h2 class="font-extrabold text-sm text-slate-800">Unplaced fax cases</h2>
-        <p class="text-[11px] text-slate-500">{{ parked|length }} waiting · drag onto a card →</p>
+        <h2 class="font-extrabold text-sm text-slate-800">Parked fax cases</h2>
+        <p class="text-[11px] text-slate-500">{{ parked|length }} waiting · grouped by master schedule rule</p>
       </div>
     </div>
     <div id="ingest-parked" class="p-3 space-y-2 overflow-y-auto flex-1">
@@ -72,11 +86,12 @@
             <p class="text-xs font-bold text-slate-800 truncate">{{ row.patientName }}</p>
             <p class="text-[11px] text-slate-600 mt-0.5">
               <span class="font-semibold">{{ row.surgeonInitials or '—' }}</span>
-              · {{ row.date or '—' }}
+              · {{ row.dateLabel or row.date or '—' }}
               · {% if row.startTime %}{{ row.startTime }}{% else %}<span class="text-amber-800 font-bold">no time</span>{% endif %}
               {% if row.location %} · {{ row.location }}{% endif %}
               {% if row.room %} · {{ row.room }}{% endif %}
             </p>
+            <p class="text-[10px] text-amber-800 font-bold mt-1">{{ row.reasonTitle }}: <span class="font-semibold">{{ row.reasonDetail }}</span></p>
             {% if row.procedure %}
             <p class="text-[10px] text-slate-500 mt-0.5 line-clamp-1">{{ row.procedure }}</p>
             {% endif %}
@@ -110,7 +125,7 @@
   <section class="xl:col-span-8 clinical-panel overflow-hidden flex flex-col min-h-[28rem]">
     <div class="px-4 py-3 border-b border-slate-100">
       <h2 class="font-extrabold text-sm text-slate-800">Block OR drop targets</h2>
-      <p class="text-[11px] text-slate-500">{{ start_date.strftime('%b %-d') }} – {{ end_date.strftime('%b %-d') }} · drop a case on the right hospital / day / session</p>
+      <p class="text-[11px] text-slate-500">{{ start_date.month }}/{{ start_date.day }}/{{ start_date.year }} – {{ end_date.month }}/{{ end_date.day }}/{{ end_date.year }} · drop a case on the right hospital / day / session</p>
     </div>
     <div class="p-3 overflow-y-auto flex-1 space-y-2">
       {% set ns = namespace(prev='') %}

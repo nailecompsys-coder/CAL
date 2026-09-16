@@ -5,7 +5,7 @@
 <header class="portal-header px-5 py-3 sticky top-0 z-10 flex-shrink-0 flex items-center justify-between gap-3">
   <div class="min-w-0">
     <h1 class="font-bold">Needs attention</h1>
-    <p class="text-xs text-slate-500">One issue at a time — open Compare to see CAL vs fax OCR.</p>
+    <p class="text-xs text-slate-500">Only true schedule exceptions should stay here. Master-card problems go to Ingest fixes.</p>
   </div>
   <div class="flex items-center gap-2 flex-shrink-0">
     <a href="/admin/ingest-fixes" class="text-xs font-bold text-teal-800 px-3 py-2 rounded-xl border border-teal-200 bg-teal-50">
@@ -44,7 +44,7 @@
      class="block rounded-xl border border-amber-200 bg-amber-50/70 hover:border-amber-400 hover:bg-amber-50 px-4 py-3">
     <div class="flex items-center justify-between gap-3">
       <p class="text-sm font-bold text-slate-900">
-        <span class="tabular-nums">{{ row.date or '—' }}</span>
+        <span class="tabular-nums">{{ row.dateLabel or row.date or '—' }}</span>
         · {{ row.surgeonInitials }} {{ row.surgeon }}
       </p>
       <span class="text-[11px] font-bold text-teal-800 whitespace-nowrap">Compare CAL vs OCR →</span>

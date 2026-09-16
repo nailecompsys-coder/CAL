@@ -171,6 +171,12 @@ def enrich_flag_list_row(db: Session, row: dict[str, Any]) -> dict[str, Any]:
     event_id = row.get("id")
     href = f"/admin/schedule-flags/{event_id}" if event_id else (row.get("href") or "/admin/block-or")
     out = dict(row)
+    raw_date = row.get("date")
+    try:
+        parts = str(raw_date or "").split("-")
+        out["dateLabel"] = f"{int(parts[1])}/{int(parts[2])}/{parts[0]}" if len(parts) == 3 else raw_date
+    except (TypeError, ValueError):
+        out["dateLabel"] = raw_date
     out["compareHref"] = href
     out["href"] = href
     payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}

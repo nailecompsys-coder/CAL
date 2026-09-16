@@ -1,4 +1,5 @@
 """Admin schedule template and call rotation builder routes."""
+from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, Request
@@ -18,6 +19,8 @@ from ..admin_schedule_template_service import (
 )
 from ..database import get_db
 from ..jinja_env import templates
+from ..paper_block_schedule import apply_paper_block_schedule
+from ..practice_time import practice_today
 from .admin import _base, _sort_surgeons_physicians_first
 
 router = APIRouter(prefix="/admin")
@@ -99,6 +102,36 @@ async def apply_schedule_templates(
         overwrite_daysoff,
     )
     return RedirectResponse(clinic_apply_result_url(result), status_code=303)
+
+
+@router.post("/schedule-templates/build-master")
+async def build_master_schedule_cards(
+    date_from: str = Form(""),
+    date_to: str = Form(""),
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    """Build OR + clinic cards from the published master schedule."""
+    today = practice_today()
+    default_end = date(today.year + 1, 12, 31)
+    try:
+        d_from = date.fromisoformat(date_from or today.isoformat())
+        d_to = date.fromisoformat(date_to or default_end.isoformat())
+    except ValueError:
+        return RedirectResponse("/admin/schedule-templates?msg=bad_date", status_code=303)
+    if d_to < d_from or (d_to - d_from).days > 550:
+        return RedirectResponse("/admin/schedule-templates?msg=bad_range", status_code=303)
+    result = apply_paper_block_schedule(db, start=d_from, end=d_to)
+    return RedirectResponse(
+        "/admin/schedule-templates?msg=master_built"
+        f"&from={d_from.isoformat()}&to={d_to.isoformat()}"
+        f"&clinic={result.get('clinicCreated', 0)}"
+        f"&blocks={result.get('blocksAssigned', 0)}"
+        f"&already={result.get('blocksAlready', 0)}"
+        f"&folded={result.get('cardsFolded', 0)}"
+        f"&pruned={result.get('blocksPruned', 0)}",
+        status_code=303,
+    )
 
 
 @router.post("/call-rotation/save-order")

@@ -207,97 +207,111 @@ def aggregate_assigned_or_blocks(blocks: list[dict]) -> list[dict]:
 
 
 def collapse_daily_or_blocks(assigned_or_blocks: dict) -> dict:
-    """Enforce one OR card per surgeon/day on the Clinic / OR grid."""
+    """Enforce one OR card per surgeon/day/session on the Clinic / OR grid."""
     for surgeon_id, by_day in assigned_or_blocks.items():
         for day, blocks in list(by_day.items()):
-            if len(blocks) <= 1:
-                continue
-
-            locations: list[str] = []
-            location_names: list[str] = []
-            color = None
-            segments: list[dict] = []
-            fallback_count = 0
-            notes: list[str] = []
-
+            grouped: dict[str, list[dict]] = {}
             for block in blocks:
-                loc_abbr = block.get("locationAbbreviation") or block.get("location") or "OR"
-                loc_name = block.get("location") or loc_abbr
-                if loc_abbr not in locations:
-                    locations.append(loc_abbr)
-                if loc_name and loc_name not in location_names:
-                    location_names.append(loc_name)
-                if not color and block.get("locationColor"):
-                    color = block.get("locationColor")
-                note = (block.get("assignmentNote") or "").strip()
-                if note and note not in notes:
-                    notes.append(note)
-                fallback_count += int(block.get("caseCount") or 0)
+                grouped.setdefault(_block_display_session(block), []).append(block)
 
-                block_segments = list(block.get("segments") or [])
-                if block_segments:
-                    for segment in block_segments:
-                        row = dict(segment)
-                        row.setdefault("locationAbbreviation", loc_abbr)
-                        row.setdefault("location", loc_name)
-                        segments.append(row)
+            collapsed: list[dict] = []
+            for session, session_blocks in grouped.items():
+                if len(session_blocks) <= 1:
+                    one = dict(session_blocks[0])
+                    one["session"] = session
+                    collapsed.append(one)
                     continue
 
-                start = block.get("assignedStart") or block.get("start") or ""
-                segments.append({
-                    "start": start,
-                    "caseCount": int(block.get("caseCount") or 0),
-                    "note": note,
-                    "label": block.get("assignmentLabel") or loc_abbr,
-                    "locationAbbreviation": loc_abbr,
-                    "location": loc_name,
-                    "assignmentId": block.get("assignmentId"),
-                    "blockId": block.get("id"),
-                })
+                locations: list[str] = []
+                location_names: list[str] = []
+                color = None
+                segments: list[dict] = []
+                fallback_count = 0
+                notes: list[str] = []
 
-            has_real_cases = any(row.get("patient") or row.get("caseId") for row in segments)
-            if has_real_cases:
-                segments = [
-                    row for row in segments
-                    if row.get("patient") or row.get("caseId") or int(row.get("caseCount") or 0) > 0
-                ]
-            segments.sort(
+                for block in session_blocks:
+                    loc_abbr = block.get("locationAbbreviation") or block.get("location") or "OR"
+                    loc_name = block.get("location") or loc_abbr
+                    if loc_abbr not in locations:
+                        locations.append(loc_abbr)
+                    if loc_name and loc_name not in location_names:
+                        location_names.append(loc_name)
+                    if not color and block.get("locationColor"):
+                        color = block.get("locationColor")
+                    note = (block.get("assignmentNote") or "").strip()
+                    if note and note not in notes:
+                        notes.append(note)
+                    fallback_count += int(block.get("caseCount") or 0)
+
+                    block_segments = list(block.get("segments") or [])
+                    if block_segments:
+                        for segment in block_segments:
+                            row = dict(segment)
+                            row.setdefault("locationAbbreviation", loc_abbr)
+                            row.setdefault("location", loc_name)
+                            segments.append(row)
+                        continue
+
+                    start = block.get("assignedStart") or block.get("start") or ""
+                    segments.append({
+                        "start": start,
+                        "caseCount": int(block.get("caseCount") or 0),
+                        "note": note,
+                        "label": block.get("assignmentLabel") or loc_abbr,
+                        "locationAbbreviation": loc_abbr,
+                        "location": loc_name,
+                        "assignmentId": block.get("assignmentId"),
+                        "blockId": block.get("id"),
+                    })
+
+                has_real_cases = any(row.get("patient") or row.get("caseId") for row in segments)
+                if has_real_cases:
+                    segments = [
+                        row for row in segments
+                        if row.get("patient") or row.get("caseId") or int(row.get("caseCount") or 0) > 0
+                    ]
+                segments.sort(
+                    key=lambda row: (
+                        row.get("start") or "",
+                        row.get("caseId") or row.get("assignmentId") or row.get("blockId") or 0,
+                        row.get("locationAbbreviation") or "",
+                    )
+                )
+                assigned_start = next((row.get("start") for row in segments if row.get("start")), "")
+                case_count = sum(int(row.get("caseCount") or 0) for row in segments) or fallback_count
+                case_word = "Case" if case_count == 1 else "Cases"
+                display_location = locations[0] if len(locations) == 1 else "OR"
+                display_name = location_names[0] if len(location_names) == 1 else "Multiple OR locations"
+
+                merged = dict(session_blocks[0])
+                merged.update({
+                    "detailId": f"daily-or-{surgeon_id}-{day.isoformat()}-{session}",
+                    "surgeonId": surgeon_id,
+                    "locationId": None if len(locations) > 1 else session_blocks[0].get("locationId"),
+                    "location": display_name,
+                    "locationAbbreviation": display_location,
+                    "locationColor": color or session_blocks[0].get("locationColor") or "#A7F3D0",
+                    "session": session,
+                    "assignedStart": assigned_start,
+                    "caseCount": case_count,
+                    "assignmentNote": "; ".join(notes),
+                    "segments": segments,
+                    "pillLabel": display_location,
+                    "pillCountLabel": f"{case_count} {case_word.lower()}",
+                    "startCompact": _hhmm_compact(assigned_start),
+                    "kind": "or",
+                    "countLabel": case_word,
+                })
+                collapsed.append(merged)
+
+            collapsed.sort(
                 key=lambda row: (
-                    row.get("start") or "",
-                    row.get("caseId") or row.get("assignmentId") or row.get("blockId") or 0,
+                    SESSION_SORT_ORDER.get((row.get("session") or "full").lower(), 9),
+                    row.get("assignedStart") or "",
                     row.get("locationAbbreviation") or "",
                 )
             )
-            assigned_start = next((row.get("start") for row in segments if row.get("start")), "")
-            case_count = sum(int(row.get("caseCount") or 0) for row in segments) or fallback_count
-            case_word = "Case" if case_count == 1 else "Cases"
-            display_location = locations[0] if len(locations) == 1 else "OR"
-            display_name = location_names[0] if len(location_names) == 1 else "Multiple OR locations"
-            session = "am"
-            if assigned_start:
-                parsed = parse_hhmm(assigned_start, time(7, 0))
-                session = "am" if parsed < time(12, 0) else "pm"
-
-            merged = dict(blocks[0])
-            merged.update({
-                "detailId": f"daily-or-{surgeon_id}-{day.isoformat()}",
-                "surgeonId": surgeon_id,
-                "locationId": None if len(locations) > 1 else blocks[0].get("locationId"),
-                "location": display_name,
-                "locationAbbreviation": display_location,
-                "locationColor": color or blocks[0].get("locationColor") or "#A7F3D0",
-                "session": session,
-                "assignedStart": assigned_start,
-                "caseCount": case_count,
-                "assignmentNote": "; ".join(notes),
-                "segments": segments,
-                "pillLabel": display_location,
-                "pillCountLabel": f"{case_count} {case_word.lower()}",
-                "startCompact": _hhmm_compact(assigned_start),
-                "kind": "or",
-                "countLabel": case_word,
-            })
-            by_day[day] = [merged]
+            by_day[day] = collapsed[:2]
     return assigned_or_blocks
 
 
@@ -364,8 +378,18 @@ def enforce_two_card_daily_limit(
                     row.get("detailId") or "",
                 ),
             )
-            if ordered:
-                limited_blocks.setdefault(surgeon_id, {})[day] = [ordered[0]]
+            kept: list[dict] = []
+            used_sessions: set[str] = set()
+            for row in ordered:
+                session = (row.get("session") or "full").lower()
+                if session in used_sessions:
+                    continue
+                kept.append(row)
+                used_sessions.add(session)
+                if len(kept) == 2:
+                    break
+            if kept:
+                limited_blocks.setdefault(surgeon_id, {})[day] = kept
 
     limited_or_overlays = {
         schedule_id: overlay

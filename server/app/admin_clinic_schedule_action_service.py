@@ -5,6 +5,11 @@ from datetime import date, timedelta
 from sqlalchemy.orm import Session
 
 from .conflicts import check_conflicts
+from .clinic_schedule_card_guard import (
+    normalize_clinic_day_cards,
+    target_card_sessions,
+    upsert_clinic_schedule_cards,
+)
 from .models import ClinicSchedule, Location, Surgeon
 from .practice_time import practice_today
 from .or_block_service import log_schedule_change
@@ -41,24 +46,25 @@ def assign_clinic(
 
     assignment_type = "off" if location_choice == "__off__" else "assigned"
     location_id = None if assignment_type == "off" else int(location_choice)
-    slot_query = db.query(ClinicSchedule).filter(
-        ClinicSchedule.surgeon_id == surgeon_id,
-        ClinicSchedule.date == schedule_date,
-    )
-    for existing in schedule_rows_for_slot(slot_query, session):
-        db.delete(existing)
-    db.flush()
-
-    schedule = ClinicSchedule(
+    upsert_clinic_schedule_cards(
+        db,
         surgeon_id=surgeon_id,
+        day=schedule_date,
         location_id=location_id,
-        date=schedule_date,
         session=session,
         assignment_type=assignment_type,
         notes=notes,
+        replace_day=(session or "").lower() == "full",
     )
-    db.add(schedule)
-    db.flush()
+    schedule = (
+        db.query(ClinicSchedule)
+        .filter(
+            ClinicSchedule.surgeon_id == surgeon_id,
+            ClinicSchedule.date == schedule_date,
+            ClinicSchedule.session == target_card_sessions(session)[0],
+        )
+        .first()
+    )
     db.commit()
 
     surgeon = db.get(Surgeon, surgeon_id)
@@ -91,7 +97,7 @@ def assign_clinic(
     # No surgeon push/SMS/email for clinic assigns until notification prefs exist.
     raw = check_conflicts(
         surgeon_id, schedule_date, schedule_date, db,
-        exclude_clinic_schedule_id=schedule.id,
+        exclude_clinic_schedule_id=schedule.id if schedule else None,
         target_entity={"type": "clinic_schedule", "date": schedule_date, "session": session},
     )
     return [f"{surgeon.full_name}: " + conflict for conflict in raw]
@@ -139,14 +145,16 @@ def copy_clinic_week(db: Session, source_offset: int, surgeon_id: str) -> dict:
     for schedule in src_schedules:
         offset = (schedule.date - src_start).days
         new_date = dst_start + timedelta(days=offset)
-        db.add(ClinicSchedule(
+        upsert_clinic_schedule_cards(
+            db,
             surgeon_id=schedule.surgeon_id,
+            day=new_date,
             location_id=schedule.location_id,
-            date=new_date,
             session=schedule.session,
             assignment_type=schedule.assignment_type or "assigned",
             notes=schedule.notes,
-        ))
+        )
+        normalize_clinic_day_cards(db, schedule.surgeon_id, new_date)
         created += 1
     db.commit()
     return {"ok": True, "created": created, "replaced": replaced, "next_offset": source_offset + 1}

@@ -6,6 +6,7 @@ from datetime import timedelta
 from sqlalchemy.orm import Session
 
 from .admin_schedule_template_common import approved_off_dates, parse_target_surgeon_ids
+from .clinic_schedule_card_guard import normalize_clinic_day_cards, upsert_clinic_schedule_cards
 from .models import CallGroup, CallRotationTemplate, ClinicSchedule, Location, Surgeon, SurgeonLocationSchedule
 from .surgeon_visibility import surgeon_is_visible
 
@@ -183,14 +184,16 @@ def apply_clinic_schedule_templates(
                         skipped_existing += 1
                         continue
 
-                db.add(ClinicSchedule(
+                upsert_clinic_schedule_cards(
+                    db,
                     surgeon_id=sid,
+                    day=cur_date,
                     location_id=template.location_id if template.assignment_type == "assigned" else None,
-                    date=cur_date,
                     session=session,
                     assignment_type=template.assignment_type,
                     notes=None,
-                ))
+                )
+                normalize_clinic_day_cards(db, sid, cur_date)
                 created += 1
 
         cur_date += timedelta(days=1)

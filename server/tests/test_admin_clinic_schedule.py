@@ -19,6 +19,7 @@ from app.admin_clinic_schedule_page_service import (
     page_data,
     parse_clinic_fax_visit_segments,
 )
+from app.clinic_schedule_card_guard import normalize_clinic_day_cards
 from app.migrate_location_admin_fields import normalize_office_location_name
 from app.models import Base, ClinicSchedule, Location, Surgeon, SurgicalCase
 from app.or_block_service import BlockORCreateInput, assign_block, create_or_blocks
@@ -114,6 +115,57 @@ class AdminClinicScheduleTest(unittest.TestCase):
             self.assertEqual(rows[0].location_id, hospital.id)
             self.assertEqual(rows[0].session, "pm")
             self.assertEqual(rows[0].notes, "new note")
+        finally:
+            db.close()
+
+    def test_full_day_off_writes_am_and_pm_only(self):
+        db = self.Session()
+        try:
+            surgeon = self._surgeon(db, "Chris", "Johnson")
+            schedule_date = date(2026, 7, 8)
+
+            conflicts = assign_clinic(
+                db,
+                schedule_date,
+                surgeon.id,
+                "__off__",
+                "full",
+                "vacation",
+            )
+
+            self.assertEqual(conflicts, [])
+            rows = db.query(ClinicSchedule).filter(
+                ClinicSchedule.surgeon_id == surgeon.id,
+                ClinicSchedule.date == schedule_date,
+            ).order_by(ClinicSchedule.session).all()
+            self.assertEqual([(row.session, row.assignment_type) for row in rows], [("am", "off"), ("pm", "off")])
+            self.assertEqual(len(rows), 2)
+        finally:
+            db.close()
+
+    def test_normalize_day_cards_converts_legacy_full_to_two_slots(self):
+        db = self.Session()
+        try:
+            surgeon = self._surgeon(db, "Chris", "Johnson")
+            clinic = Location(name="Winter Garden Clinic", abbreviation="WG-OV", location_type="clinic", is_active=True)
+            db.add(clinic)
+            db.flush()
+            schedule_date = date(2026, 7, 8)
+            db.add_all([
+                ClinicSchedule(surgeon_id=surgeon.id, location_id=clinic.id, date=schedule_date, session="am", assignment_type="assigned"),
+                ClinicSchedule(surgeon_id=surgeon.id, location_id=clinic.id, date=schedule_date, session="full", assignment_type="off"),
+            ])
+            db.flush()
+
+            normalize_clinic_day_cards(db, surgeon.id, schedule_date)
+            db.commit()
+
+            rows = db.query(ClinicSchedule).filter(
+                ClinicSchedule.surgeon_id == surgeon.id,
+                ClinicSchedule.date == schedule_date,
+            ).order_by(ClinicSchedule.session).all()
+            self.assertEqual([row.session for row in rows], ["am", "pm"])
+            self.assertLessEqual(len(rows), 2)
         finally:
             db.close()
 

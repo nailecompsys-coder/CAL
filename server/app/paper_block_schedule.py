@@ -27,6 +27,7 @@ from .models import (
     Surgeon,
     SurgeonLocationSchedule,
 )
+from .clinic_schedule_card_guard import normalize_clinic_day_cards, upsert_clinic_schedule_cards
 from .or_block_service import (
     BlockORCreateInput,
     SESSION_DEFAULTS,
@@ -377,15 +378,17 @@ def _replace_clinic_day(
         if not abbrev:
             continue
         loc = locations[abbrev]
-        db.add(ClinicSchedule(
+        upsert_clinic_schedule_cards(
+            db,
             surgeon_id=surgeon.id,
+            day=day,
             location_id=loc.id,
-            date=day,
             session=session,
             assignment_type="assigned",
             notes=None,
-        ))
+        )
         created += 1
+    normalize_clinic_day_cards(db, surgeon.id, day)
     return created, len(existing)
 
 

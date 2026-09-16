@@ -441,6 +441,8 @@ class ClinicSchedule(Base):
     notes = Column(Text)
     created_at = Column(DateTime, server_default=func.now())
 
+    __table_args__ = (UniqueConstraint("surgeon_id", "date", "session"),)
+
     surgeon = relationship("Surgeon", back_populates="clinic_schedules")
     location = relationship("Location")
 

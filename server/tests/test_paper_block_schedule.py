@@ -25,6 +25,7 @@ from app.models import (
     SurgeonLocationSchedule,
     SurgicalCase,
 )
+from app.master_schedule_build_service import build_missing_master_cards
 from app.paper_block_schedule import (
     PAPER,
     START,
@@ -197,6 +198,39 @@ class PaperBlockScheduleTest(unittest.TestCase):
             .all()
         )
         self.assertEqual(alex_mon, [])
+
+    def test_master_builder_adds_only_missing_cards_and_preserves_existing(self):
+        jorge = self.db.query(Surgeon).filter_by(last_name="Florin").one()
+        ap = self.db.query(Location).filter_by(abbreviation="AP-OV").one()
+        wg = self.db.query(Location).filter_by(abbreviation="WG-OV").one()
+        day = date(2026, 9, 14)
+        save_template_cell_value(self.db, jorge.id, 0, "am", ap.id, "assigned", "all")
+        save_template_cell_value(self.db, jorge.id, 0, "pm", ap.id, "assigned", "all")
+        self.db.add(ClinicSchedule(
+            surgeon_id=jorge.id,
+            location_id=wg.id,
+            date=day,
+            session="am",
+            assignment_type="assigned",
+            notes="Keep this scheduled card exactly as entered.",
+        ))
+        self.db.commit()
+
+        result = build_missing_master_cards(self.db, start=day, end=day)
+
+        am = self.db.query(ClinicSchedule).filter_by(
+            surgeon_id=jorge.id, date=day, session="am"
+        ).one()
+        pm = self.db.query(ClinicSchedule).filter_by(
+            surgeon_id=jorge.id, date=day, session="pm"
+        ).one()
+        self.assertEqual(am.location_id, wg.id)
+        self.assertEqual(am.notes, "Keep this scheduled card exactly as entered.")
+        self.assertEqual(pm.location_id, ap.id)
+        self.assertEqual(result["clinicCreated"], 1)
+        self.assertGreaterEqual(result["conflicts"], 1)
+        self.assertEqual(result["cardsFolded"], 0)
+        self.assertEqual(result["blocksPruned"], 0)
 
         chris = self.db.query(Surgeon).filter_by(last_name="Johnson").one()
         fri = (

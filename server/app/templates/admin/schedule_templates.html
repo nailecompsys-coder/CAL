@@ -31,9 +31,11 @@
     {% if from_parts|length == 3 %}{{ from_parts[1]|int }}/{{ from_parts[2]|int }}/{{ from_parts[0] }}{% else %}{{ request.query_params.get('from','') }}{% endif %}
     –
     {% if to_parts|length == 3 %}{{ to_parts[1]|int }}/{{ to_parts[2]|int }}/{{ to_parts[0] }}{% else %}{{ request.query_params.get('to','') }}{% endif %}.
-    {{ request.query_params.get('clinic','0') }} clinic cards written,
-    {{ request.query_params.get('blocks','0') }} block assignments written,
+    {{ request.query_params.get('clinic','0') }} missing clinic cards added,
+    {{ request.query_params.get('blocks','0') }} missing block assignments added,
     {{ request.query_params.get('already','0') }} already present.
+    {% if request.query_params.get('skipped','0')|int > 0 %} {{ request.query_params.get('skipped','0') }} existing cards left unchanged.{% endif %}
+    {% if request.query_params.get('conflicts','0')|int > 0 %} {{ request.query_params.get('conflicts','0') }} existing-card conflicts left unchanged.{% endif %}
     Backup #{{ request.query_params.get('backup_id','') }} was created first.
   </div>
   {% if request.query_params.get('backup_id') %}
@@ -83,7 +85,7 @@
         <span id="master-build-label">Build Cards</span>
       </button>
     </form>
-    <p class="text-xs text-slate-500 mt-2" id="master-build-help">Blank slots stay blank. Rows without a matching card are parked in Ingest fixes. A restore point is created before cards are written.</p>
+    <p class="text-xs text-slate-500 mt-2" id="master-build-help">Adds only missing cards from this grid. Existing cards, cases, visits, and master-grid values are never changed. Blank slots stay blank. A restore point is created first.</p>
   </div>
 
   {# ── Template grid — one surgeon at a time ── #}

@@ -20,7 +20,7 @@ from ..admin_schedule_template_service import (
 )
 from ..database import get_db
 from ..jinja_env import templates
-from ..paper_block_schedule import apply_paper_block_schedule
+from ..master_schedule_build_service import build_missing_master_cards
 from ..practice_time import practice_today
 from ..schedule_build_backup_service import create_schedule_build_backup, revert_schedule_build_backup
 from .admin import _base, _sort_surgeons_physicians_first
@@ -119,7 +119,7 @@ async def build_master_schedule_cards(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    """Build OR + clinic cards from the published master schedule."""
+    """Add missing Clinic / OR cards from the saved master schedule only."""
     today = practice_today()
     default_end = date(today.year + 1, 12, 31)
     try:
@@ -130,7 +130,7 @@ async def build_master_schedule_cards(
     if d_to < d_from or (d_to - d_from).days > 550:
         return RedirectResponse("/admin/schedule-templates?msg=bad_range", status_code=303)
     backup = create_schedule_build_backup(db, admin_id=getattr(admin, "id", None), start=d_from, end=d_to)
-    result = apply_paper_block_schedule(db, start=d_from, end=d_to)
+    result = build_missing_master_cards(db, start=d_from, end=d_to)
     return RedirectResponse(
         "/admin/schedule-templates?msg=master_built"
         f"&from={d_from.isoformat()}&to={d_to.isoformat()}"
@@ -138,6 +138,8 @@ async def build_master_schedule_cards(
         f"&clinic={result.get('clinicCreated', 0)}"
         f"&blocks={result.get('blocksAssigned', 0)}"
         f"&already={result.get('blocksAlready', 0)}"
+        f"&skipped={result.get('skippedExisting', 0)}"
+        f"&conflicts={result.get('conflicts', 0)}"
         f"&folded={result.get('cardsFolded', 0)}"
         f"&pruned={result.get('blocksPruned', 0)}",
         status_code=303,

@@ -19,7 +19,7 @@ from app.admin_clinic_schedule_page_service import (
     parse_clinic_fax_visit_segments,
 )
 from app.migrate_location_admin_fields import normalize_office_location_name
-from app.models import Base, ClinicSchedule, Location, Surgeon
+from app.models import Base, ClinicSchedule, Location, Surgeon, SurgicalCase
 from app.or_block_service import BlockORCreateInput, assign_block, create_or_blocks
 
 class AdminClinicScheduleTest(unittest.TestCase):
@@ -167,6 +167,55 @@ class AdminClinicScheduleTest(unittest.TestCase):
             self.assertEqual(jason_blocks[0]["pillCountLabel"], "2 cases")
             self.assertEqual(jason_blocks[0]["session"], "am")
             self.assertEqual(len(jason_blocks[0]["segments"]), 1)
+        finally:
+            db.close()
+
+    def test_page_data_surfaces_unlinked_surgical_cases_as_or_pills(self):
+        db = self.Session()
+        try:
+            hospital = Location(
+                name="Minneola OR",
+                abbreviation="MN-OR",
+                location_type="hospital",
+                color="#A7F3D0",
+                is_active=True,
+            )
+            db.add(hospital)
+            surgeon = self._surgeon(db, "Alex", "Schroeder")
+            db.flush()
+            monday = date.today() - timedelta(days=date.today().weekday())
+            db.add_all([
+                SurgicalCase(
+                    surgeon_id=surgeon.id,
+                    date=monday,
+                    start_time=time(7, 15),
+                    patient_name="Bishop, David",
+                    procedure="Case 1",
+                    location_id=hospital.id,
+                    room_text="MIN S05",
+                    status="scheduled",
+                ),
+                SurgicalCase(
+                    surgeon_id=surgeon.id,
+                    date=monday,
+                    start_time=time(8, 55),
+                    patient_name="Vercamen, Donald",
+                    procedure="Case 2",
+                    location_id=hospital.id,
+                    room_text="MIN S05",
+                    status="scheduled",
+                ),
+            ])
+            db.commit()
+
+            data = page_data(db, week_offset=0)
+            blocks = data["assigned_or_blocks"].get(surgeon.id, {}).get(monday, [])
+
+            self.assertEqual(len(blocks), 1)
+            self.assertEqual(blocks[0]["pillLabel"], "MN-OR")
+            self.assertEqual(blocks[0]["caseCount"], 2)
+            self.assertEqual(blocks[0]["pillCountLabel"], "2 cases")
+            self.assertEqual([seg["patient"] for seg in blocks[0]["segments"]], ["Bishop, David", "Vercamen, Donald"])
         finally:
             db.close()
 
@@ -351,6 +400,32 @@ class AdminClinicScheduleTest(unittest.TestCase):
         self.assertIsNotNone(overlay)
         self.assertEqual(overlay["caseCount"], 9)
         self.assertEqual(overlay["segments"][0]["label"], "NIEVES, ROSA CAROLINA")
+
+    def test_visual_sot_clinic_notes_include_patient_names(self):
+        notes = "Fax 162 visual SOT · 08:30 FLORES, ANNA MARIE; 08:40 DAMON, BRANDY JUSTICE; 08:50 MARTINEZ, GARI"
+        segments = parse_clinic_fax_visit_segments(notes)
+        self.assertEqual(len(segments), 3)
+        self.assertEqual(segments[0]["label"], "FLORES, ANNA MARIE")
+
+        clinic = Location(
+            name="HP Clermont Clinic",
+            abbreviation="CL-OV",
+            location_type="clinic",
+            is_active=True,
+        )
+        schedule = ClinicSchedule(
+            id=2115,
+            session="am",
+            assignment_type="assigned",
+            notes=notes,
+            location=clinic,
+            location_id=13,
+        )
+        overlay = clinic_fax_overlay_from_notes(schedule)
+        self.assertIsNotNone(overlay)
+        self.assertEqual(overlay["caseCount"], 3)
+        self.assertEqual(overlay["pillLabel"], "CL-OV")
+        self.assertEqual(overlay["pillCountLabel"], "3 visits")
 
     def _surgeon(self, db, first_name, last_name):
         row = Surgeon(

@@ -45,7 +45,7 @@ def _is_hospital_schedule_location(loc: Location | None) -> bool:
 
 
 def parse_clinic_fax_visit_segments(notes: str) -> list[dict]:
-    """Parse `13:00 NIEVES, ROSA; 13:10 PINDER…` from Desk clinic notes."""
+    """Parse `13:00 NIEVES, ROSA; 13:10 PINDER…` from fax clinic notes."""
     text = notes or ""
     first = _FAX_CLINIC_TIME_RE.search(text)
     if not first:
@@ -63,7 +63,13 @@ def parse_clinic_fax_visit_segments(notes: str) -> list[dict]:
         stamp = f"{int(match.group(1)):02d}:{match.group(2)}"
         label = (match.group(3) or "").strip()
         lower = label.lower()
-        if "desk fax" in lower or "kno2" in lower or lower.startswith("source="):
+        if (
+            "desk fax" in lower
+            or "kno2" in lower
+            or "visual sot" in lower
+            or "visual png sot" in lower
+            or lower.startswith("source=")
+        ):
             continue
         if stamp in seen:
             continue
@@ -80,14 +86,19 @@ def parse_clinic_fax_visit_segments(notes: str) -> list[dict]:
 def clinic_fax_overlay_from_notes(
     schedule: ClinicSchedule,
 ) -> dict | None:
-    """Build an AP-CL pill overlay from Desk fax times stored in ClinicSchedule.notes."""
+    """Build a clinic pill overlay from fax times stored in ClinicSchedule.notes."""
     if (schedule.assignment_type or "").lower() != "assigned":
         return None
     loc = schedule.location
     if not loc or _is_hospital_schedule_location(loc):
         return None
     notes = schedule.notes or ""
-    if "Desk fax" not in notes and "source=desk" not in notes:
+    note_lower = notes.lower()
+    if (
+        "desk fax" not in note_lower
+        and "source=desk" not in note_lower
+        and "visual sot" not in note_lower
+    ):
         return None
     segments = parse_clinic_fax_visit_segments(notes)
     if not segments:
@@ -298,6 +309,110 @@ def enrich_or_overlays_with_live_cases(
         )
         out[schedule_id] = _enrich_or_block_with_live_cases(block, day_cases)
     return out
+
+
+def _case_display_session(case: SurgicalCase) -> str:
+    start = case.start_time or time(7, 0)
+    return "am" if start < time(12, 0) else "pm"
+
+
+def append_unlinked_surgical_case_blocks(
+    assigned_or_blocks: dict,
+    surgical_map: dict,
+    or_block_overlays: dict[int, dict],
+) -> dict:
+    """Surface surgical cases even when static Block OR links are missing.
+
+    Fax cleanup can land a true case before the static card is repaired. The
+    portal still has to show counts/details instead of a bare Hospital chip.
+    """
+    represented: set[tuple[int, date, int, str]] = set()
+    for surgeon_id, by_day in assigned_or_blocks.items():
+        for day, blocks in by_day.items():
+            for block in blocks:
+                loc_id = block.get("locationId")
+                session = _block_display_session(block)
+                if loc_id:
+                    represented.add((surgeon_id, day, int(loc_id), session))
+    for block in or_block_overlays.values():
+        surgeon_id = block.get("surgeonId")
+        loc_id = block.get("locationId")
+        raw_day = block.get("date")
+        day = raw_day if isinstance(raw_day, date) else None
+        if not day and isinstance(raw_day, str) and raw_day:
+            try:
+                day = date.fromisoformat(raw_day[:10])
+            except ValueError:
+                day = None
+        if surgeon_id and loc_id and day:
+            represented.add((int(surgeon_id), day, int(loc_id), _block_display_session(block)))
+
+    grouped: dict[tuple[int, date, int, str], list[SurgicalCase]] = {}
+    for surgeon_id, by_day in surgical_map.items():
+        for day, cases in by_day.items():
+            for case in cases:
+                if case.or_block_instance_id or not case.location_id:
+                    continue
+                if not _is_hospital_schedule_location(case.location):
+                    continue
+                session = _case_display_session(case)
+                key = (surgeon_id, day, case.location_id, session)
+                if key in represented:
+                    continue
+                grouped.setdefault(key, []).append(case)
+
+    for (surgeon_id, day, location_id, session), cases in grouped.items():
+        location = cases[0].location
+        if not location:
+            continue
+        sorted_cases = sorted(cases, key=lambda row: (row.start_time or time(0, 0), row.id or 0))
+        segments = []
+        for case in sorted_cases:
+            stamp = case.start_time.strftime("%H:%M") if case.start_time else ""
+            proc = (case.procedure or "").strip()
+            room = (case.room_text or "").strip()
+            secondary = " · ".join(part for part in (proc[:80], room) if part)
+            segments.append({
+                "start": stamp,
+                "caseCount": 1,
+                "note": secondary,
+                "label": case.patient_name or "Case",
+                "patient": case.patient_name or "Case",
+                "procedure": proc[:80],
+                "room": room,
+                "caseId": case.id,
+            })
+        start = segments[0]["start"] if segments else ""
+        count = len(segments)
+        case_word = "Case" if count == 1 else "Cases"
+        abbr = location.abbreviation or location.name or "OR"
+        fallback = {
+            "detailId": f"case-fallback-{surgeon_id}-{location_id}-{session}-{day.isoformat()}",
+            "surgeonId": surgeon_id,
+            "locationId": location_id,
+            "location": location.name or abbr,
+            "locationAbbreviation": abbr,
+            "locationColor": location.color or "#A7F3D0",
+            "session": session,
+            "assignedStart": start,
+            "caseCount": count,
+            "segments": segments,
+            "pillLabel": abbr,
+            "pillCountLabel": f"{count} {case_word.lower()}",
+            "startCompact": _hhmm_compact(start),
+            "kind": "or",
+            "countLabel": case_word,
+            "assignmentNote": "Static Block OR card missing; showing scheduled cases.",
+        }
+        assigned_or_blocks.setdefault(surgeon_id, {}).setdefault(day, []).append(fallback)
+        assigned_or_blocks[surgeon_id][day].sort(
+            key=lambda row: (
+                SESSION_SORT_ORDER.get((row.get("session") or "full").lower(), 9),
+                row.get("assignedStart") or "",
+                row.get("locationAbbreviation") or "",
+            )
+        )
+    return assigned_or_blocks
 
 
 def merge_or_blocks_into_clinic_grid(
@@ -530,6 +645,9 @@ def page_data(db: Session, week_offset: int) -> dict:
     assigned_or_blocks = enrich_or_blocks_with_live_cases(assigned_or_blocks, surgical_map)
     or_block_overlays = enrich_or_overlays_with_live_cases(
         or_block_overlays, sched_map, surgical_map
+    )
+    assigned_or_blocks = append_unlinked_surgical_case_blocks(
+        assigned_or_blocks, surgical_map, or_block_overlays
     )
     clinic_fax_overlays = build_clinic_fax_overlays(sched_map)
 

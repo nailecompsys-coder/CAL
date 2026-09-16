@@ -301,6 +301,20 @@ def collapse_daily_or_blocks(assigned_or_blocks: dict) -> dict:
     return assigned_or_blocks
 
 
+def remove_zero_case_or_cards(assigned_or_blocks: dict) -> dict:
+    """Hide paper/static OR cards from the grid until an actual case exists."""
+    cleaned: dict = {}
+    for surgeon_id, by_day in assigned_or_blocks.items():
+        for day, blocks in by_day.items():
+            visible = [
+                block for block in blocks
+                if int(block.get("caseCount") or 0) > 0
+            ]
+            if visible:
+                cleaned.setdefault(surgeon_id, {})[day] = visible
+    return cleaned
+
+
 def _sessions_compatible(schedule_session: str | None, block_session: str | None) -> bool:
     sched = (schedule_session or "full").lower()
     block = (block_session or "am").lower()
@@ -747,6 +761,7 @@ def page_data(db: Session, week_offset: int) -> dict:
         assigned_or_blocks, surgical_map, or_block_overlays
     )
     assigned_or_blocks = collapse_daily_or_blocks(assigned_or_blocks)
+    assigned_or_blocks = remove_zero_case_or_cards(assigned_or_blocks)
     clinic_fax_overlays = build_clinic_fax_overlays(sched_map)
 
     hospital_locations = [loc for loc in all_locations if loc.location_type == "hospital"]

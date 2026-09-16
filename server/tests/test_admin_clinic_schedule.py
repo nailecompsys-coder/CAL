@@ -282,6 +282,61 @@ class AdminClinicScheduleTest(unittest.TestCase):
         finally:
             db.close()
 
+    def test_page_data_hides_zero_case_paper_or_cards(self):
+        db = self.Session()
+        try:
+            clinic = Location(
+                name="Lake Mary Clinic",
+                abbreviation="LM-OV",
+                location_type="clinic",
+                color="#BFDBFE",
+                is_active=True,
+            )
+            hospital = Location(
+                name="Altamonte OR",
+                abbreviation="AL-OR",
+                location_type="hospital",
+                color="#A7F3D0",
+                is_active=True,
+            )
+            db.add_all([clinic, hospital])
+            surgeon = self._surgeon(db, "Geoff", "Yurcisin")
+            db.flush()
+            monday = date.today() - timedelta(days=date.today().weekday())
+            db.add(ClinicSchedule(
+                surgeon_id=surgeon.id,
+                location_id=clinic.id,
+                date=monday,
+                session="am",
+                assignment_type="assigned",
+            ))
+            for session, start, end in (("am", time(7, 0), time(12, 0)), ("pm", time(12, 0), time(17, 0))):
+                block_id = create_or_blocks(
+                    db,
+                    BlockORCreateInput(
+                        name=f"{session.upper()} paper block",
+                        start_date=monday,
+                        end_date=monday,
+                        weekdays=[monday.weekday()],
+                        location_ids=[hospital.id],
+                        session=session,
+                        start_time=start,
+                        end_time=end,
+                        recurrence="once",
+                    ),
+                )["instance_ids"][0]
+                assign_block(db, block_id, surgeon.id, assigned_start_time=start, case_count=0, assignment_note="Paper block schedule", notify=False)
+            db.commit()
+
+            data = page_data(db, week_offset=0)
+            blocks = data["assigned_or_blocks"].get(surgeon.id, {}).get(monday, [])
+            entries = data["sched_map"].get(surgeon.id, {}).get(monday, [])
+
+            self.assertEqual([(entry.session, entry.location.abbreviation) for entry in entries], [("am", "LM-OV")])
+            self.assertEqual(blocks, [])
+        finally:
+            db.close()
+
     def test_aggregate_assigned_or_blocks_merges_same_location_session(self):
         merged = aggregate_assigned_or_blocks([
             {

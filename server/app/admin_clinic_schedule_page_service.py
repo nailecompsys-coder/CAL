@@ -735,6 +735,40 @@ def open_block_day_slots(
     return slots
 
 
+def add_unlinked_or_case_counts_to_day_slots(
+    open_or_day_slots: dict[date, list[dict]],
+    surgical_map: dict,
+) -> dict[date, list[dict]]:
+    """Make the top OR-location row count real cases even when block links are missing."""
+    counts: dict[tuple[date, int], int] = {}
+    for _surgeon_id, by_day in surgical_map.items():
+        for day, cases in by_day.items():
+            for case in cases:
+                if case.or_block_instance_id or not case.location_id:
+                    continue
+                if not _is_hospital_schedule_location(case.location):
+                    continue
+                counts[(day, case.location_id)] = counts.get((day, case.location_id), 0) + 1
+
+    if not counts:
+        return open_or_day_slots
+
+    for day, slots in open_or_day_slots.items():
+        for slot in slots:
+            extra = counts.get((day, slot.get("locationId")))
+            if not extra:
+                continue
+            total = int(slot.get("caseCount") or 0) + extra
+            slot["caseCount"] = total
+            slot["caseCountLabel"] = f"{total} case{'s' if total != 1 else ''}"
+            time_label = slot.get("timeLabel")
+            if time_label:
+                slot["pillTitle"] = f"{slot.get('locationAbbreviation')} {time_label} · {slot['caseCountLabel']}"
+            else:
+                slot["pillTitle"] = f"{slot.get('locationAbbreviation')} · {slot['caseCountLabel']}"
+    return open_or_day_slots
+
+
 def page_data(db: Session, week_offset: int) -> dict:
     today, week_days = week_days_for_offset(week_offset)
     all_locations = db.query(Location).filter(
@@ -836,6 +870,10 @@ def page_data(db: Session, week_offset: int) -> dict:
         day: open_block_day_slots(hospital_locations, blocks_by_day_location, day)
         for day in week_days
     }
+    open_or_day_slots = add_unlinked_or_case_counts_to_day_slots(
+        open_or_day_slots,
+        surgical_map,
+    )
 
     from .off_conflict_service import build_clinic_off_display
 

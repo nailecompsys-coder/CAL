@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.admin_clinic_schedule_action_service import assign_clinic, copy_clinic_week
 from app.admin_clinic_schedule_page_service import (
+    add_unlinked_or_case_counts_to_day_slots,
     aggregate_assigned_or_blocks,
     clinic_fax_overlay_from_notes,
     clinic_schedule_sort_key,
@@ -547,6 +548,67 @@ class AdminClinicScheduleTest(unittest.TestCase):
         self.assertEqual(wg["caseCount"], 3)
         self.assertEqual(wg["caseCountLabel"], "3 cases")
         self.assertEqual(wg["blockId"], 51)
+
+    def test_open_block_day_slots_include_unlinked_or_cases(self):
+        day = date(2026, 9, 16)
+        location = Location(
+            id=8,
+            name="Apopka OR",
+            abbreviation="AP-OR",
+            location_type="hospital",
+            color="#7CBFDE",
+            is_active=True,
+        )
+        slots = {
+            day: [{
+                "locationId": 8,
+                "locationAbbreviation": "AP-OR",
+                "timeLabel": "7:00-17:00",
+                "caseCount": 3,
+                "caseCountLabel": "3 cases",
+                "pillTitle": "AP-OR 7:00-17:00 · 3 cases",
+            }]
+        }
+        surgical_map = {
+            16: {
+                day: [
+                    SurgicalCase(
+                        surgeon_id=16,
+                        date=day,
+                        start_time=time(7, 15),
+                        patient_name="Philome, Natasha",
+                        location_id=8,
+                        location=location,
+                        status="scheduled",
+                    ),
+                    SurgicalCase(
+                        surgeon_id=16,
+                        date=day,
+                        start_time=time(8, 15),
+                        patient_name="Arent, Tadeusz",
+                        location_id=8,
+                        location=location,
+                        status="scheduled",
+                    ),
+                    SurgicalCase(
+                        surgeon_id=16,
+                        date=day,
+                        start_time=time(9, 15),
+                        patient_name="Linked case",
+                        location_id=8,
+                        location=location,
+                        or_block_instance_id=1450,
+                        status="scheduled",
+                    ),
+                ]
+            }
+        }
+
+        updated = add_unlinked_or_case_counts_to_day_slots(slots, surgical_map)
+
+        self.assertEqual(updated[day][0]["caseCount"], 5)
+        self.assertEqual(updated[day][0]["caseCountLabel"], "5 cases")
+        self.assertIn("5 cases", updated[day][0]["pillTitle"])
 
     def test_clinic_fax_notes_include_patient_names(self):
         notes = (

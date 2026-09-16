@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session, joinedload
 from .models import AdminNotification, ORBlockInstance, Surgeon, SurgicalCase
 from .or_block_service import (
     ACTIVE_BLOCK_STATUSES,
-    assign_block,
     block_instances_for_range,
     serialize_block_instance,
 )
@@ -273,14 +272,6 @@ def save_ingest_placements(
             errors.append(f"Case {case_id} still needs a start time")
             continue
 
-        case.surgeon_id = surgeon_id
-        case.date = block.date
-        case.start_time = start
-        case.or_block_instance_id = block.id
-        case.location_id = block.location_id
-        if raw.get("room"):
-            case.room_text = str(raw.get("room")).strip() or case.room_text
-
         already = (
             db.query(ORBlockAssignment)
             .filter(
@@ -290,20 +281,18 @@ def save_ingest_placements(
             .first()
         )
         if already is None:
-            try:
-                assign_block(
-                    db,
-                    block.id,
-                    surgeon_id,
-                    admin_id=None,
-                    assigned_start_time=min(start, block.end_time) if start < block.end_time else block.start_time,
-                    case_count=1,
-                    assignment_note="Desk ingest placement",
-                    notify=False,
-                )
-            except Exception as exc:  # noqa: BLE001
-                errors.append(f"Case {case_id}: {exc}")
-                continue
+            errors.append(
+                f"Case {case_id}: no existing master OR card for this surgeon/block; parked for review"
+            )
+            continue
+
+        case.surgeon_id = surgeon_id
+        case.date = block.date
+        case.start_time = start
+        case.or_block_instance_id = block.id
+        case.location_id = block.location_id
+        if raw.get("room"):
+            case.room_text = str(raw.get("room")).strip() or case.room_text
 
         _clear_case_ingest_notifications(db, case_id=case.id)
         placed += 1

@@ -9,6 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.admin_clinic_schedule_action_service import assign_clinic, copy_clinic_week
+from app.ingest_fix_service import save_ingest_placements
 from app.admin_clinic_schedule_page_service import (
     add_unlinked_or_case_counts_to_day_slots,
     aggregate_assigned_or_blocks,
@@ -328,6 +329,126 @@ class AdminClinicScheduleTest(unittest.TestCase):
 
             self.assertEqual(blocks, [])
             self.assertEqual(slots, {})
+        finally:
+            db.close()
+
+    def test_ingest_placement_refuses_to_create_missing_master_or_card(self):
+        db = self.Session()
+        try:
+            hospital = Location(
+                name="Minneola OR",
+                abbreviation="MN-OR",
+                location_type="hospital",
+                color="#A7F3D0",
+                is_active=True,
+            )
+            db.add(hospital)
+            surgeon = self._surgeon(db, "Jason", "Boardman")
+            db.flush()
+            monday = date.today() - timedelta(days=date.today().weekday())
+            block_id = create_or_blocks(
+                db,
+                BlockORCreateInput(
+                    name="Open AM",
+                    start_date=monday,
+                    end_date=monday,
+                    weekdays=[monday.weekday()],
+                    location_ids=[hospital.id],
+                    session="am",
+                    start_time=time(7, 0),
+                    end_time=time(12, 0),
+                    recurrence="once",
+                ),
+            )["instance_ids"][0]
+            case = SurgicalCase(
+                surgeon_id=surgeon.id,
+                date=monday,
+                start_time=time(7, 15),
+                patient_name="Case, Parked",
+                procedure="Procedure",
+                location_id=hospital.id,
+                room_text="MIN S05",
+                status="scheduled",
+            )
+            db.add(case)
+            db.commit()
+
+            result = save_ingest_placements(
+                db,
+                placements=[{
+                    "caseId": case.id,
+                    "blockId": block_id,
+                    "surgeonId": surgeon.id,
+                    "startTime": "07:15",
+                }],
+            )
+
+            db.refresh(case)
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["placed"], 0)
+            self.assertIn("no existing master OR card", result["errors"][0])
+            self.assertIsNone(case.or_block_instance_id)
+        finally:
+            db.close()
+
+    def test_ingest_placement_can_attach_to_existing_master_or_card(self):
+        db = self.Session()
+        try:
+            hospital = Location(
+                name="Minneola OR",
+                abbreviation="MN-OR",
+                location_type="hospital",
+                color="#A7F3D0",
+                is_active=True,
+            )
+            db.add(hospital)
+            surgeon = self._surgeon(db, "Jason", "Boardman")
+            db.flush()
+            monday = date.today() - timedelta(days=date.today().weekday())
+            block_id = create_or_blocks(
+                db,
+                BlockORCreateInput(
+                    name="Open AM",
+                    start_date=monday,
+                    end_date=monday,
+                    weekdays=[monday.weekday()],
+                    location_ids=[hospital.id],
+                    session="am",
+                    start_time=time(7, 0),
+                    end_time=time(12, 0),
+                    recurrence="once",
+                ),
+            )["instance_ids"][0]
+            assign_block(db, block_id, surgeon.id, assigned_start_time=time(7, 0), case_count=0, notify=False)
+            case = SurgicalCase(
+                surgeon_id=surgeon.id,
+                date=monday,
+                start_time=time(7, 15),
+                patient_name="Case, Parked",
+                procedure="Procedure",
+                location_id=hospital.id,
+                room_text="MIN S05",
+                status="scheduled",
+            )
+            db.add(case)
+            db.commit()
+
+            result = save_ingest_placements(
+                db,
+                placements=[{
+                    "caseId": case.id,
+                    "blockId": block_id,
+                    "surgeonId": surgeon.id,
+                    "startTime": "07:15",
+                    "room": "MIN S05",
+                }],
+            )
+
+            db.refresh(case)
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["placed"], 1)
+            self.assertEqual(case.or_block_instance_id, block_id)
+            self.assertEqual(case.location_id, hospital.id)
         finally:
             db.close()
 

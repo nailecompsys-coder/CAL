@@ -12,6 +12,7 @@ from app.admin_clinic_schedule_action_service import assign_clinic, copy_clinic_
 from app.admin_clinic_schedule_page_service import (
     add_unlinked_or_case_counts_to_day_slots,
     aggregate_assigned_or_blocks,
+    build_clinic_grid_slots,
     clinic_fax_overlay_from_notes,
     clinic_schedule_sort_key,
     merge_or_blocks_into_clinic_grid,
@@ -580,6 +581,121 @@ class AdminClinicScheduleTest(unittest.TestCase):
             self.assertEqual([seg["patient"] for seg in overlay["segments"]], ["Case One", "Case Two"])
         finally:
             db.close()
+
+    def test_grid_slots_pick_one_card_per_am_pm_even_with_duplicate_inputs(self):
+        day = date(2026, 9, 15)
+        hospital = Location(
+            id=10,
+            name="Winter Garden OR",
+            abbreviation="WG-OR",
+            location_type="hospital",
+            color="#E48EA6",
+            is_active=True,
+        )
+        clinic = Location(
+            id=11,
+            name="Winter Garden Clinic",
+            abbreviation="WG-OV",
+            location_type="clinic",
+            color="#BFDBFE",
+            is_active=True,
+        )
+        plain_or = ClinicSchedule(
+            id=100,
+            surgeon_id=3,
+            location_id=hospital.id,
+            date=day,
+            session="am",
+            assignment_type="assigned",
+        )
+        counted_or = ClinicSchedule(
+            id=101,
+            surgeon_id=3,
+            location_id=hospital.id,
+            date=day,
+            session="am",
+            assignment_type="assigned",
+        )
+        clinic_row = ClinicSchedule(
+            id=102,
+            surgeon_id=3,
+            location_id=clinic.id,
+            date=day,
+            session="pm",
+            assignment_type="assigned",
+        )
+        plain_or.location = hospital
+        counted_or.location = hospital
+        clinic_row.location = clinic
+
+        slots = build_clinic_grid_slots(
+            {3: {day: [plain_or, counted_or, clinic_row]}},
+            {
+                3: {
+                    day: [{
+                        "detailId": "fallback-wg",
+                        "session": "am",
+                        "assignedStart": "07:15",
+                        "caseCount": 3,
+                        "locationAbbreviation": "WG-OR",
+                    }]
+                }
+            },
+            {
+                counted_or.id: {
+                    "caseCount": 3,
+                    "pillLabel": "WG-OR",
+                    "pillCountLabel": "3 cases",
+                }
+            },
+            {},
+        )
+
+        day_slots = slots[3][day]
+        self.assertEqual(day_slots["am"]["entry"].id, counted_or.id)
+        self.assertIsNone(day_slots["am"]["block"])
+        self.assertEqual(day_slots["pm"]["entry"].id, clinic_row.id)
+        self.assertIsNone(day_slots["pm"]["block"])
+
+    def test_grid_slots_off_entries_suppress_unlinked_or_fallbacks(self):
+        day = date(2026, 9, 18)
+        off_am = ClinicSchedule(
+            id=200,
+            surgeon_id=15,
+            date=day,
+            session="am",
+            assignment_type="off",
+        )
+        off_pm = ClinicSchedule(
+            id=201,
+            surgeon_id=15,
+            date=day,
+            session="pm",
+            assignment_type="off",
+        )
+
+        slots = build_clinic_grid_slots(
+            {15: {day: [off_am, off_pm]}},
+            {
+                15: {
+                    day: [{
+                        "detailId": "unlinked-min",
+                        "session": "pm",
+                        "assignedStart": "07:15",
+                        "caseCount": 1,
+                        "locationAbbreviation": "MIN-OR",
+                    }]
+                }
+            },
+            {},
+            {},
+        )
+
+        day_slots = slots[15][day]
+        self.assertEqual(day_slots["am"]["entry"].id, off_am.id)
+        self.assertIsNone(day_slots["am"]["block"])
+        self.assertEqual(day_slots["pm"]["entry"].id, off_pm.id)
+        self.assertIsNone(day_slots["pm"]["block"])
 
     def test_aggregate_assigned_or_blocks_merges_same_location_session(self):
         merged = aggregate_assigned_or_blocks([

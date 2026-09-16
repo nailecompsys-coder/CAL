@@ -414,6 +414,92 @@ def enforce_two_card_daily_limit(
     return limited_sched, limited_blocks, limited_or_overlays, limited_clinic_overlays
 
 
+def _entry_display_rank(
+    schedule: ClinicSchedule,
+    or_block_overlays: dict[int, dict],
+    clinic_fax_overlays: dict[int, dict],
+) -> tuple[int, int, int, int]:
+    overlay = or_block_overlays.get(schedule.id or 0) or clinic_fax_overlays.get(schedule.id or 0)
+    overlay_count = int((overlay or {}).get("caseCount") or 0)
+    assignment_type = (schedule.assignment_type or "assigned").lower()
+    is_assigned = assignment_type == "assigned"
+    is_off = assignment_type == "off"
+    return (
+        0 if is_assigned else 1 if is_off else 2,
+        0 if overlay_count > 0 else 1,
+        0 if _is_hospital_schedule_location(schedule.location) else 1,
+        schedule.id or 0,
+    )
+
+
+def _slot_schedule_candidates(schedules: list[ClinicSchedule], session: str) -> list[ClinicSchedule]:
+    candidates = [
+        schedule for schedule in schedules
+        if (schedule.session or "am").lower() == session
+    ]
+    if candidates:
+        return candidates
+    if session not in {"am", "pm"}:
+        return []
+    return [
+        schedule for schedule in schedules
+        if (schedule.session or "").lower() == "full"
+        and (schedule.assignment_type or "").lower() == "off"
+    ]
+
+
+def build_clinic_grid_slots(
+    sched_map: dict,
+    assigned_or_blocks: dict,
+    or_block_overlays: dict[int, dict],
+    clinic_fax_overlays: dict[int, dict],
+) -> dict:
+    """Return exactly two visible display slots per surgeon/day: AM and PM."""
+    out: dict = {}
+    keys: set[tuple[int, date]] = set()
+    for surgeon_id, by_day in sched_map.items():
+        for day in by_day:
+            keys.add((surgeon_id, day))
+    for surgeon_id, by_day in assigned_or_blocks.items():
+        for day in by_day:
+            keys.add((surgeon_id, day))
+
+    for surgeon_id, day in keys:
+        schedules = list(sched_map.get(surgeon_id, {}).get(day, []) or [])
+        blocks = list(assigned_or_blocks.get(surgeon_id, {}).get(day, []) or [])
+        day_slots: dict[str, dict] = {}
+        for session, label in (("am", "AM"), ("pm", "PM")):
+            entries = _slot_schedule_candidates(schedules, session)
+            entry = None
+            if entries:
+                entry = sorted(
+                    entries,
+                    key=lambda row: _entry_display_rank(row, or_block_overlays, clinic_fax_overlays),
+                )[0]
+            block = None
+            if entry is None:
+                session_blocks = [
+                    row for row in blocks
+                    if ((row.get("session") or _block_display_session(row) or "am").lower() == session)
+                ]
+                if session_blocks:
+                    block = sorted(
+                        session_blocks,
+                        key=lambda row: (
+                            row.get("assignedStart") or "",
+                            row.get("detailId") or "",
+                        ),
+                    )[0]
+            day_slots[session] = {
+                "label": label,
+                "session": session,
+                "entry": entry,
+                "block": block,
+            }
+        out.setdefault(surgeon_id, {})[day] = day_slots
+    return out
+
+
 def _sessions_compatible(schedule_session: str | None, block_session: str | None) -> bool:
     sched = (schedule_session or "full").lower()
     block = (block_session or "am").lower()
@@ -997,6 +1083,12 @@ def page_data(db: Session, week_offset: int) -> dict:
         assigned_or_blocks=assigned_or_blocks,
         or_block_overlays=or_block_overlays,
     )
+    clinic_grid_slots = build_clinic_grid_slots(
+        sched_map,
+        assigned_or_blocks,
+        or_block_overlays,
+        clinic_fax_overlays,
+    )
 
     return {
         "today": today,
@@ -1005,6 +1097,7 @@ def page_data(db: Session, week_offset: int) -> dict:
         "clinic_locations": [loc for loc in all_locations if loc.location_type == "clinic"],
         "hospital_locations": hospital_locations,
         "sched_map": sched_map,
+        "clinic_grid_slots": clinic_grid_slots,
         "surgical_map": surgical_map,
         "surgical_cases_json": surgical_cases_json,
         "open_or_blocks": {

@@ -191,19 +191,14 @@
         {% for day in week_days %}
         {% set is_today = day == today %}
         {% set day_entries = sched_map.get(surgeon.id, {}).get(day, []) %}
-        {% set am_entries = day_entries|selectattr('session', 'equalto', 'am')|list %}
-        {% set pm_entries = day_entries|selectattr('session', 'equalto', 'pm')|list %}
+        {% set day_slots = clinic_grid_slots.get(surgeon.id, {}).get(day, {}) if clinic_grid_slots is defined else {} %}
+        {% set am_slot = day_slots.get('am', {'label': 'AM', 'session': 'am', 'entry': none, 'block': none}) %}
+        {% set pm_slot = day_slots.get('pm', {'label': 'PM', 'session': 'pm', 'entry': none, 'block': none}) %}
+        {% set primary_entry = am_slot.entry or pm_slot.entry %}
         {% set day_surgeries = surgical_map.get(surgeon.id, {}).get(day, []) %}
         {% set day_block_assignments = assigned_or_blocks.get(surgeon.id, {}).get(day, []) %}
-        {% set hide_or_for_off = hide_empty_or_blocks.get((surgeon.id, day), false) if hide_empty_or_blocks is defined else false %}
-        {% set am_blocks = [] if hide_or_for_off else day_block_assignments|selectattr('session', 'equalto', 'am')|list %}
-        {% set pm_blocks = [] if hide_or_for_off else day_block_assignments|selectattr('session', 'equalto', 'pm')|list %}
         {% set day_off_info = off_map.get((surgeon.id, day)) if off_map is defined else none %}
         {% set day_has_off_conflict = conflict_keys and (surgeon.id, day) in conflict_keys %}
-        {% set show_synthetic_off = synthetic_off_days and (surgeon.id, day) in synthetic_off_days and not day_entries and (hide_or_for_off or not day_block_assignments) %}
-        {% set day_has_hospital_clinic = (day_entries|selectattr('assignment_type', 'equalto', 'assigned')|map(attribute='location')|selectattr('location_type', 'equalto', 'hospital')|list|length > 0) %}
-        {# Cases chip when surgeries exist and nothing else already surfaces them (OR pills / hospital grid). #}
-        {% set day_has_hospital = day_surgeries|length > 0 and not day_has_hospital_clinic and not day_block_assignments and not day_has_off_conflict %}
         <td id="sched-cell-{{ surgeon.id }}-{{ day.isoformat() }}"
           class="px-1.5 py-1.5 border border-slate-200 align-top
           {% if day_has_off_conflict %}bg-rose-50/50{% elif is_today %}bg-blue-50/30{% else %}bg-white{% endif %}
@@ -212,22 +207,20 @@
           data-date="{{ day.isoformat() }}"
           data-surgeon-name="{{ surgeon.full_name }}"
           data-date-label="{{ day.strftime('%a, %b %-d') }}"
-          data-schedule-id="{{ day_entries[0].id if day_entries else '' }}"
-          {% if day_entries %}
-          data-location-choice="{{ '__off__' if day_entries[0].assignment_type == 'off' else day_entries[0].location_id }}"
-          data-session="{{ day_entries[0].session or 'full' }}"
-          data-notes="{{ day_entries[0].notes or '' }}"
+          data-schedule-id="{{ primary_entry.id if primary_entry else '' }}"
+          {% if primary_entry %}
+          data-location-choice="{{ '__off__' if primary_entry.assignment_type == 'off' else primary_entry.location_id }}"
+          data-session="{{ primary_entry.session or 'full' }}"
+          data-notes="{{ primary_entry.notes or '' }}"
           {% endif %}
           onclick='openAssignModal({"surgeonId": {{ surgeon.id }}, "date": {{ day.isoformat()|tojson }}, "surgeonName": {{ surgeon.full_name|tojson }}, "dateLabel": {{ day.strftime("%a, %b %-d")|tojson }}})'>
 
           <div class="cal-surgeon-cell space-y-1">
-            {% for slot in [
-              {'label': 'AM', 'entries': am_entries, 'blocks': am_blocks},
-              {'label': 'PM', 'entries': pm_entries, 'blocks': pm_blocks}
-            ] %}
+            {% for slot in [am_slot, pm_slot] %}
+            {% set entry = slot.entry %}
+            {% set block = slot.block %}
             <div class="cal-slot space-y-0.5">
-            {% if slot.entries or slot.blocks %}
-              {% for entry in slot.entries %}
+            {% if entry %}
               {% set off_overlay = show_off_schedule_ids is defined and entry.id in show_off_schedule_ids %}
               {% set entry_is_off = entry.assignment_type == 'off' %}
               {% set entry_location_choice = '__off__' if entry_is_off else entry.location_id|string %}
@@ -280,10 +273,8 @@
                   </button>
                 </form>
               </div>
-              {% endfor %}
 
-              {% if not slot.entries %}
-              {% for block in slot.blocks %}
+            {% elif block %}
               <div class="w-full">
                 <button type="button"
                   class="cal-pill flex items-center gap-1 w-full text-xs font-medium leading-tight cursor-pointer hover:opacity-90 block-gradient shadow-sm text-left"
@@ -296,8 +287,6 @@
                   </span>
                 </button>
               </div>
-              {% endfor %}
-              {% endif %}
             {% else %}
               {% set blank_off = day_off_info and slot.label|lower in (day_off_info.sessions or ['am', 'pm']) %}
               <div class="cal-placeholder border {% if blank_off %}border-slate-300 bg-slate-100 text-slate-700 shadow-sm{% else %}border-dashed border-slate-200 bg-white/45{% endif %} justify-end px-2">
@@ -308,25 +297,6 @@
             {% endif %}
             </div>
             {% endfor %}
-
-            {% if day_has_hospital %}
-            <div class="w-full" onclick="event.stopPropagation(); event.preventDefault(); openHospitalTimeline({{ surgeon.id }}, '{{ day.isoformat() }}', '{{ surgeon.full_name|e }}', '{{ day.strftime('%a, %b %-d') }}', 0);">
-              <span class="flex items-center gap-1 w-full text-xs font-semibold px-2 py-0.5 rounded-md bg-sky-100 text-sky-800 cursor-pointer hover:bg-sky-200 touch-manipulation">
-                <i class="fa-solid fa-hospital text-[10px] flex-shrink-0"></i>
-                <span class="truncate min-w-0">Hospital {% if day_surgeries|length > 1 %}({{ day_surgeries|length }}){% endif %}</span>
-              </span>
-            </div>
-            {% endif %}
-
-            {% if not day_entries and not day_has_hospital and not day_block_assignments %}
-            <div class="text-slate-300 text-xs text-center leading-tight group-hover/cell:text-slate-400">
-              <i class="fa-solid fa-plus"></i>
-            </div>
-            {% elif day_entries or day_has_hospital or day_block_assignments %}
-            <div class="text-slate-300 text-[10px] text-center leading-tight group-hover/cell:text-slate-400">
-              <i class="fa-solid fa-plus text-[8px]"></i> add
-            </div>
-            {% endif %}
           </div>
         </td>
         {% endfor %}

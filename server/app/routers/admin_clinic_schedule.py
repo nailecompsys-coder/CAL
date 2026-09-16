@@ -56,6 +56,7 @@ def clinic_schedule_page(
         all_locations=data["all_locations"],
         week_days=data["week_days"],
         sched_map=data["sched_map"],
+        clinic_grid_slots=data["clinic_grid_slots"],
         surgical_map=data["surgical_map"],
         surgical_cases_json=data["surgical_cases_json"],
         open_or_blocks=data["open_or_blocks"],

@@ -17,6 +17,7 @@ from ..database import get_db
 from ..jinja_env import templates
 from ..models import Surgeon
 from ..surgeon_visibility import surgeon_is_visible
+from ..schedule_write_freeze import require_schedule_write_enabled
 from .admin import _base, _sort_surgeons_physicians_first, _warn_redirect
 
 router = APIRouter(prefix="/admin")
@@ -91,6 +92,7 @@ def assign_clinic(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
+    require_schedule_write_enabled()
     d = date.fromisoformat(schedule_date)
     selected_schedule_id = int(schedule_id) if schedule_id.strip() else None
     conflicts = assign_clinic_service(db, d, surgeon_id, location_choice, session, notes, selected_schedule_id)
@@ -105,6 +107,7 @@ def clear_clinic(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
+    require_schedule_write_enabled()
     clear_clinic_service(db, schedule_id)
     return RedirectResponse(f"/admin/clinic-schedule?week_offset={week_offset}&surgeon_id={selected_surgeon_id}", status_code=303)
 
@@ -117,6 +120,7 @@ def copy_clinic_week(
     admin=Depends(get_current_admin),
 ):
     """Copy the source week's clinic schedule to the next week."""
+    require_schedule_write_enabled()
     result = copy_clinic_week_service(db, source_offset, surgeon_id)
     if not result["ok"]:
         return RedirectResponse(

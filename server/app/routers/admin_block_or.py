@@ -30,6 +30,7 @@ from ..or_block_service import (
     update_or_block_instance,
 )
 from ..surgeon_visibility import surgeon_is_visible
+from ..schedule_write_freeze import require_schedule_write_enabled
 from .admin import _base, _sort_surgeons_physicians_first
 
 router = APIRouter(prefix="/admin")
@@ -192,6 +193,7 @@ def block_or_create(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
+    require_schedule_write_enabled()
     try:
         default_start, default_end = session_default_times(session)
         payload = BlockORCreateInput(
@@ -230,6 +232,7 @@ def block_or_copy(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
+    require_schedule_write_enabled()
     _, week_days = week_days_for_offset(week_offset)
     loc_raw = (location_id or "").strip()
     block_raw = (source_block_id or "").strip()
@@ -276,6 +279,7 @@ def block_or_edit(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
+    require_schedule_write_enabled()
     try:
         default_start, default_end = session_default_times(session)
         update_or_block_instance(
@@ -308,6 +312,7 @@ def block_or_assign(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
+    require_schedule_write_enabled()
     block = db.get(ORBlockInstance, block_id)
     if not block:
         return _redirect(week_offset, warn="Block not found")
@@ -339,6 +344,7 @@ def block_or_update_assignment(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
+    require_schedule_write_enabled()
     block = db.get(ORBlockInstance, block_id)
     if not block:
         return _redirect(week_offset, warn="Block not found")
@@ -367,6 +373,7 @@ def block_or_remove_assignment(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
+    require_schedule_write_enabled()
     try:
         remove_block_assignment(db, block_id, assignment_id, admin_id=admin.id)
     except ValueError as exc:
@@ -381,6 +388,7 @@ def block_or_clear(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
+    require_schedule_write_enabled()
     try:
         clear_block_assignment(db, block_id, admin_id=admin.id)
     except ValueError as exc:
@@ -399,6 +407,7 @@ def block_or_add_case(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
+    require_schedule_write_enabled()
     block = db.get(ORBlockInstance, block_id)
     if not block:
         return _redirect(week_offset, warn="Block not found")
@@ -430,6 +439,7 @@ def block_or_update_case(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
+    require_schedule_write_enabled()
     block = db.get(ORBlockInstance, block_id)
     if not block:
         return _redirect(week_offset, warn="Block not found")
@@ -463,6 +473,7 @@ def block_or_delete(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
+    require_schedule_write_enabled()
     try:
         delete_or_block_instance(db, block_id, admin_id=admin.id)
     except ValueError as exc:

@@ -23,6 +23,7 @@ from ..fax_visual_ingest_service import (
     apply_visual_schedule,
     run_local_backup,
 )
+from ..schedule_write_freeze import require_schedule_write_enabled
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 
@@ -126,6 +127,7 @@ def ingest_visual_schedule_route(
     This is the only Desk schedule write route. It requires a DB backup before
     applying rows and uses the same guardrails as the manual visual ingest CLI.
     """
+    require_schedule_write_enabled()
     if not body.rows:
         raise HTTPException(400, "rows required")
     if len(body.rows) > 1000:

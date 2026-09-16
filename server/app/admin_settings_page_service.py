@@ -501,18 +501,9 @@ def recent_admin_notifications(db: Session, admin_user_id: int, limit: int = 20)
 
 
 def _reconcile_admin_notification_feed(db: Session, admin_user_id: int) -> None:
-    try:
-        from .grok_lookahead_service import run_grok_rules
-        run_grok_rules(db)
-    except Exception:
-        pass
-    reconcile_stale_dayoff_notifications(db, admin_user_id)
-    reconcile_stale_schedule_flag_notifications(db, admin_user_id)
-    reconcile_ingest_correction_notifications(db, admin_user_id)
-    reconcile_desk_fax_outlier_cases(db)
-    from .grok_lookahead_service import reconcile_stale_call_coverage_notifications
-    reconcile_stale_call_coverage_notifications(db, admin_user_id)
-    reconcile_bot_chatter_notifications(db, admin_user_id)
+    # Notification reads used to run several mutating reconciliation jobs,
+    # including cancellation/re-dating of Desk fax cases. Reads are now pure.
+    del db, admin_user_id
 
 
 def unread_admin_notification_count(db: Session, admin_user_id: int) -> int:

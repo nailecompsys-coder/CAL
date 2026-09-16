@@ -18,6 +18,35 @@ from app.routers.api_ingest import (
 
 
 class ApiIngestVisualTest(unittest.TestCase):
+    def setUp(self):
+        self._freeze = os.environ.pop("CAL_SCHEDULE_WRITE_FREEZE", None)
+        os.environ["CAL_SCHEDULE_WRITE_FREEZE"] = "0"
+
+    def tearDown(self):
+        if self._freeze is not None:
+            os.environ["CAL_SCHEDULE_WRITE_FREEZE"] = self._freeze
+        else:
+            os.environ.pop("CAL_SCHEDULE_WRITE_FREEZE", None)
+
+    def test_visual_schedule_endpoint_refuses_when_schedule_is_frozen(self):
+        os.environ["CAL_SCHEDULE_WRITE_FREEZE"] = "1"
+        body = VisualScheduleBatch(
+            source_fax_id=168,
+            rows=[
+                VisualFaxRowIn(
+                    page=1,
+                    surgeon_initials="JF",
+                    case_date="2026-09-16",
+                    row_type="surgical",
+                    room="MIN S05",
+                    patient_name="White, Jeffrey Allan",
+                )
+            ],
+        )
+        with self.assertRaises(HTTPException) as ctx:
+            ingest_visual_schedule_route(body, db=Mock())
+        self.assertEqual(ctx.exception.status_code, 503)
+
     def test_visual_schedule_endpoint_backs_up_and_applies_reviewed_rows(self):
         body = VisualScheduleBatch(
             source_fax_id=162,

@@ -928,7 +928,7 @@ def ensure_am_pm_split_for_range(db: Session, start_date: date, end_date: date) 
 
 
 def block_instances_for_range(db: Session, start_date: date, end_date: date) -> list[ORBlockInstance]:
-    ensure_am_pm_split_for_range(db, start_date, end_date)
+    # Readers must never repair or split production schedule rows.
     return (
         db.query(ORBlockInstance)
         .filter(ORBlockInstance.date >= start_date, ORBlockInstance.date <= end_date)

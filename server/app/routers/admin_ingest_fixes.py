@@ -24,6 +24,7 @@ from ..jinja_env import templates
 from ..or_block_service import recent_schedule_changes
 from ..practice_time import practice_today
 from ..schedule_flag_compare_service import enrich_flag_list_row
+from ..schedule_write_freeze import require_schedule_write_enabled
 from .admin import _base
 
 router = APIRouter(prefix="/admin")
@@ -120,6 +121,7 @@ def ingest_fixes_save(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
+    require_schedule_write_enabled()
     result = save_ingest_placements(
         db,
         placements=[row.model_dump() for row in body.placements],
@@ -134,6 +136,7 @@ def ingest_fixes_dismiss(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
+    require_schedule_write_enabled()
     del admin
     ok = dismiss_parked_case(db, case_id=case_id)
     if not ok:
@@ -143,6 +146,7 @@ def ingest_fixes_dismiss(
 
 @router.post("/ingest-fixes/{case_id}/confirm-blank-slot")
 def ingest_fixes_confirm_blank_slot(case_id: int, session: str = Form(...), db: Session = Depends(get_db), admin=Depends(get_current_admin)):
+    require_schedule_write_enabled()
     del admin
     result = confirm_blank_slot_card(db, case_id=case_id, session=session)
     msg = "blank_confirmed" if result.get("ok") else "blank_error"

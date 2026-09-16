@@ -23,6 +23,7 @@ from ..jinja_env import templates
 from ..master_schedule_build_service import build_missing_master_cards
 from ..practice_time import practice_today
 from ..schedule_build_backup_service import create_schedule_build_backup, revert_schedule_build_backup
+from ..schedule_write_freeze import require_schedule_write_enabled
 from .admin import _base, _sort_surgeons_physicians_first
 
 router = APIRouter(prefix="/admin")
@@ -97,6 +98,7 @@ async def apply_schedule_templates(
     admin=Depends(get_current_admin),
 ):
     """Generate clinic_schedules from weekly templates for a date range."""
+    require_schedule_write_enabled()
     d_from, d_to, error = parse_date_range(date_from, date_to)
     if error:
         return RedirectResponse(f"/admin/schedule-templates?msg={error}", status_code=303)
@@ -120,6 +122,7 @@ async def build_master_schedule_cards(
     admin=Depends(get_current_admin),
 ):
     """Add missing Clinic / OR cards from the saved master schedule only."""
+    require_schedule_write_enabled()
     today = practice_today()
     default_end = date(today.year + 1, 12, 31)
     try:

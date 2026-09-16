@@ -24,7 +24,7 @@ def schedule_flag_compare_page(
 ):
     compare = build_schedule_flag_compare(db, event_id)
     if compare is None:
-        return RedirectResponse("/admin/scheduler-availability?msg=missing-flag", status_code=303)
+        return RedirectResponse("/admin/ingest-fixes?msg=missing-flag", status_code=303)
     return templates.TemplateResponse(
         "admin/schedule_flag_compare.html",
         _base(request, admin, db=db, compare=compare),

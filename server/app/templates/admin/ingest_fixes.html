@@ -33,10 +33,9 @@
 <header class="portal-header px-5 py-3 sticky top-0 z-10 flex-shrink-0 flex items-center justify-between gap-3">
   <div class="min-w-0">
     <h1 class="font-bold">Ingest fixes</h1>
-    <p class="text-xs text-slate-500">Fax rows that cannot safely attach to a master schedule card land here. Fix the card problem first, then place the case.</p>
+    <p class="text-xs text-slate-500">One review queue for parked fax rows and schedule items that need a human check.</p>
   </div>
   <div class="flex items-center gap-2 flex-shrink-0">
-    <a href="/admin/scheduler-availability" class="text-xs font-bold text-slate-600 px-3 py-2 rounded-xl border border-slate-200 hover:bg-slate-50">Needs attention</a>
     <button type="button" id="ingest-save" disabled
       class="bg-teal-700 text-white text-xs font-bold px-4 py-2 rounded-xl hover:bg-teal-800 disabled:opacity-40 disabled:cursor-not-allowed">
       Save <span id="ingest-save-count"></span>
@@ -49,6 +48,35 @@
 <div class="mx-5 mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">Case dismissed.</div>
 {% endif %}
 <div id="ingest-banner" class="mx-5 mt-3 hidden rounded-xl border px-3 py-2 text-xs"></div>
+
+{% if schedule_flags %}
+<div class="mx-5 mt-3 rounded-xl border border-amber-200 bg-amber-50/70 overflow-hidden">
+  <div class="px-4 py-3 border-b border-amber-200/70 flex items-center justify-between gap-2">
+    <div>
+      <h2 class="text-sm font-extrabold text-slate-800">Needs review</h2>
+      <p class="text-[11px] text-slate-600">CAL vs OCR schedule flags. Use these to compare, then fix the underlying schedule/card.</p>
+    </div>
+    <span class="text-[10px] font-black text-amber-900 bg-white/70 border border-amber-200 rounded-full px-2 py-0.5">{{ schedule_flags|length }}</span>
+  </div>
+  <div class="divide-y divide-amber-200/60">
+    {% for row in schedule_flags %}
+    <a href="{{ row.compareHref or row.href }}" class="block px-4 py-3 hover:bg-amber-50">
+      <div class="flex items-center justify-between gap-3">
+        <p class="text-sm font-bold text-slate-900">
+          <span class="tabular-nums">{{ row.dateLabel or row.date or '—' }}</span>
+          · {{ row.surgeonInitials }} {{ row.surgeon }}
+        </p>
+        <span class="text-[11px] font-bold text-teal-800 whitespace-nowrap">Compare CAL vs OCR →</span>
+      </div>
+      <p class="text-xs text-amber-950 mt-1 line-clamp-2">{{ row.body }}</p>
+      {% if row.ocrPreview %}
+      <p class="text-[11px] text-violet-900 mt-1.5"><span class="font-bold">OCR:</span> {{ row.ocrPreview }}</p>
+      {% endif %}
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
 
 {% if reason_counts %}
 <div class="mx-5 mt-3 grid gap-2 md:grid-cols-3">

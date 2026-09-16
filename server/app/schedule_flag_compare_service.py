@@ -167,7 +167,7 @@ def build_schedule_flag_compare(db: Session, event_id: int) -> dict[str, Any] | 
 
 
 def enrich_flag_list_row(db: Session, row: dict[str, Any]) -> dict[str, Any]:
-    """Attach compare href + short CAL/OCR blurb for Needs attention cards."""
+    """Attach compare href + short CAL/OCR blurb for ingest-fix review cards."""
     event_id = row.get("id")
     href = f"/admin/schedule-flags/{event_id}" if event_id else (row.get("href") or "/admin/block-or")
     out = dict(row)

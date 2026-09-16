@@ -96,6 +96,14 @@
             <td class="px-3 py-2 text-xs font-bold text-slate-500 uppercase">{{ sess }}</td>
             {% for dow in range(5) %}
             {% set cell = surg_tpls.get(dow, {}).get(sess) %}
+            {% set current_color = cell.location.color if cell and cell.assignment_type == 'assigned' and cell.location and cell.location.color else '#ffffff' %}
+            {% if cell and cell.assignment_type == 'off' %}
+              {% set current_color = '#e2e8f0' %}
+            {% elif cell and cell.assignment_type == 'float' %}
+              {% set current_color = '#e0f2fe' %}
+            {% elif not cell %}
+              {% set current_color = '#f8fafc' %}
+            {% endif %}
             <td class="px-2 py-2">
               <div class="master-cell">
                 <div class="flex gap-1.5">
@@ -104,18 +112,19 @@
                     data-surgeon="{{ surgeon.id }}"
                     data-dow="{{ dow }}"
                     data-session="{{ sess }}"
+                    style="background-color: {{ current_color }}33; border-color: {{ current_color }};"
                   >
-                    <option value="blank"{% if not cell %} selected{% endif %}>BLANK</option>
-                    <option value="off"{% if cell and cell.assignment_type == 'off' %} selected{% endif %}>OFF</option>
-                    <option value="float"{% if cell and cell.assignment_type == 'float' %} selected{% endif %}>FLOAT</option>
+                    <option value="blank" data-color="#f8fafc"{% if not cell %} selected{% endif %}>BLANK</option>
+                    <option value="off" data-color="#e2e8f0"{% if cell and cell.assignment_type == 'off' %} selected{% endif %}>OFF</option>
+                    <option value="float" data-color="#e0f2fe"{% if cell and cell.assignment_type == 'float' %} selected{% endif %}>FLOAT</option>
                     <optgroup label="Hospitals / OR">
                       {% for loc in all_locations if loc.location_type == 'hospital' %}
-                      <option value="location:{{ loc.id }}"{% if cell and cell.assignment_type == 'assigned' and cell.location_id == loc.id %} selected{% endif %}>{{ loc.abbreviation or loc.name }}</option>
+                      <option value="location:{{ loc.id }}" data-color="{{ loc.color or '#e8f0fc' }}"{% if cell and cell.assignment_type == 'assigned' and cell.location_id == loc.id %} selected{% endif %}>{{ loc.abbreviation or loc.name }}</option>
                       {% endfor %}
                     </optgroup>
                     <optgroup label="Clinics">
                       {% for loc in all_locations if loc.location_type == 'clinic' %}
-                      <option value="location:{{ loc.id }}"{% if cell and cell.assignment_type == 'assigned' and cell.location_id == loc.id %} selected{% endif %}>{{ loc.abbreviation or loc.name }}</option>
+                      <option value="location:{{ loc.id }}" data-color="{{ loc.color or '#e8f0fc' }}"{% if cell and cell.assignment_type == 'assigned' and cell.location_id == loc.id %} selected{% endif %}>{{ loc.abbreviation or loc.name }}</option>
                       {% endfor %}
                     </optgroup>
                   </select>
@@ -146,6 +155,17 @@
 
 <script>
 (function () {
+  function selectedColor(selectEl) {
+    var opt = selectEl.options[selectEl.selectedIndex];
+    return (opt && opt.getAttribute('data-color')) || '#ffffff';
+  }
+
+  function applyMasterSelectColor(selectEl) {
+    var color = selectedColor(selectEl);
+    selectEl.style.backgroundColor = color + '33';
+    selectEl.style.borderColor = color;
+  }
+
   function postCell(selectEl, statusEl) {
     var cell = selectEl.closest('.master-cell');
     var weekEl = cell.querySelector('.master-week-select');
@@ -183,8 +203,10 @@
   }
 
   document.querySelectorAll('.master-cell-select').forEach(function (selectEl) {
+    applyMasterSelectColor(selectEl);
     selectEl.addEventListener('change', function () {
       var cell = selectEl.closest('.master-cell');
+      applyMasterSelectColor(selectEl);
       postCell(selectEl, cell.querySelector('.master-save'));
     });
   });

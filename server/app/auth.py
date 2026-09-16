@@ -59,9 +59,10 @@ def get_current_admin(
             _raise_html_or_json_auth_error(request, "/admin/block-or")
         allowed = path in {
             "/admin/block-or",
+            "/admin/ingest-fixes",
             "/admin/scheduler-availability",
             "/admin/logout",
-        } or path.startswith("/admin/block-or/")
+        } or path.startswith("/admin/block-or/") or path.startswith("/admin/ingest-fixes") or path.startswith("/admin/schedule-flags/")
         if not allowed:
             _raise_html_or_json_auth_error(request, "/admin/block-or")
     return admin

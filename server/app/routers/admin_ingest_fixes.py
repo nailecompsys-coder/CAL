@@ -20,7 +20,9 @@ from ..ingest_fix_service import (
     surgeons_for_fix,
 )
 from ..jinja_env import templates
+from ..or_block_service import recent_schedule_changes
 from ..practice_time import practice_today
+from ..schedule_flag_compare_service import enrich_flag_list_row
 from .admin import _base
 
 router = APIRouter(prefix="/admin")
@@ -69,6 +71,18 @@ def ingest_fixes_page(
             "count": 0,
         })
         reason_counts[key]["count"] += 1
+    schedule_flags = []
+    for row in recent_schedule_changes(db, hours=24 * 90):
+        if row.get("type") != "desk_or_schedule_flag":
+            continue
+        if row.get("date"):
+            try:
+                flag_day = date.fromisoformat(str(row["date"])[:10])
+            except ValueError:
+                flag_day = None
+            if flag_day and (flag_day < start or flag_day > end):
+                continue
+        schedule_flags.append(enrich_flag_list_row(db, row))
     return templates.TemplateResponse(
         "admin/ingest_fixes.html",
         _base(
@@ -76,6 +90,7 @@ def ingest_fixes_page(
             admin,
             db=db,
             parked=parked,
+            schedule_flags=schedule_flags,
             reason_counts=list(reason_counts.values()),
             blocks=placement_blocks(db, start=start, end=end),
             surgeons=surgeons_for_fix(db),

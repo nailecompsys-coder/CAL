@@ -222,11 +222,18 @@ class AdminClinicScheduleTest(unittest.TestCase):
             data = page_data(db, week_offset=0)
             blocks = data["assigned_or_blocks"].get(surgeon.id, {}).get(monday, [])
 
-            self.assertEqual(len(blocks), 1)
-            self.assertEqual(blocks[0]["pillLabel"], "MN-OR")
-            self.assertEqual(blocks[0]["caseCount"], 3)
-            self.assertEqual(blocks[0]["pillCountLabel"], "3 cases")
-            self.assertEqual([seg["patient"] for seg in blocks[0]["segments"]], ["Bishop, David", "Vercamen, Donald", "Torres, Carla"])
+            self.assertEqual(len(blocks), 2)
+            am = next(row for row in blocks if row["session"] == "am")
+            pm = next(row for row in blocks if row["session"] == "pm")
+            self.assertEqual(am["pillLabel"], "MN-OR")
+            self.assertEqual(am["caseCount"], 2)
+            self.assertEqual(am["pillCountLabel"], "2 cases")
+            self.assertEqual([seg["patient"] for seg in am["segments"]], ["Bishop, David", "Vercamen, Donald"])
+            self.assertEqual(pm["pillLabel"], "MN-OR")
+            self.assertEqual(pm["caseCount"], 1)
+            self.assertEqual(pm["pillCountLabel"], "1 case")
+            self.assertEqual([seg["patient"] for seg in pm["segments"]], ["Torres, Carla"])
+            self.assertLessEqual(len(blocks), 2)
         finally:
             db.close()
 
@@ -390,13 +397,75 @@ class AdminClinicScheduleTest(unittest.TestCase):
             data = page_data(db, week_offset=0)
             entries = data["sched_map"].get(surgeon.id, {}).get(monday, [])
             blocks = data["assigned_or_blocks"].get(surgeon.id, {}).get(monday, [])
+            overlays = data["or_block_overlays"]
+
+            self.assertEqual(len(entries), 2)
+            self.assertEqual([(row.session, row.location.abbreviation) for row in entries], [("am", "AL-OR"), ("pm", "LM-OV")])
+            self.assertEqual(blocks, [])
+            self.assertEqual(overlays[entries[0].id]["pillLabel"], "AL-OR")
+            self.assertEqual(overlays[entries[0].id]["caseCount"], 1)
+            self.assertLessEqual(len(entries) + len(blocks), 2)
+            self.assertNotIn(entries[1].id, overlays)
+        finally:
+            db.close()
+
+    def test_existing_hospital_card_gets_case_count_without_extra_card(self):
+        db = self.Session()
+        try:
+            hospital = Location(
+                name="Winter Garden OR",
+                abbreviation="WG-OR",
+                location_type="hospital",
+                color="#E48EA6",
+                is_active=True,
+            )
+            db.add(hospital)
+            surgeon = self._surgeon(db, "Jorge", "Florin")
+            db.flush()
+            monday = date.today() - timedelta(days=date.today().weekday())
+            schedule = ClinicSchedule(
+                surgeon_id=surgeon.id,
+                location_id=hospital.id,
+                date=monday,
+                session="am",
+                assignment_type="assigned",
+            )
+            db.add(schedule)
+            db.add_all([
+                SurgicalCase(
+                    surgeon_id=surgeon.id,
+                    date=monday,
+                    start_time=time(7, 15),
+                    patient_name="Case One",
+                    procedure="Procedure",
+                    location_id=hospital.id,
+                    room_text="WG S01",
+                    status="scheduled",
+                ),
+                SurgicalCase(
+                    surgeon_id=surgeon.id,
+                    date=monday,
+                    start_time=time(9, 0),
+                    patient_name="Case Two",
+                    procedure="Procedure",
+                    location_id=hospital.id,
+                    room_text="WG S01",
+                    status="scheduled",
+                ),
+            ])
+            db.commit()
+
+            data = page_data(db, week_offset=0)
+            entries = data["sched_map"].get(surgeon.id, {}).get(monday, [])
+            blocks = data["assigned_or_blocks"].get(surgeon.id, {}).get(monday, [])
+            overlay = data["or_block_overlays"].get(schedule.id)
 
             self.assertEqual(len(entries), 1)
-            self.assertEqual(entries[0].location.abbreviation, "LM-OV")
-            self.assertEqual(len(blocks), 1)
-            self.assertEqual(blocks[0]["pillLabel"], "AL-OR")
-            self.assertEqual(blocks[0]["caseCount"], 1)
-            self.assertLessEqual(len(entries) + len(blocks), 2)
+            self.assertEqual(blocks, [])
+            self.assertIsNotNone(overlay)
+            self.assertEqual(overlay["pillLabel"], "WG-OR")
+            self.assertEqual(overlay["pillCountLabel"], "2 cases")
+            self.assertEqual([seg["patient"] for seg in overlay["segments"]], ["Case One", "Case Two"])
         finally:
             db.close()
 

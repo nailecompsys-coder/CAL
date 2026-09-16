@@ -370,6 +370,12 @@ def enforce_two_card_daily_limit(
     limited_blocks: dict = {}
     for surgeon_id, by_day in assigned_or_blocks.items():
         for day, blocks in by_day.items():
+            occupied_sessions = {
+                (schedule.session or "full").lower()
+                for schedule in limited_sched.get(surgeon_id, {}).get(day, [])
+            }
+            if "full" in occupied_sessions:
+                occupied_sessions.update({"am", "pm"})
             ordered = sorted(
                 blocks,
                 key=lambda row: (
@@ -382,6 +388,8 @@ def enforce_two_card_daily_limit(
             used_sessions: set[str] = set()
             for row in ordered:
                 session = (row.get("session") or "full").lower()
+                if session in occupied_sessions:
+                    continue
                 if session in used_sessions:
                     continue
                 kept.append(row)
@@ -511,6 +519,52 @@ def enrich_or_overlays_with_live_cases(
     return out
 
 
+def build_hospital_case_overlays(
+    sched_map: dict,
+    surgical_map: dict,
+) -> dict[int, dict]:
+    """Show live OR case counts on existing hospital ClinicSchedule cards.
+
+    The Clinic / OR grid has two fixed surgeon/day slots. If the master card
+    already says AL-OR/WG-OR/etc., fax/Epic cases should fill that card, not
+    create a second fallback OR pill beside it.
+    """
+    out: dict[int, dict] = {}
+    for surgeon_id, by_day in sched_map.items():
+        for day, schedules in by_day.items():
+            day_cases = surgical_map.get(surgeon_id, {}).get(day, []) or []
+            if not day_cases:
+                continue
+            for schedule in schedules:
+                if not schedule.id:
+                    continue
+                if (schedule.assignment_type or "").lower() != "assigned":
+                    continue
+                if not _is_hospital_schedule_location(schedule.location):
+                    continue
+                loc = schedule.location
+                block = {
+                    "detailId": f"schedule-or-{schedule.id}",
+                    "surgeonId": surgeon_id,
+                    "locationId": schedule.location_id,
+                    "location": loc.name if loc else "OR",
+                    "locationAbbreviation": (loc.abbreviation if loc else "") or "OR",
+                    "locationColor": (loc.color if loc else "") or "#A7F3D0",
+                    "session": (schedule.session or "am").lower(),
+                    "assignedStart": "",
+                    "caseCount": 0,
+                    "segments": [],
+                    "pillLabel": (loc.abbreviation if loc else "") or "OR",
+                    "pillCountLabel": "0 cases",
+                    "kind": "or",
+                    "countLabel": "Cases",
+                }
+                overlay = _enrich_or_block_with_live_cases(block, day_cases)
+                if int(overlay.get("caseCount") or 0) > 0:
+                    out[schedule.id] = overlay
+    return out
+
+
 def _case_display_session(case: SurgicalCase) -> str:
     start = case.start_time or time(7, 0)
     return "am" if start < time(12, 0) else "pm"
@@ -520,6 +574,7 @@ def append_unlinked_surgical_case_blocks(
     assigned_or_blocks: dict,
     surgical_map: dict,
     or_block_overlays: dict[int, dict],
+    sched_map: dict | None = None,
 ) -> dict:
     """Surface surgical cases even when static Block OR links are missing.
 
@@ -527,6 +582,19 @@ def append_unlinked_surgical_case_blocks(
     portal still has to show counts/details instead of a bare Hospital chip.
     """
     represented: set[tuple[int, date, int, str]] = set()
+    for surgeon_id, by_day in (sched_map or {}).items():
+        for day, schedules in by_day.items():
+            for schedule in schedules:
+                if (schedule.assignment_type or "").lower() != "assigned":
+                    continue
+                if not schedule.location_id or not _is_hospital_schedule_location(schedule.location):
+                    continue
+                represented.add((
+                    int(surgeon_id),
+                    day,
+                    int(schedule.location_id),
+                    (schedule.session or "am").lower(),
+                ))
     for surgeon_id, by_day in assigned_or_blocks.items():
         for day, blocks in by_day.items():
             for block in blocks:
@@ -881,8 +949,11 @@ def page_data(db: Session, week_offset: int) -> dict:
     or_block_overlays = enrich_or_overlays_with_live_cases(
         or_block_overlays, sched_map, surgical_map
     )
+    hospital_case_overlays = build_hospital_case_overlays(sched_map, surgical_map)
+    for schedule_id, overlay in hospital_case_overlays.items():
+        or_block_overlays.setdefault(schedule_id, overlay)
     assigned_or_blocks = append_unlinked_surgical_case_blocks(
-        assigned_or_blocks, surgical_map, or_block_overlays
+        assigned_or_blocks, surgical_map, or_block_overlays, sched_map
     )
     assigned_or_blocks = collapse_daily_or_blocks(assigned_or_blocks)
     assigned_or_blocks = remove_zero_case_or_cards(assigned_or_blocks)

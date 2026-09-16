@@ -154,6 +154,7 @@
         {% set am_entries = day_entries|selectattr('session', 'equalto', 'am')|list %}
         {% set pm_entries = day_entries|selectattr('session', 'equalto', 'pm')|list %}
         {% set full_entries = day_entries|rejectattr('session', 'equalto', 'am')|rejectattr('session', 'equalto', 'pm')|list %}
+        {% set full_off_entries = full_entries|selectattr('assignment_type', 'equalto', 'off')|list %}
         {% set day_surgeries = surgical_map.get(surgeon.id, {}).get(day, []) %}
         {% set day_block_assignments = assigned_or_blocks.get(surgeon.id, {}).get(day, []) %}
         {% set hide_or_for_off = hide_empty_or_blocks.get((surgeon.id, day), false) if hide_empty_or_blocks is defined else false %}
@@ -181,7 +182,7 @@
           {% endif %}
           onclick='openAssignModal({"surgeonId": {{ surgeon.id }}, "date": {{ day.isoformat()|tojson }}, "surgeonName": {{ surgeon.full_name|tojson }}, "dateLabel": {{ day.strftime("%a, %b %-d")|tojson }}})'>
 
-          <div class="min-h-[52px] space-y-0.5">
+          <div class="min-h-[82px] space-y-1">
             {% if day_has_off_conflict %}
             <div class="flex items-center gap-1 text-[10px] font-bold text-rose-700 px-1">
               <i class="fa-solid fa-triangle-exclamation text-[9px]"></i>
@@ -200,12 +201,11 @@
             </div>
             {% endif %}
             {% for slot in [
-              {'label': 'AM', 'entries': am_entries, 'blocks': am_blocks},
-              {'label': 'PM', 'entries': pm_entries, 'blocks': pm_blocks},
-              {'label': 'Full', 'entries': full_entries, 'blocks': []}
+              {'label': 'AM', 'entries': am_entries if am_entries else full_off_entries, 'blocks': am_blocks},
+              {'label': 'PM', 'entries': pm_entries if pm_entries else full_off_entries, 'blocks': pm_blocks}
             ] %}
+            <div class="min-h-[38px] space-y-0.5">
             {% if slot.entries or slot.blocks %}
-            <div class="min-h-[18px] space-y-0.5">
               {% for entry in slot.entries %}
               {% set force_off = show_off_schedule_ids is defined and entry.id in show_off_schedule_ids %}
               {% set entry_is_off = entry.assignment_type == 'off' or force_off %}
@@ -214,7 +214,7 @@
               {% set clinic_overlay = none if force_off else (clinic_fax_overlays.get(entry.id) if clinic_fax_overlays is defined else none) %}
               {% set pill_overlay = or_overlay or clinic_overlay %}
               <div class="flex items-center gap-1 group/entry relative w-full">
-                <span class="flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-md leading-tight w-full min-w-0 min-h-[34px] cursor-pointer hover:opacity-90 {% if entry_is_off %}bg-slate-200 text-slate-700 shadow-sm{% else %}block-gradient shadow-sm{% endif %}"
+                <span class="flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-md leading-tight w-full min-w-0 min-h-[38px] cursor-pointer hover:opacity-90 {% if entry_is_off %}bg-slate-200 text-slate-700 shadow-sm{% else %}block-gradient shadow-sm{% endif %}"
                   style="{% if not entry_is_off and entry.assignment_type == 'assigned' %}--block-c: {{ entry.location.color or '#0ea5e9' }};color:#1e293b{% endif %}"
                   title="{% if entry_is_off %}OFF{% if day_off_info and day_off_info.status == 'pending' %} (requested){% endif %}{% else %}{{ entry.location.name }} — {{ entry.session }}{% endif %}{% if pill_overlay %} · {{ pill_overlay.assignedStart }} · {{ pill_overlay.caseCount }}{% endif %}{% if entry.notes %} · {{ entry.notes }}{% endif %}"
                   {% if pill_overlay %}
@@ -258,7 +258,7 @@
               {% for block in slot.blocks %}
               <div class="w-full">
                 <button type="button"
-                  class="flex items-center gap-1 w-full text-xs font-medium px-2 py-1 rounded-md leading-tight min-h-[34px] cursor-pointer hover:opacity-90 block-gradient shadow-sm text-left"
+                  class="flex items-center gap-1 w-full text-xs font-medium px-2 py-1 rounded-md leading-tight min-h-[38px] cursor-pointer hover:opacity-90 block-gradient shadow-sm text-left"
                   style="--block-c: {{ block.locationColor or '#A7F3D0' }};color:#1e293b"
                   title="{{ block.location }} · {{ block.assignedStart }} · {{ block.caseCount }} case{{ '' if block.caseCount == 1 else 's' }} — click for detail"
                   onclick='event.stopPropagation(); openPillDetailModal({{ {"kind": "or", "title": block.location or block.locationAbbreviation, "abbr": block.locationAbbreviation or "", "session": (block.session or "")|upper, "earliest": block.assignedStart or "", "count": block.caseCount or 0, "countLabel": block.countLabel or "Cases", "pillLabel": block.pillLabel or "", "segments": block.segments or [], "surgeonId": surgeon.id, "date": day.isoformat(), "locationId": block.locationId} | tojson }})'>
@@ -269,8 +269,10 @@
                 </button>
               </div>
               {% endfor %}
-            </div>
+            {% else %}
+              <div class="min-h-[38px] rounded-md border border-dashed border-slate-200 bg-white/45"></div>
             {% endif %}
+            </div>
             {% endfor %}
 
             {% if day_has_hospital %}
@@ -283,7 +285,7 @@
             {% endif %}
 
             {% if not day_entries and not day_has_hospital and not day_block_assignments %}
-            <div class="text-slate-300 text-xs text-center py-1 group-hover/cell:text-slate-400">
+            <div class="text-slate-300 text-xs text-center leading-tight group-hover/cell:text-slate-400">
               <i class="fa-solid fa-plus"></i>
             </div>
             {% elif day_entries or day_has_hospital or day_block_assignments %}

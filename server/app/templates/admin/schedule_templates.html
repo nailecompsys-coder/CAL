@@ -160,7 +160,7 @@
       .then(function () {
         statusEl.textContent = 'Saved';
         statusEl.className = 'master-save text-[10px] text-green-600 mt-1 h-3';
-        window.setTimeout(function () { window.location.reload(); }, 350);
+        window.setTimeout(function () { statusEl.textContent = ''; }, 1200);
       })
       .catch(function () {
         statusEl.textContent = 'Save failed';

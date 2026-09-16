@@ -55,13 +55,18 @@ def save_template_cell_value(
     location_id: int | None,
     assignment_type: str,
 ) -> dict:
+    assignment_type = (assignment_type or "assigned").lower().strip()
     existing = db.query(SurgeonLocationSchedule).filter(
         SurgeonLocationSchedule.surgeon_id == surgeon_id,
         SurgeonLocationSchedule.day_of_week == day_of_week,
         SurgeonLocationSchedule.session == session,
     ).first()
 
-    if assignment_type == "off" and location_id is None and existing is None:
+    if assignment_type == "blank":
+        if existing:
+            db.delete(existing)
+            db.commit()
+            return {"ok": True, "action": "deleted"}
         return {"ok": True, "action": "noop"}
 
     if existing:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -142,7 +142,7 @@ def ingest_fixes_dismiss(
 
 
 @router.post("/ingest-fixes/{case_id}/confirm-blank-slot")
-def ingest_fixes_confirm_blank_slot(case_id: int, session: str = "", db: Session = Depends(get_db), admin=Depends(get_current_admin)):
+def ingest_fixes_confirm_blank_slot(case_id: int, session: str = Form(...), db: Session = Depends(get_db), admin=Depends(get_current_admin)):
     del admin
     result = confirm_blank_slot_card(db, case_id=case_id, session=session)
     msg = "blank_confirmed" if result.get("ok") else "blank_error"

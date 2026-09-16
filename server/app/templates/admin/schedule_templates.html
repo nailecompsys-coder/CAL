@@ -69,7 +69,7 @@
         <p class="text-xs text-slate-500 mt-1">Creates the Clinic / OR cards from the master grid. Fax rows only fill matching cards.</p>
       </div>
     </div>
-    <form method="post" action="/admin/schedule-templates/build-master" class="flex flex-wrap items-end gap-3 mt-3">
+    <form method="post" action="/admin/schedule-templates/build-master" class="flex flex-wrap items-end gap-3 mt-3" id="master-build-form">
       <div>
         <label class="block text-xs font-medium text-slate-600 mb-1">From</label>
         <input type="date" name="date_from" value="{{ default_master_start }}" class="border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400">
@@ -78,11 +78,12 @@
         <label class="block text-xs font-medium text-slate-600 mb-1">To</label>
         <input type="date" name="date_to" value="{{ default_master_end }}" class="border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400">
       </div>
-      <button type="submit" class="bg-blue-600 text-white text-sm font-medium px-5 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2">
-        <i class="fa-solid fa-calendar-check"></i> Build Cards
+      <button type="submit" id="master-build-button" class="bg-blue-600 text-white text-sm font-medium px-5 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2 disabled:opacity-70 disabled:cursor-wait">
+        <i class="fa-solid fa-calendar-check" id="master-build-icon"></i>
+        <span id="master-build-label">Build Cards</span>
       </button>
     </form>
-    <p class="text-xs text-slate-500 mt-2">Blank slots stay blank. Rows without a matching card are parked in Ingest fixes. A restore point is created before cards are written.</p>
+    <p class="text-xs text-slate-500 mt-2" id="master-build-help">Blank slots stay blank. Rows without a matching card are parked in Ingest fixes. A restore point is created before cards are written.</p>
   </div>
 
   {# ── Template grid — one surgeon at a time ── #}
@@ -242,6 +243,20 @@
       postCell(cell.querySelector('.master-cell-select'), cell.querySelector('.master-save'));
     });
   });
+
+  var buildForm = document.getElementById('master-build-form');
+  if (buildForm) {
+    buildForm.addEventListener('submit', function () {
+      var button = document.getElementById('master-build-button');
+      var icon = document.getElementById('master-build-icon');
+      var label = document.getElementById('master-build-label');
+      var help = document.getElementById('master-build-help');
+      if (button) button.disabled = true;
+      if (icon) icon.className = 'fa-solid fa-spinner fa-spin';
+      if (label) label.textContent = 'Building cards...';
+      if (help) help.textContent = 'Creating a restore point first, then writing the selected date range. Leave this page open.';
+    });
+  }
 })();
 </script>
 {% endblock %}

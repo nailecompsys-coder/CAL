@@ -38,6 +38,9 @@ def schedule_templates_page(
     admin=Depends(get_current_admin),
 ):
     context = template_grid_context(db, _sort_surgeons_by_type)
+    today = practice_today()
+    context["default_master_start"] = today.isoformat()
+    context["default_master_end"] = date(today.year + 1, 12, 31).isoformat()
     return templates.TemplateResponse(
         "admin/schedule_templates.html",
         _base(request, admin, db=db, **context),

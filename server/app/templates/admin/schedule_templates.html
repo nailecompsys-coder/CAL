@@ -46,57 +46,27 @@
 <div class="p-6 space-y-6">
 
   {# ── Master build panel ── #}
-  <div class="bg-blue-50 border border-blue-200 rounded-xl p-5">
-    <h2 class="font-semibold text-blue-800 text-sm mb-3"><i class="fa-solid fa-layer-group mr-1.5"></i>Build Master Schedule Cards</h2>
-    <form method="post" action="/admin/schedule-templates/build-master" class="flex flex-wrap items-end gap-3">
+  <div class="bg-white border border-slate-200 rounded-xl p-4">
+    <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
-        <label class="block text-xs font-medium text-blue-700 mb-1">From</label>
-        <input type="date" name="date_from" class="border border-blue-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400">
+        <h2 class="font-semibold text-slate-900 text-sm"><i class="fa-solid fa-layer-group mr-1.5"></i>Build Master Schedule Cards</h2>
+        <p class="text-xs text-slate-500 mt-1">Creates the Clinic / OR cards from the master grid. Fax rows only fill matching cards.</p>
+      </div>
+    </div>
+    <form method="post" action="/admin/schedule-templates/build-master" class="flex flex-wrap items-end gap-3 mt-3">
+      <div>
+        <label class="block text-xs font-medium text-slate-600 mb-1">From</label>
+        <input type="date" name="date_from" value="{{ default_master_start }}" class="border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400">
       </div>
       <div>
-        <label class="block text-xs font-medium text-blue-700 mb-1">To</label>
-        <input type="date" name="date_to" class="border border-blue-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400">
+        <label class="block text-xs font-medium text-slate-600 mb-1">To</label>
+        <input type="date" name="date_to" value="{{ default_master_end }}" class="border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400">
       </div>
       <button type="submit" class="bg-blue-600 text-white text-sm font-medium px-5 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2">
         <i class="fa-solid fa-calendar-check"></i> Build Cards
       </button>
     </form>
-    <p class="text-xs text-blue-600 mt-2">Blank slots stay blank. Fax rows with no matching card are parked for review instead of creating cards.</p>
-  </div>
-
-  <div class="bg-slate-50 border border-slate-200 rounded-xl p-5">
-    <h2 class="font-semibold text-slate-800 text-sm mb-3"><i class="fa-solid fa-wand-magic-sparkles mr-1.5"></i>Legacy Template Apply</h2>
-    <form method="post" action="/admin/schedule-templates/apply" class="flex flex-wrap items-end gap-3">
-      <div>
-        <label class="block text-xs font-medium text-blue-700 mb-1">From</label>
-        <input type="date" name="date_from" required class="border border-blue-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400">
-      </div>
-      <div>
-        <label class="block text-xs font-medium text-blue-700 mb-1">To</label>
-        <input type="date" name="date_to" required class="border border-blue-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400">
-      </div>
-      <div>
-        <label class="block text-xs font-medium text-blue-700 mb-1">Surgeons</label>
-        <select name="surgeon_ids" class="border border-blue-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400">
-          <option value="all">All active surgeons</option>
-          {% for s in surgeons %}
-          <option value="{{ s.id }}">{{ s.first_name }} {{ s.last_name }}{% if s.suffix %}, {{ s.suffix }}{% endif %}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="flex flex-col gap-1">
-        <label class="flex items-center gap-2 text-xs text-blue-700 cursor-pointer">
-          <input type="checkbox" name="skip_existing" value="true" checked class="rounded"> Skip dates already scheduled
-        </label>
-        <label class="flex items-center gap-2 text-xs text-blue-700 cursor-pointer">
-          <input type="checkbox" name="overwrite_daysoff" value="true" class="rounded"> Include days marked as off
-        </label>
-      </div>
-      <button type="submit" class="bg-blue-600 text-white text-sm font-medium px-5 py-2 rounded-lg hover:bg-blue-700 flex items-center gap-2">
-        <i class="fa-solid fa-bolt"></i> Generate Schedule
-      </button>
-    </form>
-    <p class="text-xs text-slate-500 mt-2">Use only for legacy manual template rows. The master schedule build above is the normal card source.</p>
+    <p class="text-xs text-slate-500 mt-2">Blank slots stay blank. Rows without a matching card are parked in Ingest fixes.</p>
   </div>
 
   {# ── Template grid — one surgeon at a time ── #}

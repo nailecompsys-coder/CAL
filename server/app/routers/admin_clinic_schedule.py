@@ -1,5 +1,5 @@
 """Admin clinic schedule routes."""
-from datetime import date
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -11,6 +11,7 @@ from ..admin_clinic_schedule_service import (
     copy_clinic_week as copy_clinic_week_service,
     page_data,
 )
+from ..admin_surgical_schedule_service import week_offset_for_date
 from ..auth import get_current_admin
 from ..database import get_db
 from ..jinja_env import templates
@@ -25,39 +26,31 @@ router = APIRouter(prefix="/admin")
 def clinic_schedule_page(
     request: Request,
     week_offset: int = 0,
-    surgeon_id: str = "all",
+    month: str = "",
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
+    if month:
+        try:
+            first = date.fromisoformat(f"{month}-01")
+            first_monday = first + timedelta(days=(7 - first.weekday()) % 7)
+            week_offset = week_offset_for_date(first_monday)
+        except ValueError:
+            pass
     all_surgeons = [
         row for row in db.query(Surgeon).filter(Surgeon.is_active == True).order_by(Surgeon.last_name).all()
         if surgeon_is_visible(row)
     ]
     all_surgeons = _sort_surgeons_physicians_first(all_surgeons)
-    selected_surgeon_id = None
-    if surgeon_id != "all":
-        try:
-            selected_surgeon_id = int(surgeon_id)
-        except ValueError:
-            selected_surgeon_id = None
     surgeons = all_surgeons
-    if selected_surgeon_id is not None:
-        surgeons = [row for row in all_surgeons if row.id == selected_surgeon_id]
     data = page_data(db, week_offset)
-    copy_source_count = sum(
-        len(day_rows)
-        for sid, surgeon_days in data["sched_map"].items()
-        if selected_surgeon_id is None or sid == selected_surgeon_id
-        for day_rows in surgeon_days.values()
-    )
 
     return templates.TemplateResponse("admin/clinic_schedule.html", _base(
         request, admin, db=db,
         surgeons=surgeons,
         all_surgeons=all_surgeons,
-        selected_surgeon_id=selected_surgeon_id,
-        selected_surgeon_value=str(selected_surgeon_id) if selected_surgeon_id is not None else "all",
-        copy_source_count=copy_source_count,
+        selected_surgeon_id=None,
+        selected_surgeon_value="all",
         clinics=data["clinic_locations"],
         hospitals=data["hospital_locations"],
         all_locations=data["all_locations"],
@@ -78,6 +71,7 @@ def clinic_schedule_page(
         conflict_keys=data.get("conflict_keys") or set(),
         synthetic_off_days=data.get("synthetic_off_days") or set(),
         week_offset=week_offset,
+        view_month_value=data["week_days"][0].strftime("%Y-%m"),
         locations=data["all_locations"],
         today=data["today"],
     ))

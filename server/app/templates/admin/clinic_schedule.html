@@ -7,31 +7,14 @@
   <div>
     <h1 class="text-xl font-bold text-slate-800">Schedule</h1>
     <p class="text-sm text-slate-500">
-      Week of {{ week_days[0].strftime('%b %-d') }} – {{ week_days[6].strftime('%b %-d, %Y') }}
+      Week of {{ week_days[0].strftime('%b %-d') }} – {{ week_days[-1].strftime('%b %-d, %Y') }}
     </p>
   </div>
   <div class="flex items-center gap-2">
     <form method="get" action="/admin/clinic-schedule" class="flex items-center gap-2">
-      <input type="hidden" name="week_offset" value="{{ week_offset }}" />
-      <label class="text-xs font-bold text-slate-500 uppercase tracking-wide" for="surgeon-filter">Physician</label>
-      <select id="surgeon-filter" name="surgeon_id" class="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700"
-        onchange="this.form.submit()">
-        <option value="all" {% if selected_surgeon_value == 'all' %}selected{% endif %}>All Surgeons</option>
-        {% for surgeon in all_surgeons %}
-        <option value="{{ surgeon.id }}" {% if selected_surgeon_id == surgeon.id %}selected{% endif %}>{{ surgeon.last_name }}, {{ surgeon.first_name }}</option>
-        {% endfor %}
-      </select>
+      <label class="text-xs font-bold text-slate-500 uppercase tracking-wide" for="month-jump">Month</label>
+      <input id="month-jump" type="month" name="month" value="{{ view_month_value }}" class="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700" onchange="this.form.submit()" />
     </form>
-    <!-- Copy this week to next -->
-    <form method="post" action="/admin/clinic-schedule/copy-week" class="flex items-center gap-2" id="copy-week-form">
-      <input type="hidden" name="source_offset" value="{{ week_offset }}" />
-      <input type="hidden" name="surgeon_id" value="{{ selected_surgeon_value }}" />
-      <button class="bg-slate-100 text-slate-600 text-sm px-3 py-2 rounded-lg hover:bg-slate-200 flex items-center gap-1.5"
-        onclick="return confirmCopyWeek()">
-        <i class="fa-solid fa-copy"></i> Copy to Next Week
-      </button>
-    </form>
-    <!-- Week nav -->
     <a href="/admin/clinic-schedule?week_offset={{ week_offset - 1 }}"
       class="w-9 h-9 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 flex items-center justify-center">
       <i class="fa-solid fa-chevron-left text-xs"></i>
@@ -45,22 +28,10 @@
   </div>
 </header>
 
-{% if selected_surgeon_id %}
-<div class="mx-6 mt-4 bg-teal-50 border border-teal-200 rounded-xl px-4 py-3 text-teal-800 text-sm flex items-start gap-2">
-  <i class="fa-solid fa-circle-info mt-0.5 text-teal-600"></i>
-  <div>
-    <strong>Copy preview:</strong> only the highlighted visible row will copy to next week.
-    {{ copy_source_count }} clinic/OR entr{{ 'y' if copy_source_count == 1 else 'ies' }} selected.
-  </div>
-</div>
-{% endif %}
-
 {% if request.query_params.get('msg') == 'added' or request.query_params.get('msg') == 'updated' %}
 <div class="mx-6 mt-4 bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-green-700 text-sm">Case {{ request.query_params.get('msg') }}.</div>
 {% elif request.query_params.get('msg') == 'deleted' %}
 <div class="mx-6 mt-4 bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-green-700 text-sm">Case deleted.</div>
-{% elif request.query_params.get('msg') == 'week_copied' %}
-<div class="mx-6 mt-4 bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-green-700 text-sm">Schedule copied. Added {{ request.query_params.get('created', '0') }} entries and replaced {{ request.query_params.get('replaced', '0') }} existing entries.</div>
 {% elif request.query_params.get('msg') == 'missing_date' %}
 <div class="mx-6 mt-4 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3 text-rose-700 text-sm">Please select a date for the case.</div>
 {% elif request.query_params.get('msg') == 'invalid_date' %}
@@ -167,7 +138,7 @@
         {% endfor %}
       </tr>
       {% for surgeon in surgeons %}
-      <tr class="group {% if selected_surgeon_id == surgeon.id %}copy-preview-row{% endif %}">
+      <tr class="group">
         <!-- Surgeon name column -->
         <td class="px-4 py-3 border border-slate-200 bg-white align-top">
           <div class="flex items-center gap-2">
@@ -197,7 +168,6 @@
         <td id="sched-cell-{{ surgeon.id }}-{{ day.isoformat() }}"
           class="px-1.5 py-1.5 border border-slate-200 align-top
           {% if day_has_off_conflict %}bg-rose-50/50{% elif is_today %}bg-blue-50/30{% else %}bg-white{% endif %}
-          {% if selected_surgeon_id == surgeon.id and day_entries %}ring-2 ring-inset ring-teal-300 bg-teal-50/30{% endif %}
           cursor-pointer hover:bg-slate-50 group/cell"
           data-surgeon-id="{{ surgeon.id }}"
           data-date="{{ day.isoformat() }}"
@@ -629,8 +599,6 @@
 <script>
 var SCHEDULE_DATA = {{ surgical_cases_json | tojson }};
 var WEEK_OFFSET = {{ week_offset }};
-var COPY_SELECTED_LABEL = {{ ('all visible surgeons' if not selected_surgeon_id else (surgeons[0].full_name if surgeons else 'selected surgeon')) | tojson }};
-var COPY_SOURCE_COUNT = {{ copy_source_count }};
 var SCHEDULE_SCROLL_KEY = 'clinic-schedule-scroll:' + window.location.pathname + '?week_offset=' + WEEK_OFFSET;
 
 var PILL_FLOAT_POS_KEY = 'clinic-pill-float-pos';
@@ -872,11 +840,6 @@ if (savedClinicScroll !== null) {
       sessionStorage.removeItem(SCHEDULE_SCROLL_KEY);
     }, 80);
   });
-}
-
-function confirmCopyWeek() {
-  var entryWord = COPY_SOURCE_COUNT === 1 ? 'entry' : 'entries';
-  return confirm('Copy ' + COPY_SOURCE_COUNT + ' clinic/OR ' + entryWord + ' for ' + COPY_SELECTED_LABEL + ' to next week?');
 }
 
 function setCheckedRadio(name, value) {

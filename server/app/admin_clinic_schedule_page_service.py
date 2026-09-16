@@ -321,24 +321,37 @@ def enforce_two_card_daily_limit(
     or_block_overlays: dict[int, dict],
     clinic_fax_overlays: dict[int, dict],
 ) -> tuple[dict, dict, dict, dict]:
-    """Clinic / OR grid invariant: at most one schedule card and one OR card per surgeon/day."""
+    """Clinic / OR grid invariant: at most one AM card and one PM card per surgeon/day."""
     limited_sched: dict = {}
     kept_schedule_ids: set[int] = set()
     for surgeon_id, by_day in sched_map.items():
         for day, schedules in by_day.items():
-            ordered = sorted(
-                schedules,
+            groups: dict[str, list[ClinicSchedule]] = {}
+            for schedule in schedules:
+                session = (schedule.session or "full").lower()
+                groups.setdefault(session, []).append(schedule)
+
+            kept_rows = []
+            for session in ("am", "pm", "full"):
+                group = groups.get(session) or []
+                ordered = sorted(group, key=clinic_schedule_sort_key)
+                if ordered:
+                    kept_rows.append(ordered[0])
+            if not kept_rows:
+                continue
+            kept_rows = sorted(
+                kept_rows,
                 key=lambda schedule: (
+                    SESSION_SORT_ORDER.get((schedule.session or "full").lower(), 9),
                     1 if _is_hospital_schedule_location(schedule.location) else 0,
                     *clinic_schedule_sort_key(schedule),
                 ),
             )
-            if not ordered:
-                continue
-            kept = ordered[0]
-            limited_sched.setdefault(surgeon_id, {})[day] = [kept]
-            if kept.id:
-                kept_schedule_ids.add(kept.id)
+            kept_rows = kept_rows[:2]
+            limited_sched.setdefault(surgeon_id, {})[day] = kept_rows
+            for kept in kept_rows:
+                if kept.id:
+                    kept_schedule_ids.add(kept.id)
 
     limited_blocks: dict = {}
     for surgeon_id, by_day in assigned_or_blocks.items():
@@ -631,7 +644,7 @@ def clinic_schedule_sort_key(schedule: ClinicSchedule) -> tuple[int, int]:
 def week_days_for_offset(week_offset: int) -> tuple[date, list[date]]:
     today = practice_today()
     week_start = today - timedelta(days=today.weekday()) + timedelta(weeks=week_offset)
-    return today, [week_start + timedelta(days=i) for i in range(7)]
+    return today, [week_start + timedelta(days=i) for i in range(5)]
 
 
 def surgical_case_json(cases: list[SurgicalCase]) -> list[dict]:
@@ -771,6 +784,7 @@ def add_unlinked_or_case_counts_to_day_slots(
 
 def page_data(db: Session, week_offset: int) -> dict:
     today, week_days = week_days_for_offset(week_offset)
+    week_end = week_days[-1]
     all_locations = db.query(Location).filter(
         Location.is_active == True,
     ).order_by(Location.location_type, Location.name).all()
@@ -779,7 +793,7 @@ def page_data(db: Session, week_offset: int) -> dict:
         .options(joinedload(ClinicSchedule.location))
         .filter(
             ClinicSchedule.date >= week_days[0],
-            ClinicSchedule.date <= week_days[6],
+            ClinicSchedule.date <= week_end,
         )
         .all()
     )
@@ -792,7 +806,7 @@ def page_data(db: Session, week_offset: int) -> dict:
         .options(joinedload(SurgicalCase.location))
         .filter(
             SurgicalCase.date >= week_days[0],
-            SurgicalCase.date <= week_days[6],
+            SurgicalCase.date <= week_end,
             SurgicalCase.status != "cancelled",
         )
         .order_by(SurgicalCase.date, SurgicalCase.start_time)
@@ -810,7 +824,7 @@ def page_data(db: Session, week_offset: int) -> dict:
     # Index by every assigned surgeon (ORBlockAssignment), not legacy first-only assigned_surgeon_id.
     # Then aggregate same location+AM/PM into one clinic-sized pill (sum cases, earliest start).
     assigned_or_blocks_raw: dict = {}
-    for block in block_instances_for_range(db, week_days[0], week_days[6]):
+    for block in block_instances_for_range(db, week_days[0], week_end):
         base = serialize_block_instance(block)
         assignments = base.get("assignments") or []
         if not assignments:
@@ -860,7 +874,7 @@ def page_data(db: Session, week_offset: int) -> dict:
 
     # All Block OR instances for the week (open + assigned) → Open Block day grid
     blocks_by_day_location: dict[date, dict[int, list[dict]]] = {}
-    for block in block_instances_for_range(db, week_days[0], week_days[6]):
+    for block in block_instances_for_range(db, week_days[0], week_end):
         if block.status not in ("open", "assigned"):
             continue
         payload = serialize_block_instance(block)
@@ -880,7 +894,7 @@ def page_data(db: Session, week_offset: int) -> dict:
     off_display = build_clinic_off_display(
         db,
         week_days[0],
-        week_days[6],
+        week_end,
         sched_map=sched_map,
         surgical_map=surgical_map,
         assigned_or_blocks=assigned_or_blocks,
@@ -898,7 +912,7 @@ def page_data(db: Session, week_offset: int) -> dict:
         "surgical_cases_json": surgical_cases_json,
         "open_or_blocks": {
             day: [serialize_block_instance(block) for block in blocks]
-            for day, blocks in open_blocks_by_day(db, week_days[0], week_days[6]).items()
+            for day, blocks in open_blocks_by_day(db, week_days[0], week_end).items()
         },
         "open_or_day_slots": open_or_day_slots,
         "assigned_or_blocks": assigned_or_blocks,

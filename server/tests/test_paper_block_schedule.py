@@ -12,6 +12,8 @@ from app.admin_schedule_template_clinic_service import (
     apply_clinic_schedule_templates,
     save_template_cell_value,
 )
+from app.admin_clinic_schedule_page_service import page_data
+from app.admin_surgical_schedule_service import week_offset_for_date
 from app.models import (
     Base,
     ClinicSchedule,
@@ -465,6 +467,24 @@ class PaperBlockScheduleTest(unittest.TestCase):
         result = revert_schedule_build_backup(self.db, backup_id=backup.id, admin_id=None)
         self.assertFalse(result["ok"])
         self.assertIn("surgical cases", result["reason"])
+
+    def test_clinic_grid_keeps_master_or_and_clinic_same_day(self):
+        day = date(2027, 1, 4)
+        result = apply_paper_block_schedule(
+            self.db,
+            start=day,
+            end=day,
+            write_templates=True,
+            write_clinic=True,
+            write_blocks=True,
+        )
+        self.assertTrue(result["ok"])
+        jorge = self.db.query(Surgeon).filter_by(last_name="Florin").one()
+        data = page_data(self.db, week_offset_for_date(day))
+        rows = data["sched_map"][jorge.id][day]
+        labels = sorted(row.location.abbreviation for row in rows)
+        self.assertEqual(labels, ["AP-OR", "AP-OV"])
+        self.assertEqual(data["week_days"], [date(2027, 1, d) for d in range(4, 9)])
 
 
 if __name__ == "__main__":

@@ -1,7 +1,8 @@
 """Add-only builder for concrete Clinic / OR cards from the saved master grid."""
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, time, timedelta
+import re
 
 from sqlalchemy.orm import Session, joinedload
 
@@ -33,6 +34,29 @@ def _case_session(case: SurgicalCase) -> str | None:
     return "am" if case.start_time.hour < 12 else "pm"
 
 
+def _campus(location) -> str:
+    return ((getattr(location, "abbreviation", "") or "").split("-", 1)[0]).upper()
+
+
+def _handoff_sessions(db: Session, case: SurgicalCase) -> list[str]:
+    session = _case_session(case)
+    if session != "am" or case.start_time is None or case.start_time < time(11, 30):
+        return [session] if session else []
+    campus = _campus(case.location)
+    cards = db.query(ClinicSchedule).filter(
+        ClinicSchedule.surgeon_id == case.surgeon_id,
+        ClinicSchedule.date == case.date,
+        ClinicSchedule.session == "am",
+    ).all()
+    for card in cards:
+        if not card.location or card.location.location_type != "clinic" or _campus(card.location) != campus:
+            continue
+        times = [time.fromisoformat(value) for value in re.findall(r"\b\d{2}:\d{2}\b", card.notes or "")]
+        if times and max(times).hour * 60 + max(times).minute + 30 <= case.start_time.hour * 60 + case.start_time.minute:
+            return ["pm", "am"]
+    return ["am"]
+
+
 def reconcile_parked_cases_after_master_build(db: Session, *, start: date, end: date) -> dict:
     """Attach parked cases only when one existing master OR card is an exact match."""
     cases = (
@@ -51,8 +75,8 @@ def reconcile_parked_cases_after_master_build(db: Session, *, start: date, end: 
     ambiguous = 0
     unmatched = 0
     for case in cases:
-        session = _case_session(case)
-        if session is None:
+        sessions = _handoff_sessions(db, case)
+        if not sessions:
             missing_time += 1
             continue
         candidates = (
@@ -66,7 +90,8 @@ def reconcile_parked_cases_after_master_build(db: Session, *, start: date, end: 
             )
             .all()
         )
-        candidates = [row for row in candidates if _session_bucket(row) == session]
+        candidates = [row for row in candidates if _session_bucket(row) in sessions]
+        candidates.sort(key=lambda row: sessions.index(_session_bucket(row)))
         if len(candidates) == 1:
             placements.append({"caseId": case.id, "blockId": candidates[0].id})
         elif len(candidates) > 1:

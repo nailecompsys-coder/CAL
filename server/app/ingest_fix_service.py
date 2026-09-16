@@ -8,13 +8,14 @@ from typing import Any
 
 from sqlalchemy.orm import Session, joinedload
 
-from .models import AdminNotification, ORBlockInstance, Surgeon, SurgicalCase
+from .admin_schedule_template_clinic_service import week_pattern_matches
+from .models import AdminNotification, ClinicSchedule, ORBlockInstance, Surgeon, SurgicalCase, SurgeonLocationSchedule
 from .or_block_service import (
     ACTIVE_BLOCK_STATUSES,
     block_instances_for_range,
     serialize_block_instance,
 )
-from .paper_block_schedule import paper_cell
+from .paper_block_schedule import _place_or_block
 from .practice_time import practice_today
 from .surgeon_visibility import surgeon_is_visible
 
@@ -41,7 +42,7 @@ def _session_for_time(value: time | None) -> str | None:
     return "am" if value < time(12, 0) else "pm"
 
 
-def _classify_parked_case(case: SurgicalCase) -> dict[str, str]:
+def _classify_parked_case(db: Session, case: SurgicalCase) -> dict[str, str]:
     surgeon = case.surgeon
     loc = case.location
     initials = (surgeon.initials or "").strip().upper() if surgeon else ""
@@ -55,8 +56,12 @@ def _classify_parked_case(case: SurgicalCase) -> dict[str, str]:
             "detail": "Fix this because CAL needs surgeon, date, time, and location before it can place the row.",
         }
 
-    master_abbrev = paper_cell(initials, day, session)
-    if not master_abbrev:
+    master = db.query(SurgeonLocationSchedule).filter(
+        SurgeonLocationSchedule.surgeon_id == case.surgeon_id,
+        SurgeonLocationSchedule.day_of_week == day.weekday(),
+        SurgeonLocationSchedule.session == session,
+    ).first()
+    if master is None or not week_pattern_matches(day, master.week_pattern):
         return {
             "key": "blank-master-slot",
             "title": "Blank master slot",
@@ -65,7 +70,7 @@ def _classify_parked_case(case: SurgicalCase) -> dict[str, str]:
                 f"on {_us_date_label(day)} {session.upper()}, but the master schedule is blank."
             ),
         }
-    master_abbrev = master_abbrev.upper()
+    master_abbrev = ((master.location.abbreviation if master.location else "") or "").upper()
     if master_abbrev == location_abbrev:
         return {
             "key": "master-card-missing",
@@ -141,7 +146,7 @@ def parked_ingest_cases(
             pass
         loc = case.location
         surgeon = case.surgeon
-        reason = _classify_parked_case(case)
+        reason = _classify_parked_case(db, case)
         rows.append({
             "id": case.id,
             "date": case.date.isoformat() if case.date else None,
@@ -325,3 +330,34 @@ def dismiss_parked_case(db: Session, *, case_id: int) -> bool:
     _clear_case_ingest_notifications(db, case_id=case_id)
     db.commit()
     return True
+
+
+def confirm_blank_slot_card(db: Session, *, case_id: int, session: str) -> dict[str, Any]:
+    """Explicit scheduler exception: create one dated OR card from a blank slot."""
+    case = db.get(SurgicalCase, case_id)
+    session = (session or "").lower()
+    if case is None or case.status == "cancelled" or session not in {"am", "pm"}:
+        return {"ok": False, "reason": "Case or time slot is invalid."}
+    if case.location is None or case.location.location_type != "hospital":
+        return {"ok": False, "reason": "A blank-slot confirmation requires a hospital OR case."}
+    existing = db.query(ClinicSchedule).filter(
+        ClinicSchedule.surgeon_id == case.surgeon_id,
+        ClinicSchedule.date == case.date,
+        ClinicSchedule.session == session,
+    ).first()
+    if existing is not None:
+        return {"ok": False, "reason": "That time slot already has a card."}
+    db.add(ClinicSchedule(
+        surgeon_id=case.surgeon_id, location_id=case.location_id, date=case.date,
+        session=session, assignment_type="assigned", notes="Confirmed blank-slot OR exception",
+    ))
+    placed = _place_or_block(db, case.surgeon, case.date, session, case.location)
+    if placed not in {"assigned", "already"}:
+        db.rollback()
+        return {"ok": False, "reason": "No OR block could be created for this confirmed slot."}
+    result = save_ingest_placements(db, placements=[{"caseId": case.id, "blockId": next(
+        row.id for row in db.query(ORBlockInstance).filter(
+            ORBlockInstance.date == case.date, ORBlockInstance.location_id == case.location_id
+        ).all() if (row.session or "").lower() == session and any(a.surgeon_id == case.surgeon_id for a in row.assignments)
+    )}])
+    return {"ok": result.get("placed") == 1, "reason": "; ".join(result.get("errors") or [])}

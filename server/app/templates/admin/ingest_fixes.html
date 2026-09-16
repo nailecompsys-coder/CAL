@@ -46,6 +46,10 @@
 {% set msg = request.query_params.get('msg') %}
 {% if msg == 'dismissed' %}
 <div class="mx-5 mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">Case dismissed.</div>
+{% elif msg == 'blank_confirmed' %}
+<div class="mx-5 mt-3 rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-700">Confirmed one-time blank-slot card and attached the case.</div>
+{% elif msg == 'blank_error' %}
+<div class="mx-5 mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">Could not confirm that blank-slot card. Nothing was changed.</div>
 {% endif %}
 <div id="ingest-banner" class="mx-5 mt-3 hidden rounded-xl border px-3 py-2 text-xs"></div>
 
@@ -129,6 +133,12 @@
           </form>
         </div>
         <div class="mt-2 flex flex-wrap items-center gap-2">
+          {% if row.reasonKey == 'blank-master-slot' and row.startTime %}
+          <form method="post" action="/admin/ingest-fixes/{{ row.id }}/confirm-blank-slot" onsubmit="return confirm('Confirm a one-time {{ 'AM' if row.startTime < '12:00' else 'PM' }} {{ row.location }} card for this blank master slot and attach this case?');">
+            <input type="hidden" name="session" value="{{ 'am' if row.startTime < '12:00' else 'pm' }}">
+            <button type="submit" class="text-[10px] font-bold text-teal-800 border border-teal-200 bg-teal-50 px-2 py-1 rounded-lg">Confirm {{ 'AM' if row.startTime < '12:00' else 'PM' }} card</button>
+          </form>
+          {% endif %}
           <label class="text-[10px] text-slate-500 font-semibold">Time
             <input type="time" class="ingest-time ml-1 px-1.5 py-0.5 rounded border border-slate-200 text-[11px]"
                    value="{{ row.startTime }}" data-case-id="{{ row.id }}">

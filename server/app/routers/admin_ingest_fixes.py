@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from ..auth import get_current_admin
 from ..database import get_db
 from ..ingest_fix_service import (
+    confirm_blank_slot_card,
     dismiss_parked_case,
     parked_ingest_cases,
     placement_blocks,
@@ -138,3 +139,11 @@ def ingest_fixes_dismiss(
     if not ok:
         return RedirectResponse("/admin/ingest-fixes?msg=missing", status_code=303)
     return RedirectResponse("/admin/ingest-fixes?msg=dismissed", status_code=303)
+
+
+@router.post("/ingest-fixes/{case_id}/confirm-blank-slot")
+def ingest_fixes_confirm_blank_slot(case_id: int, session: str = "", db: Session = Depends(get_db), admin=Depends(get_current_admin)):
+    del admin
+    result = confirm_blank_slot_card(db, case_id=case_id, session=session)
+    msg = "blank_confirmed" if result.get("ok") else "blank_error"
+    return RedirectResponse(f"/admin/ingest-fixes?msg={msg}", status_code=303)

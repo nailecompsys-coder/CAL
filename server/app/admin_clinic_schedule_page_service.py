@@ -315,6 +315,58 @@ def remove_zero_case_or_cards(assigned_or_blocks: dict) -> dict:
     return cleaned
 
 
+def enforce_two_card_daily_limit(
+    sched_map: dict,
+    assigned_or_blocks: dict,
+    or_block_overlays: dict[int, dict],
+    clinic_fax_overlays: dict[int, dict],
+) -> tuple[dict, dict, dict, dict]:
+    """Clinic / OR grid invariant: at most one schedule card and one OR card per surgeon/day."""
+    limited_sched: dict = {}
+    kept_schedule_ids: set[int] = set()
+    for surgeon_id, by_day in sched_map.items():
+        for day, schedules in by_day.items():
+            ordered = sorted(
+                schedules,
+                key=lambda schedule: (
+                    1 if _is_hospital_schedule_location(schedule.location) else 0,
+                    *clinic_schedule_sort_key(schedule),
+                ),
+            )
+            if not ordered:
+                continue
+            kept = ordered[0]
+            limited_sched.setdefault(surgeon_id, {})[day] = [kept]
+            if kept.id:
+                kept_schedule_ids.add(kept.id)
+
+    limited_blocks: dict = {}
+    for surgeon_id, by_day in assigned_or_blocks.items():
+        for day, blocks in by_day.items():
+            ordered = sorted(
+                blocks,
+                key=lambda row: (
+                    SESSION_SORT_ORDER.get((row.get("session") or "full").lower(), 9),
+                    row.get("assignedStart") or "",
+                    row.get("detailId") or "",
+                ),
+            )
+            if ordered:
+                limited_blocks.setdefault(surgeon_id, {})[day] = [ordered[0]]
+
+    limited_or_overlays = {
+        schedule_id: overlay
+        for schedule_id, overlay in or_block_overlays.items()
+        if schedule_id in kept_schedule_ids
+    }
+    limited_clinic_overlays = {
+        schedule_id: overlay
+        for schedule_id, overlay in clinic_fax_overlays.items()
+        if schedule_id in kept_schedule_ids
+    }
+    return limited_sched, limited_blocks, limited_or_overlays, limited_clinic_overlays
+
+
 def _sessions_compatible(schedule_session: str | None, block_session: str | None) -> bool:
     sched = (schedule_session or "full").lower()
     block = (block_session or "am").lower()
@@ -763,6 +815,12 @@ def page_data(db: Session, week_offset: int) -> dict:
     assigned_or_blocks = collapse_daily_or_blocks(assigned_or_blocks)
     assigned_or_blocks = remove_zero_case_or_cards(assigned_or_blocks)
     clinic_fax_overlays = build_clinic_fax_overlays(sched_map)
+    sched_map, assigned_or_blocks, or_block_overlays, clinic_fax_overlays = enforce_two_card_daily_limit(
+        sched_map,
+        assigned_or_blocks,
+        or_block_overlays,
+        clinic_fax_overlays,
+    )
 
     hospital_locations = [loc for loc in all_locations if loc.location_type == "hospital"]
 

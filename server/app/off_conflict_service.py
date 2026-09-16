@@ -368,6 +368,8 @@ def build_clinic_off_display(
             off_info = off_map.get((surgeon_id, day))
             if not off_info:
                 continue
+            if off_info.get("status") != "approved":
+                continue
             for schedule in schedules:
                 if (schedule.assignment_type or "assigned").lower() == "off":
                     continue

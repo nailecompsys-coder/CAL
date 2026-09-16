@@ -39,6 +39,17 @@ def normalize_clinic_day_cards(db: Session, surgeon_id: int, day: date) -> int:
         return 0
 
     changed = 0
+    kept_rows: list[ClinicSchedule] = []
+    for row in rows:
+        if (row.assignment_type or "assigned").lower() == "off":
+            db.delete(row)
+            changed += 1
+            continue
+        kept_rows.append(row)
+    rows = kept_rows
+    if not rows:
+        return changed
+
     full_rows = [row for row in rows if (row.session or "").lower() == "full"]
     deleted_full_ids: set[int] = set()
     for row in full_rows:

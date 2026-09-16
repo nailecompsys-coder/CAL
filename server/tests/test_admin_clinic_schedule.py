@@ -120,7 +120,7 @@ class AdminClinicScheduleTest(unittest.TestCase):
         finally:
             db.close()
 
-    def test_full_day_off_writes_am_and_pm_only(self):
+    def test_schedule_editor_rejects_manual_off_cards(self):
         db = self.Session()
         try:
             surgeon = self._surgeon(db, "Chris", "Johnson")
@@ -135,13 +135,15 @@ class AdminClinicScheduleTest(unittest.TestCase):
                 "vacation",
             )
 
-            self.assertEqual(conflicts, [])
+            self.assertEqual(
+                conflicts,
+                ["Use Days Off to mark approved OFF time. Blank schedule slots display as NA."],
+            )
             rows = db.query(ClinicSchedule).filter(
                 ClinicSchedule.surgeon_id == surgeon.id,
                 ClinicSchedule.date == schedule_date,
             ).order_by(ClinicSchedule.session).all()
-            self.assertEqual([(row.session, row.assignment_type) for row in rows], [("am", "off"), ("pm", "off")])
-            self.assertEqual(len(rows), 2)
+            self.assertEqual(rows, [])
         finally:
             db.close()
 
@@ -166,8 +168,8 @@ class AdminClinicScheduleTest(unittest.TestCase):
                 ClinicSchedule.surgeon_id == surgeon.id,
                 ClinicSchedule.date == schedule_date,
             ).order_by(ClinicSchedule.session).all()
-            self.assertEqual([row.session for row in rows], ["am", "pm"])
-            self.assertLessEqual(len(rows), 2)
+            self.assertEqual([row.session for row in rows], ["am"])
+            self.assertLessEqual(len(rows), 1)
         finally:
             db.close()
 
@@ -766,7 +768,7 @@ class AdminClinicScheduleTest(unittest.TestCase):
         self.assertEqual(day_slots["pm"]["entry"].id, clinic_row.id)
         self.assertIsNone(day_slots["pm"]["block"])
 
-    def test_grid_slots_off_entries_suppress_unlinked_or_fallbacks(self):
+    def test_grid_slots_ignore_legacy_off_schedule_rows(self):
         day = date(2026, 9, 18)
         off_am = ClinicSchedule(
             id=200,
@@ -801,10 +803,10 @@ class AdminClinicScheduleTest(unittest.TestCase):
         )
 
         day_slots = slots[15][day]
-        self.assertEqual(day_slots["am"]["entry"].id, off_am.id)
+        self.assertIsNone(day_slots["am"]["entry"])
         self.assertIsNone(day_slots["am"]["block"])
-        self.assertEqual(day_slots["pm"]["entry"].id, off_pm.id)
-        self.assertIsNone(day_slots["pm"]["block"])
+        self.assertIsNone(day_slots["pm"]["entry"])
+        self.assertEqual(day_slots["pm"]["block"]["detailId"], "unlinked-min")
 
     def test_aggregate_assigned_or_blocks_merges_same_location_session(self):
         merged = aggregate_assigned_or_blocks([

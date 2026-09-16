@@ -436,16 +436,11 @@ def _slot_schedule_candidates(schedules: list[ClinicSchedule], session: str) -> 
     candidates = [
         schedule for schedule in schedules
         if (schedule.session or "am").lower() == session
+        and (schedule.assignment_type or "assigned").lower() != "off"
     ]
     if candidates:
         return candidates
-    if session not in {"am", "pm"}:
-        return []
-    return [
-        schedule for schedule in schedules
-        if (schedule.session or "").lower() == "full"
-        and (schedule.assignment_type or "").lower() == "off"
-    ]
+    return []
 
 
 def build_clinic_grid_slots(

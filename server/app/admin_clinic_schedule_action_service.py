@@ -33,6 +33,9 @@ def assign_clinic(
     notes: str,
     schedule_id: int | None = None,
 ) -> list[str]:
+    if location_choice == "__off__":
+        return ["Use Days Off to mark approved OFF time. Blank schedule slots display as NA."]
+
     if schedule_id:
         selected_schedule = db.get(ClinicSchedule, schedule_id)
         if not selected_schedule:
@@ -44,8 +47,8 @@ def assign_clinic(
         db.delete(selected_schedule)
         db.flush()
 
-    assignment_type = "off" if location_choice == "__off__" else "assigned"
-    location_id = None if assignment_type == "off" else int(location_choice)
+    assignment_type = "assigned"
+    location_id = int(location_choice)
     upsert_clinic_schedule_cards(
         db,
         surgeon_id=surgeon_id,
@@ -70,18 +73,6 @@ def assign_clinic(
     surgeon = db.get(Surgeon, surgeon_id)
     loc = db.get(Location, location_id) if location_id else None
     if not surgeon:
-        return []
-    if assignment_type == "off":
-        log_schedule_change(
-            db,
-            event_type="clinic_schedule_updated",
-            surgeon_id=surgeon_id,
-            event_date=schedule_date,
-            title="Clinic/OR schedule updated",
-            body=f"{surgeon.initials}: OFF",
-        )
-        db.commit()
-        # No surgeon push/SMS/email for clinic assigns until notification prefs exist.
         return []
     if not loc:
         return []

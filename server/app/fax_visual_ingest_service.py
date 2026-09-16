@@ -7,7 +7,8 @@ This module implements the fax-162 workflow as code:
 3. Stage reviewed visual rows in a temp SQLite database.
 4. Compare duplicate-first and overlay against CAL.
 5. Refuse to write unless a successful backup receipt is supplied.
-6. Write silently: no SMS, email, push, or admin notification blasts.
+6. Write without surgeon blasts; approved day-off collisions create
+   scheduler/admin-only review flags and emails.
 
 The visual rows are the source of truth for a fax cycle. A later fax may
 supersede an earlier one by updating matching patient/date rows.
@@ -34,6 +35,7 @@ from .fax_ingest_guardrails import (
     PLACEHOLDER_CLINIC_ROOMS,
     existing_clinic_card,
     fax_may_update_clinic_location,
+    flag_ingest_day_off_collision,
     matching_assigned_or_block,
 )
 from .models import (
@@ -113,7 +115,8 @@ class VisualFaxIngestRun:
             "status": self.status,
             "engine": "pdf_to_png_to_ocr_tempdb_v1",
             "rule": "Fax ingest stages visual OCR rows only; writes must pass CAL guardrails and a successful backup.",
-            "no_blasts": True,
+            "surgeon_notifications_quiet": True,
+            "scheduler_day_off_collision_email": True,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -632,7 +635,8 @@ def apply_visual_schedule(
 
     Hard guardrails:
     - successful backup receipt required
-    - no native/admin notifications are created
+    - no surgeon notifications are created
+    - approved day-off collisions create scheduler/admin-only flags/email
     - CBO/Surgery One is never mapped from fax rooms
     - same patient/date updates existing rows for schedule creep
     - exact duplicate fax rows collapse to one case with assisting surgeon
@@ -722,6 +726,20 @@ def apply_visual_schedule(
             db.add(case)
             db.flush()
             created += 1
+        surgeon = db.get(Surgeon, primary_id)
+        flag_ingest_day_off_collision(
+            db,
+            surgeon_id=primary_id,
+            surgeon_name=surgeon.full_name if surgeon else f"Surgeon {primary_id}",
+            day=first.case_date,
+            source_fax_id=source_fax_id,
+            patient_name=case.patient_name,
+            landed_kind="surgical_case",
+            href=f"/admin/clinic-schedule?fix_date={first.case_date.isoformat()}&surgeon_id={primary_id}&case_id={case.id}&reason=ingest_day_off_conflict",
+            location_label=loc.abbreviation or loc.name,
+            start_time=first.start_time,
+            case_id=case.id,
+        )
         if assist_id:
             assist_cases += 1
     clinic_created = clinic_updated = clinic_skipped_rows = 0
@@ -763,6 +781,20 @@ def apply_visual_schedule(
             card.location_id = loc.id
         card.assignment_type = "assigned"
         card.notes = clinic_note
+        surgeon = db.get(Surgeon, surgeon_id)
+        flag_ingest_day_off_collision(
+            db,
+            surgeon_id=surgeon_id,
+            surgeon_name=surgeon.full_name if surgeon else f"Surgeon {surgeon_id}",
+            day=day,
+            source_fax_id=source_fax_id,
+            patient_name=None,
+            landed_kind="clinic_visits",
+            href=f"/admin/clinic-schedule?fix_date={day.isoformat()}&surgeon_id={surgeon_id}&reason=ingest_day_off_conflict",
+            location_label=(loc.abbreviation or loc.name) if loc else None,
+            session=session,
+            schedule_id=card.id,
+        )
         clinic_updated += 1
 
     db.add(ScheduleChangeEvent(

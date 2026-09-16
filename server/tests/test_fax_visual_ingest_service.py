@@ -21,9 +21,11 @@ from app.fax_visual_ingest_service import (
 )
 from app.models import (
     AdminNotification,
+    AdminUser,
     Base,
     ClinicSchedule,
     CoSurgeonPair,
+    DayOff,
     Location,
     NativeScheduleAlert,
     ORBlockAssignment,
@@ -125,7 +127,8 @@ class FaxVisualIngestServiceTest(unittest.TestCase):
             manifest = json.loads(Path(run.manifest_path).read_text())
             self.assertEqual(manifest["engine"], "pdf_to_png_to_ocr_tempdb_v1")
             self.assertEqual(manifest["status"], "prepared_review_required")
-            self.assertTrue(manifest["no_blasts"])
+            self.assertTrue(manifest["surgeon_notifications_quiet"])
+            self.assertTrue(manifest["scheduler_day_off_collision_email"])
 
     def test_write_requires_backup_receipt(self):
         with self.assertRaisesRegex(ValueError, "backup"):
@@ -168,6 +171,46 @@ class FaxVisualIngestServiceTest(unittest.TestCase):
         self.assertEqual(self.db.query(AdminNotification).count(), 0)
         self.assertEqual(self.db.query(NativeScheduleAlert).count(), 0)
         self.assertEqual(self.db.query(ScheduleChangeEvent).count(), 1)
+
+    def test_approved_day_off_collision_flags_scheduler_but_lands_case(self):
+        self.db.add_all([
+            AdminUser(
+                username="scheduler",
+                first_name="Surgical",
+                last_name="Scheduler",
+                email="scheduler@example.com",
+                password_hash="x",
+                role="scheduler",
+                is_active=True,
+                notify_schedule_changes=True,
+            ),
+            DayOff(
+                surgeon_id=self.jf.id,
+                start_date=date(2026, 9, 16),
+                end_date=date(2026, 9, 16),
+                status="approved",
+                reason="Vacation",
+            ),
+        ])
+        self.db.commit()
+
+        with patch("app.fax_ingest_guardrails.send_email", return_value=True) as send_email:
+            result = apply_visual_schedule(
+                self.db,
+                [self.row()],
+                backup=BackupReceipt(True, "unit-test", "/tmp/backup.dump"),
+                source_fax_id=162,
+            )
+
+        self.assertEqual(result["surgical_created"], 1)
+        self.assertEqual(self.db.query(SurgicalCase).count(), 1)
+        notice = self.db.query(AdminNotification).one()
+        self.assertEqual(notice.kind, "ingest_day_off_conflict")
+        self.assertIn("approved OFF", notice.title)
+        self.assertIn("Jorge Florin", notice.body)
+        self.assertEqual(self.db.query(NativeScheduleAlert).count(), 0)
+        send_email.assert_called_once()
+        self.assertEqual(send_email.call_args.kwargs["to_email"], "scheduler@example.com")
 
     def test_shared_assist_rows_collapse_to_one_case(self):
         self.db.add(CoSurgeonPair(primary_surgeon_id=self.jf.id, assisting_surgeon_id=self.jb.id, is_active=True))

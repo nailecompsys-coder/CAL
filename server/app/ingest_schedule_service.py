@@ -2,7 +2,9 @@
 
 Fax rows update surgical cases and clinic visit counts/details only when they
 fit existing CAL master cards. Ingest never creates Clinic / OR cards, never
-creates Block OR capacity, and never sends surgeon/admin SMS or email blasts.
+creates Block OR capacity, and never sends surgeon SMS/email/push blasts.
+Approved day-off collisions still land from Epic/Advent but create a
+scheduler/admin-only flag and email.
 
 Re-ingest semantics (daily 1–2 week lookahead faxes):
 - identical case → ignore (no overlay, no second row)
@@ -33,6 +35,7 @@ from .fax_ingest_guardrails import (
     create_admin_ingest_notice,
     existing_clinic_card,
     existing_hospital_session_block,
+    flag_ingest_day_off_collision,
     is_generic_practice_site,
     looks_like_surgical_case,
 )
@@ -44,7 +47,7 @@ from .ingest_date_rules import (
     parse_iso_date,
 )
 from .ingest_resolve import resolve_clinic_location, resolve_or_location, resolve_surgeon
-from .models import ClinicSchedule, CoSurgeonPair, ORBlockAssignment, ORBlockInstance, SurgicalCase
+from .models import ClinicSchedule, CoSurgeonPair, Location, ORBlockAssignment, ORBlockInstance, Surgeon, SurgicalCase
 from .or_block_service import (
     ACTIVE_BLOCK_STATUSES,
     assign_block,
@@ -91,6 +94,15 @@ def _parse_time(raw: str | None, fallback: time | None = None) -> time | None:
             except ValueError:
                 continue
         return fallback
+
+
+def _location_label(db: Session, location_id: int | None) -> str | None:
+    if not location_id:
+        return None
+    loc = db.get(Location, location_id)
+    if not loc:
+        return None
+    return loc.abbreviation or loc.name
 
 
 def _salvage_start_time(case: dict) -> None:
@@ -876,6 +888,7 @@ def _upsert_surgical_case(
     day_candidates: list[SurgicalCase],
     claimed_ids: set[int],
     patient_dob: str | None = None,
+    source_fax_id: int | None = None,
 ) -> dict[str, Any]:
     """Create / update / ignore. Identity = surgeon + date + patient (not time)."""
     incoming_name = patient_name.strip()
@@ -960,6 +973,20 @@ def _upsert_surgical_case(
                 # Keep provenance, but don't stack fax ids on every resend.
                 existing.notes = notes
             db.commit()
+            surgeon = db.get(Surgeon, surgeon_id)
+            flag_ingest_day_off_collision(
+                db,
+                surgeon_id=surgeon_id,
+                surgeon_name=surgeon.full_name if surgeon else f"Surgeon {surgeon_id}",
+                day=case_date,
+                source_fax_id=source_fax_id,
+                patient_name=existing.patient_name,
+                landed_kind="surgical_case",
+                href=_clinic_href(case_date, surgeon_id, existing.id, reason="ingest_day_off_conflict"),
+                location_label=_location_label(db, location_id),
+                start_time=start_time,
+                case_id=existing.id,
+            )
             return {
                 "id": existing.id,
                 "action": "updated",
@@ -1052,6 +1079,20 @@ def _upsert_surgical_case(
     surgical_case, _warn = add_surgical_case(db, fields, notify=notify)
     claimed_ids.add(surgical_case.id)
     day_candidates.append(surgical_case)
+    surgeon = db.get(Surgeon, surgeon_id)
+    flag_ingest_day_off_collision(
+        db,
+        surgeon_id=surgeon_id,
+        surgeon_name=surgeon.full_name if surgeon else f"Surgeon {surgeon_id}",
+        day=case_date,
+        source_fax_id=source_fax_id,
+        patient_name=surgical_case.patient_name,
+        landed_kind="surgical_case",
+        href=_clinic_href(case_date, surgeon_id, surgical_case.id, reason="ingest_day_off_conflict"),
+        location_label=_location_label(db, location_id),
+        start_time=start_time,
+        case_id=surgical_case.id,
+    )
     return {
         "id": surgical_case.id,
         "action": "created",
@@ -1673,6 +1714,7 @@ def ingest_surgeon_schedule(
                             day_candidates=day_candidates,
                             claimed_ids=claimed_ids,
                             patient_dob=case.get("patient_dob"),
+                            source_fax_id=source_fax_id,
                         )
                         case_results.append(result)
                 except ValueError as exc:
@@ -1821,6 +1863,7 @@ def ingest_surgeon_schedule(
                     day_candidates=day_candidates,
                     claimed_ids=claimed_ids,
                     patient_dob=slot.get("patient_dob"),
+                    source_fax_id=source_fax_id,
                 )
                 case_results.append(result)
             day_slots = kept_clinic_slots
@@ -1901,6 +1944,19 @@ def ingest_surgeon_schedule(
                         site=str(site_for_day or ""),
                     )
                 else:
+                    flag_ingest_day_off_collision(
+                        db,
+                        surgeon_id=surgeon.id,
+                        surgeon_name=surgeon.full_name,
+                        day=day,
+                        source_fax_id=source_fax_id,
+                        patient_name=None,
+                        landed_kind="clinic_visits",
+                        href=_clinic_href(day, surgeon.id, reason="ingest_day_off_conflict"),
+                        location_label=loc.abbreviation or loc.name,
+                        session=day_session,
+                        schedule_id=clinic_result.get("id"),
+                    )
                     created_clinics.append(clinic_result)
             except Exception as exc:  # noqa: BLE001
                 errors.append({
@@ -1953,7 +2009,8 @@ def ingest_surgeon_schedule(
             "faxCreatesCards": False,
             "requiresExistingOrBlock": True,
             "requiresExistingClinicCard": True,
-            "smsEmailQuiet": True,
+            "surgeonNotificationsQuiet": True,
+            "schedulerDayOffCollisionEmail": True,
         },
     }
     return payload

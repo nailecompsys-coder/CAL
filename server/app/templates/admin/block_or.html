@@ -58,7 +58,7 @@
 <header class="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 flex-shrink-0">
   <div>
     <h1 class="text-xl font-bold text-slate-800">Block OR</h1>
-    <p class="text-sm text-slate-500">Week of {{ week_days[0].strftime('%b %-d') }} - {{ week_days[6].strftime('%b %-d, %Y') }}</p>
+    <p class="text-sm text-slate-500">Week of {{ week_days[0].strftime('%b %-d') }} - {{ week_days[-1].strftime('%b %-d, %Y') }}</p>
   </div>
   <div class="flex items-center gap-2">
     <a href="/admin/block-or?week_offset={{ week_offset - 1 }}" class="w-9 h-9 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 flex items-center justify-center"><i class="fa-solid fa-chevron-left text-xs"></i></a>
@@ -524,7 +524,7 @@
         </div>
         <div>
           <label class="block text-xs font-semibold text-slate-500 mb-1">End</label>
-          <input type="date" name="end_date" value="{{ week_days[6].isoformat() }}" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+          <input type="date" name="end_date" value="{{ week_days[-1].isoformat() }}" required class="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
         </div>
         <div class="lg:col-span-2">
           <label class="block text-xs font-semibold text-slate-500 mb-2">Weekdays</label>

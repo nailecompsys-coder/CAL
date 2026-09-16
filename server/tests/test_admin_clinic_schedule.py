@@ -277,6 +277,7 @@ class AdminClinicScheduleTest(unittest.TestCase):
             self.assertEqual(blocks[0]["pillLabel"], "AL-OR")
             self.assertEqual(blocks[0]["caseCount"], 1)
             self.assertEqual(blocks[0]["pillCountLabel"], "1 case")
+            self.assertEqual(len(blocks[0]["segments"]), 1)
             self.assertEqual([seg.get("patient") for seg in blocks[0]["segments"] if seg.get("patient")], ["Colon, Nancy"])
         finally:
             db.close()

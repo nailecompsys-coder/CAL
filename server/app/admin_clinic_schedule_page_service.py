@@ -255,6 +255,12 @@ def collapse_daily_or_blocks(assigned_or_blocks: dict) -> dict:
                     "blockId": block.get("id"),
                 })
 
+            has_real_cases = any(row.get("patient") or row.get("caseId") for row in segments)
+            if has_real_cases:
+                segments = [
+                    row for row in segments
+                    if row.get("patient") or row.get("caseId") or int(row.get("caseCount") or 0) > 0
+                ]
             segments.sort(
                 key=lambda row: (
                     row.get("start") or "",

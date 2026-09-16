@@ -3,6 +3,46 @@
 {% block title %}Schedule{% endblock %}
 
 {% block content %}
+<style>
+  #clinic-schedule-grid .cal-surgeon-cell {
+    min-height: 112px;
+  }
+  #clinic-schedule-grid .cal-slot {
+    min-height: 48px;
+  }
+  #clinic-schedule-grid .cal-pill,
+  #clinic-schedule-grid .cal-placeholder {
+    min-height: 48px !important;
+    height: 48px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    display: flex !important;
+    align-items: center !important;
+    border-radius: 0.375rem !important;
+  }
+  #clinic-schedule-grid .cal-pill {
+    padding: 0.35rem 0.5rem !important;
+  }
+  #clinic-schedule-grid .cal-pill-label,
+  #clinic-schedule-grid .cal-pill-count {
+    display: block;
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #clinic-schedule-grid .cal-pill-label {
+    font-weight: 800;
+    line-height: 1.05;
+  }
+  #clinic-schedule-grid .cal-pill-count {
+    font-size: 9px;
+    font-weight: 650;
+    line-height: 1.1;
+    opacity: 0.82;
+    margin-top: 2px;
+  }
+</style>
 <header class="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 flex-shrink-0">
   <div>
     <h1 class="text-xl font-bold text-slate-800">Schedule</h1>
@@ -79,7 +119,7 @@
 
 <!-- Schedule grid -->
 <div class="p-6 overflow-x-auto">
-  <table class="w-full border-collapse min-w-[900px]">
+  <table id="clinic-schedule-grid" class="w-full border-collapse min-w-[900px]">
     <thead>
       <tr>
         <th class="text-left px-4 py-3 bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wide w-40">Surgeon</th>
@@ -180,12 +220,12 @@
           {% endif %}
           onclick='openAssignModal({"surgeonId": {{ surgeon.id }}, "date": {{ day.isoformat()|tojson }}, "surgeonName": {{ surgeon.full_name|tojson }}, "dateLabel": {{ day.strftime("%a, %b %-d")|tojson }}})'>
 
-          <div class="min-h-[104px] space-y-1">
+          <div class="cal-surgeon-cell space-y-1">
             {% for slot in [
               {'label': 'AM', 'entries': am_entries, 'blocks': am_blocks},
               {'label': 'PM', 'entries': pm_entries, 'blocks': pm_blocks}
             ] %}
-            <div class="min-h-[46px] space-y-0.5">
+            <div class="cal-slot space-y-0.5">
             {% if slot.entries or slot.blocks %}
               {% for entry in slot.entries %}
               {% set off_overlay = show_off_schedule_ids is defined and entry.id in show_off_schedule_ids %}
@@ -195,7 +235,7 @@
               {% set clinic_overlay = clinic_fax_overlays.get(entry.id) if clinic_fax_overlays is defined else none %}
               {% set pill_overlay = or_overlay or clinic_overlay %}
               <div class="flex items-center gap-1 group/entry relative w-full">
-                <span class="flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-md leading-tight w-full min-w-0 min-h-[46px] cursor-pointer hover:opacity-90 {% if entry_is_off %}bg-slate-200 text-slate-700 shadow-sm{% else %}block-gradient shadow-sm{% endif %}"
+                <span class="cal-pill flex items-center gap-1 text-xs font-medium leading-tight w-full min-w-0 cursor-pointer hover:opacity-90 {% if entry_is_off %}bg-slate-200 text-slate-700 shadow-sm{% else %}block-gradient shadow-sm{% endif %}"
                   style="{% if not entry_is_off and entry.assignment_type == 'assigned' %}--block-c: {{ entry.location.color or '#0ea5e9' }};color:#1e293b{% endif %}"
                   title="{% if entry_is_off %}OFF{% elif entry.location %}{{ entry.location.name }} — {{ entry.session }}{% endif %}{% if off_overlay %} · OFF{% if day_off_info and day_off_info.status == 'pending' %} requested{% endif %}{% endif %}{% if pill_overlay %} · {{ pill_overlay.assignedStart }} · {{ pill_overlay.caseCount }}{% endif %}{% if entry.notes %} · {{ entry.notes }}{% endif %}"
                   {% if pill_overlay %}
@@ -207,22 +247,22 @@
                   {% endif %}>
                   {% if pill_overlay %}
                   <span class="min-w-0 flex-1 leading-tight {% if off_overlay %}line-through decoration-2 decoration-slate-700/70{% endif %}">
-                    <span class="block truncate font-extrabold">{{ pill_overlay.pillLabel }}</span>
-                    <span class="block truncate text-[9px] font-semibold opacity-80">{{ pill_overlay.pillCountLabel or (pill_overlay.caseCount ~ ' cases') }}</span>
+                    <span class="cal-pill-label">{{ pill_overlay.pillLabel }}</span>
+                    <span class="cal-pill-count">{{ pill_overlay.pillCountLabel or (pill_overlay.caseCount ~ ' cases') }}</span>
                   </span>
                   {% if off_overlay %}
                   <span class="ml-auto shrink-0 rounded bg-slate-900/10 px-1.5 py-0.5 text-[10px] font-extrabold tracking-wide text-slate-800">OFF{% if day_off_info and day_off_info.status == 'pending' %}?{% endif %}</span>
                   {% endif %}
                   {% else %}
                   <span class="min-w-0 flex-1 leading-tight {% if off_overlay %}line-through decoration-2 decoration-slate-700/70{% endif %}">
-                    <span class="block truncate font-extrabold">
+                    <span class="cal-pill-label">
                       {% if entry_is_off %}OFF{% if day_off_info and day_off_info.status == 'pending' %}?{% endif %}{% else %}{{ entry.location.abbreviation or entry.location.name }}{% endif %}
                     </span>
                     {% if not entry_is_off and entry.assignment_type == 'assigned' %}
                     {% if entry.location and (entry.location.location_type == 'hospital' or (entry.location.abbreviation or '')[-3:] == '-OR') %}
-                    <span class="block truncate text-[9px] font-semibold opacity-80">0 cases</span>
+                    <span class="cal-pill-count">0 cases</span>
                     {% else %}
-                    <span class="block truncate text-[9px] font-semibold opacity-80">0 visits</span>
+                    <span class="cal-pill-count">0 visits</span>
                     {% endif %}
                     {% endif %}
                   </span>
@@ -246,13 +286,13 @@
               {% for block in slot.blocks %}
               <div class="w-full">
                 <button type="button"
-                  class="flex items-center gap-1 w-full text-xs font-medium px-2 py-1 rounded-md leading-tight min-h-[46px] cursor-pointer hover:opacity-90 block-gradient shadow-sm text-left"
+                  class="cal-pill flex items-center gap-1 w-full text-xs font-medium leading-tight cursor-pointer hover:opacity-90 block-gradient shadow-sm text-left"
                   style="--block-c: {{ block.locationColor or '#A7F3D0' }};color:#1e293b"
                   title="{{ block.location }} · {{ block.assignedStart }} · {{ block.caseCount }} case{{ '' if block.caseCount == 1 else 's' }} — click for detail"
                   onclick='event.stopPropagation(); openPillDetailModal({{ {"kind": "or", "title": block.location or block.locationAbbreviation, "abbr": block.locationAbbreviation or "", "session": (block.session or "")|upper, "earliest": block.assignedStart or "", "count": block.caseCount or 0, "countLabel": block.countLabel or "Cases", "pillLabel": block.pillLabel or "", "segments": block.segments or [], "surgeonId": surgeon.id, "date": day.isoformat(), "locationId": block.locationId} | tojson }})'>
                   <span class="min-w-0 flex-1 leading-tight">
-                    <span class="block truncate font-extrabold">{{ block.pillLabel }}</span>
-                    <span class="block truncate text-[9px] font-semibold opacity-80">{{ block.pillCountLabel or (block.caseCount ~ ' cases') }}</span>
+                    <span class="cal-pill-label">{{ block.pillLabel }}</span>
+                    <span class="cal-pill-count">{{ block.pillCountLabel or (block.caseCount ~ ' cases') }}</span>
                   </span>
                 </button>
               </div>
@@ -260,7 +300,7 @@
               {% endif %}
             {% else %}
               {% set blank_off = day_off_info and slot.label|lower in (day_off_info.sessions or ['am', 'pm']) %}
-              <div class="min-h-[46px] rounded-md border {% if blank_off %}border-slate-300 bg-slate-100 text-slate-700 shadow-sm{% else %}border-dashed border-slate-200 bg-white/45{% endif %} flex items-center justify-end px-2">
+              <div class="cal-placeholder border {% if blank_off %}border-slate-300 bg-slate-100 text-slate-700 shadow-sm{% else %}border-dashed border-slate-200 bg-white/45{% endif %} justify-end px-2">
                 {% if blank_off %}
                 <span class="rounded bg-slate-900/10 px-1.5 py-0.5 text-[10px] font-extrabold tracking-wide">OFF{% if day_off_info.status == 'pending' %}?{% endif %}</span>
                 {% endif %}

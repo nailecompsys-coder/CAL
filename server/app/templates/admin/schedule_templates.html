@@ -36,6 +36,8 @@
     {{ request.query_params.get('already','0') }} already present.
     {% if request.query_params.get('skipped','0')|int > 0 %} {{ request.query_params.get('skipped','0') }} existing cards left unchanged.{% endif %}
     {% if request.query_params.get('conflicts','0')|int > 0 %} {{ request.query_params.get('conflicts','0') }} existing-card conflicts left unchanged.{% endif %}
+    {% if request.query_params.get('cases_placed','0')|int > 0 %} {{ request.query_params.get('cases_placed','0') }} matching parked cases attached to their cards.{% endif %}
+    {% if request.query_params.get('cases_parked','0')|int > 0 %} {{ request.query_params.get('cases_parked','0') }} cases remain in Ingest fixes because they did not have one exact match.{% endif %}
     Backup #{{ request.query_params.get('backup_id','') }} was created first.
   </div>
   {% if request.query_params.get('backup_id') %}

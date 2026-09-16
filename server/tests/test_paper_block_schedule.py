@@ -232,6 +232,30 @@ class PaperBlockScheduleTest(unittest.TestCase):
         self.assertEqual(result["cardsFolded"], 0)
         self.assertEqual(result["blocksPruned"], 0)
 
+    def test_master_builder_attaches_exact_parked_case_after_creating_card(self):
+        jorge = self.db.query(Surgeon).filter_by(last_name="Florin").one()
+        ap_or = self.db.query(Location).filter_by(abbreviation="AP-OR").one()
+        day = date(2026, 9, 14)
+        save_template_cell_value(self.db, jorge.id, 0, "am", ap_or.id, "assigned", "all")
+        case = SurgicalCase(
+            surgeon_id=jorge.id,
+            date=day,
+            start_time=time(7, 15),
+            patient_name="PARKED, CASE",
+            procedure="Test procedure",
+            location_id=ap_or.id,
+            status="scheduled",
+        )
+        self.db.add(case)
+        self.db.commit()
+
+        result = build_missing_master_cards(self.db, start=day, end=day)
+
+        self.db.refresh(case)
+        self.assertIsNotNone(case.or_block_instance_id)
+        self.assertEqual(result["casesPlaced"], 1)
+        self.assertEqual(result["casesParked"], 0)
+
         chris = self.db.query(Surgeon).filter_by(last_name="Johnson").one()
         fri = (
             self.db.query(ClinicSchedule)

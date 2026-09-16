@@ -7,7 +7,9 @@ from sqlalchemy.orm import Session, joinedload
 
 from .admin_schedule_template_clinic_service import week_pattern_matches
 from .admin_schedule_template_common import approved_off_dates
-from .models import ClinicSchedule, Location, Surgeon, SurgeonLocationSchedule
+from .ingest_fix_service import save_ingest_placements
+from .models import ClinicSchedule, ORBlockAssignment, ORBlockInstance, SurgicalCase, Surgeon, SurgeonLocationSchedule
+from .or_block_service import ACTIVE_BLOCK_STATUSES, _session_bucket
 from .paper_block_schedule import _place_or_block
 from .surgeon_visibility import surgeon_is_visible
 
@@ -23,6 +25,63 @@ def _session_rows(db: Session, surgeon_id: int, day: date) -> dict[str, ClinicSc
         if session in {"am", "pm", "full"}:
             result[session] = row
     return result
+
+
+def _case_session(case: SurgicalCase) -> str | None:
+    if case.start_time is None:
+        return None
+    return "am" if case.start_time.hour < 12 else "pm"
+
+
+def reconcile_parked_cases_after_master_build(db: Session, *, start: date, end: date) -> dict:
+    """Attach parked cases only when one existing master OR card is an exact match."""
+    cases = (
+        db.query(SurgicalCase)
+        .filter(
+            SurgicalCase.date >= start,
+            SurgicalCase.date <= end,
+            SurgicalCase.or_block_instance_id.is_(None),
+            SurgicalCase.status != "cancelled",
+        )
+        .order_by(SurgicalCase.date, SurgicalCase.start_time, SurgicalCase.id)
+        .all()
+    )
+    placements: list[dict] = []
+    missing_time = 0
+    ambiguous = 0
+    unmatched = 0
+    for case in cases:
+        session = _case_session(case)
+        if session is None:
+            missing_time += 1
+            continue
+        candidates = (
+            db.query(ORBlockInstance)
+            .join(ORBlockAssignment, ORBlockAssignment.block_instance_id == ORBlockInstance.id)
+            .filter(
+                ORBlockInstance.date == case.date,
+                ORBlockInstance.location_id == case.location_id,
+                ORBlockInstance.status.in_(tuple(ACTIVE_BLOCK_STATUSES)),
+                ORBlockAssignment.surgeon_id == case.surgeon_id,
+            )
+            .all()
+        )
+        candidates = [row for row in candidates if _session_bucket(row) == session]
+        if len(candidates) == 1:
+            placements.append({"caseId": case.id, "blockId": candidates[0].id})
+        elif len(candidates) > 1:
+            ambiguous += 1
+        else:
+            unmatched += 1
+    saved = save_ingest_placements(db, placements=placements) if placements else {"placed": 0, "errors": []}
+    return {
+        "examined": len(cases),
+        "placed": saved.get("placed", 0),
+        "missingTime": missing_time,
+        "ambiguous": ambiguous,
+        "unmatched": unmatched,
+        "errors": saved.get("errors", []),
+    }
 
 
 def build_missing_master_cards(db: Session, *, start: date, end: date) -> dict:
@@ -108,6 +167,7 @@ def build_missing_master_cards(db: Session, *, start: date, end: date) -> dict:
         day += timedelta(days=1)
 
     db.commit()
+    reconciled = reconcile_parked_cases_after_master_build(db, start=start, end=end)
     return {
         "ok": True,
         "start": start.isoformat(),
@@ -120,4 +180,6 @@ def build_missing_master_cards(db: Session, *, start: date, end: date) -> dict:
         "conflicts": conflicts,
         "cardsFolded": 0,
         "blocksPruned": 0,
+        "casesPlaced": reconciled["placed"],
+        "casesParked": reconciled["missingTime"] + reconciled["ambiguous"] + reconciled["unmatched"] + len(reconciled["errors"]),
     }

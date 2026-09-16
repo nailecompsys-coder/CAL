@@ -140,6 +140,8 @@ async def build_master_schedule_cards(
         f"&already={result.get('blocksAlready', 0)}"
         f"&skipped={result.get('skippedExisting', 0)}"
         f"&conflicts={result.get('conflicts', 0)}"
+        f"&cases_placed={result.get('casesPlaced', 0)}"
+        f"&cases_parked={result.get('casesParked', 0)}"
         f"&folded={result.get('cardsFolded', 0)}"
         f"&pruned={result.get('blocksPruned', 0)}",
         status_code=303,

@@ -205,6 +205,16 @@ class AdminClinicScheduleTest(unittest.TestCase):
                     room_text="MIN S05",
                     status="scheduled",
                 ),
+                SurgicalCase(
+                    surgeon_id=surgeon.id,
+                    date=monday,
+                    start_time=time(13, 30),
+                    patient_name="Torres, Carla",
+                    procedure="Case 3",
+                    location_id=hospital.id,
+                    room_text="MIN S05",
+                    status="scheduled",
+                ),
             ])
             db.commit()
 
@@ -213,9 +223,9 @@ class AdminClinicScheduleTest(unittest.TestCase):
 
             self.assertEqual(len(blocks), 1)
             self.assertEqual(blocks[0]["pillLabel"], "MN-OR")
-            self.assertEqual(blocks[0]["caseCount"], 2)
-            self.assertEqual(blocks[0]["pillCountLabel"], "2 cases")
-            self.assertEqual([seg["patient"] for seg in blocks[0]["segments"]], ["Bishop, David", "Vercamen, Donald"])
+            self.assertEqual(blocks[0]["caseCount"], 3)
+            self.assertEqual(blocks[0]["pillCountLabel"], "3 cases")
+            self.assertEqual([seg["patient"] for seg in blocks[0]["segments"]], ["Bishop, David", "Vercamen, Donald", "Torres, Carla"])
         finally:
             db.close()
 

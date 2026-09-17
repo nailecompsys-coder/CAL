@@ -7,7 +7,6 @@
 </style>
 <header class="sticky top-0 z-10 border-b border-slate-200 bg-white px-6 py-4">
   <h1 class="text-xl font-bold text-slate-800">Master Schedule</h1>
-  <p class="text-sm text-slate-500">Weekly AM / PM baseline</p>
 </header>
 
 <div class="space-y-5 p-6">
@@ -34,7 +33,7 @@
             {% set cell = surgeon_cells.get(dow, {}).get(session) %}
             {% set current_state = cell.assignment_type if cell else 'na' %}
             {% if current_state in ['blank', 'float'] %}{% set current_state = 'na' %}{% endif %}
-            <td class="border-b border-slate-200 p-2 align-top">
+            <td class="master-cell border-b border-slate-200 p-2 align-top">
               <div class="master-slot flex items-center gap-2 border border-slate-200 bg-white px-2">
                 <select class="master-location min-w-0 flex-1 bg-transparent text-xs font-bold text-slate-800 outline-none" data-surgeon="{{ surgeon.id }}" data-dow="{{ dow }}" data-session="{{ session }}" aria-label="{{ day }} {{ session }} location">
                   <option value="na"{% if current_state == 'na' %} selected{% endif %}>NA</option>
@@ -50,7 +49,6 @@
                   {% for value, label in week_pattern_options %}<option value="{{ value }}"{% if current_pattern == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
                 </select>
               </div>
-              <p class="master-status mt-1 h-3 text-[10px] text-slate-400"></p>
             </td>
             {% endfor %}
           </tr>
@@ -68,7 +66,6 @@
   async function save(select) {
     const holder = select.closest('td');
     const cadence = holder.querySelector('.master-cadence');
-    const status = holder.querySelector('.master-status');
     const value = holder.querySelector('.master-location').value;
     const params = new URLSearchParams({
       surgeon_id: select.dataset.surgeon || holder.querySelector('.master-location').dataset.surgeon,
@@ -78,16 +75,18 @@
       week_pattern: cadence.value,
     });
     if (value.startsWith('location:')) params.set('location_id', value.slice('location:'.length));
-    status.textContent = 'Saving';
+    holder.setAttribute('aria-busy', 'true');
+    holder.classList.remove('bg-rose-50');
+    holder.removeAttribute('title');
     try {
       const response = await fetch('/admin/schedule-templates/save-cell', {method: 'POST', body: params});
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error || 'Save failed');
-      status.textContent = 'Saved';
-      window.setTimeout(() => { status.textContent = ''; }, 1200);
     } catch (error) {
-      status.textContent = error.message || 'Save failed';
-      status.classList.add('text-rose-600');
+      holder.classList.add('bg-rose-50');
+      holder.title = error.message || 'Save failed';
+    } finally {
+      holder.removeAttribute('aria-busy');
     }
   }
   document.querySelectorAll('.master-location').forEach((select) => select.addEventListener('change', () => save(select)));

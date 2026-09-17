@@ -15,7 +15,8 @@ from ..admin_surgical_schedule_service import week_offset_for_date
 from ..auth import get_current_admin
 from ..database import get_db
 from ..jinja_env import templates
-from ..models import Surgeon
+from ..models import ClinicSchedule, ScheduleCard, Surgeon, SurgicalCase
+from ..admin_clinic_schedule_page_service import parse_clinic_fax_visit_segments
 from ..surgeon_visibility import surgeon_is_visible
 from ..schedule_write_freeze import require_schedule_write_enabled
 from ..schedule_card_projection_service import card_grid_page_data
@@ -29,6 +30,7 @@ def clinic_schedule_page(
     request: Request,
     week_offset: int = 0,
     month: str = "",
+    roster_card: int | None = None,
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
@@ -41,6 +43,29 @@ def clinic_schedule_page(
             pass
     today, week_days = week_days_for_offset(week_offset)
     data = card_grid_page_data(db, week_days[0], week_days[-1])
+    selected_roster = None
+    if roster_card:
+        card = db.get(ScheduleCard, roster_card)
+        if card and card.date in week_days:
+            if card.effective_location_id:
+                cases = db.query(SurgicalCase).filter(
+                    SurgicalCase.surgeon_id == card.surgeon_id,
+                    SurgicalCase.date == card.date,
+                    SurgicalCase.location_id == card.effective_location_id,
+                    SurgicalCase.status != "cancelled",
+                ).order_by(SurgicalCase.start_time).all()
+                clinic = db.query(ClinicSchedule).filter_by(
+                    surgeon_id=card.surgeon_id, date=card.date, session=card.session,
+                    location_id=card.effective_location_id,
+                ).one_or_none()
+                selected_roster = {
+                    "label": (card.effective_location.abbreviation if card.effective_location else "NA"),
+                    "surgeon": card.surgeon.full_name,
+                    "date": card.date,
+                    "session": card.session.upper(),
+                    "cases": cases,
+                    "visits": parse_clinic_fax_visit_segments(clinic.notes or "") if clinic else [],
+                }
     card_surgeon_ids = set(data["grid"])
     all_surgeons = [
         row for row in db.query(Surgeon).filter(Surgeon.is_active == True).order_by(Surgeon.last_name).all()
@@ -57,6 +82,7 @@ def clinic_schedule_page(
         week_offset=week_offset,
         view_month_value=week_days[0].strftime("%Y-%m"),
         today=today,
+        selected_roster=selected_roster,
     ))
 
 

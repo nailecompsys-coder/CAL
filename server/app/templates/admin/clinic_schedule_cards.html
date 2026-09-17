@@ -46,7 +46,8 @@
           <div class="space-y-1">
           {% for session in ['am', 'pm'] %}
             {% set card = slots.get(session) %}
-            <div class="schedule-card flex items-center justify-between gap-2 border px-3 {% if card and card.is_off %}schedule-card--off border-slate-300 bg-white text-slate-700{% elif card and card.is_na %}border-dashed border-slate-300 bg-white text-slate-500{% else %}border-slate-300 bg-white text-slate-800{% endif %}">
+            {% if card %}<a href="/admin/clinic-schedule?week_offset={{ week_offset }}&roster_card={{ card.card_id }}" title="Open {{ card.label }} roster" class="schedule-card flex items-center justify-between gap-2 border px-3 {% if card.is_off %}schedule-card--off border-slate-300 bg-white text-slate-700{% elif card.is_na %}border-dashed border-slate-300 bg-white text-slate-500{% else %}border-slate-300 text-slate-800{% endif %}"{% if not card.is_off and not card.is_na %} style="background-color: {{ card.location_color }};"{% endif %}>
+            {% else %}<div class="schedule-card flex items-center justify-between gap-2 border border-dashed border-slate-300 bg-white px-3 text-slate-500">{% endif %}
               {% if card %}
               <div class="min-w-0">
                 <div class="schedule-label truncate text-xs font-extrabold">{{ card.label }}</div>
@@ -56,7 +57,7 @@
               {% else %}
               <span class="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">NA</span>
               {% endif %}
-            </div>
+            {% if card %}</a>{% else %}</div>{% endif %}
           {% endfor %}
           </div>
         </td>
@@ -66,4 +67,12 @@
     </tbody>
   </table>
 </div>
+{% if selected_roster %}
+<section class="mx-6 mb-6 border border-slate-300 bg-white p-4" id="roster">
+  <div class="mb-3 flex items-center justify-between"><h2 class="text-sm font-bold text-slate-800">{{ selected_roster.surgeon }} · {{ selected_roster.date.strftime('%m/%d/%Y') }} {{ selected_roster.session }} · {{ selected_roster.label }}</h2><a href="/admin/clinic-schedule?week_offset={{ week_offset }}" class="text-sm text-slate-600">Close</a></div>
+  {% for case in selected_roster.cases %}<div class="border-t border-slate-200 py-2 text-sm text-slate-700">{{ case.start_time.strftime('%I:%M %p') if case.start_time else '' }} · {{ case.patient_name }}{% if case.room_text %} · {{ case.room_text }}{% endif %}</div>{% endfor %}
+  {% for visit in selected_roster.visits %}<div class="border-t border-slate-200 py-2 text-sm text-slate-700">{{ visit.start }} · {{ visit.label }}</div>{% endfor %}
+  {% if not selected_roster.cases and not selected_roster.visits %}<div class="border-t border-slate-200 py-2 text-sm text-slate-500">No roster entries.</div>{% endif %}
+</section>
+{% endif %}
 {% endblock %}

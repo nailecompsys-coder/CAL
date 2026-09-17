@@ -1,18 +1,15 @@
 """Admin schedule template and call rotation builder routes."""
 from datetime import date
 from typing import Optional
-from urllib.parse import quote_plus
-
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..auth import get_current_admin
 from ..admin_schedule_template_service import (
-    apply_clinic_schedule_templates,
     auto_fill_call_rotation,
     call_rotation_result_url,
-    clinic_apply_result_url,
     parse_date_range,
     save_call_rotation_order as save_call_rotation_order_service,
     save_template_cell_value,
@@ -20,10 +17,9 @@ from ..admin_schedule_template_service import (
 )
 from ..database import get_db
 from ..jinja_env import templates
-from ..master_schedule_build_service import build_missing_master_cards
 from ..practice_time import practice_today
-from ..schedule_build_backup_service import create_schedule_build_backup, revert_schedule_build_backup
-from ..schedule_write_freeze import require_schedule_write_enabled
+from ..models import ScheduleCard
+from ..schedule_card_service import apply_master_schedule_to_cards
 from .admin import _base, _sort_surgeons_physicians_first
 
 router = APIRouter(prefix="/admin")
@@ -45,7 +41,7 @@ def schedule_templates_page(
     context["default_master_start"] = today.isoformat()
     context["default_master_end"] = date(today.year + 1, 12, 31).isoformat()
     return templates.TemplateResponse(
-        "admin/schedule_templates.html",
+        "admin/master_schedule.html",
         _base(request, admin, db=db, **context),
     )
 
@@ -81,10 +77,23 @@ async def save_template_cell(
     admin=Depends(get_current_admin),
 ):
     """Save a single cell in the weekly template grid (called via fetch)."""
-    result = save_template_cell_value(
-        db, surgeon_id, day_of_week, session, location_id, assignment_type, week_pattern
-    )
-    return JSONResponse(result)
+    try:
+        result = save_template_cell_value(
+            db, surgeon_id, day_of_week, session, location_id, assignment_type, week_pattern,
+            commit=False,
+        )
+        start, end = db.query(func.min(ScheduleCard.date), func.max(ScheduleCard.date)).filter(
+            ScheduleCard.surgeon_id == surgeon_id,
+        ).one()
+        if start and end:
+            result["cards"] = apply_master_schedule_to_cards(
+                db, start=start, end=end, surgeon_ids=[surgeon_id],
+            )
+        db.commit()
+        return JSONResponse(result)
+    except ValueError as exc:
+        db.rollback()
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 
 
 @router.post("/schedule-templates/apply")
@@ -97,21 +106,8 @@ async def apply_schedule_templates(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    """Generate clinic_schedules from weekly templates for a date range."""
-    require_schedule_write_enabled()
-    d_from, d_to, error = parse_date_range(date_from, date_to)
-    if error:
-        return RedirectResponse(f"/admin/schedule-templates?msg={error}", status_code=303)
-
-    result = apply_clinic_schedule_templates(
-        db,
-        d_from,
-        d_to,
-        surgeon_ids,
-        skip_existing,
-        overwrite_daysoff,
-    )
-    return RedirectResponse(clinic_apply_result_url(result), status_code=303)
+    """Retired: master edits apply to permanent cards in place."""
+    raise HTTPException(410, "Legacy template application is retired. Edit the Master Schedule grid instead.")
 
 
 @router.post("/schedule-templates/build-master")
@@ -121,34 +117,8 @@ async def build_master_schedule_cards(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    """Add missing Clinic / OR cards from the saved master schedule only."""
-    require_schedule_write_enabled()
-    today = practice_today()
-    default_end = date(today.year + 1, 12, 31)
-    try:
-        d_from = date.fromisoformat(date_from or today.isoformat())
-        d_to = date.fromisoformat(date_to or default_end.isoformat())
-    except ValueError:
-        return RedirectResponse("/admin/schedule-templates?msg=bad_date", status_code=303)
-    if d_to < d_from or (d_to - d_from).days > 550:
-        return RedirectResponse("/admin/schedule-templates?msg=bad_range", status_code=303)
-    backup = create_schedule_build_backup(db, admin_id=getattr(admin, "id", None), start=d_from, end=d_to)
-    result = build_missing_master_cards(db, start=d_from, end=d_to)
-    return RedirectResponse(
-        "/admin/schedule-templates?msg=master_built"
-        f"&from={d_from.isoformat()}&to={d_to.isoformat()}"
-        f"&backup_id={backup.id}"
-        f"&clinic={result.get('clinicCreated', 0)}"
-        f"&blocks={result.get('blocksAssigned', 0)}"
-        f"&already={result.get('blocksAlready', 0)}"
-        f"&skipped={result.get('skippedExisting', 0)}"
-        f"&conflicts={result.get('conflicts', 0)}"
-        f"&cases_placed={result.get('casesPlaced', 0)}"
-        f"&cases_parked={result.get('casesParked', 0)}"
-        f"&folded={result.get('cardsFolded', 0)}"
-        f"&pruned={result.get('blocksPruned', 0)}",
-        status_code=303,
-    )
+    """Retired: permanent cards are created only by the one-time scaffold."""
+    raise HTTPException(410, "Card building is retired. Permanent cards already exist.")
 
 
 @router.post("/schedule-templates/build-backups/{backup_id}/revert")
@@ -157,24 +127,8 @@ async def revert_master_schedule_cards(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    result = revert_schedule_build_backup(
-        db,
-        backup_id=backup_id,
-        admin_id=getattr(admin, "id", None),
-    )
-    if not result.get("ok"):
-        reason = quote_plus(str(result.get("reason") or "Revert failed."))
-        return RedirectResponse(
-            f"/admin/schedule-templates?msg=revert_blocked&reason={reason}",
-            status_code=303,
-        )
-    return RedirectResponse(
-        "/admin/schedule-templates?msg=reverted"
-        f"&backup_id={backup_id}"
-        f"&from={result.get('from', '')}&to={result.get('to', '')}"
-        f"&clinic={result.get('clinic', 0)}&blocks={result.get('blocks', 0)}",
-        status_code=303,
-    )
+    """Retired with the legacy card builder."""
+    raise HTTPException(410, "Legacy card-build restore is retired.")
 
 
 @router.post("/call-rotation/save-order")

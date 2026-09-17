@@ -93,6 +93,8 @@ def save_template_cell_value(
     location_id: int | None,
     assignment_type: str,
     week_pattern: str | None = "all",
+    *,
+    commit: bool = True,
 ) -> dict:
     assignment_type = (assignment_type or "assigned").lower().strip()
     week_pattern = normalize_week_pattern(week_pattern)
@@ -102,12 +104,12 @@ def save_template_cell_value(
         SurgeonLocationSchedule.session == session,
     ).first()
 
-    if assignment_type == "blank":
-        if existing:
-            db.delete(existing)
-            db.commit()
-            return {"ok": True, "action": "deleted"}
-        return {"ok": True, "action": "noop"}
+    if assignment_type in {"blank", "float"}:
+        assignment_type = "na"
+    if assignment_type not in {"assigned", "na", "off"}:
+        raise ValueError("Unsupported master schedule state.")
+    if assignment_type == "assigned" and not location_id:
+        raise ValueError("A location is required for an assigned master slot.")
 
     if existing:
         existing.location_id = location_id if assignment_type == "assigned" else None
@@ -122,7 +124,10 @@ def save_template_cell_value(
             assignment_type=assignment_type,
             week_pattern=week_pattern,
         ))
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return {"ok": True, "action": "updated" if existing else "created"}
 
 

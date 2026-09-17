@@ -1,0 +1,96 @@
+{% extends "base_admin.html" %}
+{% block title %}Master Schedule{% endblock %}
+
+{% block content %}
+<style>
+  .master-slot { min-height: 44px; border-radius: 6px; }
+</style>
+<header class="sticky top-0 z-10 border-b border-slate-200 bg-white px-6 py-4">
+  <h1 class="text-xl font-bold text-slate-800">Master Schedule</h1>
+  <p class="text-sm text-slate-500">Weekly AM / PM baseline</p>
+</header>
+
+<div class="space-y-5 p-6">
+  {% for surgeon in surgeons %}
+  {% set surgeon_cells = tpl_map.get(surgeon.id, {}) %}
+  <section class="overflow-hidden border border-slate-200 bg-white">
+    <header class="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3">
+      <div class="staff-avatar flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold">{{ surgeon.initials }}</div>
+      <h2 class="text-sm font-semibold text-slate-800">{{ surgeon.first_name }} {{ surgeon.last_name }}{% if surgeon.suffix %}, {{ surgeon.suffix }}{% endif %}</h2>
+    </header>
+    <div class="overflow-x-auto">
+      <table class="w-full min-w-[900px] border-collapse">
+        <thead>
+          <tr>
+            <th class="w-16 border-b border-slate-200 px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"></th>
+            {% for day in days %}<th class="border-b border-slate-200 px-2 py-2 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">{{ day }}</th>{% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+        {% for session in ['am', 'pm'] %}
+          <tr>
+            <th class="border-b border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs font-bold uppercase tracking-wide text-slate-500">{{ session }}</th>
+            {% for dow in range(5) %}
+            {% set cell = surgeon_cells.get(dow, {}).get(session) %}
+            {% set current_state = cell.assignment_type if cell else 'na' %}
+            {% if current_state in ['blank', 'float'] %}{% set current_state = 'na' %}{% endif %}
+            <td class="border-b border-slate-200 p-2 align-top">
+              <div class="master-slot flex items-center gap-2 border border-slate-200 bg-white px-2">
+                <select class="master-location min-w-0 flex-1 bg-transparent text-xs font-bold text-slate-800 outline-none" data-surgeon="{{ surgeon.id }}" data-dow="{{ dow }}" data-session="{{ session }}" aria-label="{{ day }} {{ session }} location">
+                  <option value="na"{% if current_state == 'na' %} selected{% endif %}>NA</option>
+                  <option value="off"{% if current_state == 'off' %} selected{% endif %}>OFF</option>
+                  <optgroup label="Locations">
+                  {% for location in all_locations %}
+                    <option value="location:{{ location.id }}"{% if current_state == 'assigned' and cell.location_id == location.id %} selected{% endif %}>{{ location.abbreviation or location.name }}</option>
+                  {% endfor %}
+                  </optgroup>
+                </select>
+                <select class="master-cadence w-16 border-l border-slate-200 bg-transparent pl-2 text-[11px] font-semibold text-slate-600 outline-none" aria-label="{{ day }} {{ session }} recurrence">
+                  {% set current_pattern = (cell.week_pattern if cell else 'all') or 'all' %}
+                  {% for value, label in week_pattern_options %}<option value="{{ value }}"{% if current_pattern == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                </select>
+              </div>
+              <p class="master-status mt-1 h-3 text-[10px] text-slate-400"></p>
+            </td>
+            {% endfor %}
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endfor %}
+</div>
+
+<script>
+(() => {
+  async function save(select) {
+    const holder = select.closest('td');
+    const cadence = holder.querySelector('.master-cadence');
+    const status = holder.querySelector('.master-status');
+    const value = holder.querySelector('.master-location').value;
+    const params = new URLSearchParams({
+      surgeon_id: select.dataset.surgeon || holder.querySelector('.master-location').dataset.surgeon,
+      day_of_week: select.dataset.dow || holder.querySelector('.master-location').dataset.dow,
+      session: select.dataset.session || holder.querySelector('.master-location').dataset.session,
+      assignment_type: value.startsWith('location:') ? 'assigned' : value,
+      week_pattern: cadence.value,
+    });
+    if (value.startsWith('location:')) params.set('location_id', value.slice('location:'.length));
+    status.textContent = 'Saving';
+    try {
+      const response = await fetch('/admin/schedule-templates/save-cell', {method: 'POST', body: params});
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.error || 'Save failed');
+      status.textContent = 'Saved';
+      window.setTimeout(() => { status.textContent = ''; }, 1200);
+    } catch (error) {
+      status.textContent = error.message || 'Save failed';
+      status.classList.add('text-rose-600');
+    }
+  }
+  document.querySelectorAll('.master-location').forEach((select) => select.addEventListener('change', () => save(select)));
+  document.querySelectorAll('.master-cadence').forEach((select) => select.addEventListener('change', () => save(select)));
+})();
+</script>
+{% endblock %}

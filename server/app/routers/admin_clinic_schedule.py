@@ -39,15 +39,15 @@ def clinic_schedule_page(
             week_offset = week_offset_for_date(first_monday)
         except ValueError:
             pass
+    today, week_days = week_days_for_offset(week_offset)
+    data = card_grid_page_data(db, week_days[0], week_days[-1])
+    card_surgeon_ids = set(data["grid"])
     all_surgeons = [
         row for row in db.query(Surgeon).filter(Surgeon.is_active == True).order_by(Surgeon.last_name).all()
-        if surgeon_is_visible(row)
+        if surgeon_is_visible(row) and row.id in card_surgeon_ids
     ]
     all_surgeons = _sort_surgeons_physicians_first(all_surgeons)
     surgeons = all_surgeons
-    today, week_days = week_days_for_offset(week_offset)
-    data = card_grid_page_data(db, week_days[0], week_days[-1])
-
     return templates.TemplateResponse("admin/clinic_schedule_cards.html", _base(
         request, admin, db=db,
         surgeons=surgeons,

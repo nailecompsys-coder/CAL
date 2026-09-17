@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import date
 from datetime import timedelta
 
@@ -21,6 +22,36 @@ WEEK_PATTERN_OPTIONS = [
     ("1,3,5", "1,3,5"),
     ("2,4", "2,4"),
 ]
+
+_LOCATION_ABBREVIATION_RE = re.compile(r"^[A-Z0-9 /&-]{1,12}$")
+
+
+def add_master_schedule_location(
+    db: Session,
+    *,
+    name: str,
+    abbreviation: str,
+    location_type: str,
+) -> Location:
+    """Add an active location for later assignment to existing scaffold cards."""
+    clean_name = " ".join((name or "").strip().split())
+    clean_abbreviation = " ".join((abbreviation or "").strip().upper().split())
+    clean_type = "hospital" if (location_type or "").strip().lower() == "hospital" else "clinic"
+    if not clean_name:
+        raise ValueError("Location name is required.")
+    if not _LOCATION_ABBREVIATION_RE.fullmatch(clean_abbreviation):
+        raise ValueError("Use a 1-12 character location abbreviation.")
+    if db.query(Location).filter(Location.abbreviation == clean_abbreviation).first():
+        raise ValueError("That location abbreviation already exists.")
+    location = Location(
+        name=clean_name,
+        abbreviation=clean_abbreviation,
+        location_type=clean_type,
+        is_active=True,
+    )
+    db.add(location)
+    db.flush()
+    return location
 
 
 def normalize_week_pattern(value: str | None) -> str:

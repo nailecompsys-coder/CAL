@@ -510,6 +510,78 @@ class ScheduleCard(Base):
     master_template = relationship("SurgeonLocationSchedule")
 
 
+class FaxDocument(Base):
+    """Immutable source record for one received Advent/Kno2 fax."""
+    __tablename__ = "fax_documents"
+
+    id = Column(Integer, primary_key=True)
+    external_fax_id = Column(Integer, nullable=False, unique=True)
+    source_label = Column(String(255), nullable=False, default="Desk visual PNG SOT")
+    source_sha256 = Column(String(64))
+    status = Column(String(32), nullable=False, default="staged")
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class FaxIngestRun(Base):
+    """A non-mutating parse/review run for an immutable fax document."""
+    __tablename__ = "fax_ingest_runs"
+
+    id = Column(Integer, primary_key=True)
+    fax_document_id = Column(Integer, ForeignKey("fax_documents.id"), nullable=False)
+    engine_version = Column(String(64), nullable=False)
+    status = Column(String(32), nullable=False, default="staged")
+    created_at = Column(DateTime, server_default=func.now())
+
+    document = relationship("FaxDocument")
+    rows = relationship("FaxIngestRow", back_populates="run", cascade="all, delete-orphan")
+
+
+class FaxIngestRow(Base):
+    """One reviewed row from a rendered PNG page. This table never creates cards."""
+    __tablename__ = "fax_ingest_rows"
+    __table_args__ = (
+        CheckConstraint("row_type IN ('surgical', 'clinic')", name="ck_fax_ingest_rows_type"),
+        CheckConstraint("session IN ('am', 'pm')", name="ck_fax_ingest_rows_session"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    run_id = Column(Integer, ForeignKey("fax_ingest_runs.id", ondelete="CASCADE"), nullable=False)
+    page_number = Column(Integer, nullable=False)
+    surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=True)
+    surgeon_initials = Column(String(8), nullable=False)
+    case_date = Column(Date, nullable=False)
+    start_time = Column(Time, nullable=True)
+    session = Column(String(2), nullable=False)
+    row_type = Column(String(16), nullable=False)
+    room_text = Column(String(64), nullable=False, default="")
+    patient_name = Column(String(255), nullable=False)
+    procedure = Column(Text, nullable=False, default="")
+    source_location_id = Column(Integer, ForeignKey("locations.id"), nullable=True)
+    normalized_key = Column(String(512), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    run = relationship("FaxIngestRun", back_populates="rows")
+    surgeon = relationship("Surgeon")
+    source_location = relationship("Location")
+
+
+class FaxRowDecision(Base):
+    """Deterministic placement result for a fax row; reviewable before any write."""
+    __tablename__ = "fax_row_decisions"
+    __table_args__ = (UniqueConstraint("fax_row_id"),)
+
+    id = Column(Integer, primary_key=True)
+    fax_row_id = Column(Integer, ForeignKey("fax_ingest_rows.id", ondelete="CASCADE"), nullable=False)
+    schedule_card_id = Column(Integer, ForeignKey("schedule_cards.id"), nullable=True)
+    status = Column(String(32), nullable=False)
+    reason_code = Column(String(64), nullable=False)
+    detail = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime, server_default=func.now())
+
+    fax_row = relationship("FaxIngestRow")
+    schedule_card = relationship("ScheduleCard")
+
+
 class SurgicalCase(Base):
     """One row per surgery (hospital schedule). Scheduler adds; surgeon sees on schedule and can add notes."""
     __tablename__ = "surgical_cases"

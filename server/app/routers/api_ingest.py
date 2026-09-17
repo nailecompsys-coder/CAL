@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import os
 from datetime import date, time
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -17,13 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..fax_visual_ingest_service import (
-    BackupReceipt,
-    FaxVisualRow,
-    apply_visual_schedule,
-    run_local_backup,
-)
-from ..schedule_write_freeze import require_schedule_write_enabled
+from ..fax_ingest_engine import ReviewedFaxRow, stage_reviewed_rows
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 
@@ -91,12 +84,11 @@ def _parse_clock(raw: str | None) -> time | None:
     raise HTTPException(400, f"Invalid start_time: {raw}")
 
 
-def _visual_row(source_fax_id: int, item: VisualFaxRowIn) -> FaxVisualRow:
+def _visual_row(item: VisualFaxRowIn) -> ReviewedFaxRow:
     row_type = (item.row_type or "").strip().lower()
     if row_type not in {"surgical", "clinic"}:
         raise HTTPException(400, "row_type must be surgical or clinic")
-    return FaxVisualRow(
-        fax_id=item.fax_id or source_fax_id,
+    return ReviewedFaxRow(
         page=item.page,
         surgeon_initials=item.surgeon_initials.strip().upper(),
         surgeon_name=(item.surgeon_name or "").strip() or None,
@@ -106,14 +98,7 @@ def _visual_row(source_fax_id: int, item: VisualFaxRowIn) -> FaxVisualRow:
         room=item.room or "",
         patient_name=item.patient_name.strip(),
         procedure=item.procedure or "",
-        visual_confidence=item.visual_confidence or "reviewed",
-        placement_status=item.placement_status or "reviewed",
-        notes=item.notes or "",
     )
-
-
-def _backup_dir() -> Path:
-    return Path(os.environ.get("CAL_FAX_BACKUP_DIR") or "/tmp/cal-fax-backups")
 
 
 @router.post("/visual-schedule")
@@ -122,39 +107,31 @@ def ingest_visual_schedule_route(
     db: Session = Depends(get_db),
     _: None = Depends(require_ingest_token),
 ) -> dict[str, Any]:
-    """Desk reviewed-PNG/OCR publish path.
+    """Desk reviewed-PNG/OCR staging path.
 
-    This is the only Desk schedule write route. It requires a DB backup before
-    applying rows and uses the same guardrails as the manual visual ingest CLI.
+    This route deliberately cannot write schedule cards, legacy schedules, or
+    notifications. It records facts and returns placement decisions only.
     """
-    require_schedule_write_enabled()
     if not body.rows:
         raise HTTPException(400, "rows required")
     if len(body.rows) > 1000:
         raise HTTPException(400, "too many rows (max 1000)")
-    rows = [_visual_row(body.source_fax_id, item) for item in body.rows]
-    fax_ids = {row.fax_id for row in rows}
+    rows = [_visual_row(item) for item in body.rows]
+    fax_ids = {item.fax_id or body.source_fax_id for item in body.rows}
     if fax_ids != {body.source_fax_id}:
         raise HTTPException(400, "all rows must match source_fax_id")
-    backup = run_local_backup(_backup_dir(), label=body.backup_label or f"desk_fax{body.source_fax_id}_visual")
-    if not backup.success:
-        raise HTTPException(500, f"Backup failed; write refused: {backup.metadata}")
-    result = apply_visual_schedule(
-        db,
-        rows,
-        backup=backup,
-        source_fax_id=body.source_fax_id,
-        source_label=body.source_label or "Desk visual PNG SOT",
-    )
-    return {
-        "ok": True,
-        "backup": {
-            "label": backup.label,
-            "path_or_key": backup.path_or_key,
-            "metadata": backup.metadata or {},
-        },
-        "result": result,
-    }
+    try:
+        result = stage_reviewed_rows(
+            db,
+            external_fax_id=body.source_fax_id,
+            source_label=body.source_label,
+            rows=rows,
+        )
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "result": result}
 
 
 @router.post("/surgical-cases")

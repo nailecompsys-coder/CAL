@@ -67,22 +67,7 @@ def report(args: argparse.Namespace) -> None:
 
 
 def apply(args: argparse.Namespace) -> None:
-    from app.database import SessionLocal
-    from app.fax_visual_ingest_service import apply_visual_fax_workdir
-
-    if not args.yes:
-        raise SystemExit("Refusing write without --yes.")
-    workdir = Path(args.workdir).resolve()
-    db = SessionLocal()
-    try:
-        result = apply_visual_fax_workdir(
-            db,
-            workdir=workdir,
-            backup_dir=Path(args.backup_dir),
-        )
-        print(json.dumps(result, default=str, indent=2))
-    finally:
-        db.close()
+    raise SystemExit("Retired: fax ingest can stage and review rows only. It cannot write schedules.")
 
 
 def run(args: argparse.Namespace) -> None:
@@ -109,7 +94,7 @@ def run(args: argparse.Namespace) -> None:
         return
 
     from app.database import SessionLocal
-    from app.fax_visual_ingest_service import apply_visual_fax_workdir, report_visual_fax_overlay
+    from app.fax_visual_ingest_service import report_visual_fax_overlay
 
     staged = stage_visual_fax_review(Path(prepared.workdir), reviewed_rows=Path(args.reviewed))
     result["staged"] = staged
@@ -117,17 +102,8 @@ def run(args: argparse.Namespace) -> None:
     try:
         result["report"] = report_visual_fax_overlay(db, Path(prepared.workdir))
         if args.apply:
-            if not args.yes:
-                raise SystemExit("Refusing write without --yes.")
-            if not args.backup_dir:
-                raise SystemExit("Refusing write without --backup-dir.")
-            result["applied"] = apply_visual_fax_workdir(
-                db,
-                workdir=Path(prepared.workdir),
-                backup_dir=Path(args.backup_dir),
-            )
-        else:
-            result["next"] = "Review duplicate_first_report.md and overlay_report.json before apply."
+            raise SystemExit("Retired: fax ingest can stage and review rows only. It cannot write schedules.")
+        result["next"] = "Review duplicate_first_report.md and overlay_report.json before a future card-activity publish step."
         print(json.dumps(result, default=str, indent=2))
     finally:
         db.close()

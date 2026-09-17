@@ -1,0 +1,69 @@
+{% extends "base_admin.html" %}
+{% block title %}Schedule{% endblock %}
+
+{% block content %}
+<style>
+  .schedule-card { height: 54px; border-radius: 6px; }
+  .schedule-card--off .schedule-label { text-decoration: line-through; }
+</style>
+<header class="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10">
+  <div>
+    <h1 class="text-xl font-bold text-slate-800">Schedule</h1>
+    <p class="text-sm text-slate-500">Week of {{ week_days[0].strftime('%b %-d') }} - {{ week_days[-1].strftime('%b %-d, %Y') }}</p>
+  </div>
+  <div class="flex items-center gap-2">
+    <form method="get" action="/admin/clinic-schedule" class="flex items-center gap-2">
+      <label class="text-xs font-bold text-slate-500 uppercase tracking-wide" for="month-jump">Month</label>
+      <input id="month-jump" type="month" name="month" value="{{ view_month_value }}" class="h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-700" onchange="this.form.submit()" />
+    </form>
+    <a href="/admin/clinic-schedule?week_offset={{ week_offset - 1 }}" class="w-9 h-9 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 flex items-center justify-center" aria-label="Previous week"><i class="fa-solid fa-chevron-left text-xs"></i></a>
+    <a href="/admin/clinic-schedule?week_offset=0" class="bg-blue-600 text-white text-sm px-3 py-2 rounded-lg hover:bg-blue-700">Today</a>
+    <a href="/admin/clinic-schedule?week_offset={{ week_offset + 1 }}" class="w-9 h-9 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 flex items-center justify-center" aria-label="Next week"><i class="fa-solid fa-chevron-right text-xs"></i></a>
+  </div>
+</header>
+
+<div class="p-6 overflow-x-auto">
+  <table class="w-full min-w-[900px] border-collapse">
+    <thead>
+      <tr>
+        <th class="w-40 border border-slate-200 bg-slate-50 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Surgeon</th>
+        {% for day in week_days %}
+        <th class="min-w-[150px] border border-slate-200 px-3 py-3 text-xs font-semibold uppercase tracking-wide {% if day == today %}bg-blue-50 text-blue-700{% else %}bg-slate-50 text-slate-500{% endif %}">
+          {{ day.strftime('%a') }}<br><span class="font-normal normal-case">{{ day.strftime('%b %-d') }}{% if day == today %} <span class="text-blue-500">today</span>{% endif %}</span>
+        </th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for surgeon in surgeons %}
+      <tr>
+        <td class="border border-slate-200 bg-white px-4 py-3 align-top">
+          <div class="flex items-center gap-2"><div class="staff-avatar flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold">{{ surgeon.initials }}</div><span class="text-sm font-medium text-slate-800">{{ surgeon.last_name }}</span></div>
+        </td>
+        {% for day in week_days %}
+        {% set slots = card_grid.get(surgeon.id, {}).get(day, {}) %}
+        <td class="border border-slate-200 p-1.5 align-top {% if day == today %}bg-blue-50/30{% else %}bg-white{% endif %}">
+          <div class="space-y-1">
+          {% for session in ['am', 'pm'] %}
+            {% set card = slots.get(session) %}
+            <div class="schedule-card flex items-center justify-between gap-2 border px-3 {% if card and card.is_off %}schedule-card--off border-slate-300 bg-slate-200 text-slate-700{% elif card and card.is_na %}border-dashed border-slate-200 bg-slate-50 text-slate-500{% else %}border-slate-200 bg-white text-slate-800{% endif %}">
+              {% if card %}
+              <div class="min-w-0">
+                <div class="schedule-label truncate text-xs font-extrabold">{{ card.label }}</div>
+                {% if card.count_label %}<div class="truncate text-[10px] font-semibold text-slate-500">{{ card.count_label }}</div>{% endif %}
+              </div>
+              {% if card.is_off %}<span class="shrink-0 text-[10px] font-extrabold uppercase tracking-wide">OFF</span>{% endif %}
+              {% else %}
+              <span class="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">NA</span>
+              {% endif %}
+            </div>
+          {% endfor %}
+          </div>
+        </td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

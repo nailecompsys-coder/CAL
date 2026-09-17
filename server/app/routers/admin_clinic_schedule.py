@@ -9,7 +9,7 @@ from ..admin_clinic_schedule_service import (
     assign_clinic as assign_clinic_service,
     clear_clinic as clear_clinic_service,
     copy_clinic_week as copy_clinic_week_service,
-    page_data,
+    week_days_for_offset,
 )
 from ..admin_surgical_schedule_service import week_offset_for_date
 from ..auth import get_current_admin
@@ -18,6 +18,7 @@ from ..jinja_env import templates
 from ..models import Surgeon
 from ..surgeon_visibility import surgeon_is_visible
 from ..schedule_write_freeze import require_schedule_write_enabled
+from ..schedule_card_projection_service import card_grid_page_data
 from .admin import _base, _sort_surgeons_physicians_first, _warn_redirect
 
 router = APIRouter(prefix="/admin")
@@ -44,38 +45,18 @@ def clinic_schedule_page(
     ]
     all_surgeons = _sort_surgeons_physicians_first(all_surgeons)
     surgeons = all_surgeons
-    data = page_data(db, week_offset)
+    today, week_days = week_days_for_offset(week_offset)
+    data = card_grid_page_data(db, week_days[0], week_days[-1])
 
-    return templates.TemplateResponse("admin/clinic_schedule.html", _base(
+    return templates.TemplateResponse("admin/clinic_schedule_cards.html", _base(
         request, admin, db=db,
         surgeons=surgeons,
         all_surgeons=all_surgeons,
-        selected_surgeon_id=None,
-        selected_surgeon_value="all",
-        clinics=data["clinic_locations"],
-        hospitals=data["hospital_locations"],
-        all_locations=data["all_locations"],
-        week_days=data["week_days"],
-        sched_map=data["sched_map"],
-        clinic_grid_slots=data["clinic_grid_slots"],
-        surgical_map=data["surgical_map"],
-        surgical_cases_json=data["surgical_cases_json"],
-        open_or_blocks=data["open_or_blocks"],
-        open_or_day_slots=data["open_or_day_slots"],
-        assigned_or_blocks=data["assigned_or_blocks"],
-        or_block_overlays=data.get("or_block_overlays") or {},
-        clinic_fax_overlays=data.get("clinic_fax_overlays") or {},
-        off_map=data.get("off_map") or {},
-        off_conflicts=data.get("off_conflicts") or [],
-        show_off_schedule_ids=data.get("show_off_schedule_ids") or set(),
-        show_off_or_keys=data.get("show_off_or_keys") or set(),
-        hide_empty_or_blocks=data.get("hide_empty_or_blocks") or {},
-        conflict_keys=data.get("conflict_keys") or set(),
-        synthetic_off_days=data.get("synthetic_off_days") or set(),
+        card_grid=data["grid"],
+        week_days=week_days,
         week_offset=week_offset,
-        view_month_value=data["week_days"][0].strftime("%Y-%m"),
-        locations=data["all_locations"],
-        today=data["today"],
+        view_month_value=week_days[0].strftime("%Y-%m"),
+        today=today,
     ))
 
 

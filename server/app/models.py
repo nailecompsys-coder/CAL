@@ -1,7 +1,7 @@
 from datetime import date, datetime, time
 from sqlalchemy import (
     Boolean, Column, Date, DateTime, ForeignKey, Integer,
-    String, Text, Time, UniqueConstraint, func
+    CheckConstraint, String, Text, Time, UniqueConstraint, func
 )
 from sqlalchemy.orm import relationship
 from .database import Base
@@ -445,6 +445,69 @@ class ClinicSchedule(Base):
 
     surgeon = relationship("Surgeon", back_populates="clinic_schedules")
     location = relationship("Location")
+
+
+class ScheduleCardWeek(Base):
+    """One materialized Monday-Friday card set for one surgeon."""
+    __tablename__ = "schedule_card_weeks"
+    __table_args__ = (UniqueConstraint("surgeon_id", "week_start"),)
+
+    id = Column(Integer, primary_key=True)
+    surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=False)
+    week_start = Column(Date, nullable=False)  # Monday
+    master_revision = Column(String(64), nullable=False, default="master-v1")
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    surgeon = relationship("Surgeon")
+    cards = relationship("ScheduleCard", back_populates="week", cascade="all, delete-orphan")
+
+
+class ScheduleCard(Base):
+    """Permanent AM or PM surgeon card. Activity is attached; the card is never replaced."""
+    __tablename__ = "schedule_cards"
+    __table_args__ = (
+        UniqueConstraint("surgeon_id", "date", "session"),
+        CheckConstraint("session IN ('am', 'pm')", name="ck_schedule_cards_session"),
+        CheckConstraint(
+            "baseline_state IN ('assigned', 'na', 'off')",
+            name="ck_schedule_cards_baseline_state",
+        ),
+        CheckConstraint(
+            "effective_state IN ('assigned', 'na', 'off')",
+            name="ck_schedule_cards_effective_state",
+        ),
+        CheckConstraint(
+            "baseline_state <> 'assigned' OR baseline_location_id IS NOT NULL",
+            name="ck_schedule_cards_baseline_location",
+        ),
+        CheckConstraint(
+            "effective_state <> 'assigned' OR effective_location_id IS NOT NULL",
+            name="ck_schedule_cards_effective_location",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    week_id = Column(Integer, ForeignKey("schedule_card_weeks.id", ondelete="CASCADE"), nullable=False)
+    surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=False)
+    date = Column(Date, nullable=False)
+    session = Column(String(2), nullable=False)  # am | pm
+    baseline_state = Column(String(16), nullable=False)
+    effective_state = Column(String(16), nullable=False)
+    baseline_location_id = Column(Integer, ForeignKey("locations.id"), nullable=True)
+    effective_location_id = Column(Integer, ForeignKey("locations.id"), nullable=True)
+    master_template_id = Column(Integer, ForeignKey("surgeon_location_schedules.id"), nullable=True)
+    master_week_pattern = Column(String(16), nullable=False, default="all")
+    source = Column(String(32), nullable=False, default="master")
+    version = Column(Integer, nullable=False, default=1, server_default="1")
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    week = relationship("ScheduleCardWeek", back_populates="cards")
+    surgeon = relationship("Surgeon")
+    baseline_location = relationship("Location", foreign_keys=[baseline_location_id])
+    effective_location = relationship("Location", foreign_keys=[effective_location_id])
+    master_template = relationship("SurgeonLocationSchedule")
 
 
 class SurgicalCase(Base):

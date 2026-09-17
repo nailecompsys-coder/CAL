@@ -1,7 +1,6 @@
 """Admin schedule template and call rotation builder routes."""
 from datetime import date
 from typing import Optional
-from urllib.parse import quote_plus
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from sqlalchemy import func
@@ -12,7 +11,6 @@ from ..admin_schedule_template_service import (
     auto_fill_call_rotation,
     call_rotation_result_url,
     parse_date_range,
-    add_master_schedule_location,
     save_call_rotation_order as save_call_rotation_order_service,
     save_template_cell_value,
     template_grid_context,
@@ -96,32 +94,6 @@ async def save_template_cell(
     except ValueError as exc:
         db.rollback()
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
-
-
-@router.post("/schedule-templates/locations")
-def add_master_location(
-    name: str = Form(...),
-    abbreviation: str = Form(...),
-    location_type: str = Form("clinic"),
-    db: Session = Depends(get_db),
-    admin=Depends(get_current_admin),
-):
-    """Create a location only; assigning it is a separate Master Schedule edit."""
-    try:
-        location = add_master_schedule_location(
-            db,
-            name=name,
-            abbreviation=abbreviation,
-            location_type=location_type,
-        )
-        db.commit()
-    except ValueError as exc:
-        db.rollback()
-        return RedirectResponse(f"/admin/schedule-templates?location_error={quote_plus(str(exc))}", status_code=303)
-    return RedirectResponse(
-        f"/admin/schedule-templates?location_added={location.id}",
-        status_code=303,
-    )
 
 
 @router.post("/schedule-templates/apply")

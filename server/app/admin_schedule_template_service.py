@@ -7,7 +7,6 @@ from .admin_schedule_template_call_service import (
     save_call_rotation_order,
 )
 from .admin_schedule_template_clinic_service import (
-    add_master_schedule_location,
     apply_clinic_schedule_templates,
     clinic_apply_result_url,
     save_template_cell_value,
@@ -22,7 +21,6 @@ from .admin_schedule_template_common import (
 )
 
 __all__ = [
-    "add_master_schedule_location",
     "active_surgeon_ids",
     "apply_clinic_schedule_templates",
     "approved_off_dates",

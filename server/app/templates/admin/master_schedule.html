@@ -48,6 +48,7 @@
                   {% set current_pattern = (cell.week_pattern if cell else 'all') or 'all' %}
                   {% for value, label in week_pattern_options %}<option value="{{ value }}"{% if current_pattern == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
                 </select>
+                <i class="master-save-icon hidden text-[11px]" aria-hidden="true"></i>
               </div>
             </td>
             {% endfor %}
@@ -66,6 +67,7 @@
   async function save(select) {
     const holder = select.closest('td');
     const cadence = holder.querySelector('.master-cadence');
+    const icon = holder.querySelector('.master-save-icon');
     const value = holder.querySelector('.master-location').value;
     const params = new URLSearchParams({
       surgeon_id: select.dataset.surgeon || holder.querySelector('.master-location').dataset.surgeon,
@@ -78,13 +80,17 @@
     holder.setAttribute('aria-busy', 'true');
     holder.classList.remove('bg-rose-50');
     holder.removeAttribute('title');
+    icon.className = 'master-save-icon fa-solid fa-spinner fa-spin text-[11px] text-slate-400';
     try {
       const response = await fetch('/admin/schedule-templates/save-cell', {method: 'POST', body: params});
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error || 'Save failed');
+      icon.className = 'master-save-icon fa-solid fa-check text-[11px] text-emerald-600';
+      window.setTimeout(() => { icon.className = 'master-save-icon hidden text-[11px]'; }, 1400);
     } catch (error) {
       holder.classList.add('bg-rose-50');
       holder.title = error.message || 'Save failed';
+      icon.className = 'master-save-icon fa-solid fa-triangle-exclamation text-[11px] text-rose-600';
     } finally {
       holder.removeAttribute('aria-busy');
     }

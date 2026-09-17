@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from app.models import Base, Location, ScheduleCard, ScheduleCardWeek, Surgeon, SurgeonLocationSchedule
-from app.schedule_card_service import materialize_master_schedule_cards
+from app.schedule_card_service import apply_master_schedule_to_cards, materialize_master_schedule_cards
 
 
 class ScheduleCardServiceTest(unittest.TestCase):
@@ -87,6 +87,54 @@ class ScheduleCardServiceTest(unittest.TestCase):
             with self.assertRaises(IntegrityError):
                 db.commit()
             db.rollback()
+        finally:
+            db.close()
+
+    def test_master_apply_updates_existing_cards_without_creating_any(self):
+        db = self.Session()
+        try:
+            surgeon = Surgeon(first_name="Alex", last_name="Smith", email="as@example.com", is_active=True, staff_type="physician")
+            location = Location(name="Minneola OR", abbreviation="MN-OR", location_type="hospital", is_active=True)
+            db.add_all([surgeon, location])
+            db.commit()
+            materialize_master_schedule_cards(db, start=date(2026, 9, 14), end=date(2026, 9, 18))
+            db.commit()
+            target = db.query(ScheduleCard).filter_by(
+                surgeon_id=surgeon.id, date=date(2026, 9, 15), session="pm"
+            ).one()
+            target_id = target.id
+            self.assertEqual(target.baseline_state, "na")
+
+            db.add(SurgeonLocationSchedule(
+                surgeon_id=surgeon.id, day_of_week=1, session="pm", location_id=location.id,
+                assignment_type="assigned", week_pattern="all",
+            ))
+            db.commit()
+            result = apply_master_schedule_to_cards(db, start=date(2026, 9, 14), end=date(2026, 9, 18))
+            db.commit()
+            updated = db.get(ScheduleCard, target_id)
+            self.assertEqual(result["cardsApplied"], 10)
+            self.assertGreaterEqual(result["cardsChanged"], 1)
+            self.assertEqual(db.query(ScheduleCard).count(), 10)
+            self.assertEqual(updated.baseline_state, "assigned")
+            self.assertEqual(updated.baseline_location_id, location.id)
+            self.assertEqual(updated.id, target_id)
+        finally:
+            db.close()
+
+    def test_master_apply_refuses_to_recreate_missing_card(self):
+        db = self.Session()
+        try:
+            surgeon = Surgeon(first_name="Alex", last_name="Smith", email="as@example.com", is_active=True, staff_type="physician")
+            db.add(surgeon)
+            db.commit()
+            materialize_master_schedule_cards(db, start=date(2026, 9, 14), end=date(2026, 9, 18))
+            db.commit()
+            db.query(ScheduleCard).filter_by(surgeon_id=surgeon.id, date=date(2026, 9, 15), session="pm").delete()
+            db.commit()
+            with self.assertRaisesRegex(ValueError, "Missing permanent schedule card"):
+                apply_master_schedule_to_cards(db, start=date(2026, 9, 14), end=date(2026, 9, 18))
+            self.assertEqual(db.query(ScheduleCard).count(), 9)
         finally:
             db.close()
 

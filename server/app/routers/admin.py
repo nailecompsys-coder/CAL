@@ -9,6 +9,7 @@ from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from ..admin_dashboard_stats_service import dashboard_today_volume_stats
+from ..admin_meeting_service import cal_meetings_in_range
 from ..aprima_cache_service import (
     begin_manual_aprima_sync,
     main_office_patients_by_weekday,
@@ -21,9 +22,8 @@ from ..auth import (
 from ..database import get_db
 from ..jinja_env import templates
 from ..models import (
-    AdminUser, CallRotation, DayOff, Meeting, SiteSettings, Surgeon,
+    AdminUser, CallRotation, DayOff, SiteSettings, Surgeon,
 )
-from ..native_home_serializers import is_clinic_day_meeting
 from ..paths import UPLOADS_DIR
 from ..practice_time import practice_today
 from ..surgeon_visibility import surgeon_is_visible
@@ -138,14 +138,7 @@ def dashboard(
         if surgeon_is_visible(row.surgeon)
     ]
 
-    upcoming_meetings = [
-        row
-        for row in db.query(Meeting).filter(
-            Meeting.date >= today,
-            Meeting.date <= week_end,
-        ).order_by(Meeting.date, Meeting.start_time).all()
-        if not is_clinic_day_meeting(row)
-    ][:5]
+    upcoming_meetings = cal_meetings_in_range(db, today, week_end, limit=5)
     from ..admin_settings_page_service import recent_admin_notifications, unread_admin_notification_count
     admin_notifications = recent_admin_notifications(db, admin.id, limit=20)
     admin_unread_notifications = unread_admin_notification_count(db, admin.id)

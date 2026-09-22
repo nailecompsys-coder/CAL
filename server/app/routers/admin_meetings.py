@@ -7,6 +7,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from ..admin_meeting_service import (
+    cal_meetings_in_range,
     calendar_events_by_day,
     create_meeting as create_meeting_service,
     delete_meeting as delete_meeting_service,
@@ -20,7 +21,7 @@ from ..auth import get_current_admin
 from ..database import get_db
 from ..jinja_env import templates
 from ..models import Meeting, Surgeon
-from ..native_home_serializers import is_clinic_day_meeting, is_clinic_rotation_text
+from ..native_home_serializers import is_clinic_rotation_text
 from ..surgeon_visibility import surgeon_is_visible
 from .admin import _base, _sort_surgeons_physicians_first, _warn_redirect
 
@@ -36,15 +37,8 @@ def meetings_page(
 ):
     month = month_schedule_days(month_offset)
     schedule_days = month["schedule_days"]
-    # Surgery One / clinic rotation rows live in Meetings historically but are not meetings.
-    meetings = [
-        row
-        for row in db.query(Meeting).filter(
-            Meeting.date >= month["month_start"],
-            Meeting.date <= month["month_end"],
-        ).order_by(Meeting.date, Meeting.start_time).all()
-        if not is_clinic_day_meeting(row)
-    ]
+    # Every CAL meeting is visible here, including clinic-related meetings entered by an admin.
+    meetings = cal_meetings_in_range(db, month["month_start"], month["month_end"])
     surgeons = [
         row for row in db.query(Surgeon).filter(Surgeon.is_active == True).order_by(Surgeon.last_name).all()
         if surgeon_is_visible(row)

@@ -16,6 +16,23 @@ from .push import notify_schedule_change
 from .surgeon_visibility import surgeon_is_visible
 
 
+def cal_meetings_in_range(
+    db: Session,
+    start_date: date,
+    end_date: date,
+    *,
+    limit: int | None = None,
+) -> list[Meeting]:
+    """Return all admin-entered meetings in a date range."""
+    query = db.query(Meeting).filter(
+        Meeting.date >= start_date,
+        Meeting.date <= end_date,
+    ).order_by(Meeting.date, Meeting.start_time)
+    if limit is not None:
+        query = query.limit(limit)
+    return query.all()
+
+
 def _month_from_offset(month_offset: int, today: date | None = None) -> date:
     today = today or practice_today()
     total_months = today.year * 12 + (today.month - 1) + month_offset

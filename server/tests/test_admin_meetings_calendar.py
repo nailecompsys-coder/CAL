@@ -7,13 +7,48 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SECRET_KEY", "test-secret")
 
 from app.admin_meeting_service import (
+    cal_meetings_in_range,
     calendar_events_by_day,
     month_picker_options,
     month_schedule_days,
 )
+from app.models import Base, Meeting
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 
 class AdminMeetingsCalendarTest(unittest.TestCase):
+    def test_cal_meetings_include_admin_entered_clinic_titles(self):
+        engine = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(bind=engine)
+        db = sessionmaker(bind=engine)()
+        try:
+            db.add_all([
+                Meeting(
+                    title="Surgery One Clinic",
+                    date=date(2026, 10, 16),
+                    start_time=time(9, 0),
+                    location_text="Lake Mary Office",
+                ),
+                Meeting(
+                    title="Outside range",
+                    date=date(2026, 11, 1),
+                ),
+            ])
+            db.commit()
+
+            rows = cal_meetings_in_range(
+                db,
+                date(2026, 10, 1),
+                date(2026, 10, 31),
+            )
+
+            self.assertEqual([row.title for row in rows], ["Surgery One Clinic"])
+        finally:
+            db.close()
+            Base.metadata.drop_all(bind=engine)
+            engine.dispose()
+
     def test_month_schedule_days_pads_sunday_start(self):
         # July 2026 starts on Wednesday → pad_start 3 (Sun/Mon/Tue empty)
         data = month_schedule_days(0)

@@ -21,7 +21,7 @@ WORKDIR /app
 # libpq-dev and gcc are NOT needed — psycopg2-binary ships a pre-compiled wheel
 # tzdata + TZ: date.today() and cron must stay on Florida time, not UTC
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl postgresql-client tzdata poppler-utils tesseract-ocr \
+    curl postgresql-client tzdata poppler-utils tesseract-ocr gosu \
     && rm -rf /var/lib/apt/lists/*
 
 ENV TZ=America/New_York
@@ -47,13 +47,18 @@ RUN /tmp/tailwindcss -c tailwind.config.js \
       -o app/static/css/tailwind.css --minify \
     && rm /tmp/tailwindcss
 
-# Create non-root user
-RUN adduser --disabled-password --gecos '' appuser && chown -R appuser /app
-USER appuser
+# Create non-root runtime user. The entrypoint fixes ownership on the persistent
+# fax volume before dropping privileges for the API process.
+RUN adduser --disabled-password --gecos '' appuser \
+    && mkdir -p /var/lib/cal/faxes \
+    && chown -R appuser:appuser /app /var/lib/cal
+COPY docker-entrypoint.sh /usr/local/bin/cal-entrypoint
+RUN chmod 0755 /usr/local/bin/cal-entrypoint
 
 EXPOSE 3005
 
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
   CMD curl -f http://localhost:3005/health || exit 1
 
+ENTRYPOINT ["/usr/local/bin/cal-entrypoint"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "3005", "--workers", "2"]

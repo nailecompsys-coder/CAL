@@ -37,6 +37,8 @@ def clinic_schedule_page(
     week_offset: int = 0,
     month: str = "",
     roster_card: int | None = None,
+    roster_day: str = "",
+    roster_location: int | None = None,
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
@@ -50,7 +52,36 @@ def clinic_schedule_page(
     today, week_days = week_days_for_offset(week_offset)
     data = card_grid_page_data(db, week_days[0], week_days[-1])
     selected_roster = None
-    if roster_card:
+    if roster_day and roster_location:
+        try:
+            selected_day = date.fromisoformat(roster_day)
+        except ValueError:
+            selected_day = None
+        if selected_day in week_days:
+            header = next(
+                (
+                    row for row in data["hospital_headers"].get(selected_day, [])
+                    if row["location_id"] == roster_location
+                ),
+                None,
+            )
+            if header:
+                cases = db.query(SurgicalCase).filter(
+                    SurgicalCase.date == selected_day,
+                    SurgicalCase.location_id == roster_location,
+                    SurgicalCase.status != "cancelled",
+                ).order_by(SurgicalCase.start_time).all()
+                selected_roster = {
+                    "label": header["label"],
+                    "surgeon": "All surgeons",
+                    "date": selected_day,
+                    "session": "OR TOTAL",
+                    "cases": cases,
+                    "visits": [],
+                    "aprima_cases": header["aprima_cases"],
+                    "show_surgeon": True,
+                }
+    elif roster_card:
         card = db.get(ScheduleCard, roster_card)
         if card and card.date in week_days:
             projected = data["grid"].get(card.surgeon_id, {}).get(card.date, {}).get(card.session)
@@ -70,6 +101,7 @@ def clinic_schedule_page(
                     "cases": cases,
                     "visits": projected.get("roster_visits", []) if projected else [],
                     "aprima_cases": projected.get("roster_aprima_cases", []) if projected else [],
+                    "show_surgeon": False,
                 }
     card_surgeon_ids = set(data["grid"])
     all_surgeons = [
@@ -83,6 +115,7 @@ def clinic_schedule_page(
         surgeons=surgeons,
         all_surgeons=all_surgeons,
         card_grid=data["grid"],
+        hospital_headers=data["hospital_headers"],
         week_days=week_days,
         week_offset=week_offset,
         view_month_value=week_days[0].strftime("%Y-%m"),

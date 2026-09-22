@@ -35,6 +35,26 @@
       </tr>
     </thead>
     <tbody>
+      <tr>
+        <td class="border border-slate-200 bg-white px-4 py-3 align-top">
+          <div class="flex items-center gap-2">
+            <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-slate-300 bg-white text-[10px] font-black text-slate-600">OB</div>
+            <div><div class="text-sm font-bold text-slate-800">Open Block</div><div class="text-[10px] text-slate-400">Practice OR time</div></div>
+          </div>
+        </td>
+        {% for day in week_days %}
+        <td class="border border-slate-200 bg-slate-50 p-1.5 align-top">
+          <div class="grid grid-cols-3 gap-1">
+            {% for slot in hospital_headers.get(day, []) %}
+            <a href="/admin/clinic-schedule?week_offset={{ week_offset }}&roster_day={{ day.isoformat() }}&roster_location={{ slot.location_id }}" title="Open {{ slot.label }} roster" class="flex min-h-[54px] flex-col items-center justify-center rounded-md border border-slate-300 px-1 text-center text-slate-800" style="background-color: {{ slot.location_color }};">
+              <span class="w-full truncate text-[10px] font-extrabold">{{ slot.label }}</span>
+              <span class="text-[9px] font-semibold text-slate-600">{{ slot.count }} case{{ '' if slot.count == 1 else 's' }}</span>
+            </a>
+            {% endfor %}
+          </div>
+        </td>
+        {% endfor %}
+      </tr>
       {% for surgeon in surgeons %}
       <tr>
         <td class="border border-slate-200 bg-white px-4 py-3 align-top">
@@ -75,8 +95,8 @@
   </div>
   <div class="px-3 py-3 overflow-y-auto flex-1 min-h-0">
     {% if selected_roster %}
-	      {% for case in selected_roster.cases %}<div class="border-b border-slate-100 py-2 text-sm text-slate-700"><span class="font-mono text-xs font-semibold">{{ case.start_time.strftime('%I:%M %p') if case.start_time else '—' }}</span> · {{ case.patient_name }}{% if case.room_text %} · {{ case.room_text }}{% endif %}</div>{% endfor %}
-	      {% for case in selected_roster.aprima_cases %}<div class="border-b border-slate-100 py-2 text-sm text-slate-700"><span class="font-mono text-xs font-semibold">{{ case.start }}</span> · {{ case.label }}{% if case.room %} · {{ case.room }}{% endif %}</div>{% endfor %}
+	      {% for case in selected_roster.cases %}<div class="border-b border-slate-100 py-2 text-sm text-slate-700"><span class="font-mono text-xs font-semibold">{{ case.start_time.strftime('%I:%M %p') if case.start_time else '—' }}</span> · {{ case.patient_name }}{% if selected_roster.show_surgeon and case.surgeon %} · {{ case.surgeon.initials }}{% endif %}{% if case.room_text %} · {{ case.room_text }}{% endif %}</div>{% endfor %}
+	      {% for case in selected_roster.aprima_cases %}<div class="border-b border-slate-100 py-2 text-sm text-slate-700"><span class="font-mono text-xs font-semibold">{{ case.start }}</span> · {{ case.label }}{% if selected_roster.show_surgeon and case.surgeon_initials %} · {{ case.surgeon_initials }}{% endif %}{% if case.room %} · {{ case.room }}{% endif %}</div>{% endfor %}
 	      {% for visit in selected_roster.visits %}<div class="border-b border-slate-100 py-2 text-sm text-slate-700"><span class="font-mono text-xs font-semibold">{{ visit.start }}</span> · {{ visit.label }}</div>{% endfor %}
 	      {% if not selected_roster.cases and not selected_roster.aprima_cases and not selected_roster.visits %}<p class="text-sm text-slate-500 py-8 text-center">No roster entries.</p>{% endif %}
     {% endif %}
@@ -92,6 +112,8 @@
     panel.classList.add('hidden');
     const url = new URL(window.location.href);
     url.searchParams.delete('roster_card');
+    url.searchParams.delete('roster_day');
+    url.searchParams.delete('roster_location');
     window.history.replaceState({}, '', url);
   });
   let drag;

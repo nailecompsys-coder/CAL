@@ -88,6 +88,8 @@ def _aprima_rows_by_slot(
             "is_surgery": is_surgery,
             "room": (row.get("room") or row.get("serviceSite") or "").strip(),
             "source": "aprima",
+            "surgeon": surgeon.full_name,
+            "surgeon_initials": surgeon.initials,
         })
     return result
 
@@ -286,6 +288,7 @@ def card_grid_page_data(db: Session, start: date, end: date) -> dict:
             "session": card.session,
             "label": label,
             "count_label": count_label,
+            "count": count,
             "is_off": is_off,
             "is_na": not location,
             "location_id": location_id,
@@ -295,4 +298,40 @@ def card_grid_page_data(db: Session, start: date, end: date) -> dict:
             "roster_aprima_cases": roster_aprima_cases,
             "has_aprima": bool(aprima_rows),
         }
-    return {"grid": grid, "surgeons": list(surgeons.values())}
+
+    hospital_locations = sorted(
+        [
+            location for location in locations
+            if (location.location_type or "").lower() in {"hospital", "or"}
+            or (location.abbreviation or "").upper().endswith("-OR")
+        ],
+        key=lambda row: (row.abbreviation or row.name),
+    )
+    hospital_headers: dict[date, list[dict]] = {}
+    for day in (date.fromordinal(value) for value in range(start.toordinal(), end.toordinal() + 1)):
+        slots = []
+        for location in hospital_locations:
+            matching_cards = [
+                sessions[session]
+                for by_day in grid.values()
+                for sessions in [by_day.get(day, {})]
+                for session in ("am", "pm")
+                if session in sessions and sessions[session].get("location_id") == location.id
+            ]
+            slots.append({
+                "location_id": location.id,
+                "label": location.abbreviation or location.name,
+                "location_color": location.color or "#e2e8f0",
+                "count": sum(int(card.get("count") or 0) for card in matching_cards),
+                "aprima_cases": [
+                    case
+                    for card in matching_cards
+                    for case in card.get("roster_aprima_cases", [])
+                ],
+            })
+        hospital_headers[day] = slots
+    return {
+        "grid": grid,
+        "surgeons": list(surgeons.values()),
+        "hospital_headers": hospital_headers,
+    }

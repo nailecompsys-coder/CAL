@@ -171,6 +171,54 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.assertEqual(restored_cases[0].patient_name, "Old, Patient")
         self.assertEqual(restored_cases[0].status, "scheduled")
 
+    def test_daily_snapshot_updates_expanded_patient_name_without_duplicate(self):
+        self.db.add(SurgicalCase(
+            surgeon_id=self.surgeon.id,
+            date=date(2026, 9, 22),
+            start_time=time(9, 0),
+            patient_name="Williams, Robert",
+            procedure="Prior procedure",
+            location_id=self.wg_or.id,
+            room_text="WGD S07",
+            status="scheduled",
+            notes="Fax 190 daily snapshot.",
+        ))
+        self.db.commit()
+        staged = stage_reviewed_rows(
+            self.db,
+            external_fax_id=191,
+            source_label="test",
+            surgeon_scope=["JF"],
+            rows=[
+                ReviewedFaxRow(
+                    page=2,
+                    surgeon_initials="JF",
+                    surgeon_name="Jorge Florin",
+                    case_date=date(2026, 9, 22),
+                    start_time=time(9, 0),
+                    row_type="surgical",
+                    room="WGD S07",
+                    patient_name="Williams, Robert Alexander",
+                    procedure="Current procedure",
+                ),
+            ],
+        )
+        self.db.commit()
+
+        result = apply_staged_snapshot(
+            self.db,
+            source_fax_id=191,
+            run_id=staged["runId"],
+        )
+
+        self.assertEqual(result["surgicalCreated"], 0)
+        self.assertEqual(result["surgicalUpdated"], 1)
+        self.assertEqual(result["surgicalCancelled"], 0)
+        cases = self.db.query(SurgicalCase).all()
+        self.assertEqual(len(cases), 1)
+        self.assertEqual(cases[0].patient_name, "Williams, Robert Alexander")
+        self.assertEqual(cases[0].procedure, "Current procedure")
+
 
 if __name__ == "__main__":
     unittest.main()

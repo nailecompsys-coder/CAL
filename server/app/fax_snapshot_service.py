@@ -32,6 +32,37 @@ def _normal(value: str | None) -> str:
     return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
 
 
+def _patient_name_tokens(value: str | None) -> list[str]:
+    return re.findall(r"[a-z0-9]+", (value or "").lower())
+
+
+def _same_patient_identity(left: str | None, right: str | None) -> bool:
+    """Match expanded/corrected fax names without guessing across patients."""
+    left_tokens = _patient_name_tokens(left)
+    right_tokens = _patient_name_tokens(right)
+    return len(left_tokens) >= 2 and left_tokens[:2] == right_tokens[:2]
+
+
+def _existing_case_for_row(
+    row: FaxIngestRow,
+    *,
+    exact: dict[tuple[date, str], list[SurgicalCase]],
+    by_date: dict[date, list[SurgicalCase]],
+) -> SurgicalCase | None:
+    matches = exact.get((row.case_date, _normal(row.patient_name)), [])
+    if matches:
+        return matches[0]
+    if row.start_time is None:
+        return None
+    identity_matches = [
+        case
+        for case in by_date.get(row.case_date, [])
+        if case.start_time == row.start_time
+        and _same_patient_identity(case.patient_name, row.patient_name)
+    ]
+    return identity_matches[0] if len(identity_matches) == 1 else None
+
+
 def _surgeon_initials(surgeon: Surgeon) -> str:
     return f"{(surgeon.first_name or '')[:1]}{(surgeon.last_name or '')[:1]}".upper()
 
@@ -278,15 +309,20 @@ def apply_staged_snapshot(
         SurgicalCase.status != "cancelled",
     ).all()
     existing_by_patient: dict[tuple[date, str], list[SurgicalCase]] = defaultdict(list)
+    existing_by_date: dict[date, list[SurgicalCase]] = defaultdict(list)
     for case in existing_cases:
         existing_by_patient[(case.date, _normal(case.patient_name))].append(case)
+        existing_by_date[case.date].append(case)
 
     kept_case_ids: set[int] = set()
     created = updated = assisted = 0
     for group in surgical_groups.values():
         first = group[0]
-        matches = existing_by_patient.get((first.case_date, _normal(first.patient_name)), [])
-        existing = matches[0] if matches else None
+        existing = _existing_case_for_row(
+            first,
+            exact=existing_by_patient,
+            by_date=existing_by_date,
+        )
         location_id = effective_locations[(first.surgeon_id, first.case_date, first.session)]
         primary_id, assistant_id = _choose_primary(
             group,
@@ -309,6 +345,7 @@ def apply_staged_snapshot(
             created += 1
         case.surgeon_id = primary_id
         case.assisting_surgeon_id = assistant_id
+        case.patient_name = first.patient_name
         case.start_time = first.start_time
         case.location_id = location_id
         case.room_text = (first.room_text or "").upper()

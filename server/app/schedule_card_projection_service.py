@@ -4,16 +4,92 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, time
+import re
 
 from sqlalchemy.orm import Session, joinedload
 
 from .admin_clinic_schedule_page_service import parse_clinic_fax_visit_segments
-from .models import ClinicSchedule, DayOff, ScheduleCard, SurgicalCase
+from .models import ClinicSchedule, DayOff, Location, ScheduleCard, Surgeon, SurgicalCase
 from .native_dayoff_support import segment_for_date
 
 
 def _session_for_time(value: time | None) -> str:
     return "pm" if value and value >= time(12, 0) else "am"
+
+
+def _normal(value: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
+
+
+def _parse_clock(value: str | None) -> time | None:
+    try:
+        return time.fromisoformat((value or "").strip())
+    except ValueError:
+        return None
+
+
+def _aprima_location_map(locations: list[Location]) -> dict[str, Location]:
+    result: dict[str, Location] = {}
+    for location in locations:
+        for label in (location.name, location.abbreviation):
+            if label:
+                result[_normal(label)] = location
+    cbo = next((row for row in locations if (row.abbreviation or "").upper() == "CBO-OV"), None)
+    if cbo:
+        result[_normal("Surgery One")] = cbo
+        result[_normal("Clermont Business Office")] = cbo
+    return result
+
+
+def _aprima_rows_by_slot(
+    db: Session,
+    start: date,
+    end: date,
+    surgeons: list[Surgeon],
+    locations: list[Location],
+) -> dict[tuple[int, date, str], list[dict]]:
+    from .aprima_cache_service import patient_appointments_for_api
+    from .aprima_schedule_service import (
+        appointment_belongs_to_surgeon,
+        is_surgery_appointment,
+        resolve_aprima_facility_name,
+    )
+
+    payload = patient_appointments_for_api(db, start, end)
+    location_map = _aprima_location_map(locations)
+    result: dict[tuple[int, date, str], list[dict]] = defaultdict(list)
+    for row in payload.get("appointments") or []:
+        try:
+            day = date.fromisoformat((row.get("date") or "").strip())
+        except ValueError:
+            continue
+        clock = _parse_clock(row.get("start"))
+        if not clock:
+            continue
+        surgeon = next((item for item in surgeons if appointment_belongs_to_surgeon(row, item)), None)
+        if not surgeon:
+            continue
+        is_surgery = is_surgery_appointment(row)
+        facility = resolve_aprima_facility_name(
+            row.get("serviceSite") or "",
+            is_surgery=is_surgery,
+        )
+        location = location_map.get(_normal(facility))
+        if not location:
+            location = location_map.get(_normal(row.get("serviceSite")))
+        if not location:
+            continue
+        patient = (row.get("patientName") or "").strip()
+        result[(surgeon.id, day, _session_for_time(clock))].append({
+            "start": clock.strftime("%H:%M"),
+            "label": patient,
+            "patient_key": _normal(patient),
+            "location": location,
+            "is_surgery": is_surgery,
+            "room": (row.get("room") or row.get("serviceSite") or "").strip(),
+            "source": "aprima",
+        })
+    return result
 
 
 def _clinic_times_by_day(rows: list[ClinicSchedule]) -> dict[tuple[int, date], list[time]]:
@@ -85,6 +161,9 @@ def card_grid_page_data(db: Session, start: date, end: date) -> dict:
         .all()
     )
     surgeon_ids = sorted({card.surgeon_id for card in cards})
+    surgeons = list({card.surgeon_id: card.surgeon for card in cards}.values())
+    locations = db.query(Location).filter(Location.is_active == True).all()  # noqa: E712
+    aprima_by_slot = _aprima_rows_by_slot(db, start, end, surgeons, locations)
     cases = (
         db.query(SurgicalCase)
         .filter(
@@ -121,10 +200,26 @@ def card_grid_page_data(db: Session, start: date, end: date) -> dict:
 
     clinic_times = _clinic_times_by_day(clinic_rows)
     case_counts: dict[tuple[int, date, str, int], int] = defaultdict(int)
+    case_keys: dict[tuple[int, date, str, int], set[tuple[str, str]]] = defaultdict(set)
     for row in cases:
         if row.location_id:
-            case_counts[(row.surgeon_id, row.date, _case_session(row, clinic_times), row.location_id)] += 1
+            case_key = (row.surgeon_id, row.date, _case_session(row, clinic_times), row.location_id)
+            case_counts[case_key] += 1
+            stamp = row.start_time.strftime("%H:%M") if row.start_time else ""
+            case_keys[case_key].add((_normal(row.patient_name), stamp))
     visit_counts = _clinic_visit_counts(clinic_rows)
+    visit_segments: dict[tuple[int, date, str, int], list[dict]] = defaultdict(list)
+    visit_keys: dict[tuple[int, date, str, int], set[tuple[str, str]]] = defaultdict(set)
+    for row in clinic_rows:
+        if not row.location_id:
+            continue
+        for segment in parse_clinic_fax_visit_segments(row.notes or ""):
+            clock = _parse_clock(segment.get("start"))
+            if not clock:
+                continue
+            key = (row.surgeon_id, row.date, _session_for_time(clock), row.location_id)
+            visit_segments[key].append(segment)
+            visit_keys[key].add((_normal(segment.get("label")), clock.strftime("%H:%M")))
     off_rows: dict[tuple[int, date], list[DayOff]] = defaultdict(list)
     for row in approved_days_off:
         day = max(row.start_date, start)
@@ -138,15 +233,49 @@ def card_grid_page_data(db: Session, start: date, end: date) -> dict:
     for card in cards:
         surgeons[card.surgeon_id] = card.surgeon
         location = card.effective_location
+        aprima_rows = aprima_by_slot.get((card.surgeon_id, card.date, card.session), [])
+        aprima_locations = {row["location"].id: row["location"] for row in aprima_rows}
+        current_key = (card.surgeon_id, card.date, card.session, card.effective_location_id)
+        current_activity = case_counts.get(current_key, 0) + visit_counts.get(current_key, 0)
+        if len(aprima_locations) == 1:
+            aprima_location = next(iter(aprima_locations.values()))
+            if not location or location.id == aprima_location.id or current_activity == 0:
+                location = aprima_location
         is_off = card.effective_state == "off" or any(
             _session_is_off(row, card.date, card.session)
             for row in off_rows.get((card.surgeon_id, card.date), [])
         )
         is_hospital = bool(location and ((location.location_type or "").lower() in {"hospital", "or"} or (location.abbreviation or "").upper().endswith("-OR")))
-        count_key = (card.surgeon_id, card.date, card.session, card.effective_location_id)
+        location_id = location.id if location else None
+        count_key = (card.surgeon_id, card.date, card.session, location_id)
+        roster_visits = list(visit_segments.get(count_key, []))
+        roster_aprima_cases: list[dict] = []
+        for row in aprima_rows:
+            if row["location"].id != location_id:
+                continue
+            dedupe_key = (row["patient_key"], row["start"])
+            if row["is_surgery"] or is_hospital:
+                if dedupe_key in case_keys[count_key]:
+                    continue
+                case_keys[count_key].add(dedupe_key)
+                case_counts[count_key] += 1
+                roster_aprima_cases.append(row)
+                continue
+            if dedupe_key in visit_keys[count_key]:
+                continue
+            visit_keys[count_key].add(dedupe_key)
+            visit_counts[count_key] += 1
+            roster_visits.append({
+                "start": row["start"],
+                "caseCount": 1,
+                "note": row["label"],
+                "label": row["label"],
+                "source": "aprima",
+            })
+        roster_visits.sort(key=lambda row: (row.get("start") or "", row.get("label") or ""))
         count = case_counts.get(count_key, 0) if is_hospital else visit_counts.get(count_key, 0)
         unit = "case" if is_hospital else "visit"
-        if card.effective_state == "na" or not location:
+        if not location:
             label = "NA"
             count_label = ""
         else:
@@ -158,8 +287,12 @@ def card_grid_page_data(db: Session, start: date, end: date) -> dict:
             "label": label,
             "count_label": count_label,
             "is_off": is_off,
-            "is_na": card.effective_state == "na" or not location,
+            "is_na": not location,
+            "location_id": location_id,
             "location_color": location.color if location else "#e2e8f0",
             "location_type": "hospital" if is_hospital else "clinic",
+            "roster_visits": roster_visits,
+            "roster_aprima_cases": roster_aprima_cases,
+            "has_aprima": bool(aprima_rows),
         }
     return {"grid": grid, "surgeons": list(surgeons.values())}

@@ -1,6 +1,7 @@
 import os
 import unittest
 from datetime import date, time
+from unittest.mock import patch
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SECRET_KEY", "test-secret")
@@ -99,6 +100,87 @@ class ScheduleCardProjectionServiceTest(unittest.TestCase):
             monday = payload["grid"][surgeon.id][date(2026, 9, 21)]
             self.assertEqual(monday["am"]["count_label"], "1 visit")
             self.assertEqual(monday["pm"]["count_label"], "1 case")
+        finally:
+            db.close()
+
+    @patch("app.aprima_cache_service.patient_appointments_for_api")
+    def test_aprima_clinic_patients_fill_existing_na_card(self, aprima_payload):
+        db = self.Session()
+        try:
+            surgeon = Surgeon(first_name="Jorge", last_name="Florin", email="jf@example.com", is_active=True)
+            cbo = Location(name="CBO Clinic", abbreviation="CBO-OV", location_type="clinic", is_active=True)
+            db.add_all([surgeon, cbo])
+            db.commit()
+            materialize_master_schedule_cards(db, start=date(2026, 9, 21), end=date(2026, 9, 25))
+            aprima_payload.return_value = {
+                "appointments": [
+                    {
+                        "id": f"appt-{index}",
+                        "date": "2026-09-23",
+                        "start": f"13:{index * 10:02d}",
+                        "patientName": f"Patient {index}",
+                        "surgeonInitials": "JF",
+                        "serviceSite": "Clermont Business Office",
+                        "appointmentType": "Follow Up",
+                    }
+                    for index in range(5)
+                ]
+            }
+
+            payload = card_grid_page_data(db, date(2026, 9, 21), date(2026, 9, 25))
+            card = payload["grid"][surgeon.id][date(2026, 9, 23)]["pm"]
+
+            self.assertEqual(card["label"], "CBO-OV")
+            self.assertEqual(card["count_label"], "5 visits")
+            self.assertFalse(card["is_na"])
+            self.assertEqual(len(card["roster_visits"]), 5)
+            self.assertTrue(card["has_aprima"])
+            self.assertEqual(sum(len(day) for day in payload["grid"][surgeon.id].values()), 10)
+        finally:
+            db.close()
+
+    @patch("app.aprima_cache_service.patient_appointments_for_api")
+    def test_aprima_and_fax_same_clinic_patient_count_once(self, aprima_payload):
+        db = self.Session()
+        try:
+            surgeon = Surgeon(first_name="Jorge", last_name="Florin", email="jf@example.com", is_active=True)
+            cbo = Location(name="CBO Clinic", abbreviation="CBO-OV", location_type="clinic", is_active=True)
+            db.add_all([surgeon, cbo])
+            db.commit()
+            db.add(SurgeonLocationSchedule(
+                surgeon_id=surgeon.id,
+                day_of_week=2,
+                session="pm",
+                location_id=cbo.id,
+                assignment_type="assigned",
+            ))
+            db.commit()
+            materialize_master_schedule_cards(db, start=date(2026, 9, 21), end=date(2026, 9, 25))
+            db.add(ClinicSchedule(
+                surgeon_id=surgeon.id,
+                location_id=cbo.id,
+                date=date(2026, 9, 23),
+                session="pm",
+                notes="Fax 191 visual SOT · 13:00 SAME, PATIENT",
+            ))
+            db.commit()
+            aprima_payload.return_value = {
+                "appointments": [{
+                    "id": "same-patient",
+                    "date": "2026-09-23",
+                    "start": "13:00",
+                    "patientName": "Same, Patient",
+                    "surgeonInitials": "JF",
+                    "serviceSite": "Clermont Business Office",
+                    "appointmentType": "Follow Up",
+                }]
+            }
+
+            payload = card_grid_page_data(db, date(2026, 9, 21), date(2026, 9, 25))
+            card = payload["grid"][surgeon.id][date(2026, 9, 23)]["pm"]
+
+            self.assertEqual(card["count_label"], "1 visit")
+            self.assertEqual(len(card["roster_visits"]), 1)
         finally:
             db.close()
 

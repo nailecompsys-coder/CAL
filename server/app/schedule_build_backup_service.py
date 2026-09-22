@@ -11,12 +11,14 @@ from .models import (
     ORBlockAssignment,
     ORBlockAuditEvent,
     ORBlockInstance,
+    ScheduleCard,
     ScheduleBuildBackup,
     SurgicalCase,
 )
 
 
 SNAPSHOT_VERSION = 1
+FAX_SNAPSHOT_VERSION = 2
 
 
 def _dump_value(value: Any) -> Any:
@@ -150,6 +152,98 @@ def create_schedule_build_backup(
     return backup
 
 
+def create_fax_snapshot_backup(
+    db: Session,
+    *,
+    admin_id: int | None,
+    start: date,
+    end: date,
+    fax_id: int,
+) -> ScheduleBuildBackup:
+    """Snapshot every schedule row a fax reconciliation is allowed to change."""
+    payload = {
+        "version": FAX_SNAPSHOT_VERSION,
+        "kind": "fax_snapshot",
+        "fax_id": fax_id,
+        "range": {"start": start.isoformat(), "end": end.isoformat()},
+        "schedule_cards": [
+            _row_payload(row)
+            for row in db.query(ScheduleCard).filter(
+                ScheduleCard.date >= start,
+                ScheduleCard.date <= end,
+            ).order_by(ScheduleCard.id).all()
+        ],
+        "clinic_schedules": [
+            _row_payload(row)
+            for row in db.query(ClinicSchedule).filter(
+                ClinicSchedule.date >= start,
+                ClinicSchedule.date <= end,
+            ).order_by(ClinicSchedule.id).all()
+        ],
+        "surgical_cases": [
+            _row_payload(row)
+            for row in db.query(SurgicalCase).filter(
+                SurgicalCase.date >= start,
+                SurgicalCase.date <= end,
+            ).order_by(SurgicalCase.id).all()
+        ],
+    }
+    backup = ScheduleBuildBackup(
+        start_date=start,
+        end_date=end,
+        created_by_admin_id=admin_id,
+        payload_json=json.dumps(payload, separators=(",", ":"), sort_keys=True),
+        note=f"Created automatically before fax {fax_id} snapshot reconciliation.",
+    )
+    db.add(backup)
+    db.commit()
+    db.refresh(backup)
+    return backup
+
+
+def _revert_fax_snapshot(db: Session, backup: ScheduleBuildBackup, payload: dict[str, Any]) -> dict[str, Any]:
+    start = backup.start_date
+    end = backup.end_date
+    card_payloads = {row["id"]: row for row in payload.get("schedule_cards", [])}
+    for card in db.query(ScheduleCard).filter(
+        ScheduleCard.date >= start,
+        ScheduleCard.date <= end,
+    ).all():
+        saved = card_payloads.get(card.id)
+        if not saved:
+            continue
+        for column in inspect(ScheduleCard).columns:
+            if column.key == "id" or column.key not in saved:
+                continue
+            setattr(card, column.key, _load_value(column, saved[column.key]))
+
+    db.query(ClinicSchedule).filter(
+        ClinicSchedule.date >= start,
+        ClinicSchedule.date <= end,
+    ).delete(synchronize_session="fetch")
+    db.query(SurgicalCase).filter(
+        SurgicalCase.date >= start,
+        SurgicalCase.date <= end,
+    ).delete(synchronize_session="fetch")
+    for row in payload.get("clinic_schedules", []):
+        db.add(_model_from_payload(ClinicSchedule, row))
+    for row in payload.get("surgical_cases", []):
+        db.add(_model_from_payload(SurgicalCase, row))
+
+    backup.reverted_at = datetime.now(UTC).replace(tzinfo=None)
+    _bump_pg_sequence(db, "clinic_schedules")
+    _bump_pg_sequence(db, "surgical_cases")
+    db.commit()
+    return {
+        "ok": True,
+        "from": start.isoformat(),
+        "to": end.isoformat(),
+        "cards": len(card_payloads),
+        "clinic": len(payload.get("clinic_schedules", [])),
+        "cases": len(payload.get("surgical_cases", [])),
+    }
+
+
 def revert_schedule_build_backup(
     db: Session,
     *,
@@ -171,6 +265,9 @@ def revert_schedule_build_backup(
     )
     current_block_ids = [row.id for row in current_blocks]
     payload = json.loads(backup.payload_json)
+    if payload.get("kind") == "fax_snapshot":
+        backup.reverted_by_admin_id = admin_id
+        return _revert_fax_snapshot(db, backup, payload)
     case_links = {row["id"]: row for row in payload.get("surgical_case_links", [])}
     if current_block_ids and "surgical_case_links" not in payload:
         linked_cases = db.query(SurgicalCase).filter(

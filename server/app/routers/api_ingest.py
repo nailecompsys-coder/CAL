@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..fax_ingest_engine import ReviewedFaxRow, stage_reviewed_rows
 from ..fax_pdf_intake import prepare_fax_pdf
+from ..fax_snapshot_service import apply_staged_snapshot
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 
@@ -58,7 +59,13 @@ class VisualScheduleBatch(BaseModel):
     source_fax_id: int
     source_label: str = "Desk visual PNG SOT"
     backup_label: str | None = None
+    surgeon_scope: list[str] = Field(default_factory=list)
     rows: list[VisualFaxRowIn] = Field(default_factory=list)
+
+
+class SnapshotApplyIn(BaseModel):
+    run_id: int
+    confirm_authoritative_snapshot: bool = False
 
 
 @router.post("/fax/{source_fax_id:int}/prepare")
@@ -155,8 +162,31 @@ def ingest_visual_schedule_route(
             external_fax_id=body.source_fax_id,
             source_label=body.source_label,
             rows=rows,
+            surgeon_scope=body.surgeon_scope,
         )
         db.commit()
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "result": result}
+
+
+@router.post("/fax/{source_fax_id:int}/apply-snapshot")
+def apply_fax_snapshot_route(
+    source_fax_id: int,
+    body: SnapshotApplyIn,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_ingest_token),
+) -> dict[str, Any]:
+    """Backup and apply a reviewed daily snapshot to existing cards only."""
+    if not body.confirm_authoritative_snapshot:
+        raise HTTPException(400, "confirm_authoritative_snapshot is required")
+    try:
+        result = apply_staged_snapshot(
+            db,
+            source_fax_id=source_fax_id,
+            run_id=body.run_id,
+        )
     except ValueError as exc:
         db.rollback()
         raise HTTPException(400, str(exc)) from exc

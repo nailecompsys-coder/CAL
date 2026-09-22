@@ -7,6 +7,7 @@ facts and resolves each row to an already-existing AM/PM card for review.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from datetime import date, time
@@ -41,6 +42,41 @@ class ReviewedFaxRow:
 
 def session_for_time(value: time | None) -> str:
     return "am" if value is not None and value < time(12) else "pm"
+
+
+def sessions_for_rows(rows: list[ReviewedFaxRow]) -> list[str]:
+    """Resolve AM/PM with the documented clinic-to-OR transition rule.
+
+    Noon remains the normal boundary. A surgical case between 11:30 and noon
+    moves to PM only when that surgeon has a clinic appointment earlier that
+    day and the gap is at least 30 minutes. This keeps an 11:45 downstairs OR
+    start after an 11:00 clinic visit out of the AM clinic card.
+    """
+    resolved = [session_for_time(row.start_time) for row in rows]
+    clinic_times: dict[tuple[str, date], list[time]] = {}
+    for row in rows:
+        if row.row_type != "clinic" or row.start_time is None:
+            continue
+        key = (_normal(row.surgeon_name or row.surgeon_initials), row.case_date)
+        clinic_times.setdefault(key, []).append(row.start_time)
+
+    for index, row in enumerate(rows):
+        if row.row_type != "surgical" or row.start_time is None:
+            continue
+        if not time(11, 30) <= row.start_time < time(12):
+            continue
+        key = (_normal(row.surgeon_name or row.surgeon_initials), row.case_date)
+        prior = [value for value in clinic_times.get(key, []) if value < row.start_time]
+        if not prior:
+            continue
+        gap = (
+            row.start_time.hour * 60
+            + row.start_time.minute
+            - max(value.hour * 60 + value.minute for value in prior)
+        )
+        if gap >= 30:
+            resolved[index] = "pm"
+    return resolved
 
 
 def _text(value: str | None) -> str:
@@ -89,6 +125,7 @@ def stage_reviewed_rows(
     external_fax_id: int,
     source_label: str,
     rows: list[ReviewedFaxRow],
+    surgeon_scope: list[str] | None = None,
 ) -> dict:
     """Persist reviewed fax facts and deterministic, non-mutating card decisions."""
     if not rows:
@@ -98,12 +135,21 @@ def stage_reviewed_rows(
         document = FaxDocument(external_fax_id=external_fax_id, source_label=_text(source_label) or "Desk visual PNG SOT")
         db.add(document)
         db.flush()
-    run = FaxIngestRun(fax_document_id=document.id, engine_version=ENGINE_VERSION, status="staged")
+    scope = sorted({value.strip().upper() for value in (surgeon_scope or []) if value.strip()})
+    if not scope:
+        scope = sorted({_text(row.surgeon_initials).upper() for row in rows if _text(row.surgeon_initials)})
+    run = FaxIngestRun(
+        fax_document_id=document.id,
+        engine_version=ENGINE_VERSION,
+        status="staged",
+        surgeon_scope_json=json.dumps(scope),
+    )
     db.add(run)
     db.flush()
 
     counts: dict[str, int] = {}
-    for row in rows:
+    resolved_sessions = sessions_for_rows(rows)
+    for row, resolved_session in zip(rows, resolved_sessions, strict=True):
         if row.row_type not in {"surgical", "clinic"}:
             raise ValueError("row_type must be surgical or clinic")
         surgeon = _surgeon_for_row(db, row)
@@ -116,7 +162,7 @@ def stage_reviewed_rows(
             surgeon_initials=_text(row.surgeon_initials).upper(),
             case_date=row.case_date,
             start_time=row.start_time,
-            session=session_for_time(row.start_time),
+            session=resolved_session,
             row_type=row.row_type,
             room_text=room,
             patient_name=_text(row.patient_name),

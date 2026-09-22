@@ -552,6 +552,7 @@ class FaxIngestRun(Base):
     fax_document_id = Column(Integer, ForeignKey("fax_documents.id"), nullable=False)
     engine_version = Column(String(64), nullable=False)
     status = Column(String(32), nullable=False, default="staged")
+    surgeon_scope_json = Column(Text, nullable=False, default="[]", server_default="[]")
     created_at = Column(DateTime, server_default=func.now())
 
     document = relationship("FaxDocument")

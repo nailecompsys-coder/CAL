@@ -47,6 +47,44 @@ class ScheduleCardProjectionServiceTest(unittest.TestCase):
         finally:
             db.close()
 
+    def test_hospital_header_sql_count_excludes_clinic_rows(self):
+        db = self.Session()
+        try:
+            surgeon = Surgeon(first_name="Alex", last_name="Smith", email="as@example.com", is_active=True)
+            hospital = Location(name="Apopka OR", abbreviation="AP-OR", location_type="hospital", is_active=True)
+            clinic = Location(name="Apopka Clinic", abbreviation="AP-OV", location_type="clinic", is_active=True)
+            db.add_all([surgeon, hospital, clinic])
+            db.commit()
+            materialize_master_schedule_cards(db, start=date(2026, 9, 21), end=date(2026, 9, 25))
+            db.add_all([
+                SurgicalCase(
+                    surgeon_id=surgeon.id,
+                    date=date(2026, 9, 21),
+                    start_time=time(7, 15),
+                    patient_name="OR Patient",
+                    procedure="Procedure",
+                    location_id=hospital.id,
+                    status="scheduled",
+                ),
+                SurgicalCase(
+                    surgeon_id=surgeon.id,
+                    date=date(2026, 9, 21),
+                    start_time=time(8, 30),
+                    patient_name="Clinic Patient",
+                    procedure="Office visit",
+                    location_id=clinic.id,
+                    status="scheduled",
+                ),
+            ])
+            db.commit()
+
+            payload = card_grid_page_data(db, date(2026, 9, 21), date(2026, 9, 25))
+            header = payload["hospital_headers"][date(2026, 9, 21)]
+
+            self.assertEqual([(row["label"], row["count"]) for row in header], [("AP-OR", 1)])
+        finally:
+            db.close()
+
     def test_approved_time_off_overlays_existing_card_without_creating_one(self):
         db = self.Session()
         try:

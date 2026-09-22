@@ -6,6 +6,7 @@ from collections import defaultdict
 from datetime import date, time
 import re
 
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from .admin_clinic_schedule_page_service import parse_clinic_fax_visit_segments
@@ -153,6 +154,34 @@ def _clinic_visit_counts(rows: list[ClinicSchedule]) -> dict[tuple[int, date, st
     return counts
 
 
+def _or_totals_by_day_location_sql(
+    db: Session,
+    start: date,
+    end: date,
+) -> dict[tuple[date, int], int]:
+    """Authoritative OR totals: one database COUNT grouped by date and facility."""
+    rows = (
+        db.query(
+            SurgicalCase.date,
+            SurgicalCase.location_id,
+            func.count(SurgicalCase.id),
+        )
+        .join(Location, Location.id == SurgicalCase.location_id)
+        .filter(
+            SurgicalCase.date >= start,
+            SurgicalCase.date <= end,
+            SurgicalCase.status != "cancelled",
+            or_(
+                func.lower(Location.location_type).in_(("hospital", "or")),
+                func.upper(Location.abbreviation).like("%-OR"),
+            ),
+        )
+        .group_by(SurgicalCase.date, SurgicalCase.location_id)
+        .all()
+    )
+    return {(day, location_id): int(total) for day, location_id, total in rows}
+
+
 def card_grid_page_data(db: Session, start: date, end: date) -> dict:
     """Return exactly the permanent AM/PM cards. This function never writes."""
     cards = (
@@ -199,6 +228,7 @@ def card_grid_page_data(db: Session, start: date, end: date) -> dict:
         .all()
         if surgeon_ids else []
     )
+    or_totals = _or_totals_by_day_location_sql(db, start, end)
 
     clinic_times = _clinic_times_by_day(clinic_rows)
     case_counts: dict[tuple[int, date, str, int], int] = defaultdict(int)
@@ -322,7 +352,7 @@ def card_grid_page_data(db: Session, start: date, end: date) -> dict:
                 "location_id": location.id,
                 "label": location.abbreviation or location.name,
                 "location_color": location.color or "#e2e8f0",
-                "count": sum(int(card.get("count") or 0) for card in matching_cards),
+                "count": or_totals.get((day, location.id), 0),
                 "aprima_cases": [
                     case
                     for card in matching_cards

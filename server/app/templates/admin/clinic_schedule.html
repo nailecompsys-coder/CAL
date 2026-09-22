@@ -149,13 +149,14 @@
         <td class="px-1.5 py-1.5 border border-slate-200 align-top bg-teal-50/20 min-w-[200px]">
           <div class="grid grid-cols-3 gap-1 auto-rows-fr">
             {% for slot in day_slots[:6] %}
-            {% if slot.blockId %}
-            <a href="/admin/block-or?week_offset={{ week_offset }}&block_id={{ slot.blockId }}"
+            {% if slot.blockId or slot.caseCount %}
+            <a href="/admin/block-or?week_offset={{ week_offset }}{% if slot.blockId %}&block_id={{ slot.blockId }}{% endif %}"
                class="flex flex-col justify-center items-center min-h-[58px] px-1 py-1.5 rounded-md text-center leading-none shadow-sm block-gradient border border-black/5 hover:ring-2 hover:ring-blue-300 transition gap-0.5"
                style="--block-c: {{ slot.locationColor }}; color:#1e293b"
-               title="{{ slot.pillTitle }} — edit block">
+               title="{{ slot.pillTitle }}{% if slot.blockId %} — edit block{% else %} — no Block OR row{% endif %}">
               <span class="text-[10px] font-extrabold tracking-wide w-full truncate">{{ slot.locationAbbreviation }}</span>
               <span class="text-[9px] font-semibold opacity-80 w-full">{{ slot.caseCountLabel or (slot.caseCount ~ ' cases') }}</span>
+              {% if not slot.blockId %}<span class="text-[8px] font-semibold text-amber-700">no block</span>{% endif %}
             </a>
             {% else %}
             <a href="/admin/block-or?week_offset={{ week_offset }}"

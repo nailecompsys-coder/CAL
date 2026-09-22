@@ -11,7 +11,6 @@ from sqlalchemy.orm import sessionmaker
 from app.admin_clinic_schedule_action_service import assign_clinic, copy_clinic_week
 from app.ingest_fix_service import save_ingest_placements
 from app.admin_clinic_schedule_page_service import (
-    add_unlinked_or_case_counts_to_day_slots,
     aggregate_assigned_or_blocks,
     build_clinic_grid_slots,
     clinic_fax_overlay_from_notes,
@@ -20,6 +19,7 @@ from app.admin_clinic_schedule_page_service import (
     open_block_day_slots,
     page_data,
     parse_clinic_fax_visit_segments,
+    set_or_case_counts_on_day_slots,
 )
 from app.clinic_schedule_card_guard import normalize_clinic_day_cards
 from app.migrate_location_admin_fields import normalize_office_location_name
@@ -957,7 +957,7 @@ class AdminClinicScheduleTest(unittest.TestCase):
         self.assertEqual(wg["caseCountLabel"], "3 cases")
         self.assertEqual(wg["blockId"], 51)
 
-    def test_open_block_day_slots_include_unlinked_or_cases(self):
+    def test_open_block_day_slots_use_only_real_hospital_cases(self):
         day = date(2026, 9, 16)
         location = Location(
             id=8,
@@ -972,9 +972,9 @@ class AdminClinicScheduleTest(unittest.TestCase):
                 "locationId": 8,
                 "locationAbbreviation": "AP-OR",
                 "timeLabel": "7:00-17:00",
-                "caseCount": 3,
-                "caseCountLabel": "3 cases",
-                "pillTitle": "AP-OR 7:00-17:00 · 3 cases",
+                "caseCount": 9,
+                "caseCountLabel": "9 cases",
+                "pillTitle": "AP-OR 7:00-17:00 · 9 cases",
             }]
         }
         surgical_map = {
@@ -1012,11 +1012,67 @@ class AdminClinicScheduleTest(unittest.TestCase):
             }
         }
 
-        updated = add_unlinked_or_case_counts_to_day_slots(slots, surgical_map)
+        updated = set_or_case_counts_on_day_slots(slots, surgical_map)
 
-        self.assertEqual(updated[day][0]["caseCount"], 5)
-        self.assertEqual(updated[day][0]["caseCountLabel"], "5 cases")
-        self.assertIn("5 cases", updated[day][0]["pillTitle"])
+        self.assertEqual(updated[day][0]["caseCount"], 3)
+        self.assertEqual(updated[day][0]["caseCountLabel"], "3 cases")
+        self.assertIn("3 cases", updated[day][0]["pillTitle"])
+
+    def test_open_block_day_slots_exclude_clinic_rows(self):
+        day = date(2026, 9, 23)
+        hospital = Location(
+            id=8,
+            name="Apopka OR",
+            abbreviation="AP-OR",
+            location_type="hospital",
+            is_active=True,
+        )
+        clinic = Location(
+            id=4,
+            name="Apopka Office",
+            abbreviation="AP-OV",
+            location_type="clinic",
+            is_active=True,
+        )
+        slots = {
+            day: [{
+                "locationId": 8,
+                "locationAbbreviation": "AP-OR",
+                "timeLabel": None,
+                "caseCount": 7,
+                "caseCountLabel": "7 cases",
+                "pillTitle": "AP-OR · 7 cases",
+            }]
+        }
+        surgical_map = {
+            16: {day: [
+                SurgicalCase(
+                    surgeon_id=16,
+                    date=day,
+                    start_time=time(7, 15),
+                    patient_name="OR patient",
+                    procedure="Procedure",
+                    location_id=8,
+                    location=hospital,
+                    status="scheduled",
+                ),
+                SurgicalCase(
+                    surgeon_id=16,
+                    date=day,
+                    start_time=time(8, 30),
+                    patient_name="Clinic patient",
+                    procedure="Office visit",
+                    location_id=4,
+                    location=clinic,
+                    status="scheduled",
+                ),
+            ]}
+        }
+
+        updated = set_or_case_counts_on_day_slots(slots, surgical_map)
+
+        self.assertEqual(updated[day][0]["caseCount"], 1)
+        self.assertEqual(updated[day][0]["caseCountLabel"], "1 case")
 
     def test_clinic_fax_notes_include_patient_names(self):
         notes = (

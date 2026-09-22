@@ -16,6 +16,28 @@ def _session_for_time(value: time | None) -> str:
     return "pm" if value and value >= time(12, 0) else "am"
 
 
+def _clinic_times_by_day(rows: list[ClinicSchedule]) -> dict[tuple[int, date], list[time]]:
+    result: dict[tuple[int, date], list[time]] = defaultdict(list)
+    for row in rows:
+        for segment in parse_clinic_fax_visit_segments(row.notes or ""):
+            try:
+                result[(row.surgeon_id, row.date)].append(time.fromisoformat(segment["start"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+    return result
+
+
+def _case_session(row: SurgicalCase, clinic_times: dict[tuple[int, date], list[time]]) -> str:
+    value = row.start_time
+    if value is None or not time(11, 30) <= value < time(12):
+        return _session_for_time(value)
+    prior = [slot for slot in clinic_times.get((row.surgeon_id, row.date), []) if slot < value]
+    if not prior:
+        return "am"
+    gap = value.hour * 60 + value.minute - max(slot.hour * 60 + slot.minute for slot in prior)
+    return "pm" if gap >= 30 else "am"
+
+
 def _session_is_off(day_off: DayOff, day: date, session: str) -> bool:
     segment = segment_for_date(day_off, day) or {}
     if segment.get("isFullDay", day_off.is_full_day if day_off.is_full_day is not None else True):
@@ -97,10 +119,11 @@ def card_grid_page_data(db: Session, start: date, end: date) -> dict:
         if surgeon_ids else []
     )
 
+    clinic_times = _clinic_times_by_day(clinic_rows)
     case_counts: dict[tuple[int, date, str, int], int] = defaultdict(int)
     for row in cases:
         if row.location_id:
-            case_counts[(row.surgeon_id, row.date, _session_for_time(row.start_time), row.location_id)] += 1
+            case_counts[(row.surgeon_id, row.date, _case_session(row, clinic_times), row.location_id)] += 1
     visit_counts = _clinic_visit_counts(clinic_rows)
     off_rows: dict[tuple[int, date], list[DayOff]] = defaultdict(list)
     for row in approved_days_off:

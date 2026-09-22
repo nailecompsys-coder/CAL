@@ -518,8 +518,30 @@ class FaxDocument(Base):
     external_fax_id = Column(Integer, nullable=False, unique=True)
     source_label = Column(String(255), nullable=False, default="Desk visual PNG SOT")
     source_sha256 = Column(String(64))
+    original_filename = Column(String(255))
+    source_path = Column(Text)
+    page_count = Column(Integer)
     status = Column(String(32), nullable=False, default="staged")
     created_at = Column(DateTime, server_default=func.now())
+
+    pages = relationship("FaxPage", back_populates="document", cascade="all, delete-orphan")
+
+
+class FaxPage(Base):
+    """One verified PNG and OCR result derived from an immutable fax PDF."""
+    __tablename__ = "fax_pages"
+    __table_args__ = (UniqueConstraint("fax_document_id", "page_number"),)
+
+    id = Column(Integer, primary_key=True)
+    fax_document_id = Column(Integer, ForeignKey("fax_documents.id", ondelete="CASCADE"), nullable=False)
+    page_number = Column(Integer, nullable=False)
+    image_path = Column(Text, nullable=False)
+    image_sha256 = Column(String(64), nullable=False)
+    ocr_text_path = Column(Text, nullable=False)
+    ocr_text_sha256 = Column(String(64), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    document = relationship("FaxDocument", back_populates="pages")
 
 
 class FaxIngestRun(Base):

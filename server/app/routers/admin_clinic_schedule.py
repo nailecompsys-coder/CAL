@@ -25,6 +25,13 @@ from .admin import _base, _sort_surgeons_physicians_first, _warn_redirect
 router = APIRouter(prefix="/admin")
 
 
+@router.get("/clinic-schedule_cards.html", include_in_schema=False)
+@router.get("/clinic_schedule_cards.html", include_in_schema=False)
+def clinic_schedule_template_alias(admin=Depends(get_current_admin)):
+    """The Jinja filename is not a public page; send admins to the real route."""
+    return RedirectResponse("/admin/clinic-schedule", status_code=302)
+
+
 @router.get("/clinic-schedule", response_class=HTMLResponse)
 def clinic_schedule_page(
     request: Request,

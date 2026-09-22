@@ -17,6 +17,9 @@ services:
     env_file: .env
     environment:
       TZ: America/New_York
+      CAL_FAX_DATA_DIR: /var/lib/cal/faxes
+    volumes:
+      - cal_fax_data:/var/lib/cal/faxes
     ports:
       - "127.0.0.1:3005:3005"
     networks:
@@ -33,3 +36,6 @@ networks:
     external: true
   atlas_default:
     external: true
+
+volumes:
+  cal_fax_data:

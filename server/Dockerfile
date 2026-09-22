@@ -17,10 +17,11 @@ ENV CAL_GIT_COMMIT="${GIT_COMMIT}" \
 WORKDIR /app
 
 # curl: Docker HEALTHCHECK + Tailwind CLI download; postgresql-client: pg_dump/psql for Wasabi backup/restore
+# poppler-utils + tesseract-ocr: verified fax PDF page rendering and OCR staging
 # libpq-dev and gcc are NOT needed — psycopg2-binary ships a pre-compiled wheel
 # tzdata + TZ: date.today() and cron must stay on Florida time, not UTC
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl postgresql-client tzdata \
+    curl postgresql-client tzdata poppler-utils tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
 ENV TZ=America/New_York

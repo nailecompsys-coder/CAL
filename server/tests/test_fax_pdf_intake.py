@@ -11,7 +11,7 @@ os.environ.setdefault("SECRET_KEY", "test-secret")
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.fax_pdf_intake import prepare_fax_pdf
+from app.fax_pdf_intake import cleanup_fax_derivatives, prepare_fax_pdf
 from app.models import Base, FaxDocument, FaxPage
 
 
@@ -100,6 +100,32 @@ class FaxPdfIntakeTest(unittest.TestCase):
             self.db.commit()
             with self.assertRaisesRegex(ValueError, "different immutable PDF"):
                 prepare_fax_pdf(self.db, external_fax_id=168, original_filename="fax.pdf", source=io.BytesIO(b"%PDF-1.7 second"))
+
+    def test_cleanup_removes_derivatives_but_keeps_source_pdf(self):
+        with (
+            patch("app.fax_pdf_intake._pdf_page_count", return_value=1),
+            patch("app.fax_pdf_intake._render_and_ocr", side_effect=self.fake_render),
+        ):
+            prepare_fax_pdf(
+                self.db,
+                external_fax_id=168,
+                original_filename="fax.pdf",
+                source=io.BytesIO(b"%PDF-1.7 cleanup"),
+            )
+            self.db.commit()
+
+        document = self.db.query(FaxDocument).one()
+        page = self.db.query(FaxPage).one()
+        source_path = Path(document.source_path)
+        image_path = Path(page.image_path)
+        ocr_path = Path(page.ocr_text_path)
+
+        result = cleanup_fax_derivatives(document)
+
+        self.assertEqual(result["files"], 2)
+        self.assertTrue(source_path.exists())
+        self.assertFalse(image_path.exists())
+        self.assertFalse(ocr_path.exists())
 
 
 if __name__ == "__main__":

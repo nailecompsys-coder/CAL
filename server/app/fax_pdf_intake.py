@@ -24,6 +24,36 @@ def fax_data_root() -> Path:
     return Path(os.environ.get("CAL_FAX_DATA_DIR", "/var/lib/cal/faxes")).resolve()
 
 
+def cleanup_fax_derivatives(document: FaxDocument) -> dict[str, int]:
+    """Remove reproducible PNG/OCR files while retaining the immutable PDF."""
+    root = fax_data_root()
+    removed_files = 0
+    removed_bytes = 0
+    paths = {
+        Path(path)
+        for page in document.pages
+        for path in (page.image_path, page.ocr_text_path)
+        if path
+    }
+    for path in paths:
+        resolved = path.resolve()
+        if not resolved.is_relative_to(root):
+            raise ValueError(f"Refusing to clean fax artifact outside {root}.")
+        if not resolved.is_file():
+            continue
+        removed_bytes += resolved.stat().st_size
+        resolved.unlink()
+        removed_files += 1
+
+    source_path = Path(document.source_path).resolve() if document.source_path else None
+    if source_path and source_path.is_relative_to(root):
+        for directory_name in ("pages", "ocr"):
+            directory = source_path.parent / directory_name
+            if directory.is_dir() and not any(directory.iterdir()):
+                directory.rmdir()
+    return {"files": removed_files, "bytes": removed_bytes}
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:

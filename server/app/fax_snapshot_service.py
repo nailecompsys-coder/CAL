@@ -21,6 +21,7 @@ from .models import (
     Surgeon,
     SurgicalCase,
 )
+from .fax_pdf_intake import cleanup_fax_derivatives
 from .schedule_build_backup_service import create_fax_snapshot_backup
 
 
@@ -350,6 +351,14 @@ def apply_staged_snapshot(
         }),
     ))
     db.commit()
+    cleanup = {"files": 0, "bytes": 0}
+    superseded_documents = db.query(FaxDocument).filter(
+        FaxDocument.external_fax_id <= source_fax_id,
+    ).all()
+    for fax_document in superseded_documents:
+        removed = cleanup_fax_derivatives(fax_document)
+        cleanup["files"] += removed["files"]
+        cleanup["bytes"] += removed["bytes"]
     return {
         "ok": True,
         "faxId": source_fax_id,
@@ -365,4 +374,5 @@ def apply_staged_snapshot(
         "baselineConflicts": conflicts,
         "cardsCreated": 0,
         "notificationsSent": 0,
+        "derivativesRemoved": cleanup,
     }

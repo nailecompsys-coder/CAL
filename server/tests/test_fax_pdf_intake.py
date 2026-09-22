@@ -11,7 +11,7 @@ os.environ.setdefault("SECRET_KEY", "test-secret")
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.fax_pdf_intake import cleanup_fax_derivatives, prepare_fax_pdf
+from app.fax_pdf_intake import cleanup_fax_derivatives, prepare_fax_pdf, prune_immutable_fax_sources
 from app.models import Base, FaxDocument, FaxPage
 
 
@@ -126,6 +126,30 @@ class FaxPdfIntakeTest(unittest.TestCase):
         self.assertTrue(source_path.exists())
         self.assertFalse(image_path.exists())
         self.assertFalse(ocr_path.exists())
+
+    def test_prune_keeps_only_three_newest_immutable_sources(self):
+        documents = []
+        for fax_id in (168, 181, 187, 191):
+            directory = Path(self.temp.name) / str(fax_id) / (str(fax_id) * 8)[:64]
+            directory.mkdir(parents=True)
+            source_path = directory / "source.pdf"
+            source_path.write_bytes(f"fax-{fax_id}".encode())
+            document = FaxDocument(
+                external_fax_id=fax_id,
+                source_sha256=(str(fax_id) * 8)[:64],
+                source_path=str(source_path),
+                status="applied",
+            )
+            self.db.add(document)
+            documents.append((fax_id, source_path))
+        self.db.commit()
+
+        result = prune_immutable_fax_sources(self.db, keep=3)
+
+        self.assertEqual(result["files"], 1)
+        self.assertFalse(documents[0][1].exists())
+        self.assertTrue(all(path.exists() for _, path in documents[1:]))
+        self.assertEqual(self.db.query(FaxDocument).count(), 4)
 
 
 if __name__ == "__main__":

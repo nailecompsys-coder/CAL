@@ -21,7 +21,7 @@ from .models import (
     Surgeon,
     SurgicalCase,
 )
-from .fax_pdf_intake import cleanup_fax_derivatives
+from .fax_pdf_intake import cleanup_fax_derivatives, prune_immutable_fax_sources
 from .schedule_build_backup_service import create_fax_snapshot_backup
 
 
@@ -359,6 +359,7 @@ def apply_staged_snapshot(
         removed = cleanup_fax_derivatives(fax_document)
         cleanup["files"] += removed["files"]
         cleanup["bytes"] += removed["bytes"]
+    source_cleanup = prune_immutable_fax_sources(db, keep=3)
     return {
         "ok": True,
         "faxId": source_fax_id,
@@ -375,4 +376,5 @@ def apply_staged_snapshot(
         "cardsCreated": 0,
         "notificationsSent": 0,
         "derivativesRemoved": cleanup,
+        "immutableSourcesRemoved": source_cleanup,
     }

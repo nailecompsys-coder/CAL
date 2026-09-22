@@ -54,6 +54,34 @@ def cleanup_fax_derivatives(document: FaxDocument) -> dict[str, int]:
     return {"files": removed_files, "bytes": removed_bytes}
 
 
+def prune_immutable_fax_sources(db: Session, *, keep: int = 3) -> dict[str, int]:
+    """Retain only the newest immutable source PDFs while preserving DB audit rows."""
+    if keep < 1:
+        raise ValueError("At least one immutable fax source must be retained.")
+    root = fax_data_root()
+    documents = db.query(FaxDocument).filter(
+        FaxDocument.source_path.isnot(None),
+        FaxDocument.source_sha256.isnot(None),
+    ).order_by(FaxDocument.external_fax_id.desc()).all()
+    removed_files = 0
+    removed_bytes = 0
+    for document in documents[keep:]:
+        source_path = Path(document.source_path).resolve()
+        if not source_path.is_relative_to(root):
+            raise ValueError(f"Refusing to prune fax source outside {root}.")
+        if source_path.is_file():
+            removed_bytes += source_path.stat().st_size
+            source_path.unlink()
+            removed_files += 1
+        parent = source_path.parent
+        if parent.is_dir() and not any(parent.iterdir()):
+            parent.rmdir()
+        fax_dir = parent.parent
+        if fax_dir.is_dir() and fax_dir != root and not any(fax_dir.iterdir()):
+            fax_dir.rmdir()
+    return {"files": removed_files, "bytes": removed_bytes}
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:

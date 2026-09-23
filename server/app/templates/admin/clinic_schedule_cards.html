@@ -95,10 +95,9 @@
   </div>
   <div class="px-3 py-3 overflow-y-auto flex-1 min-h-0">
     {% if selected_roster %}
-	      {% for case in selected_roster.cases %}<div class="border-b border-slate-100 py-2 text-sm text-slate-700"><span class="font-mono text-xs font-semibold">{{ case.start_time.strftime('%I:%M %p') if case.start_time else '—' }}</span> · {{ case.patient_name }}{% if selected_roster.show_surgeon and case.surgeon %} · {{ case.surgeon.initials }}{% endif %}{% if case.room_text %} · {{ case.room_text }}{% endif %}</div>{% endfor %}
-	      {% for case in selected_roster.aprima_cases %}<div class="border-b border-slate-100 py-2 text-sm text-slate-700"><span class="font-mono text-xs font-semibold">{{ case.start }}</span> · {{ case.label }}{% if selected_roster.show_surgeon and case.surgeon_initials %} · {{ case.surgeon_initials }}{% endif %}{% if case.room %} · {{ case.room }}{% endif %}</div>{% endfor %}
+	      {% for case in selected_roster.cases %}<div class="border-b border-slate-100 py-2 text-sm text-slate-700"><span class="font-mono text-xs font-semibold">{{ case.start }}</span> · {{ case.label }}{% if selected_roster.show_surgeon and case.surgeon_initials %} · {{ case.surgeon_initials }}{% endif %}{% if case.room %} · {{ case.room }}{% endif %}</div>{% endfor %}
 	      {% for visit in selected_roster.visits %}<div class="border-b border-slate-100 py-2 text-sm text-slate-700"><span class="font-mono text-xs font-semibold">{{ visit.start }}</span> · {{ visit.label }}</div>{% endfor %}
-	      {% if not selected_roster.cases and not selected_roster.aprima_cases and not selected_roster.visits %}<p class="text-sm text-slate-500 py-8 text-center">No roster entries.</p>{% endif %}
+	      {% if not selected_roster.cases and not selected_roster.visits %}<p class="text-sm text-slate-500 py-8 text-center">No roster entries.</p>{% endif %}
     {% endif %}
   </div>
 </div>

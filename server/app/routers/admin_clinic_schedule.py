@@ -15,7 +15,7 @@ from ..admin_surgical_schedule_service import week_offset_for_date
 from ..auth import get_current_admin
 from ..database import get_db
 from ..jinja_env import templates
-from ..models import ScheduleCard, Surgeon, SurgicalCase
+from ..models import ScheduleCard, Surgeon
 from ..surgeon_visibility import surgeon_is_visible
 from ..schedule_write_freeze import require_schedule_write_enabled
 from ..schedule_card_projection_service import card_grid_page_data
@@ -66,19 +66,13 @@ def clinic_schedule_page(
                 None,
             )
             if header:
-                cases = db.query(SurgicalCase).filter(
-                    SurgicalCase.date == selected_day,
-                    SurgicalCase.location_id == roster_location,
-                    SurgicalCase.status != "cancelled",
-                ).order_by(SurgicalCase.start_time).all()
                 selected_roster = {
                     "label": header["label"],
                     "surgeon": "All surgeons",
                     "date": selected_day,
                     "session": "OR TOTAL",
-                    "cases": cases,
+                    "cases": header["roster_cases"],
                     "visits": [],
-                    "aprima_cases": header["aprima_cases"],
                     "show_surgeon": True,
                 }
     elif roster_card:
@@ -87,20 +81,13 @@ def clinic_schedule_page(
             projected = data["grid"].get(card.surgeon_id, {}).get(card.date, {}).get(card.session)
             location_id = projected.get("location_id") if projected else card.effective_location_id
             if location_id:
-                cases = db.query(SurgicalCase).filter(
-                    SurgicalCase.surgeon_id == card.surgeon_id,
-                    SurgicalCase.date == card.date,
-                    SurgicalCase.location_id == location_id,
-                    SurgicalCase.status != "cancelled",
-                ).order_by(SurgicalCase.start_time).all()
                 selected_roster = {
                     "label": projected["label"] if projected else "NA",
                     "surgeon": card.surgeon.full_name,
                     "date": card.date,
                     "session": card.session.upper(),
-                    "cases": cases,
+                    "cases": projected.get("roster_cases", []) if projected else [],
                     "visits": projected.get("roster_visits", []) if projected else [],
-                    "aprima_cases": projected.get("roster_aprima_cases", []) if projected else [],
                     "show_surgeon": False,
                 }
     card_surgeon_ids = set(data["grid"])

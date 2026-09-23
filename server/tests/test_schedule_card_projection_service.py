@@ -53,9 +53,11 @@ class ScheduleCardProjectionServiceTest(unittest.TestCase):
             self.assertEqual(set(monday), {"am", "pm"})
             self.assertEqual(monday["am"]["label"], "MN-OR")
             self.assertEqual(monday["am"]["count_label"], "1 case")
+            self.assertEqual(len(monday["am"]["roster_cases"]), 1)
             self.assertTrue(monday["pm"]["is_na"])
             header = payload["hospital_headers"][date(2026, 9, 14)]
             self.assertEqual([(row["label"], row["count"]) for row in header], [("MN-OR", 1)])
+            self.assertEqual(len(header[0]["roster_cases"]), 1)
         finally:
             db.close()
 

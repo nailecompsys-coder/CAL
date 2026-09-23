@@ -151,7 +151,7 @@ def card_grid_page_data(db: Session, start: date, end: date) -> dict:
             "location_color": location.color if location else "#e2e8f0",
             "location_type": "hospital" if is_hospital else "clinic",
             "roster_visits": roster_visits,
-            "roster_aprima_cases": roster_cases,
+            "roster_cases": roster_cases,
             "has_aprima": any(row["source"] == "aprima" for row in activity_rows),
         }
 
@@ -180,8 +180,8 @@ def card_grid_page_data(db: Session, start: date, end: date) -> dict:
                 "label": location.abbreviation or location.name,
                 "location_color": location.color or "#e2e8f0",
                 "count": or_totals.get((day, location.id), 0),
-                "aprima_cases": [
-                    case for card in matching_cards for case in card.get("roster_aprima_cases", [])
+                "roster_cases": [
+                    case for card in matching_cards for case in card.get("roster_cases", [])
                 ],
             })
         hospital_headers[day] = slots

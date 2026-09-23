@@ -1,6 +1,6 @@
 import os
 import unittest
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from unittest.mock import patch
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
@@ -96,6 +96,13 @@ class AprimaCacheServiceTest(unittest.TestCase):
                 kind="patient",
                 date=date(2026, 6, 1),  # outside Jul 9..Jul 30 window
                 surgeon_initials="JB",
+                start_time=time(9, 0),
+                end_time=time(9, 30),
+                patient_name="Office Pt",
+                activity_type="clinic",
+                appointment_type="Office Visit",
+                service_site="Clermont Office",
+                room_text="1",
                 content_hash="old",
                 payload_json="{}",
                 synced_at=datetime.now(timezone.utc).replace(tzinfo=None),
@@ -147,6 +154,13 @@ class AprimaCacheServiceTest(unittest.TestCase):
                 kind="patient",
                 date=date(2026, 7, 9),
                 surgeon_initials="JB",
+                start_time=time(9, 0),
+                end_time=time(9, 30),
+                patient_name="Cached",
+                activity_type="clinic",
+                appointment_type="Office Visit",
+                service_site="Clermont Office",
+                room_text="1",
                 content_hash="x",
                 payload_json=(
                     '{"id":"c1","date":"2026-07-09","start":"09:00","end":"09:30",'
@@ -191,6 +205,13 @@ class AprimaCacheServiceTest(unittest.TestCase):
                 kind="patient",
                 date=date(2026, 7, 9),
                 surgeon_initials="JB",
+                start_time=time(9, 0),
+                end_time=time(9, 30),
+                patient_name="Office Pt",
+                activity_type="clinic",
+                appointment_type="Office Visit",
+                service_site="Clermont Office",
+                room_text="1",
                 content_hash="o",
                 payload_json=(
                     '{"id":"office1","date":"2026-07-09","start":"09:00","end":"09:30",'
@@ -208,6 +229,14 @@ class AprimaCacheServiceTest(unittest.TestCase):
                 kind="patient",
                 date=date(2026, 7, 10),
                 surgeon_initials="JB",
+                start_time=time(7, 30),
+                end_time=time(9, 0),
+                patient_name="Sx Pt",
+                activity_type="surgical",
+                appointment_type="Surgery",
+                reason_text="Hernia",
+                service_site="AHWG-Outpt",
+                room_text="OR 2",
                 content_hash="s",
                 payload_json=(
                     '{"id":"sx1","date":"2026-07-10","start":"07:30","end":"09:00",'

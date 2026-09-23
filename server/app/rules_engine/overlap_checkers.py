@@ -117,62 +117,57 @@ def check_overlap_call(
     On-call does not conflict with an OR block or a surgical case — operating while on
     call is expected. Overlaps with day-off / clinic / meeting are still surfaced.
     """
-    from ..models import CallCoverage, CallRotation
+    from ..models import CallDailyAssignment
 
     target = overlap_target(target_entity, start_date, end_date)
     target_start, target_end = target.start, target.end
 
-    rotations = (
-        db.query(CallRotation)
-        .options(joinedload(CallRotation.coverages), joinedload(CallRotation.call_group))
+    assignments = (
+        db.query(CallDailyAssignment)
+        .options(joinedload(CallDailyAssignment.call_group), joinedload(CallDailyAssignment.location))
         .filter(
-            CallRotation.date >= target_start,
-            CallRotation.date <= target_end,
+            CallDailyAssignment.surgeon_id == surgeon_id,
+            CallDailyAssignment.date >= target_start,
+            CallDailyAssignment.date <= target_end,
         )
+        .order_by(CallDailyAssignment.date, CallDailyAssignment.location_id)
         .all()
     )
-    for r in rotations:
-        if _exclude_entity(exclude_entity, "call_rotation", r.id):
-            continue
-        active = next((c for c in (r.coverages or []) if c.status == "active"), None)
-        effective_id = active.covering_surgeon_id if active else r.surgeon_id
-        if effective_id != surgeon_id:
+    for assignment in assignments:
+        if _exclude_entity(exclude_entity, "call_rotation", assignment.call_rotation_id):
             continue
         # Full-day call commitment unless target is a partial day-off that ends before overnight call
         call_range = (
-            datetime.combine(r.date, time(0, 0)),
-            datetime.combine(r.date, time(0, 0)) + timedelta(days=1),
+            datetime.combine(assignment.date, time(0, 0)),
+            datetime.combine(assignment.date, time(0, 0)) + timedelta(days=1),
         )
         if should_skip_time_overlap(
             target,
-            r.date,
+            assignment.date,
             call_range,
             {"day_off", "clinic_schedule", "surgical_case", "meeting", "or_block", "call_rotation"},
         ):
             continue
         if _operating_while_on_call(target_entity):
             continue
-        group = r.call_group.name if r.call_group else "call"
-        if active and active.covering_surgeon_id == surgeon_id:
-            msg = f"Covering on-call ({group}) on {r.date.strftime('%b %-d')}"
+        group = assignment.call_group.name if assignment.call_group else "call"
+        location = assignment.location.abbreviation if assignment.location else "location"
+        if assignment.call_coverage_id:
+            msg = f"Covering on-call ({group}, {location}) on {assignment.date.strftime('%b %-d')}"
             entity_type = "call_coverage"
-            entity_id = active.id
+            entity_id = assignment.call_coverage_id
         else:
-            msg = f"Assigned on-call ({group}) on {r.date.strftime('%b %-d')}"
+            msg = f"Assigned on-call ({group}, {location}) on {assignment.date.strftime('%b %-d')}"
             entity_type = "call_rotation"
-            entity_id = r.id
+            entity_id = assignment.call_rotation_id
         yield Conflict(
             rule_id="OVERLAP_CALL",
             surgeon_id=surgeon_id,
-            date=r.date,
+            date=assignment.date,
             message=msg,
             conflicting_entity_type=entity_type,
             conflicting_entity_id=entity_id,
         )
-
-    # Covering surgeon may also have coverage rows whose rotation wasn't loaded above
-    # (already covered via join). Extra: coverages where covering_surgeon_id matches
-    # but rotation.surgeon_id differs — already handled. Done.
 
 
 def check_overlap_unavailable(

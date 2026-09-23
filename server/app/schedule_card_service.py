@@ -119,6 +119,8 @@ def materialize_master_schedule_cards(
                     cards_created += 1
         current_monday += timedelta(days=7)
     db.flush()
+    from .day_off_card_normalization import sync_day_off_links_for_range
+    sync_day_off_links_for_range(db, start, end)
     return {
         "weeksCreated": weeks_created,
         "cardsCreated": cards_created,

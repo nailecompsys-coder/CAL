@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, time, timedelta
+from datetime import date, time
 
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session, joinedload
 
-from .admin_clinic_schedule_page_service import parse_clinic_fax_visit_segments
-from .models import ClinicSchedule, DayOff, Surgeon, SurgicalCase
-from .native_dayoff_support import segment_for_date
+from .models import ClinicSchedule, DayOff, DayOffScheduleCard, ScheduleCard, ScheduleCardActivity, Surgeon
 from .surgeon_visibility import surgeon_is_visible
 
 
@@ -61,38 +60,34 @@ def day_off_status_map(
 ) -> dict[tuple[int, date], dict]:
     """(surgeon_id, day) -> {status, day_off_id, reason}. Prefer approved over pending."""
     rows = (
-        db.query(DayOff)
+        db.query(DayOff, ScheduleCard)
+        .join(DayOffScheduleCard, DayOffScheduleCard.day_off_id == DayOff.id)
+        .join(ScheduleCard, ScheduleCard.id == DayOffScheduleCard.schedule_card_id)
         .options(joinedload(DayOff.surgeon))
         .filter(
-            DayOff.start_date <= end_date,
-            DayOff.end_date >= start_date,
+            ScheduleCard.date >= start_date,
+            ScheduleCard.date <= end_date,
             DayOff.status.in_(("approved", "pending")),
         )
         .all()
     )
     out: dict[tuple[int, date], dict] = {}
-    for row in rows:
+    for row, card in rows:
         if not surgeon_is_visible(row.surgeon):
             continue
-        current = max(row.start_date, start_date)
-        last = min(row.end_date, end_date)
-        while current <= last:
-            key = (row.surgeon_id, current)
-            existing = out.get(key)
-            # Prefer approved; keep earliest pending if no approved.
-            if existing and existing["status"] == "approved":
-                current += timedelta(days=1)
-                continue
-            if row.status == "approved" or not existing:
-                segment = segment_for_date(row, current) or {}
-                out[key] = {
-                    "status": row.status,
-                    "day_off_id": row.id,
-                    "reason": row.reason,
-                    "surgeon": row.surgeon,
-                    "sessions": day_off_sessions(segment),
-                }
-            current += timedelta(days=1)
+        key = (row.surgeon_id, card.date)
+        existing = out.get(key)
+        if existing and existing["status"] == "approved":
+            existing["sessions"].add(card.session)
+            continue
+        if row.status == "approved" or not existing:
+            out[key] = {
+                "status": row.status,
+                "day_off_id": row.id,
+                "reason": row.reason,
+                "surgeon": row.surgeon,
+                "sessions": {card.session},
+            }
     return out
 
 
@@ -134,55 +129,6 @@ def schedule_matches_off_session(schedule: ClinicSchedule, off_info: dict | None
     return schedule_session in sessions
 
 
-def clinic_patient_count_for_schedules(schedules: list[ClinicSchedule]) -> int:
-    total = 0
-    for schedule in schedules:
-        if (schedule.assignment_type or "assigned").lower() == "off":
-            continue
-        total += len(parse_clinic_fax_visit_segments(schedule.notes or ""))
-    return total
-
-
-def aprima_patient_counts(
-    db: Session,
-    start_date: date,
-    end_date: date,
-    surgeons_by_id: dict[int, Surgeon],
-) -> dict[tuple[int, date], int]:
-    """Count non-surgery Aprima appointments per surgeon/day (cache-first, never raises)."""
-    counts: dict[tuple[int, date], int] = {}
-    try:
-        from .aprima_cache_service import patient_appointments_for_api
-        from .aprima_schedule_service import appointment_belongs_to_surgeon, is_surgery_appointment
-    except Exception:  # noqa: BLE001
-        return counts
-    try:
-        payload = patient_appointments_for_api(db, start_date, end_date, surgeon=None)
-    except Exception:  # noqa: BLE001
-        return counts
-    rows = payload.get("appointments") or []
-    if not rows or not surgeons_by_id:
-        return counts
-    for row in rows:
-        if is_surgery_appointment(row):
-            continue
-        day_raw = (row.get("date") or "")[:10]
-        if not day_raw:
-            continue
-        try:
-            day = date.fromisoformat(day_raw)
-        except ValueError:
-            continue
-        if day < start_date or day > end_date:
-            continue
-        for surgeon in surgeons_by_id.values():
-            if appointment_belongs_to_surgeon(row, surgeon):
-                key = (surgeon.id, day)
-                counts[key] = counts.get(key, 0) + 1
-                break
-    return counts
-
-
 def workload_maps(
     db: Session,
     start_date: date,
@@ -192,68 +138,35 @@ def workload_maps(
     surgical_map: dict | None = None,
     or_case_map: dict | None = None,
 ) -> dict[tuple[int, date], OffWorkload]:
-    """Aggregate cases + clinic patients for surgeon/day keys."""
-    if sched_map is None:
-        schedules = (
-            db.query(ClinicSchedule)
-            .filter(ClinicSchedule.date >= start_date, ClinicSchedule.date <= end_date)
-            .all()
+    """Aggregate cases and visits with one SQL GROUP BY over normalized rows."""
+    rows = (
+        db.query(
+            ScheduleCardActivity.surgeon_id,
+            ScheduleCardActivity.activity_date,
+            func.count(func.distinct(case(
+                (ScheduleCardActivity.activity_type == "surgical", ScheduleCardActivity.identity_key),
+                else_=None,
+            ))).label("case_count"),
+            func.count(func.distinct(case(
+                (ScheduleCardActivity.activity_type == "clinic", ScheduleCardActivity.identity_key),
+                else_=None,
+            ))).label("patient_count"),
         )
-        sched_map = {}
-        for schedule in schedules:
-            sched_map.setdefault(schedule.surgeon_id, {}).setdefault(schedule.date, []).append(schedule)
-
-    if surgical_map is None:
-        cases = (
-            db.query(SurgicalCase)
-            .filter(
-                SurgicalCase.date >= start_date,
-                SurgicalCase.date <= end_date,
-                SurgicalCase.status != "cancelled",
-            )
-            .all()
+        .filter(
+            ScheduleCardActivity.activity_date >= start_date,
+            ScheduleCardActivity.activity_date <= end_date,
+            ScheduleCardActivity.is_active == True,  # noqa: E712
         )
-        surgical_map = {}
-        for case in cases:
-            surgical_map.setdefault(case.surgeon_id, {}).setdefault(case.date, []).append(case)
-
-    surgeon_ids = set(sched_map.keys()) | set(surgical_map.keys())
-    if or_case_map:
-        surgeon_ids |= set(or_case_map.keys())
-    surgeons_by_id = {}
-    for sid in surgeon_ids:
-        surgeon = db.get(Surgeon, sid)
-        if surgeon and surgeon_is_visible(surgeon):
-            surgeons_by_id[sid] = surgeon
-    aprima_counts = aprima_patient_counts(db, start_date, end_date, surgeons_by_id)
-
-    out: dict[tuple[int, date], OffWorkload] = {}
-    all_days = []
-    current = start_date
-    while current <= end_date:
-        all_days.append(current)
-        current += timedelta(days=1)
-
-    for surgeon_id in surgeon_ids | {k[0] for k in aprima_counts}:
-        for day in all_days:
-            schedules = (sched_map.get(surgeon_id) or {}).get(day, []) or []
-            cases = (surgical_map.get(surgeon_id) or {}).get(day, []) or []
-            or_cases = 0
-            if or_case_map:
-                or_cases = int((or_case_map.get(surgeon_id) or {}).get(day, 0) or 0)
-            patients = clinic_patient_count_for_schedules(schedules) + aprima_counts.get((surgeon_id, day), 0)
-            case_count = len(cases) + or_cases
-            # SurgicalCase rows already cover live OR cases; avoid double-count when
-            # or_case_map is derived from the same cases. Prefer max of live cases vs OR pill.
-            if cases and or_cases:
-                case_count = max(len(cases), or_cases)
-            elif cases:
-                case_count = len(cases)
-            else:
-                case_count = or_cases
-            if case_count or patients or schedules:
-                out[(surgeon_id, day)] = OffWorkload(case_count=case_count, patient_count=patients)
-    return out
+        .group_by(ScheduleCardActivity.surgeon_id, ScheduleCardActivity.activity_date)
+        .all()
+    )
+    return {
+        (row.surgeon_id, row.activity_date): OffWorkload(
+            case_count=int(row.case_count or 0),
+            patient_count=int(row.patient_count or 0),
+        )
+        for row in rows
+    }
 
 
 def detect_off_conflicts(

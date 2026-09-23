@@ -1,7 +1,6 @@
 import os
 import unittest
 from datetime import date, time
-from unittest.mock import patch
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
@@ -13,7 +12,8 @@ from app.admin_dashboard_stats_service import (
     dashboard_today_volume_stats,
     surgical_cases_today_count,
 )
-from app.models import Base, ClinicSchedule, Location, Surgeon, SurgicalCase
+from app.models import Base, Location, ScheduleCard, ScheduleCardActivity, Surgeon
+from app.schedule_card_service import materialize_master_schedule_cards
 
 
 class AdminDashboardStatsTest(unittest.TestCase):
@@ -46,33 +46,29 @@ class AdminDashboardStatsTest(unittest.TestCase):
             loc = Location(name="WG OR", abbreviation="WG-OR", location_type="hospital", is_active=True)
             db.add(loc)
             db.flush()
+            db.commit()
+            materialize_master_schedule_cards(db, start=self.day, end=date(2026, 7, 24))
+            cards = {
+                row.date: row for row in db.query(ScheduleCard).filter_by(surgeon_id=surgeon.id, session="am").all()
+            }
             db.add_all([
-                SurgicalCase(
-                    surgeon_id=surgeon.id,
-                    date=self.day,
-                    start_time=time(8, 0),
-                    patient_name="A, PATIENT",
-                    procedure="ORIF",
-                    location_id=loc.id,
-                    status="scheduled",
+                ScheduleCardActivity(
+                    schedule_card_id=cards[self.day].id, surgeon_id=surgeon.id, location_id=loc.id,
+                    activity_date=self.day, session="am", activity_type="surgical", start_time=time(8),
+                    patient_name="A, Patient", source_system="test", source_record_key="a",
+                    identity_key="apatient|08:00:00|surgical", is_active=True,
                 ),
-                SurgicalCase(
-                    surgeon_id=surgeon.id,
-                    date=self.day,
-                    start_time=time(9, 0),
-                    patient_name="B, PATIENT",
-                    procedure="Scope",
-                    location_id=loc.id,
-                    status="cancelled",
+                ScheduleCardActivity(
+                    schedule_card_id=cards[self.day].id, surgeon_id=surgeon.id, location_id=loc.id,
+                    activity_date=self.day, session="am", activity_type="surgical", start_time=time(9),
+                    patient_name="B, Patient", source_system="test", source_record_key="b",
+                    identity_key="bpatient|09:00:00|surgical", is_active=False,
                 ),
-                SurgicalCase(
-                    surgeon_id=surgeon.id,
-                    date=date(2026, 7, 24),
-                    start_time=time(8, 0),
-                    patient_name="C, PATIENT",
-                    procedure="ORIF",
-                    location_id=loc.id,
-                    status="scheduled",
+                ScheduleCardActivity(
+                    schedule_card_id=cards[date(2026, 7, 24)].id, surgeon_id=surgeon.id, location_id=loc.id,
+                    activity_date=date(2026, 7, 24), session="am", activity_type="surgical", start_time=time(8),
+                    patient_name="C, Patient", source_system="test", source_record_key="c",
+                    identity_key="cpatient|08:00:00|surgical", is_active=True,
                 ),
             ])
             db.commit()
@@ -80,31 +76,29 @@ class AdminDashboardStatsTest(unittest.TestCase):
         finally:
             db.close()
 
-    @patch("app.admin_dashboard_stats_service.patient_appointments_for_api")
-    def test_clinic_visits_sum_aprima_non_surgery_and_fax_segments(self, mock_api):
-        mock_api.return_value = {
-            "appointments": [
-                {"appointmentType": "Office Visit", "serviceSite": "Apopka Clinic"},
-                {"appointmentType": "Surgery", "serviceSite": "AHWG-Outpt"},
-                {"appointmentType": "Follow Up", "serviceSite": "Minneola Clinic"},
-            ]
-        }
+    def test_clinic_visits_count_distinct_normalized_rows(self):
         db = self.Session()
         try:
             surgeon = self._surgeon(db)
             clinic = Location(name="WG Clinic", abbreviation="WG", location_type="clinic", is_active=True)
             db.add(clinic)
             db.flush()
-            db.add(ClinicSchedule(
-                surgeon_id=surgeon.id,
-                location_id=clinic.id,
-                date=self.day,
-                session="am",
-                assignment_type="assigned",
-                notes="Desk fax 13:00 NIEVES, ROSA; 13:10 PINDER, JOE",
-            ))
             db.commit()
-            # 2 Aprima clinic + 2 fax segments; Surgery type excluded
+            materialize_master_schedule_cards(db, start=self.day, end=self.day)
+            card = db.query(ScheduleCard).filter_by(
+                surgeon_id=surgeon.id, date=self.day, session="am"
+            ).one()
+            rows = []
+            for index, patient in enumerate(("Nieves, Rosa", "Pinder, Joe", "Third, Patient", "Fourth, Patient")):
+                rows.append(ScheduleCardActivity(
+                    schedule_card_id=card.id, surgeon_id=surgeon.id, location_id=clinic.id,
+                    activity_date=self.day, session="am", activity_type="clinic",
+                    start_time=time(8, index * 10), patient_name=patient,
+                    source_system="test", source_record_key=f"clinic-{index}",
+                    identity_key=f"patient{index}|08:{index * 10:02d}:00|clinic",
+                ))
+            db.add_all(rows)
+            db.commit()
             self.assertEqual(clinic_visits_today_count(db, self.day), 4)
             stats = dashboard_today_volume_stats(db, self.day)
             self.assertEqual(stats["clinic_visits_today"], 4)

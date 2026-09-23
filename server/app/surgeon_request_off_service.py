@@ -169,6 +169,9 @@ def submit_request_off(db: Session, surgeon: Surgeon, start_date: str, end_date:
     db.add(dayoff)
     db.commit()
     db.refresh(dayoff)
+    from .day_off_card_normalization import sync_day_off_card_links
+    sync_day_off_card_links(db, dayoff)
+    db.commit()
     purge_exact_pending_duplicates(db, surgeon.id, start, end, keep_id=dayoff.id)
     db.refresh(dayoff)
     findings = store_dayoff_findings(db, dayoff)

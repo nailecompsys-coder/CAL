@@ -327,6 +327,8 @@ def dismiss_parked_case(db: Session, *, case_id: int) -> bool:
     if case is None:
         return False
     case.status = "cancelled"
+    from .schedule_activity_normalization import normalize_surgical_case_card
+    normalize_surgical_case_card(db, case)
     _clear_case_ingest_notifications(db, case_id=case_id)
     db.commit()
     return True

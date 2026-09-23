@@ -117,14 +117,15 @@ class CallCoverageOverlapTest(unittest.TestCase):
         from app.rules_engine.overlap_checkers import check_overlap_call
 
         day = date.today() + timedelta(days=10)
-        coverage = SimpleNamespace(id=9, status="active", covering_surgeon_id=22)
-        rotation = SimpleNamespace(
+        assignment = SimpleNamespace(
             id=1,
             surgeon_id=16,
             date=day,
             call_group_id=1,
             call_group=SimpleNamespace(name="Winter Garden"),
-            coverages=[coverage],
+            location=SimpleNamespace(abbreviation="WG"),
+            call_rotation_id=1,
+            call_coverage_id=9,
         )
         db = MagicMock()
 
@@ -132,20 +133,16 @@ class CallCoverageOverlapTest(unittest.TestCase):
             query = MagicMock()
             query.options.return_value = query
             query.filter.return_value = query
-            # First call is CallRotation; later CallGroupLocation
+            query.order_by.return_value = query
             if not hasattr(query_any, "n"):
                 query_any.n = 0
             query_any.n += 1
-            if query_any.n == 1:
-                query.all.return_value = [rotation]
-            else:
-                query.all.return_value = []
+            query.all.return_value = [assignment] if query_any.n == 1 else []
             return query
 
         db.query.side_effect = query_any
 
         covering = list(check_overlap_call(22, day, day, db, {}, None, {"type": "day_off", "start_date": day, "end_date": day, "is_full_day": True, "segments": []}))
-        query_any.n = 0
         original = list(check_overlap_call(16, day, day, db, {}, None, {"type": "day_off", "start_date": day, "end_date": day, "is_full_day": True, "segments": []}))
         self.assertEqual(len(covering), 1)
         self.assertIn("Covering on-call", covering[0].message)
@@ -190,6 +187,8 @@ class CallCoverageOverlapTest(unittest.TestCase):
                 CallRotation(surgeon_id=surgeon.id, call_group_id=group.id, date=day),
             ])
             db.commit()
+            from app.call_assignment_normalization import backfill_call_daily_assignments
+            backfill_call_daily_assignments(db)
 
             same = list(
                 check_overlap_call(

@@ -37,6 +37,7 @@ def assign_rotation(
     from_surgeon_id = existing.surgeon_id if existing else None
     if existing:
         existing.surgeon_id = surgeon_id
+        rotation = existing
         rotation_id = existing.id
     else:
         rotation = CallRotation(
@@ -48,6 +49,9 @@ def assign_rotation(
         db.add(rotation)
         db.flush()
         rotation_id = rotation.id
+
+    from .call_assignment_normalization import sync_call_rotation
+    sync_call_rotation(db, rotation)
 
     if from_surgeon_id != surgeon_id:
         log_call_schedule_change(
@@ -113,12 +117,16 @@ def copy_call_week(db: Session, source_offset: int) -> int:
                 CallRotation.call_group_id == rotation.call_group_id,
             ).first()
             if not existing:
-                db.add(CallRotation(
+                new_rotation = CallRotation(
                     surgeon_id=rotation.surgeon_id,
                     date=destination_day,
                     rotation_type="primary",
                     call_group_id=rotation.call_group_id,
-                ))
+                )
+                db.add(new_rotation)
+                db.flush()
+                from .call_assignment_normalization import sync_call_rotation
+                sync_call_rotation(db, new_rotation)
                 copied += 1
     db.commit()
     return copied

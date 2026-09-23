@@ -74,6 +74,9 @@ def create_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequ
     db.add(row)
     db.commit()
     db.refresh(row)
+    from .day_off_card_normalization import sync_day_off_card_links
+    sync_day_off_card_links(db, row)
+    db.commit()
     purge_exact_pending_duplicates(
         db,
         surgeon.id,
@@ -159,6 +162,9 @@ def update_native_request_off(db: Session, surgeon: Surgeon, dayoff_id: int, pay
     row.admin_note = None
     db.commit()
     db.refresh(row)
+    from .day_off_card_normalization import sync_day_off_card_links
+    sync_day_off_card_links(db, row)
+    db.commit()
     log_schedule_change(
         db,
         event_type="day_off_updated",

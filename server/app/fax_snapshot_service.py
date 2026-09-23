@@ -348,11 +348,14 @@ def apply_staged_snapshot(
         case.patient_name = first.patient_name
         case.start_time = first.start_time
         case.location_id = location_id
+        case.schedule_card_id = cards[(primary_id, first.case_date, first.session)].id
         case.room_text = (first.room_text or "").upper()
         case.procedure = max((row.procedure or "" for row in group), key=len, default="") or case.procedure or "TBD"
         case.status = "scheduled"
         case.or_block_instance_id = None
         case.notes = _fax_note(case.notes, source_fax_id)
+        from .schedule_activity_normalization import normalize_surgical_case_card
+        normalize_surgical_case_card(db, case)
         kept_case_ids.add(case.id)
         if assistant_id:
             assisted += 1
@@ -365,10 +368,14 @@ def apply_staged_snapshot(
             continue
         case.status = "cancelled"
         case.notes = _fax_note(case.notes, source_fax_id)
+        from .schedule_activity_normalization import normalize_surgical_case_card
+        normalize_surgical_case_card(db, case)
         cancelled += 1
 
     run.status = "applied"
     document.status = "applied"
+    from .schedule_activity_normalization import sync_applied_fax_clinic_activities
+    sync_applied_fax_clinic_activities(db, run)
     db.add(ScheduleChangeEvent(
         event_type="fax_daily_snapshot_applied",
         surgeon_id=None,

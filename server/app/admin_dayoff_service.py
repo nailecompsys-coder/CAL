@@ -193,6 +193,9 @@ def add_approved_dayoff(
     db.add(dayoff)
     db.commit()
     db.refresh(dayoff)
+    from .day_off_card_normalization import sync_day_off_card_links
+    sync_day_off_card_links(db, dayoff)
+    db.commit()
     surgeon = db.get(Surgeon, surgeon_id)
     log_schedule_change(
         db,
@@ -222,6 +225,8 @@ def approve_dayoff(db: Session, dayoff_id: int, approved_by: int) -> list[str] |
         return None
     dayoff.status = "approved"
     dayoff.approved_by = approved_by
+    from .day_off_card_normalization import sync_day_off_card_links
+    sync_day_off_card_links(db, dayoff)
     surgeon = db.get(Surgeon, dayoff.surgeon_id)
     log_schedule_change(
         db,

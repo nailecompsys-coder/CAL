@@ -283,6 +283,7 @@ class CallGroupLocation(Base):
 
 class CallRotation(Base):
     __tablename__ = "call_rotations"
+    __table_args__ = (UniqueConstraint("date", "call_group_id"),)
     id = Column(Integer, primary_key=True)
     call_group_id = Column(Integer, ForeignKey("call_groups.id"), nullable=True)  # nullable for migration
     surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=True)  # null = NO call
@@ -320,6 +321,30 @@ class CallCoverage(Base):
     original_surgeon = relationship("Surgeon", foreign_keys=[original_surgeon_id])
     covering_surgeon = relationship("Surgeon", foreign_keys=[covering_surgeon_id])
     requested_by_surgeon = relationship("Surgeon", foreign_keys=[requested_by_surgeon_id])
+
+
+class CallDailyAssignment(Base):
+    """Canonical effective call assignment: one relational row per day and location."""
+    __tablename__ = "call_daily_assignments"
+    __table_args__ = (UniqueConstraint("date", "location_id"),)
+
+    id = Column(Integer, primary_key=True)
+    date = Column(Date, nullable=False, index=True)
+    location_id = Column(Integer, ForeignKey("locations.id"), nullable=False, index=True)
+    surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=False, index=True)
+    call_group_id = Column(Integer, ForeignKey("call_groups.id"), nullable=False, index=True)
+    call_rotation_id = Column(Integer, ForeignKey("call_rotations.id", ondelete="CASCADE"), nullable=False, index=True)
+    call_coverage_id = Column(Integer, ForeignKey("call_coverages.id", ondelete="SET NULL"), nullable=True, index=True)
+    original_surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    location = relationship("Location")
+    surgeon = relationship("Surgeon", foreign_keys=[surgeon_id])
+    original_surgeon = relationship("Surgeon", foreign_keys=[original_surgeon_id])
+    call_group = relationship("CallGroup")
+    call_rotation = relationship("CallRotation")
+    call_coverage = relationship("CallCoverage")
 
 
 class CallScheduleAuditLog(Base):
@@ -510,6 +535,59 @@ class ScheduleCard(Base):
     master_template = relationship("SurgeonLocationSchedule")
 
 
+class DayOffScheduleCard(Base):
+    """Normalized card overlay for one day-off request; never derived at render time."""
+    __tablename__ = "day_off_schedule_cards"
+    __table_args__ = (UniqueConstraint("day_off_id", "schedule_card_id"),)
+
+    id = Column(Integer, primary_key=True)
+    day_off_id = Column(Integer, ForeignKey("days_off.id", ondelete="CASCADE"), nullable=False, index=True)
+    schedule_card_id = Column(Integer, ForeignKey("schedule_cards.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+    day_off = relationship("DayOff")
+    schedule_card = relationship("ScheduleCard")
+
+
+class ScheduleCardActivity(Base):
+    """Canonical detail row attached to exactly one permanent schedule card."""
+    __tablename__ = "schedule_card_activities"
+    __table_args__ = (
+        UniqueConstraint("source_system", "source_record_key"),
+        CheckConstraint("session IN ('am', 'pm')", name="ck_schedule_card_activities_session"),
+        CheckConstraint(
+            "activity_type IN ('surgical', 'clinic')",
+            name="ck_schedule_card_activities_type",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    schedule_card_id = Column(Integer, ForeignKey("schedule_cards.id", ondelete="CASCADE"), nullable=False, index=True)
+    surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=False, index=True)
+    location_id = Column(Integer, ForeignKey("locations.id"), nullable=True, index=True)
+    activity_date = Column(Date, nullable=False, index=True)
+    session = Column(String(2), nullable=False)
+    activity_type = Column(String(16), nullable=False)
+    start_time = Column(Time)
+    end_time = Column(Time)
+    patient_name = Column(String(255), nullable=False)
+    procedure = Column(Text, nullable=False, default="")
+    room_text = Column(String(128))
+    source_system = Column(String(32), nullable=False)
+    source_record_key = Column(String(128), nullable=False)
+    surgical_case_id = Column(Integer, ForeignKey("surgical_cases.id", ondelete="CASCADE"), nullable=True, index=True)
+    fax_ingest_row_id = Column(Integer, ForeignKey("fax_ingest_rows.id", ondelete="CASCADE"), nullable=True, index=True)
+    aprima_appointment_id = Column(String(36), ForeignKey("aprima_cached_appointments.appointment_id", ondelete="CASCADE"), nullable=True, index=True)
+    identity_key = Column(String(512), nullable=False, index=True)
+    is_active = Column(Boolean, nullable=False, default=True, server_default="true", index=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    schedule_card = relationship("ScheduleCard")
+    surgeon = relationship("Surgeon")
+    location = relationship("Location")
+
+
 class FaxDocument(Base):
     """Immutable source record for one received Advent/Kno2 fax."""
     __tablename__ = "fax_documents"
@@ -563,6 +641,7 @@ class FaxIngestRow(Base):
     """One reviewed row from a rendered PNG page. This table never creates cards."""
     __tablename__ = "fax_ingest_rows"
     __table_args__ = (
+        UniqueConstraint("run_id", "normalized_key"),
         CheckConstraint("row_type IN ('surgical', 'clinic')", name="ck_fax_ingest_rows_type"),
         CheckConstraint("session IN ('am', 'pm')", name="ck_fax_ingest_rows_session"),
     )
@@ -618,6 +697,7 @@ class SurgicalCase(Base):
     patient_phone = Column(String(32))
     procedure = Column(Text, nullable=False)
     location_id = Column(Integer, ForeignKey("locations.id"))
+    schedule_card_id = Column(Integer, ForeignKey("schedule_cards.id"), index=True)
     or_block_instance_id = Column(Integer, ForeignKey("or_block_instances.id"))
     room_text = Column(String(64))
     # Co-surgeon: when a case is shared (e.g. one surgeon assisting another),
@@ -632,6 +712,7 @@ class SurgicalCase(Base):
     surgeon = relationship("Surgeon", foreign_keys=[surgeon_id], back_populates="surgical_cases")
     assisting_surgeon = relationship("Surgeon", foreign_keys=[assisting_surgeon_id])
     location = relationship("Location")
+    schedule_card = relationship("ScheduleCard")
     or_block_instance = relationship("ORBlockInstance", back_populates="cases")
 
 
@@ -911,9 +992,25 @@ class AprimaCachedAppointment(Base):
     kind = Column(String(16), nullable=False, index=True)  # patient | meeting
     date = Column(Date, nullable=False, index=True)
     surgeon_initials = Column(String(16), index=True)
+    surgeon_id = Column(Integer, ForeignKey("surgeons.id"), index=True)
+    location_id = Column(Integer, ForeignKey("locations.id"), index=True)
+    schedule_card_id = Column(Integer, ForeignKey("schedule_cards.id"), index=True)
+    session = Column(String(2))
+    start_time = Column(Time)
+    end_time = Column(Time)
+    patient_name = Column(String(255))
+    activity_type = Column(String(16))  # clinic | surgical | meeting
+    room_text = Column(String(128))
+    service_site = Column(String(255))
+    appointment_type = Column(String(255))
+    reason_text = Column(Text)
     content_hash = Column(String(64), nullable=False)
     payload_json = Column(Text, nullable=False)
     synced_at = Column(DateTime, nullable=False, server_default=func.now())
+
+    surgeon = relationship("Surgeon")
+    location = relationship("Location")
+    schedule_card = relationship("ScheduleCard")
 
 
 class AprimaSyncState(Base):

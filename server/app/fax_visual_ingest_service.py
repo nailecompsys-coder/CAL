@@ -764,6 +764,8 @@ def apply_visual_schedule(
             case.procedure = first.procedure or case.procedure or "TBD"
             case.or_block_instance_id = block.id
             case.notes = append_internal_note(case.notes, f"{note} Updated from {old}.")
+            from .schedule_activity_normalization import normalize_surgical_case_card
+            normalize_surgical_case_card(db, case)
             updated += 1
         else:
             case = SurgicalCase(
@@ -781,6 +783,8 @@ def apply_visual_schedule(
                 notes=note,
             )
             db.add(case)
+            from .schedule_activity_normalization import normalize_surgical_case_card
+            normalize_surgical_case_card(db, case)
             db.flush()
             created += 1
         surgeon = db.get(Surgeon, primary_id)

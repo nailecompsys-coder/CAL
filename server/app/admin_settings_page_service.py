@@ -346,6 +346,7 @@ def reconcile_desk_fax_outlier_cases(db: Session) -> int:
         by_fax.setdefault(fax_id, []).append(row)
 
     changed = 0
+    changed_cases = []
     for _fax_id, cases in by_fax.items():
         in_window = [c.date for c in cases if c.date and plausible_schedule_date(c.date, today)]
         window = (min(in_window), max(in_window)) if in_window else None
@@ -356,6 +357,7 @@ def reconcile_desk_fax_outlier_cases(db: Session) -> int:
             if allowed is None:
                 case.status = "cancelled"
                 changed += 1
+                changed_cases.append(case)
                 continue
             clash = next(
                 (
@@ -374,7 +376,11 @@ def reconcile_desk_fax_outlier_cases(db: Session) -> int:
             else:
                 case.date = allowed
             changed += 1
+            changed_cases.append(case)
     if changed:
+        from .schedule_activity_normalization import normalize_surgical_case_card
+        for case in changed_cases:
+            normalize_surgical_case_card(db, case)
         db.commit()
     return changed
 

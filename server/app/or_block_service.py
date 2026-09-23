@@ -1298,6 +1298,8 @@ def add_case_to_block(
         status="scheduled",
     )
     db.add(case)
+    from .schedule_activity_normalization import normalize_surgical_case_card
+    normalize_surgical_case_card(db, case)
     db.flush()
     db.expire(block, ["cases", "assignments"])
     block = _block_with_case_relations(db, block_id)

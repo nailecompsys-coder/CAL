@@ -21,6 +21,7 @@ from . import migrate_schedule_build_backups
 from . import migrate_clinic_schedule_card_guard
 from . import migrate_schedule_cards
 from . import migrate_fax_ingest
+from . import migrate_normalized_schedule_activity
 from .routers import (
     admin_otp_audit,
     admin_block_or,
@@ -57,9 +58,16 @@ async def lifespan(app: FastAPI):
     migrate_clinic_schedule_card_guard.run_migration()
     migrate_schedule_cards.run_migration()
     migrate_fax_ingest.run_migration()
+    migrate_normalized_schedule_activity.run_migration()
     migrate_grok_bot_rules.run_migration()
     db = SessionLocal()
     try:
+        from .schedule_activity_normalization import backfill_normalized_schedule_activity
+        from .day_off_card_normalization import backfill_day_off_card_links
+        from .call_assignment_normalization import backfill_call_daily_assignments
+        backfill_normalized_schedule_activity(db)
+        backfill_day_off_card_links(db)
+        backfill_call_daily_assignments(db)
         admin._get_settings(db)
         from .rules_engine.engine import ensure_rule_config_seeded
         from .grok_bot_rules import ensure_grok_bot_rules_seeded

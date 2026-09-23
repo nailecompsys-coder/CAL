@@ -9,14 +9,16 @@ from __future__ import annotations
 import re
 from datetime import date, timedelta
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from .admin_dashboard_stats_service import clinic_visits_today_count
-from .grok_ask_intent import is_identity_question, is_when_question, location_needles
+from .grok_ask_intent import is_identity_question, is_when_question
 from .models import (
     AdminNotification,
     Availability,
     CallCoverage,
+    CallDailyAssignment,
     CallGroup,
     CallRotation,
     ClinicGroup,
@@ -29,9 +31,9 @@ from .models import (
     ORBlockInstance,
     Surgeon,
     SurgeonDayItem,
+    ScheduleCardActivity,
     SurgicalCase,
 )
-from .off_conflict_service import aprima_patient_counts, clinic_patient_count_for_schedules
 from .practice_time import practice_now
 from .surgeon_visibility import surgeon_is_visible
 
@@ -126,33 +128,49 @@ def collect_surgeon_facts(db: Session, surgeon: Surgeon, start: date, end: date)
         )
         .all()
     )
-    fax_patients = clinic_patient_count_for_schedules(clinics)
-    aprima = aprima_patient_counts(db, start, end, {surgeon.id: surgeon})
-    aprima_patients = sum(aprima.values())
-    rotations = (
-        db.query(CallRotation)
-        .options(joinedload(CallRotation.call_group), joinedload(CallRotation.coverages))
+    clinic_patients = int(
+        db.query(func.count(func.distinct(ScheduleCardActivity.identity_key)))
         .filter(
-            CallRotation.surgeon_id == surgeon.id,
-            CallRotation.date >= start,
-            CallRotation.date <= end,
+            ScheduleCardActivity.surgeon_id == surgeon.id,
+            ScheduleCardActivity.activity_type == "clinic",
+            ScheduleCardActivity.is_active == True,  # noqa: E712
+            ScheduleCardActivity.activity_date >= start,
+            ScheduleCardActivity.activity_date <= end,
+        )
+        .scalar() or 0
+    )
+    case_count = int(
+        db.query(func.count(func.distinct(ScheduleCardActivity.identity_key)))
+        .filter(
+            ScheduleCardActivity.surgeon_id == surgeon.id,
+            ScheduleCardActivity.activity_type == "surgical",
+            ScheduleCardActivity.is_active == True,  # noqa: E712
+            ScheduleCardActivity.activity_date >= start,
+            ScheduleCardActivity.activity_date <= end,
+        )
+        .scalar() or 0
+    )
+    untimed_case_count = int(
+        db.query(func.count(func.distinct(ScheduleCardActivity.identity_key)))
+        .filter(
+            ScheduleCardActivity.surgeon_id == surgeon.id,
+            ScheduleCardActivity.activity_type == "surgical",
+            ScheduleCardActivity.is_active == True,  # noqa: E712
+            ScheduleCardActivity.start_time.is_(None),
+            ScheduleCardActivity.activity_date >= start,
+            ScheduleCardActivity.activity_date <= end,
+        )
+        .scalar() or 0
+    )
+    call_rows = (
+        db.query(CallDailyAssignment)
+        .filter(
+            CallDailyAssignment.surgeon_id == surgeon.id,
+            CallDailyAssignment.date >= start,
+            CallDailyAssignment.date <= end,
         )
         .all()
     )
-    covering_rows = (
-        db.query(CallCoverage)
-        .options(joinedload(CallCoverage.rotation))
-        .filter(
-            CallCoverage.covering_surgeon_id == surgeon.id,
-            CallCoverage.status == "active",
-        )
-        .all()
-    )
-    covering_days = [
-        row.rotation.date
-        for row in covering_rows
-        if row.rotation and start <= row.rotation.date <= end
-    ]
     meetings = (
         db.query(Meeting)
         .join(MeetingAttendee)
@@ -197,10 +215,13 @@ def collect_surgeon_facts(db: Session, surgeon: Surgeon, start: date, end: date)
         "pending_days": pending_days,
         "cases": cases,
         "clinic_days": [c for c in clinics if (c.assignment_type or "assigned").lower() != "off"],
-        "fax_patients": fax_patients,
-        "aprima_patients": aprima_patients,
-        "call_days": [r.date for r in rotations if r.surgeon_id],
-        "covering_days": covering_days,
+        "clinic_patients": clinic_patients,
+        "case_count": case_count,
+        "untimed_case_count": untimed_case_count,
+        "fax_patients": clinic_patients,
+        "aprima_patients": 0,
+        "call_days": sorted({row.date for row in call_rows if not row.call_coverage_id}),
+        "covering_days": sorted({row.date for row in call_rows if row.call_coverage_id}),
         "meetings": meetings,
         "blocks": blocks,
         "availability": availability,
@@ -246,28 +267,23 @@ def _answer_time_off(surgeon: Surgeon, window: dict, facts: dict) -> dict:
 
 
 def _answer_clinic(surgeon: Surgeon, window: dict, facts: dict) -> dict:
-    aprima = facts["aprima_patients"]
-    fax = facts["fax_patients"]
-    if aprima:
-        count, source = aprima, "Aprima"
-    else:
-        count, source = fax, "the clinic schedule"
+    count = facts["clinic_patients"]
     return _talk(
         f"{surgeon.full_name} — clinic",
         topic="clinic",
         lines=[
-            f"{count} clinic patient{'' if count == 1 else 's'} {window['label']} ({source})",
+            f"{count} clinic patient{'' if count == 1 else 's'} {window['label']} (CAL database)",
         ],
         count=count,
     )
 
 
 def _answer_cases(surgeon: Surgeon, window: dict, facts: dict) -> dict:
-    n = len(facts["cases"])
+    n = facts["case_count"]
     lines = [
         f"{n} surgical case{'s' if n != 1 else ''} {window['label']}",
     ]
-    untimed = sum(1 for row in facts["cases"] if row.start_time is None)
+    untimed = facts["untimed_case_count"]
     if untimed:
         lines.append(f"{untimed} still have no start time")
     return _talk(
@@ -569,7 +585,7 @@ def _answer_contact(surgeon: Surgeon) -> dict:
 
 
 def _answer_briefing(surgeon: Surgeon, window: dict, facts: dict) -> dict:
-    clinic_n = facts["aprima_patients"] or facts["fax_patients"]
+    clinic_n = facts["clinic_patients"]
     places = []
     for row in facts["clinic_days"]:
         if row.location:
@@ -583,7 +599,7 @@ def _answer_briefing(surgeon: Surgeon, window: dict, facts: dict) -> dict:
         lines=[
             f"{len(facts['off_days'])} time-off days",
             f"{clinic_n} clinic patients{loc_bit}",
-            f"{len(facts['cases'])} surgical cases",
+            f"{facts['case_count']} surgical cases",
             f"{len(facts['call_days'])} call days",
             f"{len(facts['meetings'])} meetings",
             f"{len(facts['blocks'])} Block OR assignments",
@@ -672,31 +688,34 @@ def _off_lists_for_window(db: Session, window: dict) -> tuple[list[str], list[st
 def _answer_who_call(db: Session, window: dict) -> dict:
     """Same facts as the dashboard Today's Coverage card."""
     rows = (
-        db.query(CallRotation)
+        db.query(CallDailyAssignment)
         .options(
-            joinedload(CallRotation.surgeon),
-            joinedload(CallRotation.call_group),
-            joinedload(CallRotation.coverages).joinedload(CallCoverage.covering_surgeon),
+            joinedload(CallDailyAssignment.surgeon),
+            joinedload(CallDailyAssignment.call_group),
+            joinedload(CallDailyAssignment.location),
         )
-        .filter(CallRotation.date >= window["start"], CallRotation.date <= window["end"])
-        .order_by(CallRotation.date)
+        .filter(
+            CallDailyAssignment.date >= window["start"],
+            CallDailyAssignment.date <= window["end"],
+        )
+        .order_by(
+            CallDailyAssignment.date,
+            CallDailyAssignment.location_id,
+            CallDailyAssignment.surgeon_id,
+        )
         .all()
     )
     lines = []
     for row in rows:
-        if not row.surgeon_id or not surgeon_is_visible(row.surgeon):
+        if not surgeon_is_visible(row.surgeon):
             continue
         group = row.call_group.name if row.call_group else "On-Call"
+        location = row.location.abbreviation if row.location else "Location"
         stamp = ""
         if window["start"] != window["end"]:
             stamp = f"{row.date.strftime('%a %b %-d')} · "
-        extra = ""
-        active = row.active_coverage
-        if active:
-            covering = active.covering_surgeon or db.get(Surgeon, active.covering_surgeon_id)
-            if covering and surgeon_is_visible(covering):
-                extra = f" · covering: {covering.full_name}"
-        lines.append(f"{stamp}{row.surgeon.full_name} · {group}{extra}")
+        coverage = " · covering" if row.call_coverage_id else ""
+        lines.append(f"{stamp}{location} · {row.surgeon.full_name} · {group}{coverage}")
 
     heading = (
         "Today's Coverage"
@@ -814,65 +833,29 @@ def _answer_location_details(loc: Location) -> dict:
         lines = ["on file"]
     return _talk(loc.name or "Location", topic="location", lines=lines)
 
-
-
-def _aprima_clinic_count_at_location(
-    db: Session,
-    loc: Location,
-    start: date,
-    end: date,
-) -> int:
-    try:
-        from .aprima_cache_service import patient_appointments_for_api
-        from .aprima_schedule_service import is_surgery_appointment
-    except Exception:
-        return 0
-    try:
-        payload = patient_appointments_for_api(db, start, end, surgeon=None)
-    except Exception:
-        return 0
-    needles = [n for n in location_needles(loc) if len(n) >= 4]
-    if not needles:
-        return 0
-    total = 0
-    for row in payload.get("appointments") or []:
-        if is_surgery_appointment(row):
-            continue
-        day_raw = (row.get("date") or "")[:10]
-        try:
-            day = date.fromisoformat(day_raw)
-        except ValueError:
-            continue
-        if day < start or day > end:
-            continue
-        site = (row.get("serviceSite") or "").strip().lower()
-        if any(needle in site for needle in needles):
-            total += 1
-    return total
-
-
 def _answer_location_volume(db: Session, loc: Location, window: dict, topic: str) -> dict:
-    cases = (
-        db.query(SurgicalCase)
+    patients = int(
+        db.query(func.count(func.distinct(ScheduleCardActivity.identity_key)))
         .filter(
-            SurgicalCase.location_id == loc.id,
-            SurgicalCase.date >= window["start"],
-            SurgicalCase.date <= window["end"],
-            SurgicalCase.status != "cancelled",
+            ScheduleCardActivity.location_id == loc.id,
+            ScheduleCardActivity.activity_type == "clinic",
+            ScheduleCardActivity.is_active == True,  # noqa: E712
+            ScheduleCardActivity.activity_date >= window["start"],
+            ScheduleCardActivity.activity_date <= window["end"],
         )
-        .all()
+        .scalar() or 0
     )
-    clinics = (
-        db.query(ClinicSchedule)
+    case_count = int(
+        db.query(func.count(func.distinct(ScheduleCardActivity.identity_key)))
         .filter(
-            ClinicSchedule.location_id == loc.id,
-            ClinicSchedule.date >= window["start"],
-            ClinicSchedule.date <= window["end"],
+            ScheduleCardActivity.location_id == loc.id,
+            ScheduleCardActivity.activity_type == "surgical",
+            ScheduleCardActivity.is_active == True,  # noqa: E712
+            ScheduleCardActivity.activity_date >= window["start"],
+            ScheduleCardActivity.activity_date <= window["end"],
         )
-        .all()
+        .scalar() or 0
     )
-    patients = clinic_patient_count_for_schedules(clinics)
-    patients += _aprima_clinic_count_at_location(db, loc, window["start"], window["end"])
     label = loc.name or loc.abbreviation or "that office"
     if topic == "clinic":
         if not patients:
@@ -891,7 +874,7 @@ def _answer_location_volume(db: Session, loc: Location, window: dict, topic: str
             count=patients,
         )
     if topic == "cases":
-        n = len(cases)
+        n = case_count
         return _talk(
             f"{label} {window['label']}",
             topic="cases",
@@ -903,7 +886,7 @@ def _answer_location_volume(db: Session, loc: Location, window: dict, topic: str
         topic="briefing",
         lines=[
             f"{patients} clinic patients",
-            f"{len(cases)} surgical cases",
+            f"{case_count} surgical cases",
         ],
     )
 
@@ -956,5 +939,3 @@ def _answer_notices(db: Session, admin_user_id: int | None) -> dict:
         lines=titles[:12],
         count=len(titles),
     )
-
-

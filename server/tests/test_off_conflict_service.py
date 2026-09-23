@@ -8,7 +8,8 @@ os.environ.setdefault("SECRET_KEY", "test-secret")
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models import Base, ClinicSchedule, DayOff, Location, Surgeon, SurgicalCase
+from app.day_off_card_normalization import backfill_day_off_card_links
+from app.models import Base, ClinicSchedule, DayOff, Location, ScheduleCard, ScheduleCardActivity, Surgeon, SurgicalCase
 from app.off_conflict_service import (
     detect_off_conflicts,
     should_show_as_off,
@@ -16,6 +17,8 @@ from app.off_conflict_service import (
     day_off_status_map,
     schedule_matches_off_session,
 )
+from app.schedule_activity_normalization import backfill_normalized_schedule_activity
+from app.schedule_card_service import materialize_master_schedule_cards
 
 
 class OffConflictServiceTest(unittest.TestCase):
@@ -40,6 +43,11 @@ class OffConflictServiceTest(unittest.TestCase):
         db.flush()
         return row
 
+    def _normalize(self, db, day):
+        materialize_master_schedule_cards(db, start=day, end=day)
+        backfill_day_off_card_links(db)
+        backfill_normalized_schedule_activity(db)
+
     def test_empty_clinic_on_off_shows_as_off_no_conflict(self):
         db = self.Session()
         try:
@@ -63,6 +71,7 @@ class OffConflictServiceTest(unittest.TestCase):
                 assignment_type="assigned",
             ))
             db.commit()
+            self._normalize(db, day)
 
             display = build_clinic_off_display(
                 db, day, day,
@@ -111,6 +120,7 @@ class OffConflictServiceTest(unittest.TestCase):
             )
             db.add_all([am, pm])
             db.commit()
+            self._normalize(db, day)
             schedules = db.query(ClinicSchedule).order_by(ClinicSchedule.session).all()
             display = build_clinic_off_display(
                 db, day, day,
@@ -152,6 +162,7 @@ class OffConflictServiceTest(unittest.TestCase):
                 status="scheduled",
             ))
             db.commit()
+            self._normalize(db, day)
 
             conflicts = detect_off_conflicts(db, day, day)
             self.assertEqual(len(conflicts), 1)
@@ -184,6 +195,25 @@ class OffConflictServiceTest(unittest.TestCase):
                 notes="Desk fax ingest · 13:00 SMITH, JANE; 13:15 DOE, JOHN",
             ))
             db.commit()
+            self._normalize(db, day)
+            pm_card = db.query(ScheduleCard).filter_by(
+                surgeon_id=chris.id, date=day, session="pm"
+            ).one()
+            db.add_all([
+                ScheduleCardActivity(
+                    schedule_card_id=pm_card.id, surgeon_id=chris.id, location_id=clinic.id,
+                    activity_date=day, session="pm", activity_type="clinic", start_time=time(13, 0),
+                    patient_name="Smith, Jane", source_system="fax_clinic", source_record_key="fax-1",
+                    identity_key="smithjane|13:00:00|clinic",
+                ),
+                ScheduleCardActivity(
+                    schedule_card_id=pm_card.id, surgeon_id=chris.id, location_id=clinic.id,
+                    activity_date=day, session="pm", activity_type="clinic", start_time=time(13, 15),
+                    patient_name="Doe, John", source_system="fax_clinic", source_record_key="fax-2",
+                    identity_key="doejohn|13:15:00|clinic",
+                ),
+            ])
+            db.commit()
             schedules = db.query(ClinicSchedule).all()
             display = build_clinic_off_display(
                 db, day, day,
@@ -200,7 +230,7 @@ class OffConflictServiceTest(unittest.TestCase):
         db = self.Session()
         try:
             chris = self._surgeon(db, "Chris", "Johnson")
-            day = date.today() + timedelta(days=4)
+            day = date.today() + timedelta(days=3)
             db.add(DayOff(
                 surgeon_id=chris.id,
                 start_date=day,
@@ -208,6 +238,7 @@ class OffConflictServiceTest(unittest.TestCase):
                 status="pending",
             ))
             db.commit()
+            self._normalize(db, day)
             off_map = day_off_status_map(db, day, day)
             self.assertIn((chris.id, day), off_map)
             self.assertEqual(off_map[(chris.id, day)]["status"], "pending")

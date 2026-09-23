@@ -1,7 +1,6 @@
 import os
 import unittest
 from datetime import date, time
-from unittest.mock import patch
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SECRET_KEY", "test-secret")
@@ -9,7 +8,19 @@ os.environ.setdefault("SECRET_KEY", "test-secret")
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models import Base, ClinicSchedule, DayOff, Location, SurgicalCase, Surgeon, SurgeonLocationSchedule
+from app.day_off_card_normalization import backfill_day_off_card_links
+from app.models import (
+    AprimaCachedAppointment,
+    Base,
+    DayOff,
+    Location,
+    ScheduleCard,
+    ScheduleCardActivity,
+    SurgicalCase,
+    Surgeon,
+    SurgeonLocationSchedule,
+)
+from app.schedule_activity_normalization import backfill_normalized_schedule_activity, normalize_aprima_payload
 from app.schedule_card_projection_service import card_grid_page_data
 from app.schedule_card_service import materialize_master_schedule_cards
 
@@ -36,6 +47,7 @@ class ScheduleCardProjectionServiceTest(unittest.TestCase):
             materialize_master_schedule_cards(db, start=date(2026, 9, 14), end=date(2026, 9, 18))
             db.add(SurgicalCase(surgeon_id=surgeon.id, date=date(2026, 9, 14), start_time=time(7, 15), patient_name="Patient", procedure="Procedure", location_id=location.id, status="scheduled"))
             db.commit()
+            backfill_normalized_schedule_activity(db)
             payload = card_grid_page_data(db, date(2026, 9, 14), date(2026, 9, 18))
             monday = payload["grid"][surgeon.id][date(2026, 9, 14)]
             self.assertEqual(set(monday), {"am", "pm"})
@@ -77,6 +89,7 @@ class ScheduleCardProjectionServiceTest(unittest.TestCase):
                 ),
             ])
             db.commit()
+            backfill_normalized_schedule_activity(db)
 
             payload = card_grid_page_data(db, date(2026, 9, 21), date(2026, 9, 25))
             header = payload["hospital_headers"][date(2026, 9, 21)]
@@ -94,6 +107,7 @@ class ScheduleCardProjectionServiceTest(unittest.TestCase):
             materialize_master_schedule_cards(db, start=date(2026, 9, 14), end=date(2026, 9, 18))
             db.add(DayOff(surgeon_id=surgeon.id, start_date=date(2026, 9, 14), end_date=date(2026, 9, 14), status="approved", is_full_day=True))
             db.commit()
+            backfill_day_off_card_links(db)
             payload = card_grid_page_data(db, date(2026, 9, 14), date(2026, 9, 18))
             monday = payload["grid"][surgeon.id][date(2026, 9, 14)]
             self.assertTrue(monday["am"]["is_off"])
@@ -117,13 +131,6 @@ class ScheduleCardProjectionServiceTest(unittest.TestCase):
             db.commit()
             materialize_master_schedule_cards(db, start=date(2026, 9, 21), end=date(2026, 9, 25))
             db.add_all([
-                ClinicSchedule(
-                    surgeon_id=surgeon.id,
-                    location_id=clinic.id,
-                    date=date(2026, 9, 21),
-                    session="am",
-                    notes="Fax 191 visual SOT · 11:00 Clinic, Patient",
-                ),
                 SurgicalCase(
                     surgeon_id=surgeon.id,
                     date=date(2026, 9, 21),
@@ -135,6 +142,24 @@ class ScheduleCardProjectionServiceTest(unittest.TestCase):
                 ),
             ])
             db.commit()
+            backfill_normalized_schedule_activity(db)
+            am_card = db.query(ScheduleCard).filter_by(
+                surgeon_id=surgeon.id, date=date(2026, 9, 21), session="am"
+            ).one()
+            db.add(ScheduleCardActivity(
+                schedule_card_id=am_card.id,
+                surgeon_id=surgeon.id,
+                location_id=clinic.id,
+                activity_date=date(2026, 9, 21),
+                session="am",
+                activity_type="clinic",
+                start_time=time(11, 0),
+                patient_name="Clinic, Patient",
+                source_system="fax_clinic",
+                source_record_key="test-clinic-1",
+                identity_key="clinicpatient|11:00:00|clinic",
+            ))
+            db.commit()
 
             payload = card_grid_page_data(db, date(2026, 9, 21), date(2026, 9, 25))
             monday = payload["grid"][surgeon.id][date(2026, 9, 21)]
@@ -143,8 +168,7 @@ class ScheduleCardProjectionServiceTest(unittest.TestCase):
         finally:
             db.close()
 
-    @patch("app.aprima_cache_service.patient_appointments_for_api")
-    def test_aprima_clinic_patients_fill_existing_na_card(self, aprima_payload):
+    def test_aprima_clinic_patients_fill_existing_na_card(self):
         db = self.Session()
         try:
             surgeon = Surgeon(first_name="Jorge", last_name="Florin", email="jf@example.com", is_active=True)
@@ -152,9 +176,8 @@ class ScheduleCardProjectionServiceTest(unittest.TestCase):
             db.add_all([surgeon, cbo])
             db.commit()
             materialize_master_schedule_cards(db, start=date(2026, 9, 21), end=date(2026, 9, 25))
-            aprima_payload.return_value = {
-                "appointments": [
-                    {
+            for index in range(5):
+                payload = {
                         "id": f"appt-{index}",
                         "date": "2026-09-23",
                         "start": f"13:{index * 10:02d}",
@@ -162,10 +185,14 @@ class ScheduleCardProjectionServiceTest(unittest.TestCase):
                         "surgeonInitials": "JF",
                         "serviceSite": "Clermont Business Office",
                         "appointmentType": "Follow Up",
-                    }
-                    for index in range(5)
-                ]
-            }
+                }
+                cached = AprimaCachedAppointment(
+                    appointment_id=payload["id"], kind="patient", date=date(2026, 9, 23),
+                    content_hash=payload["id"], payload_json="{}",
+                )
+                db.add(cached)
+                normalize_aprima_payload(db, cached, payload)
+            db.commit()
 
             payload = card_grid_page_data(db, date(2026, 9, 21), date(2026, 9, 25))
             card = payload["grid"][surgeon.id][date(2026, 9, 23)]["pm"]
@@ -179,8 +206,7 @@ class ScheduleCardProjectionServiceTest(unittest.TestCase):
         finally:
             db.close()
 
-    @patch("app.aprima_cache_service.patient_appointments_for_api")
-    def test_aprima_and_fax_same_clinic_patient_count_once(self, aprima_payload):
+    def test_aprima_and_fax_same_clinic_patient_count_once(self):
         db = self.Session()
         try:
             surgeon = Surgeon(first_name="Jorge", last_name="Florin", email="jf@example.com", is_active=True)
@@ -196,16 +222,17 @@ class ScheduleCardProjectionServiceTest(unittest.TestCase):
             ))
             db.commit()
             materialize_master_schedule_cards(db, start=date(2026, 9, 21), end=date(2026, 9, 25))
-            db.add(ClinicSchedule(
-                surgeon_id=surgeon.id,
-                location_id=cbo.id,
-                date=date(2026, 9, 23),
-                session="pm",
-                notes="Fax 191 visual SOT · 13:00 SAME, PATIENT",
+            card = db.query(ScheduleCard).filter_by(
+                surgeon_id=surgeon.id, date=date(2026, 9, 23), session="pm"
+            ).one()
+            db.add(ScheduleCardActivity(
+                schedule_card_id=card.id, surgeon_id=surgeon.id, location_id=cbo.id,
+                activity_date=card.date, session="pm", activity_type="clinic",
+                start_time=time(13, 0), patient_name="Same, Patient",
+                source_system="fax_clinic", source_record_key="fax-test",
+                identity_key="samepatient|13:00:00|clinic",
             ))
-            db.commit()
-            aprima_payload.return_value = {
-                "appointments": [{
+            payload = {
                     "id": "same-patient",
                     "date": "2026-09-23",
                     "start": "13:00",
@@ -213,8 +240,14 @@ class ScheduleCardProjectionServiceTest(unittest.TestCase):
                     "surgeonInitials": "JF",
                     "serviceSite": "Clermont Business Office",
                     "appointmentType": "Follow Up",
-                }]
-            }
+                }
+            cached = AprimaCachedAppointment(
+                appointment_id=payload["id"], kind="patient", date=card.date,
+                content_hash="same-patient", payload_json="{}",
+            )
+            db.add(cached)
+            normalize_aprima_payload(db, cached, payload)
+            db.commit()
 
             payload = card_grid_page_data(db, date(2026, 9, 21), date(2026, 9, 25))
             card = payload["grid"][surgeon.id][date(2026, 9, 23)]["pm"]

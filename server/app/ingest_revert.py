@@ -49,6 +49,8 @@ def revert_desk_faxes(db: Session, fax_ids: list[int] | set[int]) -> dict[str, A
         if (case.status or "") != "cancelled":
             case.status = "cancelled"
             cases_cancelled += 1
+        from .schedule_activity_normalization import normalize_surgical_case_card
+        normalize_surgical_case_card(db, case)
         # Drop block link so cancelled fax cases do not keep pills alive.
         case.or_block_instance_id = None
 

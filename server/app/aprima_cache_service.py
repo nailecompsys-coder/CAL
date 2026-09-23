@@ -152,16 +152,18 @@ def run_aprima_sync_job(*, notify: bool = True) -> dict:
 
 
 def _serialize_cached(row: AprimaCachedAppointment) -> dict:
-    try:
-        payload = json.loads(row.payload_json)
-    except (TypeError, ValueError):
-        payload = {}
-    if not isinstance(payload, dict):
-        payload = {}
-    payload.setdefault("id", row.appointment_id)
-    payload.setdefault("date", row.date.isoformat() if row.date else "")
-    payload.setdefault("surgeonInitials", row.surgeon_initials or "")
-    return payload
+    return {
+        "id": row.appointment_id,
+        "date": row.date.isoformat() if row.date else "",
+        "start": row.start_time.strftime("%H:%M") if row.start_time else "",
+        "end": row.end_time.strftime("%H:%M") if row.end_time else "",
+        "patientName": row.patient_name or "",
+        "surgeonInitials": row.surgeon_initials or "",
+        "serviceSite": row.service_site or "",
+        "appointmentType": row.appointment_type or "",
+        "reason": row.reason_text or "",
+        "room": row.room_text or "",
+    }
 
 
 def cache_is_usable(db: Session) -> bool:
@@ -430,6 +432,8 @@ def run_aprima_sync(
     seen_ids: set[str] = set()
 
     def upsert(kind: str, rows: list[dict]) -> None:
+        from .schedule_activity_normalization import normalize_aprima_payload
+
         for row in rows:
             appt_id = str(row.get("id") or "").strip()
             if not appt_id:
@@ -450,8 +454,9 @@ def run_aprima_sync(
                 existing.content_hash = digest
                 existing.payload_json = payload
                 existing.synced_at = now
+                normalize_aprima_payload(db, existing, row)
             else:
-                db.add(AprimaCachedAppointment(
+                cached = AprimaCachedAppointment(
                     appointment_id=appt_id,
                     kind=kind,
                     date=day,
@@ -459,7 +464,9 @@ def run_aprima_sync(
                     content_hash=digest,
                     payload_json=payload,
                     synced_at=now,
-                ))
+                )
+                db.add(cached)
+                normalize_aprima_payload(db, cached, row)
 
     upsert(CACHE_KIND_PATIENT, patients)
     upsert(CACHE_KIND_MEETING, meeting_rows)
@@ -477,6 +484,11 @@ def run_aprima_sync(
     )
     for row in window_rows:
         if row.appointment_id not in seen_ids:
+            from .models import ScheduleCardActivity
+            db.query(ScheduleCardActivity).filter(
+                ScheduleCardActivity.source_system == "aprima",
+                ScheduleCardActivity.source_record_key == row.appointment_id,
+            ).update({ScheduleCardActivity.is_active: False}, synchronize_session=False)
             db.delete(row)
 
     stale_outside = db.query(AprimaCachedAppointment).filter(

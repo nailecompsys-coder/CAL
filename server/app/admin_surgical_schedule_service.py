@@ -151,6 +151,8 @@ def add_surgical_case(
     fields = enforce_surgical_case_write_guardrails(db, fields)
     surgical_case = SurgicalCase(**fields)
     db.add(surgical_case)
+    from .schedule_activity_normalization import normalize_surgical_case_card
+    normalize_surgical_case_card(db, surgical_case)
     db.commit()
     if notify:
         send_push_to_surgeon(
@@ -166,6 +168,8 @@ def update_surgical_case(db: Session, surgical_case: SurgicalCase, fields: dict)
     fields = enforce_surgical_case_write_guardrails(db, fields, exclude_case_id=surgical_case.id)
     for key, value in fields.items():
         setattr(surgical_case, key, value)
+    from .schedule_activity_normalization import normalize_surgical_case_card
+    normalize_surgical_case_card(db, surgical_case)
     db.commit()
     send_push_to_surgeon(
         surgical_case.surgeon_id,
@@ -178,6 +182,8 @@ def update_surgical_case(db: Session, surgical_case: SurgicalCase, fields: dict)
 
 def delete_surgical_case(db: Session, surgical_case: SurgicalCase) -> date:
     parsed_date = surgical_case.date
+    from .schedule_activity_normalization import deactivate_surgical_case_activity
+    deactivate_surgical_case_activity(db, surgical_case.id)
     db.delete(surgical_case)
     db.commit()
     return parsed_date

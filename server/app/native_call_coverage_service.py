@@ -69,6 +69,8 @@ def assign_native_call_coverage(
     )
     db.add(coverage)
     db.flush()
+    from .call_assignment_normalization import sync_call_rotation
+    sync_call_rotation(db, rotation)
     log_call_schedule_change(
         db,
         action="cover",
@@ -185,6 +187,8 @@ def assign_admin_call_coverage(
     )
     db.add(coverage)
     db.flush()
+    from .call_assignment_normalization import sync_call_rotation
+    sync_call_rotation(db, rotation)
     log_call_schedule_change(
         db,
         action="cover",
@@ -242,6 +246,8 @@ def cancel_admin_call_coverage(
     rotation = coverage.rotation or db.get(CallRotation, coverage.call_rotation_id)
     coverage.status = "canceled"
     coverage.canceled_at = _utc_now()
+    from .call_assignment_normalization import sync_call_rotation
+    sync_call_rotation(db, rotation)
     log_call_schedule_change(
         db,
         action="cover_clear",
@@ -277,6 +283,8 @@ def cancel_native_call_coverage(db: Session, requesting_surgeon: Surgeon, covera
     rotation = coverage.rotation or db.get(CallRotation, coverage.call_rotation_id)
     coverage.status = "canceled"
     coverage.canceled_at = _utc_now()
+    from .call_assignment_normalization import sync_call_rotation
+    sync_call_rotation(db, rotation)
     log_call_schedule_change(
         db,
         action="cover_clear",

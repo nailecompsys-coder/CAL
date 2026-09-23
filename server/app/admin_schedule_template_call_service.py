@@ -113,4 +113,6 @@ def auto_fill_call_rotation(
         cur_date += timedelta(days=1)
 
     db.commit()
+    from .call_assignment_normalization import backfill_call_daily_assignments
+    backfill_call_daily_assignments(db)
     return {"created": created, "skipped": skipped, "no_rotation": False}

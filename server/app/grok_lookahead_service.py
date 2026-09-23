@@ -22,7 +22,7 @@ from .grok_bot_rules import (
     notice_date_has_passed,
     standing_instructions,
 )
-from .models import AdminNotification, CallCoverage, CallRotation, Surgeon
+from .models import AdminNotification, CallDailyAssignment, CallRotation
 from .off_conflict_service import day_off_status_map, detect_off_conflicts
 from .scheduling_gate_service import practice_today
 from .surgeon_visibility import surgeon_is_visible
@@ -239,62 +239,66 @@ def _status_label(status: str) -> str:
 
 def _call_vs_time_off(db: Session, start: date, end: date) -> list[dict]:
     off_map = day_off_status_map(db, start, end)
-    rotations = (
-        db.query(CallRotation)
+    assignments = (
+        db.query(CallDailyAssignment)
         .options(
-            joinedload(CallRotation.surgeon),
-            joinedload(CallRotation.call_group),
-            joinedload(CallRotation.coverages).joinedload(CallCoverage.covering_surgeon),
-            joinedload(CallRotation.coverages).joinedload(CallCoverage.original_surgeon),
+            joinedload(CallDailyAssignment.surgeon),
+            joinedload(CallDailyAssignment.original_surgeon),
+            joinedload(CallDailyAssignment.call_group),
+            joinedload(CallDailyAssignment.location),
+            joinedload(CallDailyAssignment.call_rotation),
         )
-        .filter(CallRotation.date >= start, CallRotation.date <= end)
+        .filter(CallDailyAssignment.date >= start, CallDailyAssignment.date <= end)
+        .order_by(CallDailyAssignment.date, CallDailyAssignment.location_id)
         .all()
     )
     issues: list[dict] = []
-    for rotation in rotations:
-        group = rotation.call_group.name if rotation.call_group else "call"
-        day_label = rotation.date.strftime("%b %-d")
-        href = _call_href(rotation)
-        active = rotation.active_coverage
-        if active:
-            covering = active.covering_surgeon or db.get(Surgeon, active.covering_surgeon_id)
+    seen: set[tuple[int, date, bool]] = set()
+    for assignment in assignments:
+        covered = bool(assignment.call_coverage_id)
+        key = (assignment.surgeon_id, assignment.date, covered)
+        if key in seen:
+            continue
+        seen.add(key)
+        group = assignment.call_group.name if assignment.call_group else "call"
+        location = assignment.location.abbreviation if assignment.location else "location"
+        day_label = assignment.date.strftime("%b %-d")
+        href = _call_href(assignment.call_rotation)
+        if covered:
+            covering = assignment.surgeon
             if not surgeon_is_visible(covering):
                 continue
-            off = off_map.get((covering.id, rotation.date))
+            off = off_map.get((covering.id, assignment.date))
             if not off:
                 continue
             if not grok_rule_enabled(db, GROK_COVER_WHILE_OFF):
                 continue
-            original = rotation.surgeon or active.original_surgeon or db.get(
-                Surgeon, active.original_surgeon_id or rotation.surgeon_id
-            )
+            original = assignment.original_surgeon
             original_initials = original.initials if original else "the assigned doctor"
             issues.append({
                 "kind": "cover_while_off",
-                "date": rotation.date.isoformat(),
+                "date": assignment.date.isoformat(),
                 "href": href,
                 "message": (
-                    f"{covering.initials} is covering {group} for {original_initials} on {day_label} "
+                    f"{covering.initials} is covering {group} at {location} for {original_initials} on {day_label} "
                     f"and also has {_status_label(off['status'])}."
                 ),
             })
             continue
-        if not rotation.surgeon_id:
-            continue
-        assigned = rotation.surgeon or db.get(Surgeon, rotation.surgeon_id)
+        assigned = assignment.surgeon
         if not surgeon_is_visible(assigned):
             continue
-        off = off_map.get((assigned.id, rotation.date))
+        off = off_map.get((assigned.id, assignment.date))
         if not off:
             continue
         if not grok_rule_enabled(db, GROK_ON_CALL_WHILE_OFF):
             continue
         issues.append({
             "kind": "on_call_while_off",
-            "date": rotation.date.isoformat(),
+            "date": assignment.date.isoformat(),
             "href": href,
             "message": (
-                f"{assigned.initials} is on call ({group}) on {day_label} "
+                f"{assigned.initials} is on call ({group}, {location}) on {day_label} "
                 f"with {_status_label(off['status'])} and no cover assigned."
             ),
         })

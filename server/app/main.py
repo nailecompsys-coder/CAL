@@ -1,10 +1,11 @@
 import logging
 import os
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 from . import __version__ as app_release_version
 from .database import Base, SessionLocal, engine
 from .location_palette import ensure_location_palette_seeded
@@ -37,6 +38,21 @@ from . import migrate_call_groups
 from . import migrate_grok_bot_rules
 
 
+@contextmanager
+def _database_startup_lock():
+    """Serialize schema setup across uvicorn workers."""
+    if engine.dialect.name != "postgresql":
+        yield
+        return
+    connection = engine.connect()
+    try:
+        connection.execute(text("SELECT pg_advisory_lock(2026092201)"))
+        yield
+    finally:
+        connection.execute(text("SELECT pg_advisory_unlock(2026092201)"))
+        connection.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from . import __version__ as _app_version
@@ -44,38 +60,40 @@ async def lifespan(app: FastAPI):
     logging.getLogger("uvicorn.error").info(
         "Mid Florida Surgical Calendar starting version=%s", _app_version
     )
-    Base.metadata.create_all(bind=engine)
-    migrate_clinic_schedule_off.run_migration()
-    migrate_surgeon_sort_order.run_migration()
-    migrate_call_groups.run_migration()
-    migrate_location_admin_fields.run_migration()
-    migrate_native_parity.run_migration()
-    migrate_scheduling_guardrails.run_migration()
-    migrate_site_settings_tools.run_migration()
-    migrate_co_surgeon.run_migration()
-    migrate_schedule_template_week_pattern.run_migration()
-    migrate_schedule_build_backups.run_migration()
-    migrate_clinic_schedule_card_guard.run_migration()
-    migrate_schedule_cards.run_migration()
-    migrate_fax_ingest.run_migration()
-    migrate_normalized_schedule_activity.run_migration()
-    migrate_grok_bot_rules.run_migration()
-    db = SessionLocal()
-    try:
-        from .schedule_activity_normalization import backfill_normalized_schedule_activity
-        from .day_off_card_normalization import backfill_day_off_card_links
-        from .call_assignment_normalization import backfill_call_daily_assignments
-        backfill_normalized_schedule_activity(db)
-        backfill_day_off_card_links(db)
-        backfill_call_daily_assignments(db)
-        admin._get_settings(db)
-        from .rules_engine.engine import ensure_rule_config_seeded
-        from .grok_bot_rules import ensure_grok_bot_rules_seeded
-        ensure_rule_config_seeded(db)
-        ensure_grok_bot_rules_seeded(db)
-        ensure_location_palette_seeded(db)
-    finally:
-        db.close()
+    with _database_startup_lock():
+        Base.metadata.create_all(bind=engine)
+        migrate_clinic_schedule_off.run_migration()
+        migrate_surgeon_sort_order.run_migration()
+        migrate_call_groups.run_migration()
+        migrate_location_admin_fields.run_migration()
+        migrate_native_parity.run_migration()
+        migrate_scheduling_guardrails.run_migration()
+        migrate_site_settings_tools.run_migration()
+        migrate_co_surgeon.run_migration()
+        migrate_schedule_template_week_pattern.run_migration()
+        migrate_schedule_build_backups.run_migration()
+        migrate_clinic_schedule_card_guard.run_migration()
+        migrate_schedule_cards.run_migration()
+        migrate_fax_ingest.run_migration()
+        migrate_normalized_schedule_activity.run_migration()
+        migrate_grok_bot_rules.run_migration()
+        db = SessionLocal()
+        try:
+            from .schedule_activity_normalization import backfill_normalized_schedule_activity
+            from .day_off_card_normalization import backfill_day_off_card_links
+            from .call_assignment_normalization import backfill_call_daily_assignments
+            backfill_normalized_schedule_activity(db)
+            backfill_day_off_card_links(db)
+            backfill_call_daily_assignments(db)
+            admin._get_settings(db)
+            from .rules_engine.engine import ensure_rule_config_seeded
+            from .grok_bot_rules import ensure_grok_bot_rules_seeded
+            ensure_rule_config_seeded(db)
+            ensure_grok_bot_rules_seeded(db)
+            ensure_location_palette_seeded(db)
+            db.commit()
+        finally:
+            db.close()
     yield
 
 

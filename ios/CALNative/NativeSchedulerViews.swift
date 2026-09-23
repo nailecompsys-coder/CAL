@@ -137,7 +137,7 @@ struct NativeSchedulerShell: View {
               Button {
                 Task { await store.switchSessionRole(to: .surgeon) }
               } label: {
-                Label("Switch to Schedule", systemImage: "calendar")
+                Label("Switch to Calendar", systemImage: "calendar")
               }
               Button(role: .destructive) {
                 store.logout()

@@ -1,6 +1,8 @@
 # CAL Native Parity Ledger
 
-Last updated: 2026-09-15
+Last updated: 2026-09-23
+
+iOS calendar chrome (2026-09-23): the surgeon-facing section is labeled `Calendar` in the title menu and scheduler mode switch. Day-view OFF initials remain single-line, fixed-height capsules so two-letter initials cannot wrap or misalign the row.
 
 Native schedule review rows (2026-09-15): `GET /api/native/home` includes Aprima-derived patient schedule rows again, separate from CAL clinic and Block OR cards. Surgery One / CBO-style Aprima rows are read-only, flagged `needsReview=true`, and carry red styling so SwiftUI can show them as Shannon-review items instead of verified CAL schedule. CAL clinic cards still summarize location, first visit time, and visit count; Block OR cards still show location, start time, and total cases.
 

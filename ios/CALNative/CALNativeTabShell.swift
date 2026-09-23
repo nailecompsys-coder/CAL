@@ -116,7 +116,7 @@ private struct NativeAlertInbox: View {
 }
 
 enum CALNativeSection: String, CaseIterable, Identifiable {
-  case schedule = "Schedule"
+  case schedule = "Calendar"
   case timeOff = "Time Off"
 
   var id: String { rawValue }

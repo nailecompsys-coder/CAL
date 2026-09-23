@@ -242,6 +242,9 @@ private struct FlexibleInitialsWrap: View {
           ForEach(row, id: \.self) { item in
             Text(item)
               .font(ClinicalTypography.captionEmphasized)
+              .lineLimit(1)
+              .fixedSize(horizontal: true, vertical: false)
+              .frame(minWidth: 20, minHeight: 20)
               .padding(.horizontal, 6)
               .padding(.vertical, 3)
               .background(ClinicalPalette.porcelainChip.opacity(0.94), in: Capsule())

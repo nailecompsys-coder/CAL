@@ -14,6 +14,7 @@ from sqlalchemy import func as sql_func
 from sqlalchemy.orm import Session
 
 from ..auth import create_native_scheduler_token, create_surgeon_session_token
+from ..admin_identity import PORTAL_ROLES, find_active_portal_user
 from ..database import get_db
 from ..device_names import readable_device_name
 from ..email_service import send_email
@@ -24,7 +25,7 @@ from ..surgeon_visibility import surgeon_is_visible
 router = APIRouter(prefix="/api/native")
 
 OTP_EXPIRE_MINUTES = 15
-_SCHEDULER_ROLES = frozenset({"scheduler", "admin", "superadmin"})
+_SCHEDULER_ROLES = PORTAL_ROLES
 
 
 class NativeOtpRequestBody(BaseModel):
@@ -101,16 +102,7 @@ def _find_active_surgeon(db: Session, identifier: str) -> Surgeon | None:
 
 
 def _find_scheduler_admin(db: Session, identifier: str) -> AdminUser | None:
-    submitted = identifier.strip()
-    if "@" not in submitted:
-        return None
-    admin = db.query(AdminUser).filter(
-        sql_func.lower(AdminUser.email) == submitted.lower(),
-        AdminUser.is_active == True,  # noqa: E712
-    ).first()
-    if admin and admin.role in _SCHEDULER_ROLES:
-        return admin
-    return None
+    return find_active_portal_user(db, identifier)
 
 
 def _resolve_identities(db: Session, identifier: str) -> tuple[Surgeon | None, AdminUser | None]:

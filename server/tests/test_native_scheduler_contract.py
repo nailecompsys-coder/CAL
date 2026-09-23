@@ -72,6 +72,31 @@ class NativeSchedulerContractTest(unittest.TestCase):
         finally:
             db.close()
 
+    def test_scheduler_otp_accepts_phone_number(self):
+        db = self.Session()
+        try:
+            admin = AdminUser(
+                username="superadmin",
+                email="superadmin@example.com",
+                phone="(407) 948-7148",
+                password_hash="x",
+                role="superadmin",
+                is_active=True,
+            )
+            db.add(admin)
+            db.commit()
+
+            with patch("app.routers.native_scheduler_api.generate_sms_otp", return_value=(True, "123456", None)), patch(
+                "app.routers.native_scheduler_api.send_email", return_value=True,
+            ):
+                scheduler_otp_request(SchedulerOtpRequestBody(email="4079487148"), db=db)
+            verified = scheduler_otp_verify(SchedulerOtpVerifyBody(email="4079487148", code="123456"), db=db)
+
+            self.assertEqual(verified["identity"]["id"], admin.id)
+            self.assertEqual(verified["identity"]["role"], "superadmin")
+        finally:
+            db.close()
+
     def test_scheduler_home_contract_has_blocks_and_no_phi(self):
         db = self.Session()
         try:

@@ -167,6 +167,46 @@ class NativeOtpUnifiedContractTest(unittest.TestCase):
         finally:
             db.close()
 
+    def test_phone_login_prefers_unique_superadmin_over_legacy_duplicate(self):
+        db = self.Session()
+        try:
+            primary = AdminUser(
+                username="shannon",
+                email="shannon@example.com",
+                phone="(407) 948-7148",
+                password_hash="x",
+                role="superadmin",
+                is_active=True,
+            )
+            db.add_all([
+                primary,
+                AdminUser(
+                    username="shannon-old",
+                    email="shannon-old@example.com",
+                    phone="4079487148",
+                    password_hash="x",
+                    role="admin",
+                    is_active=True,
+                ),
+            ])
+            db.commit()
+
+            with patch("app.routers.native_otp_api.generate_sms_otp", return_value=(True, "333444", None)), patch(
+                "app.routers.native_otp_api.send_email", return_value=True
+            ):
+                requested = native_otp_request(NativeOtpRequestBody(email="407-948-7148"), db=db)
+                verified = native_otp_verify(
+                    NativeOtpVerifyBody(email="407-948-7148", code="333444"),
+                    request=_request(),
+                    db=db,
+                )
+
+            self.assertEqual(requested["roles"], ["scheduler"])
+            self.assertEqual(verified["identity"]["admin_id"], primary.id)
+            self.assertEqual(verified["role"], "scheduler")
+        finally:
+            db.close()
+
     def test_admin_and_superadmin_roles_qualify_for_scheduler_shell(self):
         db = self.Session()
         try:

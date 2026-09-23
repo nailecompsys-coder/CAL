@@ -9,10 +9,10 @@ from datetime import datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
-from sqlalchemy import func as sql_func
 from sqlalchemy.orm import Session, joinedload
 
 from ..auth import create_native_scheduler_token, get_current_native_scheduler
+from ..admin_identity import find_active_portal_user
 from ..database import get_db
 from ..email_service import send_email
 from ..models import AdminOtpChallenge, AdminUser, Location, ORBlockAssignment, ORBlockInstance
@@ -108,13 +108,7 @@ def _local_dev_scheduler_otp() -> str | None:
 
 
 def _find_scheduler_admin(db: Session, identifier: str) -> AdminUser | None:
-    admin = db.query(AdminUser).filter(
-        sql_func.lower(AdminUser.email) == identifier.strip().lower(),
-        AdminUser.is_active == True,  # noqa: E712
-    ).first()
-    if admin and admin.role in {"scheduler", "admin", "superadmin"}:
-        return admin
-    return None
+    return find_active_portal_user(db, identifier)
 
 
 def _send_scheduler_email(admin: AdminUser, code: str) -> bool:

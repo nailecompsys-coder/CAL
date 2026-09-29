@@ -147,10 +147,6 @@ def _infer_generic_group_location(group: list[_PreparedRow], prepared: list[_Pre
     already assigned to the target card, then explicit activity in the same
     session, then the nearest prior compatible same-day activity.
     """
-    card = group[0].card
-    if card and card.baseline_location:
-        return card.baseline_location
-
     row_type_counts = {
         row_type: sum(item.row.row_type == row_type for item in group)
         for row_type in {item.row.row_type for item in group}
@@ -173,8 +169,12 @@ def _infer_generic_group_location(group: list[_PreparedRow], prepared: list[_Pre
     same_session = [item for item in candidates if item.session == session]
     if same_session:
         candidates = same_session
-    if not candidates:
-        return card.effective_location if card and card.effective_location else None
+    else:
+        card = group[0].card
+        if card and card.baseline_location:
+            return card.baseline_location
+        if not candidates:
+            return card.effective_location if card and card.effective_location else None
 
     first_group_minute = min(_minutes(item.row.start_time) for item in group)
     prior = [item for item in candidates if _minutes(item.row.start_time) <= first_group_minute]

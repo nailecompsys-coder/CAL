@@ -94,6 +94,21 @@ class FaxIngestEngineTest(unittest.TestCase):
         self.assertEqual(result["decisions"], {"ready": 1})
         self.assertEqual(decision.reason_code, "epic_override")
 
+    def test_generic_rows_follow_explicit_same_session_epic_location(self):
+        result = stage_reviewed_rows(
+            self.db,
+            external_fax_id=173,
+            source_label="Fax 173",
+            rows=[
+                self.row(start_time=time(13, 10), room="APK S03"),
+                self.row(start_time=time(13, 30), room="AHMGGENSRG", patient_name="Second, Patient"),
+            ],
+        )
+        self.db.commit()
+        staged = self.db.query(FaxIngestRow).order_by(FaxIngestRow.id).all()
+        self.assertEqual(result["decisions"], {"ready": 2})
+        self.assertEqual({row.source_location_id for row in staged}, {self.ap_location.id})
+
     def test_off_card_is_flagged_but_never_removed(self):
         card = self.db.query(ScheduleCard).filter_by(surgeon_id=self.surgeon.id, date=date(2026, 9, 16), session="am").one()
         card.effective_state = "off"

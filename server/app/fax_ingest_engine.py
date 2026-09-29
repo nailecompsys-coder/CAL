@@ -40,6 +40,15 @@ class ReviewedFaxRow:
     procedure: str = ""
 
 
+@dataclass
+class _PreparedRow:
+    row: ReviewedFaxRow
+    surgeon: Surgeon | None
+    session: str
+    source_location: Location | None
+    card: ScheduleCard | None
+
+
 def session_for_time(value: time | None) -> str:
     return "am" if value is not None and value < time(12) else "pm"
 
@@ -119,6 +128,69 @@ def _key(row: ReviewedFaxRow) -> str:
     return "|".join((_normal(row.surgeon_name or row.surgeon_initials), row.case_date.isoformat(), clock, row.row_type, _normal(row.patient_name)))
 
 
+def _minutes(value: time | None) -> int:
+    return value.hour * 60 + value.minute if value else 24 * 60
+
+
+def _location_matches_row_type(location: Location, row_type: str) -> bool:
+    abbreviation = (location.abbreviation or "").upper()
+    if row_type == "surgical":
+        return abbreviation.endswith("-OR") or (location.location_type or "").lower() in {"hospital", "or"}
+    return abbreviation.endswith("-OV") or (location.location_type or "").lower() == "clinic"
+
+
+def _infer_generic_group_location(group: list[_PreparedRow], prepared: list[_PreparedRow]) -> Location | None:
+    """Resolve a generic room into an existing NA card from same-day evidence.
+
+    AHMGGENSRG is a placeholder, not a facility. The fax still provides the
+    surgeon, date, session, time sequence, and row type. Prefer a location
+    already assigned to the target card, then explicit activity in the same
+    session, then the nearest prior compatible same-day activity.
+    """
+    card = group[0].card
+    if card and card.baseline_location:
+        return card.baseline_location
+
+    row_type_counts = {
+        row_type: sum(item.row.row_type == row_type for item in group)
+        for row_type in {item.row.row_type for item in group}
+    }
+    dominant_type = max(row_type_counts, key=row_type_counts.get)
+    if list(row_type_counts.values()).count(row_type_counts[dominant_type]) > 1:
+        return None
+
+    surgeon_id = group[0].surgeon.id if group[0].surgeon else None
+    day = group[0].row.case_date
+    session = group[0].session
+    candidates = [
+        item for item in prepared
+        if item.surgeon
+        and item.surgeon.id == surgeon_id
+        and item.row.case_date == day
+        and item.source_location
+        and _location_matches_row_type(item.source_location, dominant_type)
+    ]
+    same_session = [item for item in candidates if item.session == session]
+    if same_session:
+        candidates = same_session
+    if not candidates:
+        return card.effective_location if card and card.effective_location else None
+
+    first_group_minute = min(_minutes(item.row.start_time) for item in group)
+    prior = [item for item in candidates if _minutes(item.row.start_time) <= first_group_minute]
+    pool = prior or candidates
+    best_minute = (
+        max(_minutes(item.row.start_time) for item in pool)
+        if prior
+        else min(_minutes(item.row.start_time) for item in pool)
+    )
+    nearest = [item for item in pool if _minutes(item.row.start_time) == best_minute]
+    location_ids = {item.source_location.id for item in nearest if item.source_location}
+    if len(location_ids) != 1:
+        return None
+    return nearest[0].source_location
+
+
 def stage_reviewed_rows(
     db: Session,
     *,
@@ -149,25 +221,51 @@ def stage_reviewed_rows(
 
     counts: dict[str, int] = {}
     resolved_sessions = sessions_for_rows(rows)
+    prepared: list[_PreparedRow] = []
     for row, resolved_session in zip(rows, resolved_sessions, strict=True):
         if row.row_type not in {"surgical", "clinic"}:
             raise ValueError("row_type must be surgical or clinic")
         surgeon = _surgeon_for_row(db, row)
         room = _text(row.room).upper()
         source_location = _room_location(db, room)
+        card = None
+        if surgeon:
+            card = db.query(ScheduleCard).filter(
+                ScheduleCard.surgeon_id == surgeon.id,
+                ScheduleCard.date == row.case_date,
+                ScheduleCard.session == resolved_session,
+            ).one_or_none()
+        prepared.append(_PreparedRow(row, surgeon, resolved_session, source_location, card))
+
+    generic_groups: dict[tuple[int | None, date, str, str], list[_PreparedRow]] = {}
+    for item in prepared:
+        room = _text(item.row.room).upper()
+        if room not in GENERIC_LOCATION_ROOMS or item.source_location:
+            continue
+        key = (item.surgeon.id if item.surgeon else None, item.row.case_date, item.session, room)
+        generic_groups.setdefault(key, []).append(item)
+    for group in generic_groups.values():
+        inferred = _infer_generic_group_location(group, prepared)
+        if inferred:
+            for item in group:
+                item.source_location = inferred
+
+    for item in prepared:
+        row = item.row
+        room = _text(row.room).upper()
         staged = FaxIngestRow(
             run_id=run.id,
             page_number=row.page,
-            surgeon_id=surgeon.id if surgeon else None,
+            surgeon_id=item.surgeon.id if item.surgeon else None,
             surgeon_initials=_text(row.surgeon_initials).upper(),
             case_date=row.case_date,
             start_time=row.start_time,
-            session=resolved_session,
+            session=item.session,
             row_type=row.row_type,
             room_text=room,
             patient_name=_text(row.patient_name),
             procedure=_text(row.procedure),
-            source_location_id=source_location.id if source_location else None,
+            source_location_id=item.source_location.id if item.source_location else None,
             normalized_key=_key(row),
         )
         db.add(staged)
@@ -191,9 +289,23 @@ def _decide(db: Session, row: FaxIngestRow) -> FaxRowDecision:
         return FaxRowDecision(fax_row_id=row.id, status="needs_review", reason_code="missing_scaffold", detail="Permanent AM/PM card is missing; ingest is not allowed to create one.")
     if card.effective_state == "off":
         return FaxRowDecision(fax_row_id=row.id, schedule_card_id=card.id, status="needs_review", reason_code="off_collision", detail="Fax activity is preserved for review against approved OFF.")
-    if row.source_location_id and card.effective_location_id and row.source_location_id != card.effective_location_id:
-        return FaxRowDecision(fax_row_id=row.id, schedule_card_id=card.id, status="needs_review", reason_code="location_mismatch", detail="Fax room location does not match the permanent card baseline.")
-    if row.room_text in GENERIC_LOCATION_ROOMS and card.effective_state == "na":
+    if row.room_text in GENERIC_LOCATION_ROOMS and card.effective_state == "na" and not row.source_location_id:
         return FaxRowDecision(fax_row_id=row.id, schedule_card_id=card.id, status="needs_review", reason_code="generic_room_on_na", detail="Generic room has no facility evidence and the card is NA.")
+    if row.source_location_id and card.baseline_location_id and row.source_location_id != card.baseline_location_id:
+        return FaxRowDecision(
+            fax_row_id=row.id,
+            schedule_card_id=card.id,
+            status="ready",
+            reason_code="epic_override",
+            detail="EPIC activity differs from the master assignment and will overlay the existing card.",
+        )
+    if row.room_text in GENERIC_LOCATION_ROOMS and card.effective_state == "na" and row.source_location_id:
+        return FaxRowDecision(
+            fax_row_id=row.id,
+            schedule_card_id=card.id,
+            status="ready",
+            reason_code="na_context_location",
+            detail="Generic EPIC activity was resolved from same-day surgeon and location evidence.",
+        )
     detail = "Ready to attach to the existing permanent card; no card or baseline will be changed."
     return FaxRowDecision(fax_row_id=row.id, schedule_card_id=card.id, status="ready", reason_code="existing_card", detail=detail)

@@ -20,7 +20,8 @@ class FaxIngestEngineTest(unittest.TestCase):
         self.db = self.Session()
         self.surgeon = Surgeon(first_name="Jorge", last_name="Florin", is_active=True, staff_type="physician")
         self.location = Location(name="Minneola OR", abbreviation="MN-OR", location_type="hospital", is_active=True)
-        self.db.add_all([self.surgeon, self.location])
+        self.ap_location = Location(name="Apopka OR", abbreviation="AP-OR", location_type="hospital", is_active=True)
+        self.db.add_all([self.surgeon, self.location, self.ap_location])
         self.db.flush()
         week = ScheduleCardWeek(surgeon_id=self.surgeon.id, week_start=date(2026, 9, 14))
         self.db.add(week)
@@ -62,6 +63,36 @@ class FaxIngestEngineTest(unittest.TestCase):
         self.assertEqual(result["decisions"], {"needs_review": 1})
         self.assertEqual(decision.reason_code, "generic_room_on_na")
         self.assertIsNone(decision.schedule_card.effective_location_id)
+
+    def test_generic_room_on_na_uses_nearest_prior_same_day_location(self):
+        result = stage_reviewed_rows(
+            self.db,
+            external_fax_id=171,
+            source_label="Fax 171",
+            rows=[
+                self.row(start_time=time(9, 15), room="APK S03"),
+                self.row(start_time=time(13, 20), room="AHMGGENSRG", patient_name="Second, Patient"),
+                self.row(start_time=time(14, 0), room="AHMGGENSRG", patient_name="Third, Patient"),
+            ],
+        )
+        self.db.commit()
+        decisions = self.db.query(FaxRowDecision).order_by(FaxRowDecision.id).all()
+        staged = self.db.query(FaxIngestRow).order_by(FaxIngestRow.id).all()
+        self.assertEqual(result["decisions"], {"ready": 3})
+        self.assertEqual([decision.reason_code for decision in decisions[1:]], ["na_context_location", "na_context_location"])
+        self.assertEqual({row.source_location_id for row in staged[1:]}, {self.ap_location.id})
+
+    def test_epic_location_override_is_ready_for_existing_card(self):
+        result = stage_reviewed_rows(
+            self.db,
+            external_fax_id=172,
+            source_label="Fax 172",
+            rows=[self.row(room="APK S03")],
+        )
+        self.db.commit()
+        decision = self.db.query(FaxRowDecision).one()
+        self.assertEqual(result["decisions"], {"ready": 1})
+        self.assertEqual(decision.reason_code, "epic_override")
 
     def test_off_card_is_flagged_but_never_removed(self):
         card = self.db.query(ScheduleCard).filter_by(surgeon_id=self.surgeon.id, date=date(2026, 9, 16), session="am").one()

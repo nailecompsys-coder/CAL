@@ -266,6 +266,53 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.assertEqual([case.location_id for case in cases], [self.wg_or.id, self.alt_or.id])
         self.assertTrue(any(item["code"] == "mixed_facilities_in_session" for item in result["baselineConflicts"]))
 
+    def test_validated_session_wins_when_case_location_matches_other_card(self):
+        pm_card = self.db.query(ScheduleCard).filter_by(session="pm").one()
+        wg_or_id = self.wg_or.id
+        pm_card.baseline_location_id = wg_or_id
+        pm_card.effective_location_id = wg_or_id
+        pm_card.baseline_state = "assigned"
+        pm_card.effective_state = "assigned"
+        self.db.commit()
+        staged = stage_reviewed_rows(
+            self.db,
+            external_fax_id=191,
+            source_label="test",
+            surgeon_scope=["JF"],
+            rows=[
+                ReviewedFaxRow(
+                    page=2,
+                    surgeon_initials="JF",
+                    surgeon_name="Jorge Florin",
+                    case_date=date(2026, 9, 22),
+                    start_time=time(7, 30),
+                    row_type="surgical",
+                    room="ALT S01",
+                    patient_name="First, Patient",
+                    procedure="First case",
+                ),
+                ReviewedFaxRow(
+                    page=2,
+                    surgeon_initials="JF",
+                    surgeon_name="Jorge Florin",
+                    case_date=date(2026, 9, 22),
+                    start_time=time(9, 15),
+                    row_type="surgical",
+                    room="WGD S03",
+                    patient_name="Second, Patient",
+                    procedure="Second case",
+                ),
+            ],
+        )
+        self.db.commit()
+
+        apply_staged_snapshot(self.db, source_fax_id=191, run_id=staged["runId"])
+
+        cases = self.db.query(SurgicalCase).order_by(SurgicalCase.start_time).all()
+        am_card = self.db.query(ScheduleCard).filter_by(session="am").one()
+        self.assertEqual([case.schedule_card_id for case in cases], [am_card.id, am_card.id])
+        self.assertEqual([case.location_id for case in cases], [self.alt_or.id, self.wg_or.id])
+
     def test_post_commit_cleanup_failure_does_not_report_apply_failure(self):
         staged = stage_reviewed_rows(
             self.db,

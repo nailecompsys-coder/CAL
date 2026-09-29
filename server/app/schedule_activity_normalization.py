@@ -112,13 +112,17 @@ def resolve_schedule_card(
 def normalize_surgical_case_card(db: Session, case: SurgicalCase) -> ScheduleCard | None:
     if case.id is None:
         db.flush()
-    card = resolve_schedule_card(
-        db,
-        surgeon_id=case.surgeon_id,
-        day=case.date,
-        location_id=case.location_id,
-        start_time=case.start_time,
-    )
+    card = db.get(ScheduleCard, case.schedule_card_id) if case.schedule_card_id else None
+    if card and (card.surgeon_id != case.surgeon_id or card.date != case.date):
+        card = None
+    if card is None:
+        card = resolve_schedule_card(
+            db,
+            surgeon_id=case.surgeon_id,
+            day=case.date,
+            location_id=case.location_id,
+            start_time=case.start_time,
+        )
     case.schedule_card_id = card.id if card else None
     if card:
         _upsert_activity(

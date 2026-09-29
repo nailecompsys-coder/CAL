@@ -2,6 +2,7 @@ import json
 import os
 import unittest
 from datetime import date, time
+from unittest.mock import patch
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SECRET_KEY", "test-secret")
@@ -264,6 +265,40 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.assertEqual(self.db.query(ScheduleCard).count(), 2)
         self.assertEqual([case.location_id for case in cases], [self.wg_or.id, self.alt_or.id])
         self.assertTrue(any(item["code"] == "mixed_facilities_in_session" for item in result["baselineConflicts"]))
+
+    def test_post_commit_cleanup_failure_does_not_report_apply_failure(self):
+        staged = stage_reviewed_rows(
+            self.db,
+            external_fax_id=191,
+            source_label="test",
+            surgeon_scope=["JF"],
+            rows=[
+                ReviewedFaxRow(
+                    page=2,
+                    surgeon_initials="JF",
+                    surgeon_name="Jorge Florin",
+                    case_date=date(2026, 9, 22),
+                    start_time=time(9, 0),
+                    row_type="surgical",
+                    room="WGD S07",
+                    patient_name="Cleanup, Patient",
+                    procedure="Test procedure",
+                ),
+            ],
+        )
+        self.db.commit()
+
+        with patch(
+            "app.fax_snapshot_service.prune_immutable_fax_sources",
+            side_effect=PermissionError("read-only source"),
+        ):
+            result = apply_staged_snapshot(self.db, source_fax_id=191, run_id=staged["runId"])
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["cardsCreated"], 0)
+        self.assertEqual(len(result["cleanupErrors"]), 1)
+        self.assertIn("read-only source", result["cleanupErrors"][0])
+        self.assertEqual(self.db.query(SurgicalCase).filter_by(status="scheduled").count(), 1)
 
 
 if __name__ == "__main__":

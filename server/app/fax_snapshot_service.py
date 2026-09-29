@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections import defaultdict
 from datetime import date
@@ -26,6 +27,7 @@ from .schedule_build_backup_service import create_fax_snapshot_backup
 
 
 FAX_NOTE_RE = re.compile(r"\bFax\s+\d+\b", re.IGNORECASE)
+logger = logging.getLogger(__name__)
 
 
 def _normal(value: str | None) -> str:
@@ -417,14 +419,26 @@ def apply_staged_snapshot(
     ))
     db.commit()
     cleanup = {"files": 0, "bytes": 0}
+    cleanup_errors: list[str] = []
     superseded_documents = db.query(FaxDocument).filter(
         FaxDocument.external_fax_id <= source_fax_id,
     ).all()
     for fax_document in superseded_documents:
-        removed = cleanup_fax_derivatives(fax_document)
-        cleanup["files"] += removed["files"]
-        cleanup["bytes"] += removed["bytes"]
-    source_cleanup = prune_immutable_fax_sources(db, keep=3)
+        try:
+            removed = cleanup_fax_derivatives(fax_document)
+            cleanup["files"] += removed["files"]
+            cleanup["bytes"] += removed["bytes"]
+        except OSError as exc:
+            message = f"fax {fax_document.external_fax_id} derivative cleanup: {exc}"
+            cleanup_errors.append(message)
+            logger.warning(message)
+    source_cleanup = {"files": 0, "bytes": 0}
+    try:
+        source_cleanup = prune_immutable_fax_sources(db, keep=3)
+    except OSError as exc:
+        message = f"immutable source cleanup: {exc}"
+        cleanup_errors.append(message)
+        logger.warning(message)
     return {
         "ok": True,
         "faxId": source_fax_id,
@@ -442,4 +456,5 @@ def apply_staged_snapshot(
         "notificationsSent": 0,
         "derivativesRemoved": cleanup,
         "immutableSourcesRemoved": source_cleanup,
+        "cleanupErrors": cleanup_errors,
     }

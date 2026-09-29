@@ -100,14 +100,23 @@ def _scope_surgeons(db: Session, run: FaxIngestRun) -> dict[str, Surgeon]:
     return resolved
 
 
-def _card_location(card: ScheduleCard, explicit_ids: set[int]) -> int | None:
-    if len(explicit_ids) > 1:
-        raise ValueError(
-            f"Fax has multiple locations for surgeon {card.surgeon_id} on "
-            f"{card.date.isoformat()} {card.session.upper()}."
-        )
-    if explicit_ids:
-        return next(iter(explicit_ids))
+def _card_location(card: ScheduleCard, rows: list[FaxIngestRow]) -> int | None:
+    """Choose a display anchor without discarding row-level facilities.
+
+    A permanent AM/PM card may contain sequential activity at more than one
+    facility. Prefer the immutable master location when it appears in the fax;
+    otherwise use the first scheduled row. Individual activities retain their
+    own source_location_id.
+    """
+    explicit_ids = {row.source_location_id for row in rows if row.source_location_id}
+    if card.baseline_location_id in explicit_ids:
+        return card.baseline_location_id
+    if card.effective_location_id in explicit_ids:
+        return card.effective_location_id
+    explicit_rows = [row for row in rows if row.source_location_id]
+    if explicit_rows:
+        first = min(explicit_rows, key=lambda row: (row.start_time is None, row.start_time, row.id))
+        return first.source_location_id
     return card.effective_location_id or card.baseline_location_id
 
 
@@ -206,16 +215,19 @@ def apply_staged_snapshot(
     for row in rows:
         activity[(row.surgeon_id, row.case_date, row.session)].append(row)
     effective_locations: dict[tuple[int, date, str], int] = {}
+    mixed_location_ids: dict[tuple[int, date, str], list[int]] = {}
     for key, group in activity.items():
         card = cards[key]
         explicit = {row.source_location_id for row in group if row.source_location_id}
-        location_id = _card_location(card, explicit)
+        location_id = _card_location(card, group)
         if not location_id:
             raise ValueError(
                 f"Fax location is unresolved for {group[0].surgeon_initials} "
                 f"{card.date.isoformat()} {card.session.upper()}."
             )
         effective_locations[key] = location_id
+        if len(explicit) > 1:
+            mixed_location_ids[key] = sorted(explicit)
 
     backup = create_fax_snapshot_backup(
         db,
@@ -257,6 +269,15 @@ def apply_staged_snapshot(
         card.effective_location_id = location_id
         card.source = f"fax:{source_fax_id}"
         card.version = (card.version or 0) + 1
+        if key in mixed_location_ids:
+            conflicts.append({
+                "code": "mixed_facilities_in_session",
+                "surgeonId": card.surgeon_id,
+                "date": card.date.isoformat(),
+                "session": card.session,
+                "cardLocationId": location_id,
+                "faxLocationIds": mixed_location_ids[key],
+            })
 
     prior_clinic = db.query(ClinicSchedule).filter(
         ClinicSchedule.surgeon_id.in_(scope_ids),
@@ -323,7 +344,7 @@ def apply_staged_snapshot(
             exact=existing_by_patient,
             by_date=existing_by_date,
         )
-        location_id = effective_locations[(first.surgeon_id, first.case_date, first.session)]
+        location_id = first.source_location_id or effective_locations[(first.surgeon_id, first.case_date, first.session)]
         primary_id, assistant_id = _choose_primary(
             group,
             existing=existing,

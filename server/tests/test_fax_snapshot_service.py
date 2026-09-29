@@ -49,7 +49,13 @@ class FaxSnapshotServiceTest(unittest.TestCase):
             location_type="hospital",
             is_active=True,
         )
-        self.db.add_all([self.surgeon, self.ap_ov, self.wg_or])
+        self.alt_or = Location(
+            name="Altamonte OR",
+            abbreviation="AL-OR",
+            location_type="hospital",
+            is_active=True,
+        )
+        self.db.add_all([self.surgeon, self.ap_ov, self.wg_or, self.alt_or])
         self.db.flush()
         week = ScheduleCardWeek(
             surgeon_id=self.surgeon.id,
@@ -218,6 +224,46 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.assertEqual(len(cases), 1)
         self.assertEqual(cases[0].patient_name, "Williams, Robert Alexander")
         self.assertEqual(cases[0].procedure, "Current procedure")
+
+    def test_daily_snapshot_keeps_mixed_facilities_on_one_session_card(self):
+        staged = stage_reviewed_rows(
+            self.db,
+            external_fax_id=191,
+            source_label="test",
+            surgeon_scope=["JF"],
+            rows=[
+                ReviewedFaxRow(
+                    page=2,
+                    surgeon_initials="JF",
+                    surgeon_name="Jorge Florin",
+                    case_date=date(2026, 9, 22),
+                    start_time=time(12, 30),
+                    row_type="surgical",
+                    room="WGD S07",
+                    patient_name="First, Patient",
+                    procedure="First case",
+                ),
+                ReviewedFaxRow(
+                    page=2,
+                    surgeon_initials="JF",
+                    surgeon_name="Jorge Florin",
+                    case_date=date(2026, 9, 22),
+                    start_time=time(13, 45),
+                    row_type="surgical",
+                    room="ALT S07",
+                    patient_name="Second, Patient",
+                    procedure="Second case",
+                ),
+            ],
+        )
+        self.db.commit()
+
+        result = apply_staged_snapshot(self.db, source_fax_id=191, run_id=staged["runId"])
+
+        cases = self.db.query(SurgicalCase).order_by(SurgicalCase.start_time).all()
+        self.assertEqual(self.db.query(ScheduleCard).count(), 2)
+        self.assertEqual([case.location_id for case in cases], [self.wg_or.id, self.alt_or.id])
+        self.assertTrue(any(item["code"] == "mixed_facilities_in_session" for item in result["baselineConflicts"]))
 
 
 if __name__ == "__main__":

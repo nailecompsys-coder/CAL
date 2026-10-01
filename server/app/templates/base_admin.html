@@ -194,6 +194,8 @@ function closeSidebar() {
 }
 
 (function adminQuietRefresh() {
+  // The master calendar owns its incremental event refresh lifecycle.
+  if (document.querySelector('[data-calendar-live]')) return;
   var REFRESH_MS = 60000;
   var IDLE_MS = 20000;
   var lastActive = Date.now();

@@ -5,7 +5,7 @@
 <link rel="stylesheet" href="/static/css/admin_calendar.css?v={{ app_version|default('dev')|urlencode }}&b=3" />
 {% endblock %}
 {% block content %}
-<section class="master-calendar" aria-labelledby="calendar-heading" data-today="{{ today.isoformat() }}">
+<section class="master-calendar" aria-labelledby="calendar-heading" data-calendar-live data-today="{{ today.isoformat() }}">
   <header class="calendar-heading">
     <div><p class="calendar-eyebrow">Practice schedule</p><h1 id="calendar-heading">Master Calendar</h1>
       <p class="calendar-description">Clinic, OR, call, meetings and time off — together in one view.</p></div>
@@ -32,4 +32,4 @@
   <div id="calendar-detail-body"></div>
 </dialog>
 {% endblock %}
-{% block scripts %}<script src="/static/admin_calendar.js?v={{ app_version|default('dev')|urlencode }}&b=3" defer></script>{% endblock %}
+{% block scripts %}<script src="/static/admin_calendar.js?v={{ app_version|default('dev')|urlencode }}&b=4" defer></script>{% endblock %}

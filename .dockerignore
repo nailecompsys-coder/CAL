@@ -27,3 +27,7 @@ app/static/uploads/
 .DS_Store
 Thumbs.db
 ._*
+
+# Application queries are runtime source, not database dumps.
+!server/app/sql/*.sql
+!app/sql/*.sql

@@ -233,6 +233,7 @@ function closeSidebar() {
   if (calendarPane) calendarPane.addEventListener('scroll', markActive, { passive: true });
 
   function overlayOpen() {
+    if (document.querySelector('dialog[open]')) return true;
     var nodes = document.querySelectorAll('.fixed.inset-0, [id$="-modal"], #hospital-panel, #pill-detail-float');
     for (var i = 0; i < nodes.length; i++) {
       if (!nodes[i].classList.contains('hidden')) return true;

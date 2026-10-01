@@ -213,11 +213,14 @@ def aprima_sync_now(
 
 @router.get("/calendar", response_class=HTMLResponse)
 def calendar(request: Request, db: Session = Depends(get_db), admin=Depends(get_current_admin)):
-    surgeons = [
-        row for row in db.query(Surgeon).filter(Surgeon.is_active == True).order_by(Surgeon.last_name).all()
-        if surgeon_is_visible(row)
-    ]
-    surgeons = _sort_surgeons_physicians_first(surgeons)
+    surgeons = db.query(Surgeon).filter(
+        Surgeon.is_active == True,
+        func.lower(func.coalesce(Surgeon.email, "")) != "don@clermontitstore.com",
+        ~((func.lower(Surgeon.first_name) == "developer") & (func.lower(Surgeon.last_name) == "admin")),
+    ).order_by(
+        case((Surgeon.staff_type == "physician", 0), else_=1),
+        Surgeon.last_name, Surgeon.first_name, Surgeon.id,
+    ).all()
     return templates.TemplateResponse("admin/calendar.html", _base(request, admin, db=db, surgeons=surgeons))
 
 

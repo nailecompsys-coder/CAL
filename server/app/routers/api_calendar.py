@@ -1,6 +1,8 @@
 """Calendar JSON API feeds."""
 
-from fastapi import APIRouter, Depends
+from datetime import timedelta
+
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -18,9 +20,12 @@ def get_events(
     end: str,
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
+    surgeon_id: int | None = None,
 ):
     start_date, end_date = parse_iso_date_range(start, end)
-    return JSONResponse(build_admin_calendar_events(db, start_date, end_date))
+    if end_date <= start_date or (end_date - start_date).days > 366:
+        raise HTTPException(400, "Calendar range must be between 1 and 366 days")
+    return JSONResponse(build_admin_calendar_events(db, start_date, end_date - timedelta(days=1), surgeon_id))
 
 
 @router.get("/my-events")

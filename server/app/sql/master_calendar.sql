@@ -35,7 +35,23 @@ ranked_activity AS (
     FROM schedule_card_activities a JOIN selected s ON s.id = a.surgeon_id
     WHERE a.is_active = TRUE AND a.activity_date BETWEEN :start_date AND :end_date
 ),
-activity AS (SELECT * FROM ranked_activity WHERE rank = 1),
+activity AS (
+    SELECT id, schedule_card_id, surgeon_id, activity_type, location_id, start_time,
+           patient_name, procedure, room_text, source_system, surgical_case_id
+    FROM ranked_activity WHERE rank = 1
+    UNION ALL
+    -- Older imports normalized only the primary surgeon. Project missing assistance
+    -- into the assistant's time slot without changing source data or master blocks.
+    -- Existing reviewed activity wins; untimed/weekend cases remain standalone below.
+    SELECT -sc.id, c.id, s.id, 'surgical', sc.location_id, sc.start_time,
+           sc.patient_name, sc.procedure, sc.room_text, 'surgical_case_assist', sc.id
+    FROM surgical_cases sc JOIN selected s ON s.id = sc.assisting_surgeon_id
+    JOIN schedule_cards c ON c.surgeon_id = s.id AND c.date = sc.date
+      AND c.session = CASE WHEN substr(CAST(sc.start_time AS TEXT),1,5) < '12:00' THEN 'am' ELSE 'pm' END
+    WHERE sc.date BETWEEN :start_date AND :end_date AND sc.status <> 'cancelled'
+      AND sc.start_time IS NOT NULL AND WEEKDAY_CARD
+      AND NOT EXISTS (SELECT 1 FROM ranked_activity a WHERE a.surgeon_id = s.id AND a.surgical_case_id = sc.id)
+),
 activity_summary AS (
     SELECT a.schedule_card_id, count(*) AS activity_count,
            sum(CASE WHEN a.activity_type = 'surgical' THEN 1 ELSE 0 END) AS cases,

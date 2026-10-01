@@ -1,6 +1,6 @@
 # Master Calendar doctor filter and layout — 2026-10-01
 
-Implemented locally in `codex/schedule-integrity`. No production deployment or data changes.
+Originally implemented and validated in `codex/schedule-integrity`. The historical validation below describes that broader branch; see the backend release validation at the end for the isolated production candidate.
 
 ## Database-owned feed
 
@@ -35,3 +35,13 @@ The shared admin refresh previously navigated to the same page every minute afte
 Open detail/overflow panels and hidden tabs pause checks. A panel opened during a request defers application until closed. Background failures retain the last loaded schedule with a retry notice. Scope changes abort/discard prior requests; page navigation stops timers and back-forward restoration resumes them. SQL scheduling rules are unchanged.
 
 Validation: 12 Node client regressions pass, plus syntax/whitespace checks. Real FullCalendar verification used the isolated synthetic PostgreSQL fixture with a preview-only 2-second polling interval. After changing one meeting in SQL, the other three event DOM nodes retained identities 1/2/3, only the meeting changed from node 4 to node 5, and the page load identifier stayed unchanged. An open meeting dialog retained its original content through a later database update and showed the new meeting after closing. Audit receipt: `calendar-soft-refresh-tests.log`; synthetic screenshot: `calendar-soft-refresh-preview.jpg`. Production interval remains 60 seconds. No production deployment or database changes.
+
+## Isolated backend release validation
+
+`codex/calendar-backend-release` starts at production `1f2a661` and includes only the three calendar filter/presentation/refresh commits, plus a compatibility correction for historical assistance imports. Earlier scheduling policy, normalization, and native iOS changes are excluded. No schema migration is introduced.
+
+The SQL read now projects assistance missing from normalized activity into the assistant's weekday AM/PM card using the source time. Existing reviewed normalized activity takes precedence; untimed and weekend assistance remains visible as standalone source events. It does not write or reinterpret the master schedule. Regression coverage checks the afternoon slot, reviewed slot, cancellation, untimed/weekend visibility, and absence of duplicate events.
+
+This isolated candidate passed **18 calendar SQL/API tests** across PostgreSQL 16 and SQLite and **12 Node refresh tests**, plus Git whitespace checks. The earlier 445-test result belongs to the broader feature branch, not this release candidate. Candidate SQL executed successfully against production in an explicitly read-only transaction: the six-week all-clinician feed returned 847 events in approximately 0.14 seconds; Jorge Florin's selected feed returned 75 events in approximately 0.02 seconds. No patient details were emitted into the audit output.
+
+Production preflight confirmed a clean `main` at `1f2a661`, healthy API/PostgreSQL, and valid standalone Compose configuration. Release uses the repository rebuild script and verifies both runtime Git revision and authenticated calendar endpoints afterward. No TestFlight build is required for these server-delivered changes.

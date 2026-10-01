@@ -125,6 +125,29 @@ class MasterCalendarTest(unittest.TestCase):
         with self.assertRaises(HTTPException):
             get_events('2026-10-02','2026-10-01',db=self.db,admin=object(),surgeon_id=self.fid)
 
+    def test_assistance_projection_preserves_time_reviewed_slots_and_unplaced_cases(self):
+        from app.models import ScheduleCard
+        materialize_master_schedule_cards(self.db,start=date(2026,9,28),end=date(2026,10,4))
+        am=self.db.query(ScheduleCard).filter_by(surgeon_id=self.fid,date=self.day,session='am').one()
+        pm=self.db.query(ScheduleCard).filter_by(surgeon_id=self.fid,date=self.day,session='pm').one()
+        afternoon=SurgicalCase(surgeon_id=self.oid,assisting_surgeon_id=self.fid,date=self.day,start_time=time(14),patient_name='Afternoon',procedure='Case',status='scheduled')
+        reviewed=SurgicalCase(surgeon_id=self.oid,assisting_surgeon_id=self.fid,date=self.day,start_time=time(13),patient_name='Reviewed',procedure='Case',status='scheduled')
+        untimed=SurgicalCase(surgeon_id=self.oid,assisting_surgeon_id=self.fid,date=self.day,patient_name='Untimed',procedure='Case',status='scheduled')
+        weekend=SurgicalCase(surgeon_id=self.oid,assisting_surgeon_id=self.fid,date=date(2026,10,4),start_time=time(8),patient_name='Weekend',procedure='Case',status='scheduled')
+        cancelled=SurgicalCase(surgeon_id=self.oid,assisting_surgeon_id=self.fid,date=self.day,start_time=time(14),patient_name='Cancelled',procedure='Case',status='cancelled')
+        self.db.add_all([afternoon,reviewed,untimed,weekend,cancelled]);self.db.flush()
+        self.db.add(ScheduleCardActivity(schedule_card_id=am.id,surgeon_id=self.fid,activity_date=self.day,
+            session='am',activity_type='surgical',patient_name='Reviewed',procedure='Case',start_time=time(13),
+            source_system='surgical_case_assist',source_record_key=str(reviewed.id),identity_key='reviewed',
+            surgical_case_id=reviewed.id,is_active=True))
+        self.db.commit()
+        result=self.feed(self.fid)
+        by_id={e['id']:e for e in result}
+        self.assertEqual([r['patient'] for r in by_id[f'card-{am.id}']['extendedProps']['roster']],['Reviewed'])
+        self.assertEqual([r['patient'] for r in by_id[f'card-{pm.id}']['extendedProps']['roster']],['Afternoon'])
+        self.assertEqual({e['extendedProps']['patient_name'] for e in result if e['id'].startswith('surg-')},{'Untimed','Weekend'})
+        self.assertNotIn('Cancelled',json.dumps(result))
+
     def test_normalized_aprima_is_not_repeated_as_a_cached_appointment(self):
         materialize_master_schedule_cards(self.db,start=date(2026,9,28),end=date(2026,10,2))
         self.cached('patient','visit',self.fid,'Office visit',activity_type='clinic')

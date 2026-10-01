@@ -2,7 +2,7 @@
 {% block title %}Master Calendar{% endblock %}
 {% block head %}
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js" defer></script>
-<link rel="stylesheet" href="/static/css/admin_calendar.css?v={{ app_version|default('dev')|urlencode }}&b=2" />
+<link rel="stylesheet" href="/static/css/admin_calendar.css?v={{ app_version|default('dev')|urlencode }}&b=3" />
 {% endblock %}
 {% block content %}
 <section class="master-calendar" aria-labelledby="calendar-heading" data-today="{{ today.isoformat() }}">
@@ -32,4 +32,4 @@
   <div id="calendar-detail-body"></div>
 </dialog>
 {% endblock %}
-{% block scripts %}<script src="/static/admin_calendar.js?v={{ app_version|default('dev')|urlencode }}&b=2" defer></script>{% endblock %}
+{% block scripts %}<script src="/static/admin_calendar.js?v={{ app_version|default('dev')|urlencode }}&b=3" defer></script>{% endblock %}

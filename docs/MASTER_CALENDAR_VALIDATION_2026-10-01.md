@@ -23,3 +23,7 @@ One clinician selector replaces the second sidebar. Month view has readable even
 - JavaScript syntax and Git whitespace checks passed.
 
 Receipts are local under `/Users/donnaile/.codex/audits/cal-schedule-integrity-20261001/`: `calendar-full-suite.log`, `calendar-focused-tests.log`, `calendar-client-tests.log`, and `calendar-florin-preview.jpg`. Preview is synthetic, not a production screenshot.
+
+## Presentation follow-up
+
+Removed the Grok-BOT dock and script from the shared admin shell, retaining the underlying assistant implementation for possible later use. Restored the full sidebar navigation area, corrected the empty brand icon, isolated FullCalendar from global table padding, refined segmented controls and typography, softened event fills, and added full event titles on hover. SQL and scheduling behavior are unchanged. Verified the assistant panel and script are both absent in the rendered DOM; inspected desktop month and mobile day layouts. All three existing client regression tests, JavaScript syntax, and whitespace checks pass. Updated synthetic preview: `calendar-polish-preview.jpg`. Not deployed.

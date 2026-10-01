@@ -143,6 +143,7 @@
       info.el.setAttribute('tabindex', '0');
       info.el.setAttribute('role', 'button');
       info.el.setAttribute('aria-label', [info.event.extendedProps.surgeon, info.event.title, info.event.extendedProps.count_label].filter(Boolean).join(' · '));
+      info.el.title = info.el.getAttribute('aria-label');
       info.el.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); showDetail(info.event); }});
     }
   });

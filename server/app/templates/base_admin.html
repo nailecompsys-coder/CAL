@@ -58,7 +58,6 @@
     .color-picker-row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
     .color-picker-row input[type="color"] { width: 2.5rem; height: 2.5rem; padding: 2px; border: 1px solid #e2e8f0; border-radius: 0.5rem; cursor: pointer; background: none; }
     .color-picker-row input[type="text"].color-hex { width: 6rem; font-family: ui-monospace, monospace; font-size: 0.8rem; }
-    .grok-dock { min-height: 8.5rem; }
   </style>
 </head>
 <body class="admin-shell bg-clinical-mist font-sans">
@@ -75,7 +74,7 @@
         <img src="/static/uploads/{{ settings.logo_filename }}" alt="Logo" class="h-8 object-contain flex-shrink-0" />
         {% else %}
         <div class="w-8 h-8 bg-blue-500 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm">
-          <i class="fa-solid fa-scalpel text-white text-sm"></i>
+          <i class="fa-solid fa-calendar-days text-white text-sm"></i>
         </div>
         {% endif %}
         <div class="min-w-0">
@@ -135,12 +134,6 @@
       </a>
       {% endif %}
     </nav>
-
-    {% if admin.role != 'scheduler' %}
-    <div class="px-3 pb-3 pt-1 flex-shrink-0">
-      <div id="grok-dock" class="grok-dock"></div>
-    </div>
-    {% endif %}
 
     <div class="admin-sidebar-footer px-4 py-3 border-t space-y-2">
       <div class="flex items-center justify-between gap-2 flex-wrap">
@@ -279,9 +272,7 @@ function closeSidebar() {
 })();
 
 </script>
-{% if admin.role != 'scheduler' %}
-<script src="/static/cal_assistant.js?v={{ app_version|default('dev')|urlencode }}&b=talk3" defer></script>
-{% endif %}
+{# Grok-BOT is temporarily removed from the admin UI. #}
 {% block scripts %}{% endblock %}
 </body>
 </html>

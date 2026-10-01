@@ -218,8 +218,9 @@ def calendar(request: Request, db: Session = Depends(get_db), admin=Depends(get_
         func.lower(func.coalesce(Surgeon.email, "")) != "don@clermontitstore.com",
         ~((func.lower(Surgeon.first_name) == "developer") & (func.lower(Surgeon.last_name) == "admin")),
     ).order_by(
-        case((Surgeon.staff_type == "physician", 0), else_=1),
-        Surgeon.last_name, Surgeon.first_name, Surgeon.id,
+        case((func.coalesce(Surgeon.staff_type, "physician") == "physician", 0), else_=1),
+        case(((func.coalesce(Surgeon.staff_type, "physician") == "physician") & (Surgeon.sort_order > 0), Surgeon.sort_order), else_=999999),
+        func.lower(Surgeon.last_name), func.lower(Surgeon.first_name), Surgeon.id,
     ).all()
     return templates.TemplateResponse("admin/calendar.html", _base(request, admin, db=db, surgeons=surgeons))
 

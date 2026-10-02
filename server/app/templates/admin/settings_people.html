@@ -130,9 +130,9 @@
                   <button type="submit" title="Preview mobile" class="text-xs font-semibold text-slate-500 hover:text-slate-800 px-2 py-1 rounded-lg hover:bg-slate-100">Preview</button>
                 </form>
                 {% if admin.role in ['admin', 'superadmin'] %}
-                <form method="post" action="/admin/surgeons/{{ s.id }}/native-preview-code" target="_blank" class="inline">
-                  <button type="submit" title="Read-only iPhone simulator preview" class="text-xs font-semibold text-teal-700 hover:text-teal-900 px-2 py-1 rounded-lg hover:bg-teal-50">iPhone view</button>
-                </form>
+                <button type="button" data-preview-url="/admin/surgeons/{{ s.id }}/native-preview-code"
+                  onclick="openNativePreview(this)" title="Read-only iPhone simulator preview"
+                  class="text-xs font-semibold text-teal-700 hover:text-teal-900 px-2 py-1 rounded-lg hover:bg-teal-50">iPhone view</button>
                 {% endif %}
                 {% endif %}
                 <form method="post" action="/admin/surgeons/{{ s.id }}/toggle" class="inline">
@@ -432,15 +432,85 @@
     </form>
   </div>
 </div>
+
+<div id="native-preview-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden px-4"
+  role="dialog" aria-modal="true" aria-labelledby="native-preview-title" onclick="if (event.target === this) closeNativePreview()">
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5">
+    <h3 id="native-preview-title" class="font-bold text-slate-800">iPhone code</h3>
+    <p id="native-preview-code" class="font-mono text-2xl font-bold tracking-wider text-teal-700 my-5 select-all" aria-label="Support preview code" aria-live="polite"></p>
+    <div class="flex gap-2 justify-end">
+      <button id="native-preview-copy" type="button" onclick="copyNativePreview()" disabled
+        class="rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Copy</button>
+      <button id="native-preview-close" type="button" onclick="closeNativePreview()"
+        class="rounded-lg bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700">Close</button>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
 function hideAllPeopleModals() {
-  ['add-user-modal','edit-user-modal','password-modal'].forEach(function(id) {
+  ['add-user-modal','edit-user-modal','password-modal','native-preview-modal'].forEach(function(id) {
     document.getElementById(id)?.classList.add('hidden');
   });
 }
+let nativePreviewTrigger = null;
+let nativePreviewRequestId = 0;
+async function openNativePreview(button) {
+  const requestId = ++nativePreviewRequestId;
+  hideAllPeopleModals();
+  nativePreviewTrigger = button;
+  const modal = document.getElementById('native-preview-modal');
+  const code = document.getElementById('native-preview-code');
+  const copy = document.getElementById('native-preview-copy');
+  document.getElementById('native-preview-title').textContent = 'iPhone code';
+  code.textContent = 'Loading…';
+  copy.disabled = true;
+  copy.textContent = 'Copy';
+  modal.classList.remove('hidden');
+  document.getElementById('native-preview-close').focus();
+  try {
+    const response = await fetch(button.dataset.previewUrl, {
+      method: 'POST', credentials: 'same-origin', cache: 'no-store',
+      headers: { 'Accept': 'application/json' }
+    });
+    if (!response.ok) throw new Error('Preview code unavailable');
+    const result = await response.json();
+    if (requestId !== nativePreviewRequestId || modal.classList.contains('hidden')) return;
+    document.getElementById('native-preview-title').textContent = 'iPhone code · ' + result.surgeon;
+    code.textContent = result.code;
+    copy.disabled = false;
+    copy.focus();
+  } catch (_) {
+    if (requestId === nativePreviewRequestId && !modal.classList.contains('hidden')) {
+      code.textContent = 'Could not create code. Close and try again.';
+    }
+  }
+}
+async function copyNativePreview() {
+  const code = document.getElementById('native-preview-code').textContent;
+  const copy = document.getElementById('native-preview-copy');
+  try {
+    await navigator.clipboard.writeText(code);
+    copy.textContent = 'Copied';
+  } catch (_) {
+    copy.textContent = 'Select code to copy';
+  }
+}
+function closeNativePreview() {
+  nativePreviewRequestId += 1;
+  document.getElementById('native-preview-modal').classList.add('hidden');
+  document.getElementById('native-preview-code').textContent = '';
+  document.getElementById('native-preview-copy').disabled = true;
+  nativePreviewTrigger?.focus();
+  nativePreviewTrigger = null;
+}
+document.addEventListener('keydown', function(event) {
+  if (event.key === 'Escape' && !document.getElementById('native-preview-modal').classList.contains('hidden')) {
+    closeNativePreview();
+  }
+});
 function _isClinicalPosition(pos) {
   return pos === 'surgeon' || pos === 'pa';
 }

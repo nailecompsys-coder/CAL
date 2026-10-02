@@ -10,13 +10,14 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from starlette.requests import Request
 
-from app.auth import get_current_surgeon
+from app.auth import get_current_admin, get_current_surgeon
 from app.database import get_db
 from app.models import AdminUser, Base, NativeSupportPreviewGrant, Surgeon, SurgeonDevice
 from app.native_support_preview_service import (
     issue_preview_code, redeem_preview_code, surgeon_for_preview_token,
 )
 from app.routers.native_api import NativeSupportPreviewBody, native_support_preview_exchange, router
+from app.routers.admin_surgeons import router as admin_surgeons_router
 
 
 def _request(method: str, path: str, token: str) -> Request:
@@ -124,6 +125,19 @@ class NativeSupportPreviewTest(unittest.TestCase):
         self.assertEqual(home.json()["surgeon"]["id"], self.surgeon.id)
         blocked = client.post("/api/native/alerts/read", headers=headers)
         self.assertEqual(blocked.status_code, 401)
+
+    def test_admin_code_is_returned_for_same_page_flyover(self):
+        app = FastAPI()
+        app.include_router(admin_surgeons_router)
+        app.dependency_overrides[get_db] = lambda: self.db
+        app.dependency_overrides[get_current_admin] = lambda: self.admin
+        response = TestClient(app).post(f"/admin/surgeons/{self.surgeon.id}/native-preview-code")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(response.json()["surgeon"], self.surgeon.full_name)
+        self.assertEqual(response.json()["expiresMinutes"], 10)
+        self.assertEqual(len(response.json()["code"].replace("-", "")), 12)
+        self.assertEqual(self.db.query(NativeSupportPreviewGrant).count(), 1)
 
 
 if __name__ == "__main__":

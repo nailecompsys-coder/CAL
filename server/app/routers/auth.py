@@ -17,6 +17,7 @@ router = APIRouter()
 
 def clear_surgeon_cookies(resp: Response) -> None:
     resp.delete_cookie("surgeon_token")
+    # Remove cookies left by the retired browser-preview route.
     resp.delete_cookie("surgeon_token_preview")
 
 

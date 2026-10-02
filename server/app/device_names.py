@@ -7,8 +7,6 @@ def readable_device_name(device_name: str | None, user_agent: str | None = None)
         return "Unknown device"
 
     lowered = source.lower()
-    if "cal admin preview" in lowered or "admin desktop preview" in lowered:
-        return "Admin preview"
     if "calnative" in lowered and ("darwin" in lowered or "cfnetwork" in lowered):
         return "CAL iPhone app"
     if "calnative" in lowered and ("okhttp" in lowered or "android" in lowered):

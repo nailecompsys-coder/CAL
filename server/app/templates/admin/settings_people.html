@@ -126,9 +126,6 @@
                   data-phone="{{ (s.phone or '')|e }}"
                   data-sort-order="{{ s.sort_order or 0 }}">Edit</button>
                 {% if s.is_active %}
-                <form method="post" action="/admin/surgeons/{{ s.id }}/preview-mobile" target="_blank" class="inline">
-                  <button type="submit" title="Preview mobile" class="text-xs font-semibold text-slate-500 hover:text-slate-800 px-2 py-1 rounded-lg hover:bg-slate-100">Preview</button>
-                </form>
                 {% if admin.role in ['admin', 'superadmin'] %}
                 <button type="button" data-preview-url="/admin/surgeons/{{ s.id }}/native-preview-code"
                   onclick="openNativePreview(this)" title="Read-only iPhone simulator preview"

@@ -8,6 +8,8 @@ Preview navigation fix (2026-10-02): the read-only indicator and exit action liv
 
 Admin code flyover (2026-10-02): Users → Surgeons keeps the admin on the same page while showing a compact code dialog with Copy and Close. The code response is JSON with `Cache-Control: no-store`; the old full-page template is removed.
 
+Legacy browser Preview retirement (2026-10-02): the separate web-preview pill, its admin route, session-issuing service, cookie authentication path, and desktop-preview banner are removed. Existing legacy preview device tokens are rejected; `server/sql/retire_legacy_browser_preview.sql` deactivates their historical device rows during deployment. The native iPhone support preview remains available.
+
 iOS calendar chrome (2026-09-23): the surgeon-facing section is labeled `Calendar` in the title menu and scheduler mode switch. Day-view OFF initials remain single-line, fixed-height capsules so two-letter initials cannot wrap or misalign the row.
 
 Native schedule review rows (2026-09-15): `GET /api/native/home` includes Aprima-derived patient schedule rows again, separate from CAL clinic and Block OR cards. Surgery One / CBO-style Aprima rows are read-only, flagged `needsReview=true`, and carry red styling so SwiftUI can show them as Shannon-review items instead of verified CAL schedule. CAL clinic cards still summarize location, first visit time, and visit count; Block OR cards still show location, start time, and total cases.

@@ -1,18 +1,10 @@
 """Services for admin surgeon management."""
 
-import hashlib
 import re
-import secrets
-from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from .auth import (
-    SURGEON_ADMIN_PREVIEW_DEVICE_NAME,
-    create_surgeon_session_token,
-)
 from .models import Surgeon, SurgeonDevice
-from .surgeon_visibility import surgeon_is_visible
 
 
 def format_us_phone(phone: str | None) -> str:
@@ -84,38 +76,3 @@ def revoke_device(db: Session, surgeon_id: int, device_id: int) -> None:
     if device and device.surgeon_id == surgeon_id:
         device.is_active = False
         db.commit()
-
-
-def preview_session_token(db: Session, surgeon_id: int, user_agent: str) -> str | None:
-    surgeon = db.get(Surgeon, surgeon_id)
-    if not surgeon_is_visible(surgeon):
-        return None
-
-    now = datetime.now(timezone.utc)
-    device = (
-        db.query(SurgeonDevice)
-        .filter(
-            SurgeonDevice.surgeon_id == surgeon_id,
-            SurgeonDevice.device_name == SURGEON_ADMIN_PREVIEW_DEVICE_NAME,
-        )
-        .first()
-    )
-    placeholder = secrets.token_urlsafe(32)
-    if not device:
-        device = SurgeonDevice(
-            surgeon_id=surgeon_id,
-            device_name=SURGEON_ADMIN_PREVIEW_DEVICE_NAME,
-            user_agent=user_agent,
-            token_hash=hashlib.sha256(placeholder.encode()).hexdigest(),
-            last_seen=now,
-        )
-        db.add(device)
-        db.commit()
-        db.refresh(device)
-    else:
-        device.is_active = True
-        device.last_seen = now
-        device.user_agent = user_agent
-        db.commit()
-
-    return create_surgeon_session_token(device.id)

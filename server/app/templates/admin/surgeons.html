@@ -83,13 +83,6 @@
                 class="icon-action">
                 <i class="fa-solid fa-pen text-xs"></i>
               </button>
-              {% if s.is_active %}
-              <form method="post" action="/admin/surgeons/{{ s.id }}/preview-mobile" target="_blank" title="Opens surgeon app in a new tab for troubleshooting">
-                <button type="submit" class="icon-action">
-                  <i class="fa-solid fa-mobile-screen-button text-xs"></i>
-                </button>
-              </form>
-              {% endif %}
               <form method="post" action="/admin/surgeons/{{ s.id }}/toggle">
                 <button title="{% if s.is_active %}Deactivate{% else %}Activate{% endif %}"
                   class="icon-action {% if not s.is_active %}text-green-600{% endif %}">

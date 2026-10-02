@@ -23,10 +23,6 @@ from .database import get_db
 from .models import AdminUser, Surgeon, SurgeonDevice
 from .native_support_preview_service import surgeon_for_preview_token
 
-# SurgeonDevice.device_name for admin “preview mobile on desktop” sessions.
-SURGEON_ADMIN_PREVIEW_DEVICE_NAME = "Admin desktop preview"
-
-
 def _decode_subject_token(token: str, expected_type: str) -> int:
     return decode_subject_token(token, expected_type)
 
@@ -79,11 +75,7 @@ def get_current_surgeon(
     if not token:
         token = (request.headers.get("X-CAL-Device-Token") or "").strip()
     if not token:
-        token = (
-            surgeon_token
-            or request.cookies.get("surgeon_token")
-            or request.cookies.get("surgeon_token_preview")
-        )
+        token = surgeon_token or request.cookies.get("surgeon_token")
 
     if not token:
         _raise_html_or_json_auth_error(request, "/admin/login")
@@ -101,7 +93,8 @@ def get_current_surgeon(
         _raise_html_or_json_auth_error(request, "/admin/login")
 
     device = db.get(SurgeonDevice, device_id)
-    if not device or not device.is_active:
+    # Old browser-preview devices must never regain access through a retained token.
+    if not device or not device.is_active or device.device_name == "Admin desktop preview":
         _raise_html_or_json_auth_error(request, "/admin/login")
 
     device.last_seen = datetime.now(timezone.utc)
@@ -138,7 +131,6 @@ __all__ = [
     "ADMIN_TOKEN_EXPIRE_HOURS",
     "ALGORITHM",
     "SECRET_KEY",
-    "SURGEON_ADMIN_PREVIEW_DEVICE_NAME",
     "SURGEON_TOKEN_EXPIRE_DAYS",
     "cookie_secure",
     "create_admin_token",

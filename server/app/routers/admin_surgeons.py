@@ -7,16 +7,12 @@ from sqlalchemy.orm import Session
 from ..admin_surgeon_service import (
     add_surgeon as add_surgeon_service,
     delete_surgeon as delete_surgeon_service,
-    preview_session_token,
     revoke_device as revoke_device_service,
     surgeon_fields,
     toggle_surgeon as toggle_surgeon_service,
     update_surgeon as update_surgeon_service,
 )
-from ..auth import (
-    cookie_secure,
-    get_current_admin,
-)
+from ..auth import get_current_admin
 from ..database import get_db
 from ..models import Surgeon
 from ..native_support_preview_service import CODE_MINUTES, issue_preview_code
@@ -119,30 +115,6 @@ def revoke_device(surgeon_id: int, device_id: int, db: Session = Depends(get_db)
     staff_type = row.staff_type if row else "physician"
     revoke_device_service(db, surgeon_id, device_id)
     return _users_redirect(staff_type)
-
-
-@router.post("/surgeons/{surgeon_id}/preview-mobile")
-def preview_surgeon_mobile(
-    surgeon_id: int,
-    request: Request,
-    db: Session = Depends(get_db),
-    admin=Depends(get_current_admin),
-):
-    """Issue a surgeon session in this browser for admin troubleshooting."""
-    ua = request.headers.get("user-agent", "Desktop preview")
-    session_token = preview_session_token(db, surgeon_id, ua)
-    if not session_token:
-        raise HTTPException(status_code=404, detail="Physician not found or inactive")
-    resp = RedirectResponse("/surgeon/schedule", status_code=303)
-    resp.set_cookie(
-        "surgeon_token_preview",
-        session_token,
-        httponly=True,
-        secure=cookie_secure(),
-        samesite="lax",
-        max_age=365 * 24 * 3600,
-    )
-    return resp
 
 
 @router.post("/surgeons/{surgeon_id}/native-preview-code", response_class=JSONResponse)

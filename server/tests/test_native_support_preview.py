@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 from starlette.requests import Request
 
 from app.auth import get_current_admin, get_current_surgeon
+from app.auth_tokens import create_surgeon_session_token
 from app.database import get_db
 from app.models import AdminUser, Base, NativeSupportPreviewGrant, Surgeon, SurgeonDevice
 from app.native_support_preview_service import (
@@ -138,6 +139,34 @@ class NativeSupportPreviewTest(unittest.TestCase):
         self.assertEqual(response.json()["expiresMinutes"], 10)
         self.assertEqual(len(response.json()["code"].replace("-", "")), 12)
         self.assertEqual(self.db.query(NativeSupportPreviewGrant).count(), 1)
+
+    def test_retired_browser_preview_route_and_device_cannot_open_schedule(self):
+        device = SurgeonDevice(
+            surgeon_id=self.surgeon.id,
+            device_name="Admin desktop preview",
+            token_hash="retired-browser-preview-device",
+            is_active=True,
+        )
+        self.db.add(device)
+        self.db.commit()
+        token = create_surgeon_session_token(device.id)
+        with self.assertRaises(HTTPException):
+            get_current_surgeon(_request("GET", "/api/native/home", token), None, self.db)
+        stale_cookie_request = Request({
+            "type": "http", "method": "GET", "path": "/surgeon/schedule",
+            "headers": [(b"cookie", f"surgeon_token_preview={token}".encode())],
+        })
+        with self.assertRaises(HTTPException):
+            get_current_surgeon(stale_cookie_request, None, self.db)
+
+        app = FastAPI()
+        app.include_router(admin_surgeons_router)
+        app.dependency_overrides[get_db] = lambda: self.db
+        app.dependency_overrides[get_current_admin] = lambda: self.admin
+        self.assertEqual(
+            TestClient(app).post(f"/admin/surgeons/{self.surgeon.id}/preview-mobile").status_code,
+            404,
+        )
 
 
 if __name__ == "__main__":

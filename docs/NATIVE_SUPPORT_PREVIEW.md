@@ -1,6 +1,6 @@
 # Read-only surgeon iPhone preview
 
-This is the developer workflow for seeing the **native iPhone schedule** that a selected surgeon would receive from the live CAL API. It does not request or send a surgeon OTP, create a surgeon device, or write to that surgeon's schedule. It differs from the older admin **Preview** button, which opens the mobile web page rather than the SwiftUI app.
+This is the developer workflow for seeing the **native iPhone schedule** that a selected surgeon would receive from the live CAL API. It does not request or send a surgeon OTP, create a surgeon device, or write to that surgeon's schedule.
 
 1. Sign in to the CAL admin portal as an admin or superadmin. In **Users → Surgeons**, choose **iPhone view** beside the surgeon. A small flyover on the same page shows the one-use code with **Copy** and **Close**; it expires in ten minutes. The database records the issuing admin, selected surgeon, issue time, and redemption time/IP. No surgeon is notified.
 2. Build the repository's `CALNative` iOS target for the simulator with **Release** configuration using `xcodebuildmcp`. This preserves the production API URL; Debug targets localhost and is not a production-view check. On its sign-in screen, open **Admin support preview** and paste the one-use code. For automated checks, the simulator also accepts `--cal-support-preview=CODE` as a launch argument. These entry points are compiled only into simulator builds.

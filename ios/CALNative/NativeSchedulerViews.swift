@@ -35,12 +35,6 @@ struct NativeSchedulerShell: View {
     }
   }
 
-  private var weekDaySummaries: [SchedulerWeekDaySummary] {
-    weekDates.map { date in
-      SchedulerWeekDaySummary(date: date, schedule: schedule(on: date))
-    }
-  }
-
   private var dayBlockGroups: [SchedulerBlockGroup] {
     groupedBlocks(blocks(on: selectedDate))
   }
@@ -99,7 +93,7 @@ struct NativeSchedulerShell: View {
 
           if scope == .week {
             SchedulerWeekView(
-              days: weekDaySummaries,
+              days: weekDates,
               statusMessage: displayWarning,
               selectDay: { date in
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -493,31 +487,10 @@ private struct SchedulerBlockGroup: Identifiable {
   }
 }
 
-private struct SchedulerWeekDaySummary: Identifiable {
-  let id: String
-  let date: Date
-  let schedule: [NativeSchedulerScheduleRow]
-
-  var caseCount: Int { schedule.first?.dayCaseCount ?? 0 }
-  var visitCount: Int { schedule.first?.dayVisitCount ?? 0 }
-  var offCount: Int { schedule.first?.dayOffCount ?? 0 }
-  var hasActivity: Bool { !schedule.isEmpty }
-
-  init(date: Date, schedule: [NativeSchedulerScheduleRow]) {
-    self.date = date
-    self.schedule = schedule
-    self.id = NativeDayResponse.dateFormatter.string(from: date)
-  }
-}
-
 private struct SchedulerWeekView: View {
-  let days: [SchedulerWeekDaySummary]
+  let days: [Date]
   let statusMessage: String?
   let selectDay: (Date) -> Void
-
-  private var weekIsEmpty: Bool {
-    days.allSatisfy { !$0.hasActivity }
-  }
 
   var body: some View {
     ScrollView {
@@ -531,20 +504,14 @@ private struct SchedulerWeekView: View {
             .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.amber)
         }
 
-        if weekIsEmpty {
-          Text("No schedule this week")
-            .font(ClinicalTypography.caption)
-            .foregroundStyle(.secondary)
-        } else {
-          VStack(spacing: 7) {
-            ForEach(days) { day in
-              Button {
-                selectDay(day.date)
-              } label: {
-                SchedulerWeekDayRow(day: day)
-              }
-              .buttonStyle(.plain)
+        VStack(spacing: 7) {
+          ForEach(days, id: \.self) { day in
+            Button {
+              selectDay(day)
+            } label: {
+              SchedulerWeekDayRow(date: day)
             }
+            .buttonStyle(.plain)
           }
         }
       }
@@ -554,39 +521,18 @@ private struct SchedulerWeekView: View {
 }
 
 private struct SchedulerWeekDayRow: View {
-  let day: SchedulerWeekDaySummary
+  let date: Date
 
   private var isToday: Bool {
-    Calendar.current.isDateInToday(day.date)
+    Calendar.current.isDateInToday(date)
   }
 
   var body: some View {
     HStack(alignment: .center, spacing: 10) {
-      VStack(spacing: 1) {
-        Text(day.date.formatted(.dateTime.weekday(.abbreviated)))
-          .font(.caption2.weight(.bold))
-          .foregroundStyle(.secondary)
-        Text(day.date.formatted(.dateTime.day()))
-          .font(.subheadline.weight(.bold))
-          .foregroundStyle(isToday ? ClinicalPalette.teal : ClinicalPalette.ink)
-      }
-      .frame(width: 34)
-
-      VStack(alignment: .leading, spacing: 4) {
-        if !day.hasActivity {
-          Text("No scheduled activity")
-            .font(ClinicalTypography.caption)
-            .foregroundStyle(.secondary)
-        } else {
-          Text(summaryLine)
-            .font(ClinicalTypography.caption)
-            .foregroundStyle(ClinicalPalette.ink)
-            .lineLimit(1)
-            .minimumScaleFactor(0.85)
-
-        }
-      }
-      .frame(maxWidth: .infinity, alignment: .leading)
+      Text(date.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+        .font(ClinicalTypography.headlineStrong)
+        .foregroundStyle(isToday ? ClinicalPalette.teal : ClinicalPalette.ink)
+        .frame(maxWidth: .infinity, alignment: .leading)
 
       Image(systemName: "chevron.right")
         .font(.caption.weight(.semibold))
@@ -601,14 +547,6 @@ private struct SchedulerWeekDayRow: View {
       tint: isToday ? ClinicalPalette.tealSoft : ClinicalPalette.card
     )
   }
-
-  private var summaryLine: String {
-    var parts: [String] = []
-    if day.caseCount > 0 { parts.append("\(day.caseCount) OR") }
-    if day.visitCount > 0 { parts.append("\(day.visitCount) clinic") }
-    if day.offCount > 0 { parts.append("\(day.offCount) off") }
-    return parts.isEmpty ? "Master blocks" : parts.joined(separator: " · ")
-  }
 }
 
 private struct SchedulerSurgeonDay: Identifiable {
@@ -616,36 +554,7 @@ private struct SchedulerSurgeonDay: Identifiable {
   let name: String
   var rows: [NativeSchedulerScheduleRow]
 
-  var am: NativeSchedulerScheduleRow? { rows.first { $0.type == "card" && $0.session == "am" } }
-  var pm: NativeSchedulerScheduleRow? { rows.first { $0.type == "card" && $0.session == "pm" } }
-  var hasApprovedOff: Bool { rows.contains { $0.type == "approved_off" } }
-  var hasNoCall: Bool { rows.contains { $0.type == "no_call" } }
-  var hasMeeting: Bool { rows.contains { $0.type == "meeting" } }
-  var hasCall: Bool { rows.contains { $0.type == "call" } }
   var hasConflict: Bool { rows.contains { $0.needsReview } }
-
-  var statusSummary: String {
-    var labels: [String] = []
-    if hasApprovedOff { labels.append("Off") }
-    if hasNoCall { labels.append("No Call") }
-    if hasMeeting { labels.append("Meeting") }
-    if hasCall { labels.append("Call") }
-    if hasConflict { labels.append("⚠ Conflict") }
-    return labels.joined(separator: " · ")
-  }
-
-  var blockSummary: String {
-    guard am != nil || pm != nil else { return "No weekend master blocks" }
-    return "AM \(label(for: am)) · PM \(label(for: pm))"
-  }
-
-  private func label(for card: NativeSchedulerScheduleRow?) -> String {
-    guard let card else { return "NA" }
-    if card.title == "NA", !card.subtitle.isEmpty {
-      return "NA → \(card.subtitle.replacingOccurrences(of: "Scheduled at ", with: ""))"
-    }
-    return card.title
-  }
 }
 
 private struct SchedulerScheduleDayView: View {
@@ -698,18 +607,15 @@ private struct SchedulerScheduleDayView: View {
               }
               .padding(.top, 8)
             } label: {
-              VStack(alignment: .leading, spacing: 5) {
+              HStack(spacing: 8) {
                 Text(surgeon.name)
                   .font(ClinicalTypography.headlineStrong)
                   .foregroundStyle(ClinicalPalette.ink)
-                Text(surgeon.blockSummary)
-                  .font(ClinicalTypography.caption)
-                  .foregroundStyle(.secondary)
-                if !surgeon.statusSummary.isEmpty {
-                  Text(surgeon.statusSummary)
-                  .font(ClinicalTypography.badge)
-                  .foregroundStyle(surgeon.hasConflict ? ClinicalPalette.amber : ClinicalPalette.teal)
-                  .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                if surgeon.hasConflict {
+                  Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(ClinicalPalette.amber)
+                    .accessibilityLabel("Schedule conflict")
                 }
               }
             }
@@ -738,9 +644,15 @@ private struct SchedulerScheduleFactRow: View {
     case "surgery": return "OR"
     case "clinic_visit", "clinic_block": return "Clinic"
     case "approved_off", "no_call", "call": return ""
+    case "no_master_blocks": return ""
     case "meeting": return "Meeting"
-    default: return row.type
+    default: return ""
     }
+  }
+
+  private var detailText: String {
+    let value = row.subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
+    return ["day_off", "no_call"].contains(value.lowercased()) ? "" : value
   }
 
   var body: some View {
@@ -761,10 +673,12 @@ private struct SchedulerScheduleFactRow: View {
             .accessibilityLabel("Schedule conflict")
         }
       }
-      if !row.subtitle.isEmpty {
-        Text(row.subtitle).font(ClinicalTypography.badge).foregroundStyle(.secondary)
+      if !detailText.isEmpty {
+        Text(detailText).font(ClinicalTypography.badge).foregroundStyle(.secondary)
       }
-      let detail = [row.start, row.location, row.room].filter { !$0.isEmpty }.joined(separator: " · ")
+      let cardHasNoTime = row.type == "card" && (row.title == "NA" || row.title == "OFF")
+      let detail = [cardHasNoTime ? "" : row.start, row.location, row.room]
+        .filter { !$0.isEmpty }.joined(separator: " · ")
       if !detail.isEmpty {
         Text(detail).font(ClinicalTypography.badge).foregroundStyle(.secondary)
       }

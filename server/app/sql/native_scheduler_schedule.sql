@@ -115,6 +115,18 @@ facts AS (
     LEFT JOIN call_groups g ON g.id = c.call_group_id
     WHERE c.date BETWEEN :start_date AND :end_date
 ),
+visible_facts AS (
+    SELECT * FROM facts
+    UNION ALL
+    SELECT r.id, r.name, r.staff_rank, r.practice_rank, r.last_name, r.first_name,
+           cal.day, 'no-master-' || CAST(r.id AS TEXT) || '-' || CAST(cal.day AS TEXT),
+           'full', 'no_master_blocks', 'No master blocks', '', '', '', '', '', 0, -1
+    FROM calendar_days cal CROSS JOIN roster r
+    WHERE NOT EXISTS (
+        SELECT 1 FROM facts f
+        WHERE f.surgeon_id = r.id AND f.item_date = cal.day AND f.item_type = 'card'
+    )
+),
 daily_counts AS (
     SELECT cal.day,
            (SELECT count(*) FROM surgical_cases sc JOIN roster r ON r.id = sc.surgeon_id
@@ -130,7 +142,7 @@ SELECT surgeon_id, surgeon, item_date, item_id, session, item_type, title, subti
        daily_counts.case_count AS day_case_count,
        daily_counts.visit_count AS day_visit_count,
        daily_counts.off_count AS day_off_count
-FROM facts JOIN daily_counts ON daily_counts.day = facts.item_date
+FROM visible_facts facts JOIN daily_counts ON daily_counts.day = facts.item_date
 ORDER BY item_date, staff_rank, practice_rank, last_name, first_name, surgeon_id,
          CASE session WHEN 'am' THEN 0 WHEN 'pm' THEN 1 ELSE 2 END,
          start_time, item_rank, item_id

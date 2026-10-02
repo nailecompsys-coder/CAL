@@ -111,7 +111,19 @@ class NativeSchedulerScheduleTest(unittest.TestCase):
                            reason="Vacation", status="approved", is_full_day=True))
         self.db.commit()
         rows = scheduler_schedule(self.db, saturday, saturday)
-        self.assertEqual(["approved_off"], [row["type"] for row in rows])
+        self.assertEqual(["approved_off", "no_master_blocks"], sorted(row["type"] for row in rows))
+        self.assertEqual({surgeon.id}, {row["surgeonId"] for row in rows})
+
+    def test_empty_day_still_lists_every_surgeon_in_rank_order(self):
+        saturday = date(2026, 10, 10)
+        second = Surgeon(first_name="Chris", last_name="Johnson", sort_order=2, is_active=True)
+        first = Surgeon(first_name="Jorge", last_name="Florin", sort_order=1, is_active=True)
+        self.db.add_all([second, first])
+        self.db.commit()
+
+        rows = scheduler_schedule(self.db, saturday, saturday)
+        self.assertEqual([first.id, second.id], [row["surgeonId"] for row in rows])
+        self.assertEqual(["no_master_blocks", "no_master_blocks"], [row["type"] for row in rows])
 
     def test_schedule_with_case_details_requires_scheduler_login(self):
         response = TestClient(app).get(

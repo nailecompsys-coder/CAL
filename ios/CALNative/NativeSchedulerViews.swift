@@ -637,6 +637,11 @@ private struct SchedulerScheduleDayView: View {
 
 private struct SchedulerScheduleFactRow: View {
   let row: NativeSchedulerScheduleRow
+  @State private var isExpanded = false
+
+  private var opensDetails: Bool {
+    row.type == "surgery" || row.type == "clinic_visit" || row.type == "clinic_block"
+  }
 
   private var kindLabel: String {
     switch row.type {
@@ -655,32 +660,76 @@ private struct SchedulerScheduleFactRow: View {
     return ["day_off", "no_call"].contains(value.lowercased()) ? "" : value
   }
 
+  private var title: String {
+    guard row.type == "approved_off" else { return row.title }
+    switch row.session {
+    case "am": return "Approved OFF · AM"
+    case "pm": return "Approved OFF · PM"
+    case "both": return "Approved OFF · AM + PM"
+    case "full": return "Approved OFF · All day (AM + PM)"
+    default: return "Approved OFF"
+    }
+  }
+
+  private var timeRange: String {
+    guard !row.start.isEmpty else { return "Time not recorded" }
+    guard !row.end.isEmpty else { return "Starts \(row.start) · end not recorded" }
+    return "\(row.start)–\(row.end)"
+  }
+
+  @ViewBuilder
+  private var heading: some View {
+    HStack(alignment: .firstTextBaseline, spacing: 6) {
+      if !kindLabel.isEmpty {
+        Text(kindLabel)
+          .font(ClinicalTypography.badge)
+          .foregroundStyle(ClinicalPalette.teal)
+      }
+      Text(title)
+        .font(ClinicalTypography.caption)
+        .foregroundStyle(ClinicalPalette.ink)
+      Spacer(minLength: 0)
+      if row.needsReview {
+        Image(systemName: "exclamationmark.triangle.fill")
+          .foregroundStyle(ClinicalPalette.amber)
+          .accessibilityLabel("Schedule conflict")
+      }
+    }
+  }
+
   var body: some View {
-    VStack(alignment: .leading, spacing: 2) {
-      HStack(alignment: .firstTextBaseline, spacing: 6) {
-        if !kindLabel.isEmpty {
-          Text(kindLabel)
-            .font(ClinicalTypography.badge)
-            .foregroundStyle(ClinicalPalette.teal)
+    Group {
+      if opensDetails {
+        DisclosureGroup(isExpanded: $isExpanded) {
+          VStack(alignment: .leading, spacing: 4) {
+            Text("Time: \(timeRange)")
+            if !detailText.isEmpty && row.type != "clinic_block" {
+              Text("\(row.type == "surgery" ? "Procedure" : "Visit"): \(detailText)")
+            }
+            if !row.location.isEmpty { Text("Location: \(row.location)") }
+            if !row.room.isEmpty { Text("Room: \(row.room)") }
+          }
+          .font(ClinicalTypography.badge)
+          .foregroundStyle(.secondary)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(.top, 5)
+        } label: {
+          heading
         }
-        Text(row.title)
-          .font(ClinicalTypography.caption)
-          .foregroundStyle(ClinicalPalette.ink)
-        Spacer(minLength: 0)
-        if row.needsReview {
-          Image(systemName: "exclamationmark.triangle.fill")
-            .foregroundStyle(ClinicalPalette.amber)
-            .accessibilityLabel("Schedule conflict")
+      } else {
+        VStack(alignment: .leading, spacing: 2) {
+          heading
+          if !detailText.isEmpty {
+            Text(detailText).font(ClinicalTypography.badge).foregroundStyle(.secondary)
+          }
+          let cardHasNoTime = row.type == "card" && (row.title == "NA" || row.title == "OFF")
+          let displayedTime = cardHasNoTime || row.start.isEmpty ? "" : timeRange
+          let detail = [displayedTime, row.location, row.room]
+            .filter { !$0.isEmpty }.joined(separator: " · ")
+          if !detail.isEmpty {
+            Text(detail).font(ClinicalTypography.badge).foregroundStyle(.secondary)
+          }
         }
-      }
-      if !detailText.isEmpty {
-        Text(detailText).font(ClinicalTypography.badge).foregroundStyle(.secondary)
-      }
-      let cardHasNoTime = row.type == "card" && (row.title == "NA" || row.title == "OFF")
-      let detail = [cardHasNoTime ? "" : row.start, row.location, row.room]
-        .filter { !$0.isEmpty }.joined(separator: " · ")
-      if !detail.isEmpty {
-        Text(detail).font(ClinicalTypography.badge).foregroundStyle(.secondary)
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)

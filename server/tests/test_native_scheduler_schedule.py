@@ -92,6 +92,10 @@ class NativeSchedulerScheduleTest(unittest.TestCase):
         self.assertEqual(["AL-OR", "NA"], [row["title"] for row in primary_rows if row["type"] == "card"])
         self.assertTrue(any(row["type"] == "surgery" and row["needsReview"] for row in primary_rows))
         self.assertTrue(any(row["type"] == "clinic_visit" for row in primary_rows))
+        self.assertTrue(any(row["type"] == "surgery" and row["start"] == "09:00" and row["end"] == "10:00"
+                            and row["subtitle"] == "Procedure" for row in primary_rows))
+        self.assertTrue(any(row["type"] == "clinic_visit" and row["start"] == "13:00" and row["end"] == "13:30"
+                            and row["subtitle"] == "Visit" for row in primary_rows))
         self.assertTrue(any(row["type"] == "approved_off" and row["start"] == "08:00" for row in primary_rows))
         self.assertTrue(any(row["type"] == "surgery" and row["subtitle"].startswith("Assisting") for row in assistant_rows))
         self.assertTrue(any(row["type"] == "card" and row["title"] == "OFF" for row in assistant_rows))
@@ -113,6 +117,26 @@ class NativeSchedulerScheduleTest(unittest.TestCase):
         rows = scheduler_schedule(self.db, saturday, saturday)
         self.assertEqual(["approved_off", "no_master_blocks"], sorted(row["type"] for row in rows))
         self.assertEqual({surgeon.id}, {row["surgeonId"] for row in rows})
+        self.assertEqual("full", next(row["session"] for row in rows if row["type"] == "approved_off"))
+
+    def test_explicit_off_in_both_master_sessions_remains_two_cards(self):
+        monday = date(2026, 10, 5)
+        surgeon = Surgeon(first_name="Chris", last_name="Johnson", is_active=True)
+        self.db.add(surgeon)
+        self.db.flush()
+        week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=monday)
+        self.db.add(week)
+        self.db.flush()
+        self.db.add_all([
+            ScheduleCard(week_id=week.id, surgeon_id=surgeon.id, date=monday, session=session,
+                         baseline_state="off", effective_state="off")
+            for session in ("am", "pm")
+        ])
+        self.db.commit()
+
+        rows = scheduler_schedule(self.db, monday, monday)
+        self.assertEqual([("am", "OFF"), ("pm", "OFF")],
+                         [(row["session"], row["title"]) for row in rows if row["type"] == "card"])
 
     def test_empty_day_still_lists_every_surgeon_in_rank_order(self):
         saturday = date(2026, 10, 10)

@@ -142,8 +142,8 @@ private struct SmallCoverageInitialsView: View {
   var body: some View {
     VStack(spacing: 1) {
       callInitials
-      if let backup = assignment.backupInitials {
-        Text("Backup \(backup)")
+      if assignment.isBackup {
+        Text("Backup")
           .font(.system(size: 8, weight: .semibold))
           .foregroundStyle(ClinicalPalette.teal)
       }

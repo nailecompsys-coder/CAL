@@ -51,6 +51,7 @@ struct ScheduleAssignment: Identifiable {
   let backupSurgeon: String?
   let backupInitials: String?
   let backupNote: String?
+  let isBackup: Bool
   let time: String
   let systemImage: String
 }

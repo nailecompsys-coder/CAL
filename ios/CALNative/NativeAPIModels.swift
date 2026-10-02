@@ -271,6 +271,7 @@ struct NativeCallAssignmentResponse: Decodable {
   let backupSurgeon: String?
   let backupInitials: String?
   let backupNote: String?
+  let isBackup: Bool?
 
   func scheduleAssignment(dateKey: String) -> ScheduleAssignment {
     let displayedInitials = coveringInitials ?? initials ?? surgeonInitials(from: surgeon)
@@ -290,6 +291,7 @@ struct NativeCallAssignmentResponse: Decodable {
       backupSurgeon: backupSurgeon,
       backupInitials: backupInitials,
       backupNote: backupNote,
+      isBackup: isBackup ?? false,
       time: "07:00 - 17:00",
       systemImage: "building.2"
     )

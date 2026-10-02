@@ -37,6 +37,7 @@ def serialize_call_assignment(rotation: CallRotation, viewer_id: int) -> dict:
         "coverageId": coverage.id if coverage else None,
         "backupSurgeon": backup.full_name if backup else None,
         "backupSurgeonId": backup.id if backup else None,
+        "isBackup": bool(backup and backup.id == viewer_id),
         "backupInitials": backup.initials if backup else None,
         "backupNote": rotation.backup.note if backup else None,
     }

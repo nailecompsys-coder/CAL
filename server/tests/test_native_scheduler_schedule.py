@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.models import (
-    Base, ClinicSchedule, DayOff, Location, ScheduleCard, ScheduleCardActivity,
+    Base, CallBackup, CallDailyAssignment, CallGroup, CallRotation, ClinicSchedule, DayOff, Location, ScheduleCard, ScheduleCardActivity,
     ScheduleCardWeek, Surgeon, SurgicalCase,
 )
 from app.native_scheduler_schedule import scheduler_schedule
@@ -154,6 +154,34 @@ class NativeSchedulerScheduleTest(unittest.TestCase):
             "/api/native/scheduler/schedule?start=2026-10-05&end=2026-10-05"
         )
         self.assertIn(response.status_code, (401, 403))
+
+    def test_one_call_rotation_shows_one_read_only_backup_indicator(self):
+        friday = date(2026, 10, 2)
+        primary = Surgeon(first_name="Chris", last_name="Johnson", is_active=True)
+        backup = Surgeon(first_name="Jorge", last_name="Florin", is_active=True)
+        group = CallGroup(name="Winter Garden", sort_order=1)
+        first = Location(name="Winter Garden", abbreviation="WG")
+        second = Location(name="Apopka", abbreviation="AP")
+        self.db.add_all([primary, backup, group, first, second])
+        self.db.flush()
+        rotation = CallRotation(date=friday, call_group_id=group.id, surgeon_id=primary.id)
+        self.db.add(rotation)
+        self.db.flush()
+        self.db.add_all([
+            CallDailyAssignment(date=friday, location_id=location.id, surgeon_id=primary.id,
+                                call_group_id=group.id, call_rotation_id=rotation.id)
+            for location in (first, second)
+        ])
+        self.db.commit()
+        call_rows = [row for row in scheduler_schedule(self.db, friday, friday) if row["type"] == "call"]
+        self.assertEqual(1, len(call_rows))
+        self.assertEqual("Winter Garden", call_rows[0]["subtitle"])
+
+        self.db.add(CallBackup(call_rotation_id=rotation.id, surgeon_id=backup.id))
+        self.db.commit()
+        call_rows = [row for row in scheduler_schedule(self.db, friday, friday) if row["type"] == "call"]
+        self.assertEqual(1, len(call_rows))
+        self.assertEqual("Winter Garden · Backup", call_rows[0]["subtitle"])
 
 
 if __name__ == "__main__":

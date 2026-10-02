@@ -200,16 +200,10 @@ private struct GlanceOnCallLine: View {
       .buttonStyle(.plain)
       .disabled(coverAction == nil || assignment.rotationId == nil)
 
-      if let backup = assignment.backupSurgeon {
-        Text("Backup: \(backup)")
+      if assignment.isBackup {
+        Text("Backup")
           .font(.caption.weight(.semibold))
           .foregroundStyle(ClinicalPalette.teal)
-        if let note = assignment.backupNote, !note.isEmpty {
-          Text(note)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-        }
       }
     }
   }

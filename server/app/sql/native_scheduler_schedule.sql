@@ -38,6 +38,13 @@ clinic_activity AS (
     WHERE a.is_active = TRUE AND a.activity_type = 'clinic'
       AND a.activity_date BETWEEN :start_date AND :end_date
 ),
+call_activity AS (
+    SELECT c.*, row_number() OVER (
+        PARTITION BY c.call_rotation_id ORDER BY c.location_id, c.id
+    ) AS rotation_rank
+    FROM call_daily_assignments c
+    WHERE c.date BETWEEN :start_date AND :end_date
+),
 core_rows AS (CORE_ROWS),
 facts AS (
     SELECT r.id AS surgeon_id, r.name AS surgeon, r.staff_rank, r.practice_rank,
@@ -110,10 +117,14 @@ facts AS (
     UNION ALL
     SELECT r.id, r.name, r.staff_rank, r.practice_rank, r.last_name, r.first_name,
            c.date, 'call-' || CAST(c.id AS TEXT), 'full', 'call', 'On call',
-           coalesce(g.name, ''), '', '', '', '', 0, 5
-    FROM call_daily_assignments c JOIN roster r ON r.id = c.surgeon_id
+           coalesce(g.name, '') || CASE WHEN c.call_coverage_id IS NULL AND EXISTS (
+               SELECT 1 FROM call_backups b WHERE b.call_rotation_id = c.call_rotation_id
+             )
+             THEN ' · Backup'
+             ELSE '' END, '', '', '', '', 0, 5
+    FROM call_activity c JOIN roster r ON r.id = c.surgeon_id
     LEFT JOIN call_groups g ON g.id = c.call_group_id
-    WHERE c.date BETWEEN :start_date AND :end_date
+    WHERE c.rotation_rank = 1
 ),
 visible_facts AS (
     SELECT * FROM facts

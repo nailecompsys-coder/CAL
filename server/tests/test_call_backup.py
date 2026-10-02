@@ -49,6 +49,8 @@ class CallBackupTest(unittest.TestCase):
         self.assertEqual(after["surgeonId"], self.primary.id)
         self.assertEqual(after["backupSurgeonId"], self.backup.id)
         self.assertEqual(after["backupNote"], "Call me if needed")
+        self.assertFalse(after["isBackup"])
+        self.assertTrue(serialize_call_assignment(self.rotation, self.backup.id)["isBackup"])
         self.assertFalse(after["isCovered"])
         day_key = self.rotation.date.isoformat()
         days = {day_key: {"callAssignments": [], "offSurgeons": [], "requestedOffSurgeons": []}}
@@ -101,6 +103,7 @@ class CallBackupTest(unittest.TestCase):
         warnings = save_backup(self.db, self.rotation.id, self.backup.id, "Scheduler approved exception", admin=self.admin)
         self.assertTrue(any("No Call" in warning for warning in warnings))
         self.assertEqual(serialize_call_assignment(self.rotation, self.primary.id)["backupSurgeonId"], self.backup.id)
+
 
 
 if __name__ == "__main__":

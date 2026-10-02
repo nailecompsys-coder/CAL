@@ -175,29 +175,43 @@ private struct GlanceOnCallLine: View {
   var coverAction: ((ScheduleAssignment) -> Void)?
 
   var body: some View {
-    Button {
-      coverAction?(assignment)
-    } label: {
-      HStack(spacing: 6) {
-        Text(assignment.locationShort)
+    VStack(alignment: .leading, spacing: 3) {
+      Button {
+        coverAction?(assignment)
+      } label: {
+        HStack(spacing: 6) {
+          Text(assignment.locationShort)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(ClinicalPalette.ink)
+            .lineLimit(1)
+
+          Spacer(minLength: 2)
+
+          CoverageInitialsView(assignment: assignment)
+
+          if assignment.rotationId != nil {
+            Image(systemName: "chevron.right")
+              .font(ClinicalTypography.badge)
+              .foregroundStyle(.tertiary)
+          }
+        }
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .disabled(coverAction == nil || assignment.rotationId == nil)
+
+      if let backup = assignment.backupSurgeon {
+        Text("Backup: \(backup)")
           .font(.caption.weight(.semibold))
-          .foregroundStyle(ClinicalPalette.ink)
-          .lineLimit(1)
-
-        Spacer(minLength: 2)
-
-        CoverageInitialsView(assignment: assignment)
-
-        if assignment.rotationId != nil {
-          Image(systemName: "chevron.right")
-            .font(ClinicalTypography.badge)
-            .foregroundStyle(.tertiary)
+          .foregroundStyle(ClinicalPalette.teal)
+        if let note = assignment.backupNote, !note.isEmpty {
+          Text(note)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
         }
       }
-      .contentShape(Rectangle())
     }
-    .buttonStyle(.plain)
-    .disabled(coverAction == nil || assignment.rotationId == nil)
   }
 }
 

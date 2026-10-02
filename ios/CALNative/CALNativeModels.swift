@@ -48,6 +48,9 @@ struct ScheduleAssignment: Identifiable {
   let coveringInitials: String?
   let coveringSurgeonId: Int?
   let isCovered: Bool
+  let backupSurgeon: String?
+  let backupInitials: String?
+  let backupNote: String?
   let time: String
   let systemImage: String
 }

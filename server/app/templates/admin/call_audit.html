@@ -43,6 +43,10 @@
               <span class="bg-violet-50 text-violet-700 text-xs font-semibold px-2 py-1 rounded-full">Coverage / swap</span>
               {% elif row.action == 'cover_clear' %}
               <span class="bg-amber-50 text-amber-800 text-xs font-semibold px-2 py-1 rounded-full">Coverage cleared</span>
+              {% elif row.action == 'backup' %}
+              <span class="bg-teal-50 text-teal-800 text-xs font-semibold px-2 py-1 rounded-full">Backup saved</span>
+              {% elif row.action == 'backup_clear' %}
+              <span class="bg-slate-100 text-slate-700 text-xs font-semibold px-2 py-1 rounded-full">Backup removed</span>
               {% else %}
               <span class="bg-slate-100 text-slate-600 text-xs font-semibold px-2 py-1 rounded-full">{{ row.action }}</span>
               {% endif %}

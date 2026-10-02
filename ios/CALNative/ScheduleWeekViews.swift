@@ -140,6 +140,17 @@ private struct SmallCoverageInitialsView: View {
   let assignment: ScheduleAssignment
 
   var body: some View {
+    VStack(spacing: 1) {
+      callInitials
+      if let backup = assignment.backupInitials {
+        Text("Backup \(backup)")
+          .font(.system(size: 8, weight: .semibold))
+          .foregroundStyle(ClinicalPalette.teal)
+      }
+    }
+  }
+
+  @ViewBuilder private var callInitials: some View {
     if assignment.isCovered {
       HStack(spacing: 2) {
         StruckInitialsText(

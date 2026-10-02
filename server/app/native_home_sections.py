@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session, joinedload
 
-from .models import CallCoverage, CallRotation, DayOff, NativeScheduleAlert, Surgeon
+from .models import CallBackup, CallCoverage, CallRotation, DayOff, NativeScheduleAlert, Surgeon
 from .native_support import date_label, serialize_call_assignment, serialize_native_alert
 from .surgeon_visibility import surgeon_is_visible
 
@@ -21,6 +21,7 @@ def build_native_call_schedule(
         joinedload(CallRotation.surgeon),
         joinedload(CallRotation.call_group),
         joinedload(CallRotation.coverages).joinedload(CallCoverage.covering_surgeon),
+        joinedload(CallRotation.backup).joinedload(CallBackup.surgeon),
     ).filter(
         CallRotation.date >= start_date,
         CallRotation.date <= end_date,

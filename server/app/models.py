@@ -311,6 +311,7 @@ class CallRotation(Base):
     surgeon = relationship("Surgeon", back_populates="call_rotations")
     call_group = relationship("CallGroup", back_populates="rotations")
     coverages = relationship("CallCoverage", back_populates="rotation", cascade="all, delete-orphan")
+    backup = relationship("CallBackup", back_populates="rotation", uselist=False, cascade="all, delete-orphan")
 
     @property
     def active_coverage(self):
@@ -337,6 +338,20 @@ class CallCoverage(Base):
     original_surgeon = relationship("Surgeon", foreign_keys=[original_surgeon_id])
     covering_surgeon = relationship("Surgeon", foreign_keys=[covering_surgeon_id])
     requested_by_surgeon = relationship("Surgeon", foreign_keys=[requested_by_surgeon_id])
+
+
+class CallBackup(Base):
+    """Optional backup for one call assignment; does not change who holds call."""
+    __tablename__ = "call_backups"
+    id = Column(Integer, primary_key=True)
+    call_rotation_id = Column(Integer, ForeignKey("call_rotations.id", ondelete="CASCADE"), nullable=False, unique=True)
+    surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=False)
+    note = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    rotation = relationship("CallRotation", back_populates="backup")
+    surgeon = relationship("Surgeon")
 
 
 class CallDailyAssignment(Base):

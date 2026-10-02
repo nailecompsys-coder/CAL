@@ -3,6 +3,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from ..admin_call_schedule_service import (
@@ -15,11 +16,12 @@ from ..admin_call_schedule_service import (
 from ..admin_notification_href import month_offset_for_date
 from ..auth import get_current_admin
 from ..call_schedule_audit_service import recent_call_schedule_audit_logs, surgeon_label
+from ..call_backup_service import approved_no_call_ids, save_backup, clear_backup
 from ..database import get_db
 from ..jinja_env import templates
 from ..models import CallRotation, Surgeon
 from ..surgeon_visibility import surgeon_is_visible
-from .admin import _base, _call_schedule_qs, _sort_surgeons_physicians_first, _surgeon_sort_key, _warn_redirect
+from .admin import _base, _call_schedule_qs, _surgeon_sort_key, _warn_redirect
 
 router = APIRouter(prefix="/admin")
 
@@ -42,11 +44,18 @@ def call_schedule_page(
         rotation = db.get(CallRotation, rotation_id)
         if rotation and rotation.date:
             month_offset = month_offset_for_date(rotation.date)
-    surgeons = [
-        row for row in db.query(Surgeon).filter(Surgeon.is_active == True).order_by(Surgeon.last_name).all()  # noqa: E712
-        if surgeon_is_visible(row)
-    ]
-    surgeons = _sort_surgeons_physicians_first(surgeons)
+    surgeons = db.query(Surgeon).filter(
+        Surgeon.is_active.is_(True),
+        func.lower(func.coalesce(Surgeon.email, "")) != "don@clermontitstore.com",
+        ~(
+            (func.lower(func.trim(Surgeon.first_name)) == "developer")
+            & (func.lower(func.trim(Surgeon.last_name)) == "admin")
+        ),
+    ).order_by(
+        case((Surgeon.staff_type == "physician", 0), else_=1),
+        case((Surgeon.sort_order > 0, Surgeon.sort_order), else_=999999),
+        Surgeon.last_name, Surgeon.first_name, Surgeon.id,
+    ).all()
     data = page_data(db, month_offset, _surgeon_sort_key)
 
     return templates.TemplateResponse("admin/call_schedule.html", _base(
@@ -183,6 +192,56 @@ def clear_coverage(
             [str(exc.detail)],
         )
     return RedirectResponse(f"/admin/call-schedule?{_call_schedule_qs(month_offset)}", status_code=303)
+
+
+@router.post("/call-schedule/backup")
+def assign_backup(
+    rotation_id: int = Form(...),
+    backup_surgeon_id: int = Form(...),
+    note: str = Form(""),
+    month_offset: int = Form(0),
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    from fastapi import HTTPException
+
+    target = f"/admin/call-schedule?{_call_schedule_qs(month_offset)}"
+    try:
+        warnings = save_backup(db, rotation_id, backup_surgeon_id, note, admin=admin)
+    except HTTPException as exc:
+        return _warn_redirect(target, [str(exc.detail)])
+    return _warn_redirect(target, warnings)
+
+
+@router.get("/call-schedule/backup/no-call")
+def backup_no_call(
+    rotation_id: int,
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    from fastapi import HTTPException
+
+    rotation = db.get(CallRotation, rotation_id)
+    if not rotation:
+        raise HTTPException(404, "Call assignment not found")
+    return {"surgeonIds": approved_no_call_ids(db, rotation.date)}
+
+
+@router.post("/call-schedule/backup/clear")
+def remove_backup(
+    rotation_id: int = Form(...),
+    month_offset: int = Form(0),
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    from fastapi import HTTPException
+
+    target = f"/admin/call-schedule?{_call_schedule_qs(month_offset)}"
+    try:
+        clear_backup(db, rotation_id, admin=admin)
+    except HTTPException as exc:
+        return _warn_redirect(target, [str(exc.detail)])
+    return RedirectResponse(target, status_code=303)
 
 
 @router.get("/call-audit", response_class=HTMLResponse)

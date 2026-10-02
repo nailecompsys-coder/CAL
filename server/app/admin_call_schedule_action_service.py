@@ -36,6 +36,15 @@ def assign_rotation(
     existing = rotation_query_for_assignment(db, assignment_date, call_group_id).first()
     from_surgeon_id = existing.surgeon_id if existing else None
     if existing:
+        if from_surgeon_id != surgeon_id and existing.backup:
+            log_call_schedule_change(
+                db, action="backup_clear", event_date=assignment_date, source="portal",
+                call_group_id=call_group_id, call_group_name=_group_name(db, call_group_id),
+                rotation_id=existing.id, from_surgeon_id=existing.backup.surgeon_id,
+                actor_admin_id=admin.id if admin else None,
+                actor_label=actor_label_for_admin(admin), notes=existing.backup.note,
+            )
+            db.delete(existing.backup)
         existing.surgeon_id = surgeon_id
         rotation = existing
         rotation_id = existing.id

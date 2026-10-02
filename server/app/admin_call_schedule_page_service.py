@@ -5,7 +5,7 @@ from datetime import date, timedelta
 
 from sqlalchemy.orm import Session, joinedload
 
-from .models import CallCoverage, CallGroup, CallGroupLocation, CallRotation, DayOff, Location, Surgeon
+from .models import CallBackup, CallCoverage, CallGroup, CallGroupLocation, CallRotation, DayOff, Location, Surgeon
 from .practice_time import practice_today
 from .surgeon_visibility import surgeon_is_visible
 
@@ -98,6 +98,7 @@ def call_group_rows(db: Session, call_groups: list[CallGroup], schedule_days: li
         .options(
             joinedload(CallRotation.surgeon),
             joinedload(CallRotation.coverages).joinedload(CallCoverage.covering_surgeon),
+            joinedload(CallRotation.backup).joinedload(CallBackup.surgeon),
         )
         .filter(
             CallRotation.date >= schedule_days[0],

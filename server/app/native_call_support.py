@@ -16,6 +16,9 @@ def serialize_call_assignment(rotation: CallRotation, viewer_id: int) -> dict:
     original = rotation.surgeon
     covering = coverage.covering_surgeon if coverage else None
     active_surgeon = covering or (original if surgeon_is_visible(original) else None)
+    backup = rotation.backup.surgeon if rotation.backup and not coverage else None
+    if not surgeon_is_visible(backup):
+        backup = None
     return {
         "rotationId": rotation.id,
         "groupId": rotation.call_group_id,
@@ -32,4 +35,8 @@ def serialize_call_assignment(rotation: CallRotation, viewer_id: int) -> dict:
         "coveringInitials": covering.initials if covering else None,
         "isCovered": coverage is not None,
         "coverageId": coverage.id if coverage else None,
+        "backupSurgeon": backup.full_name if backup else None,
+        "backupSurgeonId": backup.id if backup else None,
+        "backupInitials": backup.initials if backup else None,
+        "backupNote": rotation.backup.note if backup else None,
     }

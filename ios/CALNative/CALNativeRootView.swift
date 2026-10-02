@@ -15,23 +15,6 @@ struct CALNativeRootView: View {
         NativeSchedulerShell(store: store)
       } else {
         CALNativeTabShell(store: store)
-          .safeAreaInset(edge: .top, spacing: 0) {
-            if store.isSupportPreview {
-              HStack(spacing: 8) {
-                Image(systemName: "eye")
-                Text("READ-ONLY PREVIEW · \(store.supportPreviewSurgeonName ?? "Surgeon")")
-                  .lineLimit(1)
-                Spacer(minLength: 4)
-                Button("Exit") { store.logout() }
-                  .font(.caption.weight(.bold))
-              }
-              .font(.caption.weight(.semibold))
-              .foregroundStyle(.white)
-              .padding(.horizontal, 12)
-              .padding(.vertical, 8)
-              .background(ClinicalPalette.teal)
-            }
-          }
       }
     }
     .task {

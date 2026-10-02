@@ -192,13 +192,26 @@ struct CALNativeTitleMenu: View {
 
       Divider()
 
-      Button(role: .destructive) {
-        store.logout()
-      } label: {
-        Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+      if store.isSupportPreview {
+        Label("Read-only · \(store.supportPreviewSurgeonName ?? "Surgeon")", systemImage: "eye")
+        Button(role: .destructive) {
+          store.logout()
+        } label: {
+          Label("Exit Preview", systemImage: "rectangle.portrait.and.arrow.right")
+        }
+      } else {
+        Button(role: .destructive) {
+          store.logout()
+        } label: {
+          Label("Sign Out", systemImage: "rectangle.portrait.and.arrow.right")
+        }
       }
     } label: {
       HStack(spacing: 4) {
+        if store.isSupportPreview {
+          Image(systemName: "eye")
+            .accessibilityHidden(true)
+        }
         Text(selectedSection.rawValue)
           .font(ClinicalTypography.headline)
         Image(systemName: "chevron.down")
@@ -206,5 +219,6 @@ struct CALNativeTitleMenu: View {
       }
       .foregroundStyle(.primary)
     }
+    .accessibilityLabel(store.isSupportPreview ? "\(selectedSection.rawValue), read-only preview" : selectedSection.rawValue)
   }
 }

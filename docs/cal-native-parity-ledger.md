@@ -4,6 +4,8 @@ Last updated: 2026-10-02
 
 Admin surgeon preview (2026-10-02): an administrator can issue a one-use, ten-minute code for a selected surgeon from Users → Surgeons. The Release iOS simulator exchanges it for a memory-only, thirty-minute, read-only session showing that surgeon's native schedule and patient list. This sends no surgeon OTP. The backend permits only the two native GET feeds for this session; it cannot submit schedule changes. This is a support verification path and has not been distributed through TestFlight.
 
+Preview navigation fix (2026-10-02): the read-only indicator and exit action live in the Calendar/Time Off title menu. The full-width top banner has been removed so it cannot cover the navigation bar or prevent switching screens.
+
 iOS calendar chrome (2026-09-23): the surgeon-facing section is labeled `Calendar` in the title menu and scheduler mode switch. Day-view OFF initials remain single-line, fixed-height capsules so two-letter initials cannot wrap or misalign the row.
 
 Native schedule review rows (2026-09-15): `GET /api/native/home` includes Aprima-derived patient schedule rows again, separate from CAL clinic and Block OR cards. Surgery One / CBO-style Aprima rows are read-only, flagged `needsReview=true`, and carry red styling so SwiftUI can show them as Shannon-review items instead of verified CAL schedule. CAL clinic cards still summarize location, first visit time, and visit count; Block OR cards still show location, start time, and total cases.

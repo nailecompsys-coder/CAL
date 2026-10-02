@@ -144,7 +144,7 @@ private struct SmallCoverageInitialsView: View {
       callInitials
       if assignment.isBackup {
         Text("Backup")
-          .font(.system(size: 8, weight: .semibold))
+          .font(.caption2.weight(.semibold))
           .foregroundStyle(ClinicalPalette.teal)
       }
     }

@@ -14,7 +14,9 @@ iOS calendar chrome (2026-09-23): the surgeon-facing section is labeled `Calenda
 
 Native schedule review rows (2026-09-15): `GET /api/native/home` includes Aprima-derived patient schedule rows again, separate from CAL clinic and Block OR cards. Surgery One / CBO-style Aprima rows are read-only, flagged `needsReview=true`, and carry red styling so SwiftUI can show them as Shannon-review items instead of verified CAL schedule. CAL clinic cards still summarize location, first visit time, and visit count; Block OR cards still show location, start time, and total cases.
 
-iOS test build target: `2.0 (23)` from the SwiftUI `ios/` lane.
+iOS TestFlight build target: `2.0 (24)` from the SwiftUI `ios/` lane. Build 23 is the latest Apple-uploaded build checked on October 2; build 24 must be uploaded and processed before describing it as available to testers.
+
+Build 24 candidate: the Scheduler opens on a week list, then shows every surgeon's AM/PM schedule, NA and OFF status, approved leave, call, OR case times, and clinic visit times for a selected day. The iPhone calls the SQL-backed `GET /api/native/scheduler/schedule` feed, which must be live before the client is distributed. An assigned call Backup is labeled **Backup** for that surgeon; the iPhone has no Backup assignment control. The Calendar Meetings card shows bold **Today** and a dated **Next meeting** preview with title/time only; tapping reveals the full note.
 
 Time off manage (2026-08-23): pending and approved rows in My Requests are tappable. Modify reuses the request form; changing an approved row returns it to pending. Cancel deletes the row and emails the surgeon. Request, approve, deny, and cancel each send email. New requests opened from a future month seed Start/End to the 1st of that month (today if the viewed month is current or past). Who’s Out shows the full roster; rows with no time off stay visible and dimmed.
 

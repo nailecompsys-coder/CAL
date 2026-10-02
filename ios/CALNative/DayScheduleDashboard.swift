@@ -10,6 +10,13 @@ struct DayScheduleDashboard: View {
   let onDeletePersonalItem: (PersonalCalendarItem) async throws -> Void
 
   @State private var personalEditor: PersonalEditorTarget?
+  @State private var selectedMeeting: MeetingDetail?
+
+  private struct MeetingDetail: Identifiable {
+    let date: Date
+    let item: DoctorScheduleItem
+    var id: String { "\(dateKey(date))-\(item.id)" }
+  }
 
   private enum PersonalEditorTarget: Identifiable {
     case create
@@ -36,10 +43,17 @@ struct DayScheduleDashboard: View {
     return byId.values.sorted { $0.date < $1.date }
   }
 
-  private var nextMeeting: (date: Date, content: String)? {
-    nextAgendaItem { day in
-      day.meetings.first.map(Self.meetingSummary)
+  private var nextMeeting: MeetingDetail? {
+    let calendar = Calendar.current
+    let start = calendar.startOfDay(for: day.date)
+    let end = calendar.date(byAdding: .day, value: 30, to: start) ?? start
+    for candidate in orderedDays {
+      let candidateDate = calendar.startOfDay(for: candidate.date)
+      if candidateDate > start, candidateDate <= end, let item = candidate.meetings.first {
+        return MeetingDetail(date: candidate.date, item: item)
+      }
     }
+    return nil
   }
 
   private var nextPersonal: (date: Date, content: String)? {
@@ -87,13 +101,19 @@ struct DayScheduleDashboard: View {
         }
 
         DashboardSection(title: "Meetings", tint: ClinicalPalette.meeting) {
-          AgendaPreviewRows(
-            todayContent: day.meetings.isEmpty ? nil : day.meetings.map(Self.meetingSummary).joined(separator: ", "),
-            emptyTodayText: "none",
-            nextDate: nextMeeting?.date,
-            nextContent: nextMeeting?.content,
-            systemImage: "person.2"
-          )
+          if day.meetings.isEmpty {
+            HStack(spacing: 6) {
+              Text("Today").font(.caption.weight(.bold))
+              Text("No meetings").font(.caption).foregroundStyle(.secondary)
+            }
+          } else {
+            ForEach(day.meetings) { meeting in
+              meetingPreview(MeetingDetail(date: day.date, item: meeting), label: "Today")
+            }
+          }
+          if let nextMeeting {
+            meetingPreview(nextMeeting, label: "Next meeting · \(nextMeeting.date.formatted(.dateTime.month(.abbreviated).day()))")
+          }
         }
 
         DashboardSection(title: "Personal", tint: ClinicalPalette.mint) {
@@ -184,12 +204,51 @@ struct DayScheduleDashboard: View {
         }
       )
     }
+    .sheet(item: $selectedMeeting) { detail in
+      CalNavigation {
+        ScrollView {
+          VStack(alignment: .leading, spacing: 12) {
+            Text(detail.item.title).font(.title3.weight(.bold))
+            Text(detail.date.formatted(.dateTime.weekday(.wide).month(.wide).day()))
+              .foregroundStyle(.secondary)
+            if !detail.item.timeRange.isEmpty {
+              Text(detail.item.timeRange).font(.subheadline.weight(.semibold))
+            }
+            if !detail.item.subtitle.isEmpty {
+              Text(detail.item.subtitle).font(.body)
+            }
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(20)
+        }
+        .navigationTitle("Meeting")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+          ToolbarItem(placement: .confirmationAction) {
+            Button("Done") { selectedMeeting = nil }
+          }
+        }
+      }
+    }
   }
 
-  private static func meetingSummary(_ item: DoctorScheduleItem) -> String {
-    [item.timeRange, item.title, item.subtitle]
-      .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-      .joined(separator: " ")
+  private func meetingPreview(_ detail: MeetingDetail, label: String) -> some View {
+    Button {
+      selectedMeeting = detail
+    } label: {
+      HStack(alignment: .firstTextBaseline, spacing: 6) {
+        Image(systemName: "person.2").font(.caption2).foregroundStyle(ClinicalPalette.teal)
+        Text(label).font(.caption.weight(.bold))
+        Text([detail.item.timeRange, detail.item.title].filter { !$0.isEmpty }.joined(separator: " · "))
+          .font(.caption)
+          .lineLimit(1)
+        Spacer(minLength: 0)
+        Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
+      }
+      .foregroundStyle(ClinicalPalette.ink)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
   }
 }
 

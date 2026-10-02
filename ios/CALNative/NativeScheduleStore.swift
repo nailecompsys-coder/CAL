@@ -23,6 +23,7 @@ final class NativeScheduleStore: ObservableObject {
   @Published private(set) var supportPreviewSurgeonName: String?
   @Published private(set) var availableRoles: [NativeSessionRole] = [.surgeon]
   @Published private(set) var schedulerBlocks: [NativeSchedulerBlock] = []
+  @Published private(set) var schedulerSchedule: [NativeSchedulerScheduleRow] = []
   @Published private(set) var schedulerChanges: [NativeSchedulerChange] = []
   @Published private(set) var selectedSchedulerDetail: NativeSchedulerBlockDetailResponse?
   @Published private(set) var hasBootstrapped = false
@@ -294,6 +295,7 @@ final class NativeScheduleStore: ObservableObject {
         await loadScheduler(containing: Date())
       } else {
         schedulerBlocks = []
+        schedulerSchedule = []
         schedulerChanges = []
         selectedSchedulerDetail = nil
         await loadLookahead(containing: Date(), daysAhead: 30)
@@ -314,6 +316,7 @@ final class NativeScheduleStore: ObservableObject {
     timeOffRequests = []
     patientAppointments = []
     schedulerBlocks = []
+    schedulerSchedule = []
     schedulerChanges = []
     selectedSchedulerDetail = nil
     sessionRole = .surgeon
@@ -336,6 +339,7 @@ final class NativeScheduleStore: ObservableObject {
     timeOffRequests = []
     patientAppointments = []
     schedulerBlocks = []
+    schedulerSchedule = []
     schedulerChanges = []
     selectedSchedulerDetail = nil
     sessionRole = .surgeon
@@ -571,10 +575,13 @@ final class NativeScheduleStore: ObservableObject {
     loadState = .loading
     let calendar = ClinicalCalendar.mondayFirst
     let weekStart = calendar.dateInterval(of: .weekOfYear, for: date)?.start ?? calendar.startOfDay(for: date)
-    let end = calendar.date(byAdding: .day, value: 56, to: weekStart) ?? weekStart
+    let end = calendar.date(byAdding: .day, value: 6, to: weekStart) ?? weekStart
     do {
-      let response = try await client.fetchSchedulerHome(token: token, start: weekStart, end: end)
+      async let home = client.fetchSchedulerHome(token: token, start: weekStart, end: end)
+      async let schedule = client.fetchSchedulerSchedule(token: token, start: weekStart, end: end)
+      let (response, scheduleRows) = try await (home, schedule)
       schedulerBlocks = response.blocks
+      schedulerSchedule = scheduleRows
       schedulerChanges = response.changes
       loadState = .loaded
     } catch let error as NativeCALError where error.isAuthenticationFailure {
@@ -792,6 +799,9 @@ final class NativeScheduleStore: ObservableObject {
 
   private func clearScheduleForMissingSession() {
     days = []
+    schedulerBlocks = []
+    schedulerSchedule = []
+    schedulerChanges = []
     loadState = .idle
   }
 

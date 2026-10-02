@@ -7,7 +7,7 @@ import os
 import random
 from datetime import datetime, time, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 
@@ -34,6 +34,7 @@ from ..or_block_service import (
     update_block_case,
     update_or_block_instance,
 )
+from ..native_scheduler_schedule import scheduler_schedule
 from ..routers.api_common import parse_iso_date_range
 from ..sms_service import generate_sms_otp
 
@@ -217,6 +218,21 @@ def scheduler_home(
 ):
     start_date, end_date = parse_iso_date_range(start, end)
     return scheduler_native_home(db, start_date, end_date)
+
+
+@router.get("/schedule")
+def scheduler_schedule_view(
+    start: str,
+    end: str,
+    response: Response,
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_native_scheduler),
+):
+    start_date, end_date = parse_iso_date_range(start, end)
+    if end_date < start_date or (end_date - start_date).days > 13:
+        raise HTTPException(400, "Scheduler schedule range must be 1–14 days")
+    response.headers["Cache-Control"] = "no-store"
+    return scheduler_schedule(db, start_date, end_date)
 
 
 @router.get("/meta")

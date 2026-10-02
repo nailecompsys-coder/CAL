@@ -8,6 +8,7 @@ struct NativeSchedulerShell: View {
   @State private var showCreateBlock = false
   @State private var showChanges = false
   @State private var showJumpMenu = false
+  @State private var managingBlocks = false
 
   private enum SchedulerBrowseScope {
     case week
@@ -36,7 +37,7 @@ struct NativeSchedulerShell: View {
 
   private var weekDaySummaries: [SchedulerWeekDaySummary] {
     weekDates.map { date in
-      SchedulerWeekDaySummary(date: date, blocks: blocks(on: date))
+      SchedulerWeekDaySummary(date: date, schedule: schedule(on: date))
     }
   }
 
@@ -104,18 +105,18 @@ struct NativeSchedulerShell: View {
                 withAnimation(.easeInOut(duration: 0.2)) {
                   selectedDate = date
                   scope = .day
+                  managingBlocks = false
                 }
-              },
-              addBlock: { showCreateBlock = true }
+              }
             )
             .calReadableColumn(ClinicalLayout.contentColumn)
-          } else {
+          } else if managingBlocks {
             SchedulerDayDetailView(
               blockGroups: dayBlockGroups,
               statusMessage: displayWarning,
               backToWeek: {
                 withAnimation(.easeInOut(duration: 0.2)) {
-                  scope = .week
+                  managingBlocks = false
                 }
               },
               selectBlock: { block in
@@ -123,6 +124,14 @@ struct NativeSchedulerShell: View {
                 Task { await store.loadSchedulerBlock(block) }
               },
               addBlock: { showCreateBlock = true }
+            )
+            .calReadableColumn(ClinicalLayout.contentColumn)
+          } else {
+            SchedulerScheduleDayView(
+              rows: schedule(on: selectedDate),
+              statusMessage: displayWarning,
+              backToWeek: { scope = .week },
+              manageBlocks: { managingBlocks = true }
             )
             .calReadableColumn(ClinicalLayout.contentColumn)
           }
@@ -320,6 +329,11 @@ struct NativeSchedulerShell: View {
     return store.schedulerBlocks.filter { $0.date == key }
   }
 
+  private func schedule(on date: Date) -> [NativeSchedulerScheduleRow] {
+    let key = NativeDayResponse.dateFormatter.string(from: date)
+    return store.schedulerSchedule.filter { $0.date == key }
+  }
+
   private func groupedBlocks(_ blocks: [NativeSchedulerBlock]) -> [SchedulerBlockGroup] {
     Dictionary(grouping: blocks) { block in
       "\(block.date)|\(block.locationId)|\(block.session)|\(block.start)|\(block.end)"
@@ -482,29 +496,16 @@ private struct SchedulerBlockGroup: Identifiable {
 private struct SchedulerWeekDaySummary: Identifiable {
   let id: String
   let date: Date
-  let blocks: [NativeSchedulerBlock]
+  let schedule: [NativeSchedulerScheduleRow]
 
-  var openCount: Int { blocks.filter(\.isOpen).count }
-  var assignedCount: Int { blocks.count - openCount }
+  var caseCount: Int { schedule.first?.dayCaseCount ?? 0 }
+  var visitCount: Int { schedule.first?.dayVisitCount ?? 0 }
+  var offCount: Int { schedule.first?.dayOffCount ?? 0 }
+  var hasActivity: Bool { !schedule.isEmpty }
 
-  var hospitalBadges: [String] {
-    var seen = Set<String>()
-    var ordered: [String] = []
-    for block in blocks {
-      let label = block.displayLocation
-      if seen.insert(label).inserted {
-        ordered.append(label)
-      }
-    }
-    return ordered
-  }
-
-  init(date: Date, blocks: [NativeSchedulerBlock]) {
+  init(date: Date, schedule: [NativeSchedulerScheduleRow]) {
     self.date = date
-    self.blocks = blocks.sorted { lhs, rhs in
-      if lhs.start != rhs.start { return lhs.start < rhs.start }
-      return lhs.displayLocation < rhs.displayLocation
-    }
+    self.schedule = schedule
     self.id = NativeDayResponse.dateFormatter.string(from: date)
   }
 }
@@ -513,10 +514,9 @@ private struct SchedulerWeekView: View {
   let days: [SchedulerWeekDaySummary]
   let statusMessage: String?
   let selectDay: (Date) -> Void
-  let addBlock: () -> Void
 
   private var weekIsEmpty: Bool {
-    days.allSatisfy { $0.blocks.isEmpty }
+    days.allSatisfy { !$0.hasActivity }
   }
 
   var body: some View {
@@ -532,10 +532,9 @@ private struct SchedulerWeekView: View {
         }
 
         if weekIsEmpty {
-          SchedulerEmptyState(
-            text: "No Block OR this week.",
-            addBlock: addBlock
-          )
+          Text("No schedule this week")
+            .font(ClinicalTypography.caption)
+            .foregroundStyle(.secondary)
         } else {
           VStack(spacing: 7) {
             ForEach(days) { day in
@@ -547,16 +546,6 @@ private struct SchedulerWeekView: View {
               .buttonStyle(.plain)
             }
           }
-
-          Button(action: addBlock) {
-            Label("Add block", systemImage: "plus.circle.fill")
-              .font(.subheadline.weight(.bold))
-              .frame(maxWidth: .infinity)
-              .padding(.vertical, 10)
-          }
-          .buttonStyle(.borderedProminent)
-          .tint(ClinicalPalette.teal)
-          .padding(.top, 4)
         }
       }
       .padding(16)
@@ -584,8 +573,8 @@ private struct SchedulerWeekDayRow: View {
       .frame(width: 34)
 
       VStack(alignment: .leading, spacing: 4) {
-        if day.blocks.isEmpty {
-          Text("No blocks")
+        if !day.hasActivity {
+          Text("No scheduled activity")
             .font(ClinicalTypography.caption)
             .foregroundStyle(.secondary)
         } else {
@@ -595,23 +584,6 @@ private struct SchedulerWeekDayRow: View {
             .lineLimit(1)
             .minimumScaleFactor(0.85)
 
-          if !day.hospitalBadges.isEmpty {
-            HStack(spacing: 4) {
-              ForEach(day.hospitalBadges.prefix(4), id: \.self) { badge in
-                Text(badge)
-                  .font(ClinicalTypography.badge)
-                  .foregroundStyle(ClinicalPalette.teal)
-                  .padding(.horizontal, 6)
-                  .padding(.vertical, 2)
-                  .background(ClinicalPalette.teal.opacity(0.12), in: Capsule())
-              }
-              if day.hospitalBadges.count > 4 {
-                Text("+\(day.hospitalBadges.count - 4)")
-                  .font(ClinicalTypography.badge)
-                  .foregroundStyle(.secondary)
-              }
-            }
-          }
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -632,13 +604,173 @@ private struct SchedulerWeekDayRow: View {
 
   private var summaryLine: String {
     var parts: [String] = []
-    if day.openCount > 0 {
-      parts.append("\(day.openCount) open")
+    if day.caseCount > 0 { parts.append("\(day.caseCount) OR") }
+    if day.visitCount > 0 { parts.append("\(day.visitCount) clinic") }
+    if day.offCount > 0 { parts.append("\(day.offCount) off") }
+    return parts.isEmpty ? "Master blocks" : parts.joined(separator: " · ")
+  }
+}
+
+private struct SchedulerSurgeonDay: Identifiable {
+  let id: Int
+  let name: String
+  var rows: [NativeSchedulerScheduleRow]
+
+  var am: NativeSchedulerScheduleRow? { rows.first { $0.type == "card" && $0.session == "am" } }
+  var pm: NativeSchedulerScheduleRow? { rows.first { $0.type == "card" && $0.session == "pm" } }
+  var hasApprovedOff: Bool { rows.contains { $0.type == "approved_off" } }
+  var hasNoCall: Bool { rows.contains { $0.type == "no_call" } }
+  var hasMeeting: Bool { rows.contains { $0.type == "meeting" } }
+  var hasCall: Bool { rows.contains { $0.type == "call" } }
+  var hasConflict: Bool { rows.contains { $0.needsReview } }
+
+  var statusSummary: String {
+    var labels: [String] = []
+    if hasApprovedOff { labels.append("Off") }
+    if hasNoCall { labels.append("No Call") }
+    if hasMeeting { labels.append("Meeting") }
+    if hasCall { labels.append("Call") }
+    if hasConflict { labels.append("⚠ Conflict") }
+    return labels.joined(separator: " · ")
+  }
+
+  var blockSummary: String {
+    guard am != nil || pm != nil else { return "No weekend master blocks" }
+    return "AM \(label(for: am)) · PM \(label(for: pm))"
+  }
+
+  private func label(for card: NativeSchedulerScheduleRow?) -> String {
+    guard let card else { return "NA" }
+    if card.title == "NA", !card.subtitle.isEmpty {
+      return "NA → \(card.subtitle.replacingOccurrences(of: "Scheduled at ", with: ""))"
     }
-    if day.assignedCount > 0 {
-      parts.append("\(day.assignedCount) assigned")
+    return card.title
+  }
+}
+
+private struct SchedulerScheduleDayView: View {
+  let rows: [NativeSchedulerScheduleRow]
+  let statusMessage: String?
+  let backToWeek: () -> Void
+  let manageBlocks: () -> Void
+
+  // The API's SQL ORDER BY controls surgeon and item order here.
+  private var surgeons: [SchedulerSurgeonDay] {
+    var result: [SchedulerSurgeonDay] = []
+    for row in rows {
+      if let last = result.indices.last, result[last].id == row.surgeonId {
+        result[last].rows.append(row)
+      } else {
+        result.append(SchedulerSurgeonDay(id: row.surgeonId, name: row.surgeon, rows: [row]))
+      }
     }
-    return parts.isEmpty ? "\(day.blocks.count) block\(day.blocks.count == 1 ? "" : "s")" : parts.joined(separator: " · ")
+    return result
+  }
+
+  var body: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 10) {
+        Button(action: backToWeek) {
+          Label("Week", systemImage: "chevron.left")
+            .font(ClinicalTypography.caption)
+            .foregroundStyle(ClinicalPalette.teal)
+        }
+        .buttonStyle(.plain)
+
+        if let statusMessage {
+          Label(statusMessage, systemImage: "exclamationmark.triangle")
+            .font(.caption.weight(.semibold))
+            .padding(10)
+            .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.amber)
+        }
+
+        if surgeons.isEmpty {
+          Text("No surgeon schedule for this day.")
+            .font(ClinicalTypography.caption)
+            .foregroundStyle(.secondary)
+        } else {
+          ForEach(surgeons) { surgeon in
+            DisclosureGroup {
+              VStack(alignment: .leading, spacing: 6) {
+                ForEach(surgeon.rows) { row in
+                  SchedulerScheduleFactRow(row: row)
+                }
+              }
+              .padding(.top, 8)
+            } label: {
+              VStack(alignment: .leading, spacing: 5) {
+                Text(surgeon.name)
+                  .font(ClinicalTypography.headlineStrong)
+                  .foregroundStyle(ClinicalPalette.ink)
+                Text(surgeon.blockSummary)
+                  .font(ClinicalTypography.caption)
+                  .foregroundStyle(.secondary)
+                if !surgeon.statusSummary.isEmpty {
+                  Text(surgeon.statusSummary)
+                  .font(ClinicalTypography.badge)
+                  .foregroundStyle(surgeon.hasConflict ? ClinicalPalette.amber : ClinicalPalette.teal)
+                  .fixedSize(horizontal: false, vertical: true)
+                }
+              }
+            }
+            .padding(12)
+            .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.card)
+          }
+        }
+
+        Button(action: manageBlocks) {
+          Label("Manage OR blocks", systemImage: "square.grid.2x2")
+            .font(ClinicalTypography.caption)
+        }
+        .padding(.top, 8)
+      }
+      .padding(16)
+    }
+  }
+}
+
+private struct SchedulerScheduleFactRow: View {
+  let row: NativeSchedulerScheduleRow
+
+  private var kindLabel: String {
+    switch row.type {
+    case "card": return row.session.uppercased()
+    case "surgery": return "OR"
+    case "clinic_visit", "clinic_block": return "Clinic"
+    case "approved_off", "no_call", "call": return ""
+    case "meeting": return "Meeting"
+    default: return row.type
+    }
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 2) {
+      HStack(alignment: .firstTextBaseline, spacing: 6) {
+        if !kindLabel.isEmpty {
+          Text(kindLabel)
+            .font(ClinicalTypography.badge)
+            .foregroundStyle(ClinicalPalette.teal)
+        }
+        Text(row.title)
+          .font(ClinicalTypography.caption)
+          .foregroundStyle(ClinicalPalette.ink)
+        Spacer(minLength: 0)
+        if row.needsReview {
+          Image(systemName: "exclamationmark.triangle.fill")
+            .foregroundStyle(ClinicalPalette.amber)
+            .accessibilityLabel("Schedule conflict")
+        }
+      }
+      if !row.subtitle.isEmpty {
+        Text(row.subtitle).font(ClinicalTypography.badge).foregroundStyle(.secondary)
+      }
+      let detail = [row.start, row.location, row.room].filter { !$0.isEmpty }.joined(separator: " · ")
+      if !detail.isEmpty {
+        Text(detail).font(ClinicalTypography.badge).foregroundStyle(.secondary)
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(.vertical, 3)
   }
 }
 
@@ -653,7 +785,7 @@ private struct SchedulerDayDetailView: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 12) {
         Button(action: backToWeek) {
-          Label("Week", systemImage: "chevron.left")
+          Label("Schedule", systemImage: "chevron.left")
             .font(ClinicalTypography.caption)
             .foregroundStyle(ClinicalPalette.teal)
         }

@@ -88,6 +88,21 @@ struct NativeCALClient {
     return try JSONDecoder().decode(NativeSchedulerHomeResponse.self, from: data)
   }
 
+  func fetchSchedulerSchedule(token: String, start: Date, end: Date) async throws -> [NativeSchedulerScheduleRow] {
+    var components = URLComponents(url: baseURL.appendingPathComponent("/api/native/scheduler/schedule"), resolvingAgainstBaseURL: false)!
+    components.queryItems = [
+      URLQueryItem(name: "start", value: isoDate(start)),
+      URLQueryItem(name: "end", value: isoDate(end))
+    ]
+    guard let url = components.url else { throw NativeCALError.invalidURL }
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.cachePolicy = .reloadIgnoringLocalCacheData
+    let data = try await perform(request)
+    return try JSONDecoder().decode([NativeSchedulerScheduleRow].self, from: data)
+  }
+
   func fetchSchedulerBlock(token: String, blockId: Int) async throws -> NativeSchedulerBlockDetailResponse {
     let url = baseURL.appendingPathComponent("/api/native/scheduler/blocks/\(blockId)")
     var request = URLRequest(url: url)

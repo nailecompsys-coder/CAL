@@ -6,6 +6,25 @@ struct NativeSchedulerHomeResponse: Decodable {
   let changes: [NativeSchedulerChange]
 }
 
+struct NativeSchedulerScheduleRow: Identifiable, Decodable {
+  let surgeonId: Int
+  let surgeon: String
+  let date: String
+  let id: String
+  let session: String
+  let type: String
+  let title: String
+  let subtitle: String
+  let start: String
+  let end: String
+  let location: String
+  let room: String
+  let needsReview: Bool
+  let dayCaseCount: Int
+  let dayVisitCount: Int
+  let dayOffCount: Int
+}
+
 struct NativeSchedulerRange: Decodable {
   let start: String
   let end: String

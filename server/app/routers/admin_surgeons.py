@@ -1,7 +1,7 @@
 """Admin surgeon-management routes."""
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from ..admin_surgeon_service import (
@@ -18,7 +18,10 @@ from ..auth import (
     get_current_admin,
 )
 from ..database import get_db
+from ..jinja_env import templates
 from ..models import Surgeon
+from ..native_support_preview_service import CODE_MINUTES, issue_preview_code
+from . import admin as admin_routes
 from .admin import _next_physician_sort_order
 
 router = APIRouter(prefix="/admin")
@@ -142,3 +145,26 @@ def preview_surgeon_mobile(
         max_age=365 * 24 * 3600,
     )
     return resp
+
+
+@router.post("/surgeons/{surgeon_id}/native-preview-code", response_class=HTMLResponse)
+def native_preview_code(
+    surgeon_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    """Show an admin a one-use code; never send a surgeon an OTP."""
+    code = issue_preview_code(db, admin, surgeon_id)
+    surgeon = db.get(Surgeon, surgeon_id)
+    if not code or not surgeon:
+        raise HTTPException(status_code=404, detail="Surgeon unavailable for preview")
+    response = templates.TemplateResponse(
+        "admin/native_preview_code.html",
+        admin_routes._base(
+            request, admin, db=db, surgeon=surgeon, preview_code=code,
+            preview_minutes=CODE_MINUTES,
+        ),
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response

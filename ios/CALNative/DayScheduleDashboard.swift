@@ -4,6 +4,7 @@ struct DayScheduleDashboard: View {
   let day: ScheduleDay
   let days: [ScheduleDay]
   let statusMessage: String?
+  let isReadOnly: Bool
   let coverAction: (ScheduleAssignment) -> Void
   let onSavePersonalItem: (PersonalCalendarItem?, String, String, String?, String?, Date, Date) async throws -> Void
   let onDeletePersonalItem: (PersonalCalendarItem) async throws -> Void
@@ -79,7 +80,7 @@ struct DayScheduleDashboard: View {
             .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.amber)
         }
 
-        ScheduleDailyGlanceCard(day: day, coverAction: coverAction)
+        ScheduleDailyGlanceCard(day: day, coverAction: isReadOnly ? nil : coverAction)
 
         DashboardSection(title: "Clinic / OR Schedule", tint: ClinicalPalette.cardStrong) {
           ClinicOrScheduleList(dayId: day.id, items: day.mySchedule)
@@ -138,6 +139,7 @@ struct DayScheduleDashboard: View {
                   .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .disabled(isReadOnly)
               }
 
               if let nextPersonal {
@@ -150,16 +152,18 @@ struct DayScheduleDashboard: View {
               }
             }
 
-            Button {
-              personalEditor = .create
-            } label: {
-              Label("Add personal item", systemImage: "plus.circle.fill")
-                .font(.subheadline.weight(.bold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
+            if !isReadOnly {
+              Button {
+                personalEditor = .create
+              } label: {
+                Label("Add personal item", systemImage: "plus.circle.fill")
+                  .font(.subheadline.weight(.bold))
+                  .frame(maxWidth: .infinity)
+                  .padding(.vertical, 8)
+              }
+              .buttonStyle(.borderedProminent)
+              .tint(ClinicalPalette.teal)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(ClinicalPalette.teal)
           }
         }
       }

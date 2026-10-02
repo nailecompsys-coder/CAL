@@ -19,6 +19,8 @@ final class NativeScheduleStore: ObservableObject {
   @Published private(set) var loadState: NativeLoadState = .idle
   @Published private(set) var sessionToken: String?
   @Published private(set) var sessionRole: NativeSessionRole = .surgeon
+  @Published private(set) var isSupportPreview = false
+  @Published private(set) var supportPreviewSurgeonName: String?
   @Published private(set) var availableRoles: [NativeSessionRole] = [.surgeon]
   @Published private(set) var schedulerBlocks: [NativeSchedulerBlock] = []
   @Published private(set) var schedulerChanges: [NativeSchedulerChange] = []
@@ -66,6 +68,12 @@ final class NativeScheduleStore: ObservableObject {
 
   func bootstrapLookahead(containing date: Date, daysAhead: Int = 30) async {
     hasBootstrapped = true
+    #if targetEnvironment(simulator)
+    if let code = Self.supportPreviewCode() {
+      await activateSupportPreview(code: code, containing: date, daysAhead: daysAhead)
+      return
+    }
+    #endif
     #if DEBUG
     if let email = Self.debugLoginEmail() {
       session.clearToken()
@@ -87,6 +95,42 @@ final class NativeScheduleStore: ObservableObject {
       }
     }
   }
+
+  #if targetEnvironment(simulator)
+  func openSupportPreview(code: String) async {
+    authBusy = true
+    authMessage = nil
+    authMessageIsError = false
+    defer { authBusy = false }
+    await activateSupportPreview(code: code, containing: Date(), daysAhead: 30)
+  }
+
+  private static func supportPreviewCode() -> String? {
+    guard let arg = CommandLine.arguments.first(where: { $0.hasPrefix("--cal-support-preview=") }) else {
+      return nil
+    }
+    let code = String(arg.dropFirst("--cal-support-preview=".count))
+    return code.isEmpty ? nil : code
+  }
+
+  private func activateSupportPreview(code: String, containing date: Date, daysAhead: Int) async {
+    do {
+      let preview = try await client.redeemSupportPreview(code: code)
+      guard preview.readOnly else {
+        throw NativeCALError.requestRejected("Support preview must be read-only.")
+      }
+      sessionToken = preview.token // Memory only; never save a support token in Keychain.
+      sessionRole = .surgeon
+      availableRoles = [.surgeon]
+      isSupportPreview = true
+      supportPreviewSurgeonName = preview.surgeon.name
+      await loadLookahead(containing: date, daysAhead: daysAhead)
+    } catch {
+      authMessage = "Support preview failed: \(error.localizedDescription)"
+      authMessageIsError = true
+    }
+  }
+  #endif
 
   #if DEBUG
   /// Reads DEBUG login email from env (`CAL_LOGIN_EMAIL`), simctl-prefixed env
@@ -184,8 +228,8 @@ final class NativeScheduleStore: ObservableObject {
     days = snapshot.days
     timeOffRequests = snapshot.timeOffRequests
     alerts = snapshot.alerts
-    Task {
-      await registerForPushIfPossible()
+    if !isSupportPreview {
+      Task { await registerForPushIfPossible() }
     }
   }
 
@@ -262,8 +306,10 @@ final class NativeScheduleStore: ObservableObject {
   }
 
   func logout() {
-    session.clearToken()
+    if !isSupportPreview { session.clearToken() }
     sessionToken = nil
+    isSupportPreview = false
+    supportPreviewSurgeonName = nil
     days = []
     timeOffRequests = []
     patientAppointments = []
@@ -282,8 +328,10 @@ final class NativeScheduleStore: ObservableObject {
   }
 
   private func expireSession() {
-    session.clearToken()
+    if !isSupportPreview { session.clearToken() }
     sessionToken = nil
+    isSupportPreview = false
+    supportPreviewSurgeonName = nil
     days = []
     timeOffRequests = []
     patientAppointments = []
@@ -302,12 +350,15 @@ final class NativeScheduleStore: ObservableObject {
   }
 
   private func applyVerifiedSession(_ verified: NativeVerifiedSession) {
+    isSupportPreview = false
+    supportPreviewSurgeonName = nil
     sessionToken = verified.token
     sessionRole = verified.role
     availableRoles = verified.availableRoles
   }
 
   func submitTimeOffRequest(startDate: Date, endDate: Date, reason: String, notes: String, segments: [RequestSegment]) async throws -> TimeOffSubmitResult {
+    try requireWritableSession()
     guard let token = sessionToken, !token.isEmpty else {
       throw NativeCALError.missingSession
     }
@@ -325,6 +376,7 @@ final class NativeScheduleStore: ObservableObject {
   }
 
   func updateTimeOffRequest(id: Int, startDate: Date, endDate: Date, reason: String, notes: String, segments: [RequestSegment]) async throws -> TimeOffSubmitResult {
+    try requireWritableSession()
     guard let token = sessionToken, !token.isEmpty else {
       throw NativeCALError.missingSession
     }
@@ -343,6 +395,7 @@ final class NativeScheduleStore: ObservableObject {
   }
 
   func cancelTimeOffRequest(id: Int, containing: Date) async throws {
+    try requireWritableSession()
     guard let token = sessionToken, !token.isEmpty else {
       throw NativeCALError.missingSession
     }
@@ -352,6 +405,7 @@ final class NativeScheduleStore: ObservableObject {
   }
 
   func submitCallCoverage(assignment: ScheduleAssignment, coveringSurgeon: NativeSurgeon, selectedDate: Date, scope: ScheduleScope) async throws {
+    try requireWritableSession()
     guard let token = sessionToken, !token.isEmpty else {
       throw NativeCALError.missingSession
     }
@@ -365,6 +419,7 @@ final class NativeScheduleStore: ObservableObject {
   }
 
   func cancelCallCoverage(assignment: ScheduleAssignment, selectedDate: Date, scope: ScheduleScope) async throws {
+    try requireWritableSession()
     guard let token = sessionToken, !token.isEmpty else {
       throw NativeCALError.missingSession
     }
@@ -384,6 +439,7 @@ final class NativeScheduleStore: ObservableObject {
     startTime: String?,
     endTime: String?
   ) async throws {
+    try requireWritableSession()
     guard let token = sessionToken, !token.isEmpty else {
       throw NativeCALError.missingSession
     }
@@ -412,6 +468,7 @@ final class NativeScheduleStore: ObservableObject {
     startTime: String?,
     endTime: String?
   ) async throws {
+    try requireWritableSession()
     guard let token = sessionToken, !token.isEmpty else {
       throw NativeCALError.missingSession
     }
@@ -427,6 +484,7 @@ final class NativeScheduleStore: ObservableObject {
   }
 
   func deletePersonalItem(itemId: Int, on date: Date) async throws {
+    try requireWritableSession()
     guard let token = sessionToken, !token.isEmpty else {
       throw NativeCALError.missingSession
     }
@@ -439,6 +497,7 @@ final class NativeScheduleStore: ObservableObject {
   }
 
   func markAlertsRead() async {
+    guard !isSupportPreview else { return }
     guard let token = activeToken else { return }
     do {
       try await client.markAlertsRead(token: token)
@@ -480,6 +539,7 @@ final class NativeScheduleStore: ObservableObject {
   }
 
   private func registerForPushIfPossible() async {
+    guard !isSupportPreview else { return }
     guard let token = activeToken else { return }
     guard let pushToken = await pushRegistrar.requestToken(), !pushToken.isEmpty else { return }
     let deviceName = UIDevice.current.localizedModel
@@ -495,6 +555,12 @@ final class NativeScheduleStore: ObservableObject {
   private var activeToken: String? {
     guard let sessionToken, !sessionToken.isEmpty else { return nil }
     return sessionToken
+  }
+
+  private func requireWritableSession() throws {
+    if isSupportPreview {
+      throw NativeCALError.requestRejected("This is a read-only support preview.")
+    }
   }
 
   func loadScheduler(containing date: Date) async {

@@ -4,6 +4,10 @@ struct NativeAuthView: View {
   @ObservedObject var store: NativeScheduleStore
   @State private var email = ""
   @State private var code = ""
+  #if targetEnvironment(simulator)
+  @State private var supportCode = ""
+  @State private var showingSupportCode = false
+  #endif
   @FocusState private var focusedField: AuthField?
 
   enum AuthField {
@@ -35,6 +39,33 @@ struct NativeAuthView: View {
               .padding(14)
               .calAuthGlassSurface(cornerRadius: 18)
               .calAuthSoftShadow(prominent: true)
+
+              #if targetEnvironment(simulator)
+              Button(showingSupportCode ? "Hide admin support preview" : "Admin support preview") {
+                showingSupportCode.toggle()
+              }
+              .font(.caption.weight(.semibold))
+              .foregroundStyle(ClinicalPalette.teal)
+
+              if showingSupportCode {
+                VStack(alignment: .leading, spacing: 8) {
+                  Text("Enter the one-use code from Users → Surgeons → iPhone view. No code is sent to the surgeon.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                  TextField("Admin preview code", text: $supportCode)
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+                    .calAuthFieldStyle()
+                  Button("Open read-only surgeon view") {
+                    Task { await store.openSupportPreview(code: supportCode) }
+                  }
+                  .buttonStyle(.borderedProminent)
+                  .disabled(store.authBusy || supportCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                .padding(14)
+                .calAuthGlassSurface(cornerRadius: 18)
+              }
+              #endif
             }
             .padding(.horizontal, 18)
             .padding(.top, 14)

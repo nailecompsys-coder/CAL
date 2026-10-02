@@ -34,6 +34,17 @@ struct NativeUnifiedOtpTokens: Decodable {
   let scheduler: String?
 }
 
+struct NativeSupportPreviewResponse: Decodable {
+  let token: String
+  let surgeon: NativeSupportPreviewSurgeon
+  let readOnly: Bool
+}
+
+struct NativeSupportPreviewSurgeon: Decodable {
+  let id: Int
+  let name: String
+}
+
 struct SchedulerOtpVerifyResponse: Decodable {
   let token: String
   let identity: SchedulerIdentityResponse

@@ -63,17 +63,19 @@ struct TimeOffHomeView: View {
 
         ScrollView {
           VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-              Button {
-                showingRequestSheet = true
-              } label: {
-                Label("Request Time Off", systemImage: "plus.circle.fill")
-                  .font(.subheadline.weight(.semibold))
-                  .frame(maxWidth: .infinity)
-                  .padding(.vertical, 10)
+            if !store.isSupportPreview {
+              HStack(spacing: 8) {
+                Button {
+                  showingRequestSheet = true
+                } label: {
+                  Label("Request Time Off", systemImage: "plus.circle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(ClinicalPalette.teal)
               }
-              .buttonStyle(.borderedProminent)
-              .tint(ClinicalPalette.teal)
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -109,7 +111,7 @@ struct TimeOffHomeView: View {
                       TimeOffRequestRow(request: request)
                     }
                     .buttonStyle(.plain)
-                    .disabled(!request.canManage)
+                    .disabled(!request.canManage || store.isSupportPreview)
                   }
                 }
               }
@@ -142,10 +144,12 @@ struct TimeOffHomeView: View {
 
         ToolbarItemGroup(placement: .navigationBarTrailing) {
           NativeAlertsToolbarButton(store: store)
-          Button {
-            showingRequestSheet = true
-          } label: {
-            Image(systemName: "plus")
+          if !store.isSupportPreview {
+            Button {
+              showingRequestSheet = true
+            } label: {
+              Image(systemName: "plus")
+            }
           }
         }
       }
@@ -163,18 +167,21 @@ struct TimeOffHomeView: View {
         ),
         titleVisibility: .visible
       ) {
-        Button("Modify") {
-          editingRequest = selectedRequest
-        }
-        Button("Cancel Time Off", role: .destructive) {
-          cancelTarget = selectedRequest
+        if !store.isSupportPreview {
+          Button("Modify") {
+            editingRequest = selectedRequest
+          }
+          Button("Cancel Time Off", role: .destructive) {
+            cancelTarget = selectedRequest
+          }
         }
         Button("Close", role: .cancel) {}
       } message: {
         if let selectedRequest {
-          Text(selectedRequest.status.lowercased() == "approved"
-            ? "Approved time off can be canceled, or changed and sent back for approval."
-            : "This request is pending. You can change it or cancel it.")
+          Text(store.isSupportPreview ? "Read-only support preview." :
+            (selectedRequest.status.lowercased() == "approved"
+              ? "Approved time off can be canceled, or changed and sent back for approval."
+              : "This request is pending. You can change it or cancel it."))
         }
       }
       .alert(
@@ -300,4 +307,3 @@ private struct StatusDot: View {
     }
   }
 }
-

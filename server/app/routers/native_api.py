@@ -1,8 +1,8 @@
 """Native iOS API endpoints."""
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..auth import get_current_surgeon
@@ -11,6 +11,7 @@ from ..database import get_db
 from ..native_availability_service import save_native_availability as save_native_availability_service
 from ..native_call_coverage_service import assign_native_call_coverage, cancel_native_call_coverage
 from ..native_home_service import build_native_home
+from ..native_support_preview_service import SESSION_MINUTES, redeem_preview_code
 from ..native_misc_service import mark_alerts_read, save_push_token
 from ..aprima_cache_service import patient_appointments_for_api
 from ..aprima_schedule_service import AprimaScheduleUnavailable
@@ -25,6 +26,30 @@ from ..push import send_native_push_to_surgeon
 from .api_common import parse_iso_date_range
 
 router = APIRouter(prefix="/api/native")
+
+
+class NativeSupportPreviewBody(BaseModel):
+    code: str = Field(min_length=12, max_length=32)
+
+
+@router.post("/support-preview/exchange")
+def native_support_preview_exchange(
+    body: NativeSupportPreviewBody,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    result = redeem_preview_code(db, body.code, request.client.host if request.client else None)
+    if result is None:
+        raise HTTPException(401, "Invalid or expired support preview code")
+    token, surgeon = result
+    response.headers["Cache-Control"] = "no-store"
+    return {
+        "token": token,
+        "surgeon": {"id": surgeon.id, "name": surgeon.full_name},
+        "expiresInMinutes": SESSION_MINUTES,
+        "readOnly": True,
+    }
 
 
 @router.get("/home")

@@ -129,6 +129,11 @@
                 <form method="post" action="/admin/surgeons/{{ s.id }}/preview-mobile" target="_blank" class="inline">
                   <button type="submit" title="Preview mobile" class="text-xs font-semibold text-slate-500 hover:text-slate-800 px-2 py-1 rounded-lg hover:bg-slate-100">Preview</button>
                 </form>
+                {% if admin.role in ['admin', 'superadmin'] %}
+                <form method="post" action="/admin/surgeons/{{ s.id }}/native-preview-code" target="_blank" class="inline">
+                  <button type="submit" title="Read-only iPhone simulator preview" class="text-xs font-semibold text-teal-700 hover:text-teal-900 px-2 py-1 rounded-lg hover:bg-teal-50">iPhone view</button>
+                </form>
+                {% endif %}
                 {% endif %}
                 <form method="post" action="/admin/surgeons/{{ s.id }}/toggle" class="inline">
                   <button type="submit"

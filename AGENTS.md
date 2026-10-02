@@ -6,7 +6,7 @@ Read [the scheduling contract](docs/SCHEDULE_SOURCE_OF_TRUTH_RULES.md), [the fax
 
 1. Read the current code path and check the deployed Git commit. A local branch, an old test, and an archived fax do not establish what production does.
 2. For fax questions, use the latest **applied** fax covering each surgeon/date. Earlier faxes are history. Trace reviewed row → placement decision → saved case or clinic activity → permanent AM/PM card → API response. Report counts without patient details.
-3. Separate what is verified in the database, what the API returns, and what has actually been observed on a surgeon's device. Never claim a phone display was verified from an API test alone.
+3. Separate what is verified in the database, what the API returns, and what has actually been observed on a surgeon's device. Never claim a phone display was verified from an API test alone. For native simulator verification, follow [the read-only support preview workflow](docs/NATIVE_SUPPORT_PREVIEW.md) once it is deployed.
 4. State whether a requested change is already live, implemented but unreleased, or still missing. A passing health check is not schedule verification.
 
 ## Scheduling rules

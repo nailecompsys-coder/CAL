@@ -21,6 +21,7 @@ from .auth_tokens import (
 )
 from .database import get_db
 from .models import AdminUser, Surgeon, SurgeonDevice
+from .native_support_preview_service import surgeon_for_preview_token
 
 # SurgeonDevice.device_name for admin “preview mobile on desktop” sessions.
 SURGEON_ADMIN_PREVIEW_DEVICE_NAME = "Admin desktop preview"
@@ -72,7 +73,7 @@ def get_current_surgeon(
     request: Request,
     surgeon_token: str | None = Cookie(default=None),
     db: Session = Depends(get_db),
-) -> tuple[Surgeon, SurgeonDevice]:
+) -> tuple[Surgeon, SurgeonDevice | None]:
     auth_header = request.headers.get("Authorization", "")
     token = auth_header[7:].strip() if auth_header.startswith("Bearer ") else None
     if not token:
@@ -86,6 +87,14 @@ def get_current_surgeon(
 
     if not token:
         _raise_html_or_json_auth_error(request, "/admin/login")
+    # Support previews are allowed only on the two native read endpoints. They
+    # never become a surgeon device/session and cannot reach mutation routes.
+    if request.method == "GET" and request.url.path in {
+        "/api/native/home", "/api/native/patient-schedule"
+    }:
+        preview_surgeon = surgeon_for_preview_token(db, token)
+        if preview_surgeon is not None:
+            return preview_surgeon, None
     try:
         device_id = _decode_subject_token(token, "surgeon")
     except (JWTError, ValueError):

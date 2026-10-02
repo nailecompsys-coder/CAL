@@ -7,6 +7,15 @@ struct NativeCALClient {
   private let baseURL = URL(string: "https://cal.midfloridasurgical.com")!
   #endif
 
+  func redeemSupportPreview(code: String) async throws -> NativeSupportPreviewResponse {
+    var request = URLRequest(url: baseURL.appendingPathComponent("/api/native/support-preview/exchange"))
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.httpBody = try JSONEncoder().encode(SupportPreviewCodePayload(code: code))
+    let data = try await perform(request)
+    return try JSONDecoder().decode(NativeSupportPreviewResponse.self, from: data)
+  }
+
   func requestUnifiedOtp(email: String) async throws -> String {
     var request = URLRequest(url: baseURL.appendingPathComponent("/api/native/otp/request"))
     request.httpMethod = "POST"
@@ -537,6 +546,10 @@ struct NativeCALClient {
     formatter.dateFormat = "yyyy-MM-dd"
     return formatter
   }()
+}
+
+private struct SupportPreviewCodePayload: Encodable {
+  let code: String
 }
 
 enum NativeCALError: LocalizedError {

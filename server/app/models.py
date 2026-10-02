@@ -41,6 +41,22 @@ class AdminOtpChallenge(Base):
     admin_user = relationship("AdminUser")
 
 
+class NativeSupportPreviewGrant(Base):
+    """One-use, admin-issued code for a short read-only native simulator preview."""
+    __tablename__ = "native_support_preview_grants"
+    id = Column(Integer, primary_key=True)
+    admin_user_id = Column(Integer, ForeignKey("admin_users.id"), nullable=False)
+    surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=False)
+    code_hash = Column(String(64), unique=True, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    redeemed_at = Column(DateTime(timezone=True))
+    redeemed_ip = Column(String(64))
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    admin_user = relationship("AdminUser")
+    surgeon = relationship("Surgeon")
+
+
 class SiteSettings(Base):
     __tablename__ = "site_settings"
     id = Column(Integer, primary_key=True)           # always row 1

@@ -1,6 +1,8 @@
 # CAL Native Parity Ledger
 
-Last updated: 2026-09-23
+Last updated: 2026-10-02
+
+Admin surgeon preview (2026-10-02): an administrator can issue a one-use, ten-minute code for a selected surgeon from Users → Surgeons. The Release iOS simulator exchanges it for a memory-only, thirty-minute, read-only session showing that surgeon's native schedule and patient list. This sends no surgeon OTP. The backend permits only the two native GET feeds for this session; it cannot submit schedule changes. This is a support verification path and has not been distributed through TestFlight.
 
 iOS calendar chrome (2026-09-23): the surgeon-facing section is labeled `Calendar` in the title menu and scheduler mode switch. Day-view OFF initials remain single-line, fixed-height capsules so two-letter initials cannot wrap or misalign the row.
 
@@ -33,6 +35,7 @@ Current tracked lane imports:
 | Workflow | Backend Endpoint / Contract | iOS SwiftUI | Android Expo Temporary | Android Compose Target | Production Allowed | Notes |
 |---|---|---|---|---|---|---|
 | Auth / OTP | `POST /api/native/otp/request`, `POST /api/native/otp/verify` (unified; legacy `/api/surgeon/otp*` + `/api/native/scheduler/otp*` kept) | Production: no Surgeon\|Scheduler login toggle; dual identity (AdminUser + Surgeon) returns both tokens/`roles`; in-app Schedule \| Scheduler switch; Face ID unlock | Temporary Android bridge (still role-split paths) | Debug lane (OTP + session; no biometrics yet) | iOS + Expo Android | One email/phone → OTP → sign in. Dual accounts (e.g. Don) land in Schedule by default; title menu / Scheduler principal switches mode. Surgeon-only and scheduler-only unchanged. Local OTP env vars still apply. |
+| Admin surgeon preview | Admin issue route; `POST /api/native/support-preview/exchange`; preview token limited to `GET /api/native/home` and `GET /api/native/patient-schedule` | Release simulator support entry; read-only, memory-only session | Not integrated | Not integrated | Admin support verification only | One-use code expires after ten minutes; session after thirty minutes. No surgeon OTP or TestFlight distribution. |
 | Today | `GET /api/native/home` | Production | Temporary Android bridge | Debug lane (basic) | iOS + Expo Android | At-a-glance view must match backend data |
 | Daily Schedule | `GET /api/native/home` | Production + Aprima review rows in SwiftUI | Temporary Android bridge | Debug lane (functional; UI thinner than iOS) | iOS + Expo Android | Shared date stepper + Day\|Week\|Month chrome. Day: On Call \| Off half-width pills; Clinic/OR + Personal sections; Cover from On Call. Aprima Surgery One/CBO rows are red read-only review details, not clean CAL cards |
 | Week | `GET /api/native/home` | Production | Temporary Android bridge | Debug lane (functional; UI thinner than iOS) | iOS + Expo Android | Cliff-note rows (ON/OFF/Clinic·OR + meeting); tap opens Day. Shared date-range stepper |

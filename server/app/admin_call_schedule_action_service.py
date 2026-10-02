@@ -10,6 +10,8 @@ from .practice_time import practice_today
 from .models import AdminUser, CallGroup, CallRotation, Surgeon
 from .push import send_push_to_surgeon
 
+_UNCHANGED_BACKUP = object()
+
 
 def rotation_query_for_assignment(db: Session, assignment_date: date, call_group_id: int | None):
     query = db.query(CallRotation).filter(CallRotation.date == assignment_date)
@@ -32,19 +34,20 @@ def assign_rotation(
     call_group_id: int | None,
     *,
     admin: AdminUser | None = None,
+    backup_surgeon_id: int | None | object = _UNCHANGED_BACKUP,
+    backup_note: str = "",
 ) -> list[str]:
     existing = rotation_query_for_assignment(db, assignment_date, call_group_id).first()
     from_surgeon_id = existing.surgeon_id if existing else None
+    from .call_backup_service import set_backup_on_rotation, validate_backup_choice, backup_warnings
+    if backup_surgeon_id is not _UNCHANGED_BACKUP and (
+        backup_surgeon_id is not None or (existing and existing.backup)
+    ):
+        backup_note = validate_backup_choice(
+            db, assignment_date, surgeon_id, backup_surgeon_id, backup_note,
+            active_coverage=bool(existing and existing.active_coverage),
+        )
     if existing:
-        if from_surgeon_id != surgeon_id and existing.backup:
-            log_call_schedule_change(
-                db, action="backup_clear", event_date=assignment_date, source="portal",
-                call_group_id=call_group_id, call_group_name=_group_name(db, call_group_id),
-                rotation_id=existing.id, from_surgeon_id=existing.backup.surgeon_id,
-                actor_admin_id=admin.id if admin else None,
-                actor_label=actor_label_for_admin(admin), notes=existing.backup.note,
-            )
-            db.delete(existing.backup)
         existing.surgeon_id = surgeon_id
         rotation = existing
         rotation_id = existing.id
@@ -58,6 +61,11 @@ def assign_rotation(
         db.add(rotation)
         db.flush()
         rotation_id = rotation.id
+
+    if backup_surgeon_id is not _UNCHANGED_BACKUP:
+        set_backup_on_rotation(db, rotation, backup_surgeon_id, backup_note, admin=admin)
+    elif from_surgeon_id != surgeon_id and rotation.backup:
+        set_backup_on_rotation(db, rotation, None, "", admin=admin)
 
     from .call_assignment_normalization import sync_call_rotation
     sync_call_rotation(db, rotation)
@@ -87,7 +95,7 @@ def assign_rotation(
         )
 
     surgeon = db.get(Surgeon, surgeon_id) if surgeon_id else None
-    if surgeon:
+    if surgeon and from_surgeon_id != surgeon_id:
         send_push_to_surgeon(
             surgeon_id,
             "Schedule Update",
@@ -105,7 +113,10 @@ def assign_rotation(
         exclude_call_rotation_id=rotation_id,
         target_entity={"type": "call_rotation", "date": assignment_date},
     )
-    return [f"{surgeon.full_name}: " + conflict for conflict in conflicts]
+    warnings = [f"{surgeon.full_name}: " + conflict for conflict in conflicts]
+    if backup_surgeon_id is not _UNCHANGED_BACKUP and backup_surgeon_id is not None:
+        warnings.extend(backup_warnings(db, rotation, backup_surgeon_id))
+    return warnings
 
 
 def copy_call_week(db: Session, source_offset: int) -> int:

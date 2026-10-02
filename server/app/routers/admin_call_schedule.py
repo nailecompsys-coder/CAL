@@ -1,7 +1,7 @@
 """Admin call-schedule routes."""
 from datetime import date
 
-from fastapi import APIRouter, Depends, Form, Query, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session
@@ -84,15 +84,23 @@ def assign_rotation(
     rotation_type: str = Form("primary"),
     month_offset: int = Form(0),
     call_group_id: str = Form(""),
+    backup_surgeon_id: str = Form(""),
+    backup_note: str = Form(""),
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
     assignment_date = date.fromisoformat(rotation_date)
     assigned_surgeon_id = int(surgeon_id) if surgeon_id and surgeon_id.strip() else None
     call_group_id_value = parse_call_group_id(call_group_id)
-    conflicts = assign_rotation_service(
-        db, assignment_date, assigned_surgeon_id, call_group_id_value, admin=admin,
-    )
+    backup_id = int(backup_surgeon_id) if backup_surgeon_id.strip() else None
+    try:
+        conflicts = assign_rotation_service(
+            db, assignment_date, assigned_surgeon_id, call_group_id_value, admin=admin,
+            backup_surgeon_id=backup_id, backup_note=backup_note,
+        )
+    except HTTPException as exc:
+        db.rollback()
+        return _warn_redirect(f"/admin/call-schedule?{_call_schedule_qs(month_offset)}", [str(exc.detail)])
     return _warn_redirect(f"/admin/call-schedule?{_call_schedule_qs(month_offset)}", conflicts)
 
 
@@ -215,16 +223,24 @@ def assign_backup(
 
 @router.get("/call-schedule/backup/no-call")
 def backup_no_call(
-    rotation_id: int,
+    date_value: str | None = Query(None, alias="date"),
+    rotation_id: int | None = None,
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
     from fastapi import HTTPException
 
-    rotation = db.get(CallRotation, rotation_id)
-    if not rotation:
-        raise HTTPException(404, "Call assignment not found")
-    return {"surgeonIds": approved_no_call_ids(db, rotation.date)}
+    if date_value:
+        try:
+            call_date = date.fromisoformat(date_value)
+        except ValueError:
+            raise HTTPException(400, "Invalid call date")
+    else:
+        rotation = db.get(CallRotation, rotation_id) if rotation_id else None
+        if not rotation:
+            raise HTTPException(404, "Call assignment not found")
+        call_date = rotation.date
+    return {"surgeonIds": approved_no_call_ids(db, call_date)}
 
 
 @router.post("/call-schedule/backup/clear")

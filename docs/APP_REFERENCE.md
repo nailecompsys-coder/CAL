@@ -1,8 +1,8 @@
-# Cal — App Reference (single source of truth)
+# Cal — App Architecture Reference
 
-**Purpose:** One document that describes how the app runs, its structure, config, routes, models, rules engine, and templates so no questions are needed.
+**Purpose:** Describe how the app runs, its structure, config, routes, models, and templates. Current scheduling decisions live in `docs/SCHEDULE_SOURCE_OF_TRUTH_RULES.md`; fax flow lives in `docs/FAX_VISUAL_INGEST_PROCEDURE.md`. Check `docs/CAL_CURRENT_STATE.md` for the deployed commit and known gaps.
 
-**Referenced by:** `.cursor/rules/CLAUDE.md` (session checklist), `.cursor/rules/build_app.md` (Cal project). Follow rules in CLAUDE.md, build_app.md, and `.cursor/rules/PALETTES.md` when changing UI or architecture.
+**Referenced by:** `AGENTS.md` and `CLAUDE.md`. Those entrypoints and the current scheduling contract take precedence over historical design notes in this reference.
 
 ---
 

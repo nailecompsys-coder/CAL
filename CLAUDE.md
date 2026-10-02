@@ -2,7 +2,11 @@
 # cal.midfloridasurgical.com — Mid-Florida Surgical Associates
 
 > Auto-loaded by Claude Code at session start.
-> Full reference: `docs/APP_REFERENCE.md` and `.cursor/rules/CLAUDE.md`
+> Read `AGENTS.md`, `docs/SCHEDULE_SOURCE_OF_TRUTH_RULES.md`,
+> `docs/FAX_VISUAL_INGEST_PROCEDURE.md`, and `docs/CAL_CURRENT_STATE.md`
+> before schedule work. `memory.md` is local and Git-ignored.
+> `docs/APP_REFERENCE.md` describes the app structure; it does not override
+> the current scheduling contract.
 
 ---
 
@@ -202,12 +206,12 @@ RVU (`/home/dnaile748/rvu/`) is a **separate app** that uses Cal's auth by desig
 
 ## Session Start Checklist
 
-1. Read this file
-2. Read `docs/APP_REFERENCE.md` — routes, models, rules engine
-3. Read `memory.md` — current state and next steps
+1. Read this file and `AGENTS.md`
+2. Read `docs/SCHEDULE_SOURCE_OF_TRUTH_RULES.md` and `docs/FAX_VISUAL_INGEST_PROCEDURE.md` before scheduling/fax work
+3. Read `docs/CAL_CURRENT_STATE.md` for deployed state, then `docs/APP_REFERENCE.md` for routes and models
 4. Read `.cursor/rules/PALETTES.md` before any UI work
 5. Before Docker/deploy/debug work, run `make doctor` from repo root
-6. Ask Don what to work on
+6. Continue the user's current request; ask only when a necessary fact cannot be established from the repository or verified data
 
 ---
 

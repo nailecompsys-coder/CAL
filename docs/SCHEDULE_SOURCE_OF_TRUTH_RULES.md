@@ -1,55 +1,34 @@
-# CAL Schedule Source Of Truth Rules
+# CAL Scheduling Contract
 
-These rules are hard guardrails for Desk/Fax, Aprima, CAL static schedules, and any AI-assisted schedule cleanup.
+This is Don's current scheduling rule set for the master calendar, the surgeon app, fax ingest, Aprima, and manual changes. It supersedes older rules that said an NA day could not receive a source assignment or that a source conflict should disappear from the surgeon schedule.
 
-## Enforcement Point
+## Permanent frame
 
-- These rules must be enforced in code at every schedule write path, not only OCR ingest.
-- Manual portal entry, mobile scheduler entry, API ingest, and Desk/Fax OCR must all pass the same surgical-case write guardrails.
-- A write that violates the static card/source-of-truth rules must fail before commit.
-- Admin review notes are allowed; fake phone-facing cards are not.
+- The master schedule is the source of truth for each surgeon's weekday AM and PM OR or clinic **baseline**. The permanent `schedule_cards` rows are the dated frame; incoming sources attach detail to them.
+- If a surgeon has no assigned block in one half-day, that half is **NA**: empty time the surgeon controls. They may take personal time without filing a time-off request, or a real OR/clinic/assisting assignment from Epic or Aprima may later fill it. An unused NA can feel like a day off, but it is **not** a formally approved OFF block or a No Call request. Do not infer a block or an OFF state from an empty cell.
+- Do not generate baseline OR or clinic blocks on weekends. Call, approved time off, and actual source activity may still exist on weekends.
+- A source may fill NA when its surgeon, time, and location are credible. Surgeons can roam to familiar facilities and assist others. An unused NA remains visible as NA; do not invent scheduled work or turn it into formal leave. An NA assignment is not automatically an error.
 
-## Static CAL Cards Are The Frame
+## Source overlay
 
-- CAL has one static OR/block lane and one static clinic lane per surgeon/day/session.
-- Fax, OCR, Aprima, or AI must not create new surgeon schedule cards.
-- Incoming data may only attach to an existing static card when the date, surgeon, source, location, and time window match.
-- If an incoming row does not fit a static card, queue it for admin review. Do not show it on surgeon phones.
+- A newly **applied** Epic/Desk fax supersedes older applied faxes for the surgeon/dates in its snapshot. Old fax rows remain history, not a second layer of current cases. The live app reads saved database facts, not all fax files.
+- Fax data may create, update, or cancel surgical-case and clinic-visit **details**. It may update an effective assignment on a dated card but must not rewrite that card's immutable master baseline. A failed stage/apply check leaves the live schedule unchanged.
+- Aprima is read-only and is the source for Surgery One/CBO activity. Manual changes by Shannon/admin have their own provenance. Never invent CBO from generic Epic/Advent room codes such as `AHMGGENSRG`.
+- A surgical case with an assisting surgeon occupies that surgeon's time at the same location and room as the primary surgeon. It is one case, not two patients or two rooms.
 
-## CBO / Surgery One
+## Conflicts and visibility
 
-- CBO / Surgery One comes from Aprima only.
-- Desk/Fax/Advent data must never create, update, or infer CBO.
-- Advent generic codes such as `AHMGGENSRG` and `AHMG` are practice buckets, not locations.
-- Generic Advent rows may attach only when their timestamp lands inside that surgeon's already assigned Block OR window.
-- Generic Advent rows outside an assigned Block OR window stay review-only.
+- An approved time-off request does not erase a case or clinic visit. Show both, with the exact affected AM/PM/full-day segment and a review flag. **No Call is an absolute boundary for its covered period:** show “No Call” beside the surgeon when another surgeon looks for a call swap. The other surgeon may still try to arrange the swap, but CAL must flag the attempt or resulting call assignment as an exception and keep the No Call reason visible. CAL alerts people; it does not stop them from speaking or resolving an exception. Never silently convert No Call into availability. No Call is distinct from OFF and does not by itself cancel OR/clinic work.
+- Keep the fixed master location and the actual source location distinct. A source assignment at a different location from a fixed master block needs review; an NA block filled at a credible location does not automatically conflict.
+- Uncertain OCR identities, unresolved locations, missing times, and possible duplicates require review. Do not guess a patient, surgeon, room, or time to make a row fit.
+- Group OR capacity is separate from one surgeon's own block. A team/day view may show who is assigned where without exposing another surgeon's patient details.
 
-## Desk / Fax OR Data
+## Ownership and acceptance checks
 
-- Desk/Fax OR rows are allowed to add patient/case detail only to an existing Block OR card.
-- Fax room/site must resolve to the same hospital lane as the static block.
-- Fax times are evidence; CAL must not invent missing case times.
-- If a case has no time, wrong location, wrong half-day, or no matching block, queue it for review and keep it off native schedules.
-- If the surgeon already owns the matching OR block and OCR has an uncertain same-location clue, CAL may add a short possible-case note to that existing block, such as `Possible additional case at MN-OR - time/patient needs review.`
-- Possible-case notes do not increment confirmed case counts and do not create patient rows.
+- SQL determines which facts belong to a surgeon/day, deduplicates them, calculates counts and conflicts, and orders the result. Python only maps those database results into the API response. The existing iPhone views consume that response.
+- Before saying a fax/display issue is fixed, trace representative **latest applied** fax rows through the saved case or clinic activity, permanent AM/PM card, and native API. Check a fixed block, NA, OFF, approved partial leave, assistance, group capacity, and weekend call. Compare current versus archived fax data separately.
+- Never claim all phone screens are correct solely because rows exist in PostgreSQL. Verify the API response and, for visual claims, the actual client view.
 
-## Desk / Fax Clinic Data
+## Current implementation limit (2026-10-02)
 
-- Desk/Fax clinic rows may update an existing clinic card only when the site is a specific clinic code and the surgeon/day/session card already exists.
-- Desk/Fax clinic rows must not create clinic cards.
-- Desk/Fax clinic rows must not update CBO / Surgery One.
-
-## Aprima
-
-- Aprima is read-only.
-- Aprima is the source for Surgery One / CBO patient rows and meetings.
-- Aprima Surgery One rows are review-marked until Shannon confirms the schedule source.
-- CAL never writes back to Aprima.
-
-## Look-Ahead Cleanup Rules
-
-- Tomorrow forward matters most for production cleanup.
-- Any conflict between static CAL cards, Desk/Fax OCR, and Aprima must be flagged rather than guessed.
-- If a surgeon appears assigned to two locations at the same time, keep only rows that match a static block/card and flag the rest.
-- If a patient appears under two surgeons on the same date, use known co-surgeon rules; otherwise flag it.
-- The app should prefer no phone-facing row over a wrong phone-facing row.
+Production commit `4da3ba1` restores permanent cards and stored OR cases to the native feed. Its SQL handles those rows and case conflicts. The remaining native day response still builds leave, call, meetings, Aprima, and personal items through separate paths; clinic visit counts/details and group capacity are not fully shown in the existing iPhone day view. Do not mark the complete SQL-owned day projection finished until those paths and the client display have been verified.

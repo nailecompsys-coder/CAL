@@ -84,9 +84,15 @@
             {% set gcolor = call_group_display_color(group) %}
             {% if rot %}
             <div class="flex items-center gap-1 group/entry">
-              <span class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-md leading-tight flex-1 truncate block-gradient shadow-sm"
+              <button type="button" onclick="openAssign(this)"
+                    data-date="{{ day.isoformat() }}" data-group-id="{{ group.id }}" data-group-name="{{ group.name }}"
+                    data-primary-id="{{ rot.surgeon_id or '' }}"
+                    data-backup-id="{{ rot.backup.surgeon_id if rot.backup else '' }}"
+                    data-backup-note="{{ rot.backup.note if rot.backup and rot.backup.note else '' }}"
+                    data-coverage-active="{{ '1' if rot.active_coverage else '0' }}"
+                    class="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-md leading-tight flex-1 min-w-0 truncate block-gradient shadow-sm text-left"
                     style="--block-c: {{ gcolor }}; color:#1e293b"
-                    title="{{ group.name }}">
+                    title="Add or change on-call surgeon">
                 <span class="opacity-70 text-[9px] font-extrabold">{{ group.name[:3]|upper }}</span>
                 {% set cov = rot.active_coverage %}
                 {% if cov and cov.covering_surgeon and surgeon_is_visible(cov.covering_surgeon) %}
@@ -97,7 +103,7 @@
                 {% else %}
                   <span class="font-bold">NO call</span>
                 {% endif %}
-              </span>
+              </button>
               {% if rot.surgeon_id %}
               <button type="button"
                 onclick="openCover({{ rot.id }}, '{{ group.name|e }}', '{{ day.isoformat() }}', {{ rot.surgeon_id }}, '{% if rot.surgeon %}{{ rot.surgeon.staff_type }}{% else %}physician{% endif %}')"
@@ -125,20 +131,11 @@
                 </button>
               </form>
             </div>
-            {% if rot.surgeon_id and not rot.active_coverage %}
-            <button type="button" onclick="openBackup(this)"
-              data-rotation-id="{{ rot.id }}" data-group="{{ group.name }}" data-date="{{ day.isoformat() }}"
-              data-primary="{{ rot.surgeon.full_name }}" data-primary-id="{{ rot.surgeon_id }}"
-              data-staff-type="{{ rot.surgeon.staff_type }}"
-              data-backup-id="{{ rot.backup.surgeon_id if rot.backup else '' }}"
-              data-note="{{ rot.backup.note if rot.backup and rot.backup.note else '' }}"
-              class="text-[10px] text-left text-teal-800 px-2 py-0.5 hover:underline block max-w-full truncate"
-              title="{% if rot.backup %}Backup: {{ rot.backup.surgeon.full_name if rot.backup.surgeon else 'Unknown' }}{% if rot.backup.note %} · {{ rot.backup.note }}{% endif %}{% else %}Add Backup{% endif %}">
-              {% if rot.backup and rot.backup.surgeon and surgeon_is_visible(rot.backup.surgeon) %}Backup: {{ rot.backup.surgeon.last_name }}{% else %}+ Backup{% endif %}
-            </button>
+            {% if rot.backup and rot.backup.surgeon and surgeon_is_visible(rot.backup.surgeon) and not rot.active_coverage %}
+            <div class="text-[10px] text-teal-800 px-2 leading-tight truncate" title="Backup: {{ rot.backup.surgeon.full_name }}">Backup: {{ rot.backup.surgeon.last_name }}</div>
             {% endif %}
             {% else %}
-            <button type="button" onclick="openAssign('{{ day.isoformat() }}', {{ group.id }}, '{{ group.name|e }}')"
+            <button type="button" onclick="openAssign(this)" data-date="{{ day.isoformat() }}" data-group-id="{{ group.id }}" data-group-name="{{ group.name }}"
               class="w-full text-slate-300 text-[10px] text-center py-0.5 hover:text-slate-400">
               <i class="fa-solid fa-plus text-[8px]"></i> {{ group.name[:3]|upper }}
             </button>
@@ -170,45 +167,10 @@
   {% endif %}
 </div>
 
-<div id="backup-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden" role="dialog" aria-modal="true" aria-labelledby="backup-title">
-  <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6 max-h-[90vh] overflow-y-auto">
-    <div class="flex items-center justify-between mb-2">
-      <h3 id="backup-title" class="font-bold text-slate-800">Backup</h3>
-      <button type="button" onclick="closeBackup()" class="text-slate-500 hover:text-slate-700" aria-label="Close">✕</button>
-    </div>
-    <p id="backup-date" class="text-sm text-slate-600 mb-2"></p>
-    <p class="text-sm text-slate-800 mb-4">On call: <strong id="backup-primary"></strong></p>
-    <form method="post" action="/admin/call-schedule/backup" class="space-y-4">
-      <input type="hidden" name="rotation_id" id="backup-rotation-id" />
-      <input type="hidden" name="month_offset" value="{{ month_offset }}" />
-      <div>
-        <label for="backup-surgeon-id" class="block text-xs font-medium text-slate-600 mb-1">Backup surgeon</label>
-        <select id="backup-surgeon-id" name="backup_surgeon_id" required class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
-          <option value="">Choose a surgeon</option>
-          {% for s in surgeons %}
-          <option value="{{ s.id }}" data-staff-type="{{ s.staff_type }}">{{ s.full_name }}</option>
-          {% endfor %}
-        </select>
-        <p id="backup-no-call-warning" class="text-xs text-amber-800 mt-1 hidden">No Call approved. This Backup will be flagged as an exception.</p>
-      </div>
-      <div>
-        <label for="backup-note" class="block text-xs font-medium text-slate-600 mb-1">Note (optional; written by scheduler)</label>
-        <textarea id="backup-note" name="note" maxlength="500" rows="3" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" placeholder="Add a note"></textarea>
-      </div>
-      <button type="submit" class="w-full bg-teal-700 text-white py-2.5 rounded-lg text-sm font-medium">Save Backup</button>
-    </form>
-    <form id="backup-clear-form" method="post" action="/admin/call-schedule/backup/clear" class="mt-3 hidden">
-      <input type="hidden" name="rotation_id" id="backup-clear-rotation-id" />
-      <input type="hidden" name="month_offset" value="{{ month_offset }}" />
-      <button type="submit" class="w-full bg-slate-100 text-slate-700 py-2.5 rounded-lg text-sm font-medium">Remove Backup</button>
-    </form>
-  </div>
-</div>
-
 <div id="assign-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden">
-  <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6">
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4 p-6 max-h-[90vh] overflow-y-auto">
     <div class="flex items-center justify-between mb-4">
-      <h3 class="font-bold text-slate-800">Assign On-Call</h3>
+      <h3 id="assign-title" class="font-bold text-slate-800">Assign On Call</h3>
       <button onclick="document.getElementById('assign-modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
     </div>
     <form method="post" action="/admin/call-schedule/assign" class="space-y-4">
@@ -221,21 +183,35 @@
         <label class="block text-xs font-medium text-slate-500 mb-2">Physician</label>
         <div class="space-y-1 max-h-64 overflow-y-auto">
           <label class="flex items-center gap-3 px-3 py-2 rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50">
-            <input type="radio" name="surgeon_id" value="" class="sr-only" />
+            <input type="radio" name="surgeon_id" value="" data-staff-type="" class="sr-only" />
             <div class="w-8 h-8 rounded-full flex items-center justify-center bg-slate-200 text-slate-600 text-xs font-bold flex-shrink-0">—</div>
             <p class="text-sm font-medium text-slate-700">NO call</p>
           </label>
           {% for s in surgeons %}
           <label class="flex items-center gap-3 px-3 py-2 rounded-lg border border-slate-200 cursor-pointer hover:bg-slate-50 has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50">
-            <input type="radio" name="surgeon_id" value="{{ s.id }}" class="sr-only" />
+            <input type="radio" name="surgeon_id" value="{{ s.id }}" data-staff-type="{{ s.staff_type }}" class="sr-only" />
             <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 staff-avatar">{{ s.initials }}</div>
             <p class="text-sm font-medium text-slate-800">{{ s.full_name }}{% if s.suffix %} {{ s.suffix }}{% endif %}</p>
           </label>
           {% endfor %}
         </div>
       </div>
+      <div>
+        <label for="assign-backup-id" class="block text-xs font-medium text-slate-500 mb-1">Backup (optional)</label>
+        <select id="assign-backup-id" name="backup_surgeon_id" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm">
+          <option value="">None</option>
+          {% for s in surgeons %}
+          <option value="{{ s.id }}" data-staff-type="{{ s.staff_type }}">{{ s.full_name }}</option>
+          {% endfor %}
+        </select>
+        <p id="assign-backup-warning" class="text-xs text-amber-800 mt-1 hidden">No Call approved for this surgeon. Saving will flag an exception.</p>
+      </div>
+      <div>
+        <label for="assign-backup-note" class="block text-xs font-medium text-slate-500 mb-1">Backup note (optional)</label>
+        <textarea id="assign-backup-note" name="backup_note" maxlength="500" rows="2" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" placeholder="Scheduler note"></textarea>
+      </div>
       <div class="flex gap-2 pt-1">
-        <button type="submit" class="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">Assign</button>
+        <button type="submit" class="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">Save</button>
         <button type="button" onclick="document.getElementById('assign-modal').classList.add('hidden')" class="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-lg text-sm font-medium">Cancel</button>
       </div>
     </form>
@@ -280,51 +256,53 @@
 
 {% block scripts %}
 <script>
-async function openBackup(button) {
+let assignNoCallIds = new Set();
+function syncAssignBackup() {
+  const primary = document.querySelector('#assign-modal input[name="surgeon_id"]:checked');
+  const select = document.getElementById('assign-backup-id');
+  const note = document.getElementById('assign-backup-note');
+  const primaryId = primary ? primary.value : '';
+  const staffType = primary ? primary.dataset.staffType : '';
+  select.disabled = !primaryId;
+  for (const option of select.options) {
+    option.hidden = !!option.value && (option.value === primaryId || option.dataset.staffType !== staffType);
+  }
+  if (!primaryId || (select.selectedOptions[0] && select.selectedOptions[0].hidden)) select.value = '';
+  note.disabled = !select.value;
+  if (!select.value) note.value = '';
+  document.getElementById('assign-backup-warning').classList.toggle('hidden', !assignNoCallIds.has(select.value));
+}
+async function openAssign(button) {
   const data = button.dataset;
-  document.getElementById('backup-rotation-id').value = data.rotationId;
-  document.getElementById('backup-clear-rotation-id').value = data.rotationId;
-  document.getElementById('backup-date').textContent = data.date + ' · ' + data.group;
-  document.getElementById('backup-primary').textContent = data.primary;
-  document.getElementById('backup-note').value = data.note || '';
-  const select = document.getElementById('backup-surgeon-id');
-  for (const option of select.options) {
-    option.hidden = !!option.value && (option.value === data.primaryId || option.dataset.staffType !== data.staffType);
+  if (data.coverageActive === '1') {
+    alert('Clear the active coverage swap before changing this call assignment.');
+    return;
   }
-  select.value = data.backupId || '';
-  const warning = document.getElementById('backup-no-call-warning');
-  warning.classList.add('hidden');
-  for (const option of select.options) {
-    if (option.dataset.originalLabel) option.textContent = option.dataset.originalLabel;
-  }
-  try {
-    const response = await fetch('/admin/call-schedule/backup/no-call?rotation_id=' + encodeURIComponent(data.rotationId), {credentials:'same-origin'});
-    if (response.ok) {
-      const ids = new Set((await response.json()).surgeonIds.map(String));
-      for (const option of select.options) {
-        if (!option.value) continue;
-        option.dataset.originalLabel = option.dataset.originalLabel || option.textContent;
-        if (ids.has(option.value)) option.textContent = option.dataset.originalLabel + ' · No Call';
-      }
-      select.onchange = function() { warning.classList.toggle('hidden', !ids.has(select.value)); };
-      select.onchange();
-    }
-  } catch (_) { /* Save still checks No Call on the server. */ }
-  document.getElementById('backup-clear-form').classList.toggle('hidden', !data.backupId);
-  document.getElementById('backup-modal').classList.remove('hidden');
-}
-function closeBackup() { document.getElementById('backup-modal').classList.add('hidden'); }
-document.getElementById('backup-modal').addEventListener('click', function(e) {
-  if (e.target === this) closeBackup();
-});
-function openAssign(date, groupId, groupName) {
-  document.getElementById('assign-date').value = date;
-  document.getElementById('assign-call-group-id').value = groupId;
-  const d = new Date(date + 'T12:00:00');
+  document.getElementById('assign-date').value = data.date;
+  document.getElementById('assign-call-group-id').value = data.groupId;
+  document.getElementById('assign-title').textContent = data.primaryId ? 'Change On Call' : 'Assign On Call';
+  const d = new Date(data.date + 'T12:00:00');
   document.getElementById('assign-label').textContent =
-    d.toLocaleDateString('en-US', {weekday:'long', month:'long', day:'numeric'}) + ' — ' + groupName;
+    d.toLocaleDateString('en-US', {weekday:'long', month:'long', day:'numeric'}) + ' — ' + data.groupName;
+  const primary = document.querySelector('#assign-modal input[name="surgeon_id"][value="' + (data.primaryId || '') + '"]');
+  if (primary) primary.checked = true;
+  document.getElementById('assign-backup-id').value = data.backupId || '';
+  document.getElementById('assign-backup-note').value = data.backupNote || '';
+  assignNoCallIds = new Set();
+  syncAssignBackup();
   document.getElementById('assign-modal').classList.remove('hidden');
+  try {
+    const response = await fetch('/admin/call-schedule/backup/no-call?date=' + encodeURIComponent(data.date), {credentials:'same-origin'});
+    if (response.ok) {
+      assignNoCallIds = new Set((await response.json()).surgeonIds.map(String));
+      syncAssignBackup();
+    }
+  } catch (_) { /* The server still checks No Call on save. */ }
 }
+document.querySelectorAll('#assign-modal input[name="surgeon_id"]').forEach(function(radio) {
+  radio.addEventListener('change', syncAssignBackup);
+});
+document.getElementById('assign-backup-id').addEventListener('change', syncAssignBackup);
 function openCover(rotationId, groupName, date, originalId, staffType) {
   document.getElementById('cover-rotation-id').value = rotationId;
   const d = new Date(date + 'T12:00:00');

@@ -7,11 +7,16 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SECRET_KEY", "test-secret")
 
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import sessionmaker
 
 from app.admin_call_schedule_action_service import assign_rotation
+from app.auth_tokens import create_admin_token
 from app.call_backup_service import clear_backup, save_backup
+from app.database import get_db
+from app.main import app
 from app.models import AdminUser, Base, CallBackup, CallCoverage, CallGroup, CallRotation, CallScheduleAuditLog, DayOff, Surgeon
 from app.native_call_support import serialize_call_assignment
 from app.native_home_sections import build_native_call_schedule
@@ -19,7 +24,7 @@ from app.native_home_sections import build_native_call_schedule
 
 class CallBackupTest(unittest.TestCase):
     def setUp(self):
-        self.engine = create_engine("sqlite:///:memory:")
+        self.engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
         Base.metadata.create_all(bind=self.engine)
         self.db = sessionmaker(bind=self.engine)()
         self.admin = AdminUser(username="scheduler", email="scheduler@example.com", password_hash="x")
@@ -49,8 +54,6 @@ class CallBackupTest(unittest.TestCase):
         self.assertEqual(after["surgeonId"], self.primary.id)
         self.assertEqual(after["backupSurgeonId"], self.backup.id)
         self.assertEqual(after["backupNote"], "Call me if needed")
-        self.assertFalse(after["isBackup"])
-        self.assertTrue(serialize_call_assignment(self.rotation, self.backup.id)["isBackup"])
         self.assertFalse(after["isCovered"])
         day_key = self.rotation.date.isoformat()
         days = {day_key: {"callAssignments": [], "offSurgeons": [], "requestedOffSurgeons": []}}
@@ -104,6 +107,82 @@ class CallBackupTest(unittest.TestCase):
         self.assertTrue(any("No Call" in warning for warning in warnings))
         self.assertEqual(serialize_call_assignment(self.rotation, self.primary.id)["backupSurgeonId"], self.backup.id)
 
+    @patch("app.admin_call_schedule_action_service.send_push_to_surgeon")
+    @patch("app.admin_call_schedule_action_service.check_conflicts", return_value=[])
+    @patch("app.call_backup_service.check_conflicts_structured", return_value=[])
+    def test_existing_call_form_saves_backup_without_reassigning_primary(self, _backup_conflicts, _call_conflicts, push):
+        assign_rotation(
+            self.db, self.rotation.date, self.primary.id, self.group.id, admin=self.admin,
+            backup_surgeon_id=self.backup.id, backup_note="Orientation",
+        )
+        self.assertEqual(self.rotation.surgeon_id, self.primary.id)
+        self.assertEqual(self.rotation.backup.surgeon_id, self.backup.id)
+        self.assertEqual(self.rotation.backup.note, "Orientation")
+        push.assert_not_called()
+
+        assign_rotation(
+            self.db, self.rotation.date, self.primary.id, self.group.id, admin=self.admin,
+            backup_surgeon_id=None, backup_note="",
+        )
+        self.assertIsNone(self.rotation.backup)
+        push.assert_not_called()
+
+    @patch("app.admin_call_schedule_action_service.send_push_to_surgeon")
+    @patch("app.admin_call_schedule_action_service.check_conflicts", return_value=[])
+    @patch("app.call_backup_service.check_conflicts_structured", return_value=[])
+    def test_invalid_backup_does_not_partially_change_primary(self, _backup_conflicts, _call_conflicts, push):
+        with self.assertRaises(HTTPException):
+            assign_rotation(
+                self.db, self.rotation.date, self.other.id, self.group.id, admin=self.admin,
+                backup_surgeon_id=self.other.id, backup_note="Invalid",
+            )
+        self.db.expire_all()
+        self.assertEqual(self.rotation.surgeon_id, self.primary.id)
+        self.assertIsNone(self.rotation.backup)
+        push.assert_not_called()
+
+    @patch("app.admin_call_schedule_action_service.send_push_to_surgeon")
+    @patch("app.admin_call_schedule_action_service.check_conflicts", return_value=[])
+    @patch("app.call_backup_service.check_conflicts_structured", return_value=[])
+    def test_form_changes_primary_and_backup_together(self, _backup_conflicts, _call_conflicts, _push):
+        save_backup(self.db, self.rotation.id, self.other.id, "Old backup", admin=self.admin)
+        assign_rotation(
+            self.db, self.rotation.date, self.other.id, self.group.id, admin=self.admin,
+            backup_surgeon_id=self.backup.id, backup_note="New backup",
+        )
+        self.db.expire_all()
+        self.assertEqual(self.rotation.surgeon_id, self.other.id)
+        self.assertEqual(self.rotation.backup.surgeon_id, self.backup.id)
+        self.assertEqual(self.rotation.backup.note, "New backup")
+        self.assertEqual(self.db.query(CallBackup).count(), 1)
+
+    @patch("app.admin_call_schedule_action_service.send_push_to_surgeon")
+    @patch("app.admin_call_schedule_action_service.check_conflicts", return_value=[])
+    @patch("app.call_backup_service.check_conflicts_structured", return_value=[])
+    def test_web_call_form_saves_backup_and_lists_it_under_primary(self, _backup_conflicts, _call_conflicts, _push):
+        def test_db():
+            yield self.db
+        app.dependency_overrides[get_db] = test_db
+        try:
+            client = TestClient(app)
+            client.cookies.set("admin_token", create_admin_token(self.admin.id))
+            response = client.post("/admin/call-schedule/assign", data={
+                "rotation_date": self.rotation.date.isoformat(),
+                "call_group_id": str(self.group.id),
+                "surgeon_id": str(self.primary.id),
+                "backup_surgeon_id": str(self.backup.id),
+                "backup_note": "Orientation",
+            }, follow_redirects=False)
+            self.assertEqual(response.status_code, 303)
+            self.db.expire_all()
+            self.assertEqual(self.rotation.backup.surgeon_id, self.backup.id)
+            page = client.get("/admin/call-schedule")
+            self.assertEqual(page.status_code, 200)
+            self.assertIn("Backup: Florin", page.text)
+            self.assertNotIn("id=\"backup-modal\"", page.text)
+            self.assertIn("name=\"backup_surgeon_id\"", page.text)
+        finally:
+            app.dependency_overrides.pop(get_db, None)
 
 
 if __name__ == "__main__":

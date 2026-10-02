@@ -15,6 +15,7 @@ Read [the scheduling contract](docs/SCHEDULE_SOURCE_OF_TRUTH_RULES.md), [the fax
 - The newest applied Epic/Desk fax is the schedule source for the surgeon/dates it covers. It creates, updates, or cancels **details** on permanent cards; it does not rewrite the master baseline. Aprima supplies Surgery One/CBO.
 - NA is flexible. A plausible Epic/Aprima/Shannon assignment may fill it, including a surgeon working at a familiar alternate facility. Do not reject it solely because the master says NA.
 - Keep both sides of a conflict visible for review: approved leave versus actual work, or a fixed master location versus a different source location. Do not silently discard the case or change the master assignment. Assistance is time for the assisting surgeon in the same room and case.
+- Each surgeon will have an associated scheduler group shown beside them in the app. A schedule-versus-approved-leave conflict may produce a message to that surgeon's scheduler group only after the source fax row, OCR interpretation, surgeon/date/time/location, AM/PM placement, and leave overlap are verified. Keep an uncertain conflict in review; do not send an email or text from an OCR guess or an unverified block placement.
 - SQL owns scheduling selection, deduplication, counts, and ordering. Python may serialize SQL results for the API; it must not invent schedule facts or independently sort/filter the clinical day.
 
 ## Safe delivery

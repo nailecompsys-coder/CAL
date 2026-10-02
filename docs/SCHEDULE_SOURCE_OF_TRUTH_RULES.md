@@ -23,6 +23,13 @@ This is Don's current scheduling rule set for the master calendar, the surgeon a
 - Uncertain OCR identities, unresolved locations, missing times, and possible duplicates require review. Do not guess a patient, surgeon, room, or time to make a row fit.
 - Group OR capacity is separate from one surgeon's own block. A team/day view may show who is assigned where without exposing another surgeon's patient details.
 
+## Scheduler conflict alerts
+
+- Each surgeon belongs to a scheduler group. Show the associated group beside the surgeon in the app so users can identify whom to contact about a conflict. The group-to-surgeon mapping must come from maintained app data, not an inference from a fax.
+- When Epic shows work during approved time off, preserve both facts and flag the overlapping date and AM/PM portion. Prepare an email to that surgeon's scheduler group explaining the verified schedule conflict. Keep the original fax row and placement evidence available for the review that precedes an alert.
+- Before any email or text is sent, verify the source row against the fax image, then confirm surgeon identity, date, time, location, AM/PM card, latest-applied-fax status, and the exact approved-leave overlap. If OCR or placement is uncertain, hold the alert for review. Do not send a confident-looking message based on a guess; do not automatically send a patient detail or a surgeon-wide notification blast.
+- A scheduler alert is a request to resolve a conflict, not an automatic cancellation of the case or the approved time off. Record what was reviewed and what was sent so the team can correct a bad source fact without losing the history.
+
 ## Ownership and acceptance checks
 
 - SQL determines which facts belong to a surgeon/day, deduplicates them, calculates counts and conflicts, and orders the result. Python only maps those database results into the API response. The existing iPhone views consume that response.

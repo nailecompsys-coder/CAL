@@ -16,3 +16,5 @@ Production evidence on 2026-10-02: fax **#234** (333 reviewed rows, dates Septem
 `server/scripts/fax_visual_ingest.py` and `server/app/fax_visual_ingest_service.py` also implement PDF → PNG → OCR → temporary **SQLite database** (`visual_temp.sqlite`) → reviewed-row and overlay reports → backup → apply. The file is a staging database, not a production SQL file copied over another file. This path remains in the repository; do not assume it is the path a particular production fax used. Check its `fax_ingest_runs` and `schedule_change_events` records first.
 
 No fax schedule cleanup sends a surgeon notification blast. Do not publish patient details in audit summaries or documentation.
+
+Future scheduler-conflict alerts require a separate reviewed step. Before sending anything, compare the proposed alert with the original fax image and the latest applied row, verify surgeon/date/time/location and its AM/PM card, and confirm the approved-leave overlap. Hold uncertain OCR or placement for review. The recipient must be the maintained scheduler group for that surgeon; a fax must not invent recipients. Preserve the review evidence until the alert decision is recorded.

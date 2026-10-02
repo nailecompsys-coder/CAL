@@ -17,10 +17,15 @@ from app.models import (
     Location,
     Meeting,
     NativeScheduleAlert,
+    ScheduleCard,
+    ScheduleCardActivity,
+    ScheduleCardWeek,
     Surgeon,
     SurgeonDayItem,
+    SurgicalCase,
 )
 from app.native_home_service import build_native_home
+from app.native_home_items import surgeons as native_surgeons
 
 
 class FixedDate(date):
@@ -38,6 +43,20 @@ class NativeHomeContractTest(unittest.TestCase):
     def tearDown(self):
         Base.metadata.drop_all(bind=self.engine)
         self.engine.dispose()
+
+    def test_surgeon_picker_uses_positive_database_rank(self):
+        db = self.Session()
+        try:
+            db.add_all([
+                Surgeon(first_name="Chris", last_name="Johnson", sort_order=2, is_active=True),
+                Surgeon(first_name="Robert", last_name="Florin", sort_order=1, is_active=True),
+                Surgeon(first_name="Alex", last_name="Able", sort_order=0, is_active=True),
+            ])
+            db.commit()
+            self.assertEqual(["Robert Florin", "Chris Johnson", "Alex Able"],
+                             [row["name"] for row in native_surgeons(db)])
+        finally:
+            db.close()
 
     def test_native_home_payload_shape(self):
         db = self.Session()
@@ -203,6 +222,85 @@ class NativeHomeContractTest(unittest.TestCase):
             self.assertEqual(row["location"], "Surgery One")
             self.assertEqual(row["color"], "#dc2626")
             self.assertEqual(row["notes"], "Aprima review needed")
+        finally:
+            db.close()
+
+    @patch("app.aprima_cache_service.patient_appointments_for_api")
+    def test_master_cards_and_epic_cases_survive_approved_off(self, aprima_payload):
+        aprima_payload.return_value = {"appointments": []}
+        db = self.Session()
+        try:
+            surgeon = Surgeon(first_name="Chris", last_name="Johnson", is_active=True)
+            assistant = Surgeon(first_name="Alex", last_name="Smith", is_active=True)
+            hospital = Location(name="Altamonte Hospital", abbreviation="ALT", location_type="hospital")
+            clinic = Location(name="Lake Mary Clinic", abbreviation="LM", location_type="clinic")
+            db.add_all([surgeon, assistant, hospital, clinic])
+            db.flush()
+            week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=date(2026, 10, 5))
+            db.add(week)
+            db.flush()
+            am = ScheduleCard(week_id=week.id, surgeon_id=surgeon.id, date=date(2026, 10, 5),
+                              session="am", baseline_state="assigned", effective_state="assigned",
+                              baseline_location_id=hospital.id, effective_location_id=hospital.id)
+            pm = ScheduleCard(week_id=week.id, surgeon_id=surgeon.id, date=date(2026, 10, 5),
+                              session="pm", baseline_state="na", effective_state="na")
+            db.add_all([am, pm])
+            db.flush()
+            case = SurgicalCase(surgeon_id=surgeon.id, assisting_surgeon_id=assistant.id,
+                                date=date(2026, 10, 5), start_time=time(8, 30), end_time=time(9, 30),
+                                patient_name="Test Patient", procedure="Test procedure", location_id=hospital.id,
+                                schedule_card_id=am.id, status="scheduled")
+            db.add(case)
+            db.add(DayOff(surgeon_id=surgeon.id, start_date=date(2026, 10, 5),
+                          end_date=date(2026, 10, 5), reason="Vacation", status="approved", is_full_day=True))
+            db.commit()
+
+            payload = build_native_home(db, surgeon, date(2026, 10, 5), date(2026, 10, 5))
+            items = payload["days"][0]["items"]
+            self.assertEqual(["OFF", "OFF"], [item["title"] for item in items if item["id"].startswith("card-")])
+            self.assertTrue(next(item for item in items if item["id"] == f"card-{am.id}")["needsReview"])
+            surgery = next(item for item in items if item["id"] == f"surg-{case.id}")
+            self.assertEqual(surgery["title"], "Test Patient")
+            self.assertTrue(surgery["needsReview"])
+            self.assertEqual(surgery["rawId"], case.id)
+            self.assertEqual(len([item for item in items if item["type"] == "surgery"]), 1)
+
+            assist_items = build_native_home(db, assistant, date(2026, 10, 5), date(2026, 10, 5))["days"][0]["items"]
+            assist = next(item for item in assist_items if item["type"] == "surgery")
+            self.assertIn("Assisting", assist["subtitle"])
+            self.assertTrue(assist["readOnly"])
+        finally:
+            db.close()
+
+    @patch("app.aprima_cache_service.patient_appointments_for_api")
+    def test_no_call_is_not_a_day_off_or_a_case_conflict(self, aprima_payload):
+        aprima_payload.return_value = {"appointments": []}
+        db = self.Session()
+        try:
+            surgeon = Surgeon(first_name="Chris", last_name="Johnson", is_active=True)
+            hospital = Location(name="Altamonte Hospital", abbreviation="ALT", location_type="hospital")
+            db.add_all([surgeon, hospital])
+            db.flush()
+            week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=date(2026, 10, 5))
+            db.add(week)
+            db.flush()
+            card = ScheduleCard(week_id=week.id, surgeon_id=surgeon.id, date=date(2026, 10, 6),
+                                session="am", baseline_state="assigned", effective_state="assigned",
+                                baseline_location_id=hospital.id, effective_location_id=hospital.id)
+            db.add_all([
+                card,
+                SurgicalCase(surgeon_id=surgeon.id, date=date(2026, 10, 6), start_time=time(9),
+                             end_time=time(10), patient_name="Test Patient", procedure="Test procedure",
+                             location_id=hospital.id, status="scheduled"),
+                DayOff(surgeon_id=surgeon.id, start_date=date(2026, 10, 6), end_date=date(2026, 10, 6),
+                       reason="No Call", status="approved", is_full_day=True),
+            ])
+            db.commit()
+
+            items = build_native_home(db, surgeon, date(2026, 10, 6), date(2026, 10, 6))["days"][0]["items"]
+            self.assertEqual("ALT", next(item for item in items if item["id"] == f"card-{card.id}")["title"])
+            self.assertFalse(next(item for item in items if item["type"] == "surgery")["needsReview"])
+            self.assertEqual("No Call", next(item for item in items if item["type"] == "dayoff")["title"])
         finally:
             db.close()
 

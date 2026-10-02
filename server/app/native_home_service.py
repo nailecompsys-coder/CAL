@@ -6,9 +6,7 @@ from sqlalchemy.orm import Session
 from .models import Surgeon
 from .native_home_items import (
     append_aprima_surgery_items,
-    append_clinic_items,
     append_meetings,
-    append_block_or_items,
     append_my_call_items,
     append_my_day_off_items,
     append_personal_items,
@@ -17,13 +15,13 @@ from .native_home_items import (
     empty_days,
     my_day_off_rows,
     requests,
-    sort_day_items,
     surgeons,
 )
 from .native_support import (
     native_day_off_sections,
 )
 from .native_home_sections import build_native_call_schedule, native_alerts
+from .native_schedule_feed import append_native_schedule
 from .practice_time import practice_today
 
 
@@ -42,11 +40,9 @@ class NativeHomeService:
         append_my_call_items(self.db, self.surgeon, self.start_date, self.end_date, self.by_date)
         append_my_day_off_items(self.my_day_off_rows, self.start_date, self.end_date, self.by_date)
         append_meetings(self.db, self.surgeon, self.start_date, self.end_date, self.by_date)
-        append_clinic_items(self.db, self.surgeon, self.start_date, self.end_date, self.by_date, self.my_day_off_rows)
-        append_aprima_surgery_items(self.db, self.surgeon, self.start_date, self.end_date, self.by_date, self.my_day_off_rows)
-        append_block_or_items(self.db, self.surgeon, self.start_date, self.end_date, self.by_date, self.my_day_off_rows)
+        append_native_schedule(self.db, self.surgeon.id, self.start_date, self.end_date, self.by_date)
+        append_aprima_surgery_items(self.db, self.surgeon, self.start_date, self.end_date, self.by_date)
         append_personal_items(self.db, self.surgeon, self.start_date, self.end_date, self.by_date)
-        sort_day_items(self.days)
 
         availability_rows = availability(self.db, self.surgeon, self.today)
         request_rows = requests(self.db, self.surgeon, self.today)

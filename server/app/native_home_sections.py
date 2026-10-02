@@ -2,6 +2,7 @@
 from collections import defaultdict
 from datetime import date, timedelta
 
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session, joinedload
 
 from .models import CallCoverage, CallRotation, DayOff, NativeScheduleAlert, Surgeon
@@ -49,10 +50,18 @@ def append_native_off_surgeons(
     end_date: date,
     days_by_date: dict[str, dict],
 ) -> None:
-    off_rows = db.query(DayOff).options(joinedload(DayOff.surgeon)).filter(
+    off_rows = db.query(DayOff).join(Surgeon, Surgeon.id == DayOff.surgeon_id).options(joinedload(DayOff.surgeon)).filter(
         DayOff.status.in_(["pending", "approved"]),
+        func.lower(func.trim(func.coalesce(DayOff.reason, ""))) != "no call",
+        Surgeon.is_active == True,  # noqa: E712
+        func.lower(func.coalesce(Surgeon.email, "")) != "don@clermontitstore.com",
+        ~((Surgeon.first_name.ilike("developer")) & (Surgeon.last_name.ilike("admin"))),
         DayOff.start_date <= end_date,
         DayOff.end_date >= start_date,
+    ).order_by(
+        case((func.coalesce(Surgeon.staff_type, "physician") == "physician", 0), else_=1),
+        case((Surgeon.sort_order > 0, Surgeon.sort_order), else_=999999),
+        Surgeon.last_name, Surgeon.first_name, DayOff.id,
     ).all()
     for off in off_rows:
         if not surgeon_is_visible(off.surgeon):
@@ -71,15 +80,6 @@ def append_native_off_surgeons(
                     "staffType": off.surgeon.staff_type or "",
                 })
             span += timedelta(days=1)
-
-    for day in days_by_date.values():
-        for key in ("offSurgeons", "requestedOffSurgeons"):
-            day[key].sort(key=lambda row: (
-                0 if row.get("staffType") == "physician" else 1,
-                row.get("sortOrder") or 999999,
-                row["initials"],
-            ))
-
 
 def native_alerts(db: Session, surgeon: Surgeon) -> dict:
     unread_alert_count = db.query(NativeScheduleAlert).filter(

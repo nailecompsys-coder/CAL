@@ -31,7 +31,7 @@ def day_off_item_payload(row, item_date: date, segment: dict, is_full: bool) -> 
     return {
         "id": f"off-{row.id}-{item_date.isoformat()}",
         "type": "dayoff",
-        "title": "Day Off",
+        "title": "No Call" if (row.reason or "").strip().lower() == "no call" else "Day Off",
         "subtitle": f"{row.reason or ''}{' · pending' if row.status == 'pending' else ''}".strip(" ·"),
         "start": None if is_full else segment.get("start") or fmt_time(row.start_time),
         "end": None if is_full else segment.get("end") or fmt_time(row.end_time),

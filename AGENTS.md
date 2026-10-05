@@ -4,10 +4,20 @@ Read [the scheduling contract](docs/SCHEDULE_SOURCE_OF_TRUTH_RULES.md), [the fax
 
 ## Establish the facts before editing
 
-1. Read the current code path and check the deployed Git commit. A local branch, an old test, and an archived fax do not establish what production does.
-2. For fax questions, use the latest **applied** fax covering each surgeon/date. Earlier faxes are history. Trace reviewed row → placement decision → saved case or clinic activity → permanent AM/PM card → API response. Report counts without patient details.
-3. Separate what is verified in the database, what the API returns, and what has actually been observed on a surgeon's device. Never claim a phone display was verified from an API test alone. For native simulator verification, follow [the read-only support preview workflow](docs/NATIVE_SUPPORT_PREVIEW.md) once it is deployed.
-4. State whether a requested change is already live, implemented but unreleased, or still missing. A passing health check is not schedule verification.
+1. Work from the current release branch and compare it with the deployed commit. `main`, an older worktree, a chat summary, and `docs/APP_REFERENCE.md` can be stale. If documents disagree, use Don's current contract in `docs/SCHEDULE_SOURCE_OF_TRUTH_RULES.md`, then verify the actual production state before describing behavior. Record a disagreement rather than quietly rewriting a rule.
+2. Read the current code path and check the deployed Git commit. A local branch, an old test, and an archived fax do not establish what production does.
+3. For fax questions, use the latest **applied** fax covering each surgeon/date. Earlier faxes are history. Trace reviewed row → placement decision → saved case or clinic activity → permanent AM/PM card → API response. Report counts without patient details.
+4. Separate what is verified in the database, what the API returns, and what has actually been observed on a surgeon's device. Never claim a phone display was verified from an API test alone. For native simulator verification, follow [the read-only support preview workflow](docs/NATIVE_SUPPORT_PREVIEW.md) once it is deployed.
+5. State whether a requested change is already live, implemented but unreleased, or still missing. A passing health check is not schedule verification.
+
+## Stay in the correct lane
+
+- **Master schedule:** CAL's permanent weekday AM/PM baseline; only an explicit master-schedule change edits it. Fax processing never rebuilds it.
+- **Desk:** receives and retains the source fax. Desk `processed` means Desk classified/OCR'd it; it does **not** mean CAL reviewed or applied it. Never infer a completed CAL handoff from a Desk status.
+- **CAL ingest:** raw PDF → every page PNG/OCR → reviewed rows → staged placement decisions → backup → authoritative apply → SQL/API verification → Desk archive. Apply failures leave the prior live schedule intact. The 6 PM automation is a separate worker, not proof that Desk sent a fax to CAL.
+- **CAL database/API:** the latest successfully applied fax governs its covered surgeons/dates. SQL selects and orders current schedule facts; the web portal and iPhone display those facts. UI work does not repair a missing ingest, and ingest work does not require redesigning the UI.
+- **Releases:** backend/portal deployment and iPhone TestFlight are separate. A local commit, a pushed branch, a production backend release, an uploaded TestFlight build, and an installed iPhone build are different states. Name the one actually verified.
+- For each new fax, report its Desk ID, Desk state, CAL fax/run state, latest applied fax ID, whether current schedule rows changed, and whether the native API was checked. Do not say "processed" or "visible on phones" without those checks. No surgeon or scheduler notification is sent during routine fax ingest.
 
 ## Scheduling rules
 

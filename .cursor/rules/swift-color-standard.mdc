@@ -1,0 +1,54 @@
+---
+description: NO-PASS — SwiftUI colors must use Asset Catalog / ClinicalPalette only. Never hardcode RGB/hex/UIColor in ios/.
+globs: ios/**/*.swift
+alwaysApply: true
+---
+
+# Swift Color Standard — NO PASS
+
+**This is a hard fail for any CAL iOS work.** Don will not accept hardcoded colors in Swift.
+
+## Required pattern
+
+1. **Named colors live in** `ios/CALNative/Images.xcassets/*.colorset`
+2. **App code references only:**
+   - `ClinicalPalette.*` (from `CALNativeComponents.swift`)
+   - or `Color("Clinical…")` asset names
+   - or **system semantic colors**: `.primary`, `.secondary`, `.white`, `.black`, `.clear`, `.red` / `.orange` / `.green` for system status only
+3. **`ClinicalPalette` itself** must only wrap `Color("AssetName")` — never `Color(red:green:blue:)`
+
+## Forbidden (instant reject)
+
+```swift
+// FORBIDDEN
+Color(red: 0.1, green: 0.2, blue: 0.3)
+Color(white: 0.9)
+Color(hue:saturation:brightness:)
+UIColor(red:green:blue:alpha:)
+UIColor(hex: …)
+Color(uiColor: UIColor(…))
+"#E48EA6" / 0xE48EA6 as a color
+```
+
+## Allowed
+
+```swift
+ClinicalPalette.teal
+ClinicalPalette.ink
+Color("ClinicalTeal")
+.foregroundStyle(.secondary)
+.background(.white.opacity(0.72))  // system white with opacity OK
+```
+
+## Facility / schedule pastels from API
+
+If a server sends a location hex, convert **once** via a single helper that maps into `Color` from a validated hex — do **not** scatter `Color(red:)` in views. Prefer server-driven tokens that map to asset names when possible.
+
+## Enforcement
+
+- `scripts/check-native-guardrails.sh` **fails** if any `ios/**/*.swift` matches hardcoded color constructors.
+- Agents must not “just this once” inline RGB. Add a colorset + `ClinicalPalette` entry instead.
+
+## Portal note
+
+Portal (Jinja/CSS) is separate. This rule is **Swift / `ios/` only**. Do not confuse portal hex with SwiftUI work.

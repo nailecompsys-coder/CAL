@@ -1,0 +1,16 @@
+---
+description: Desk→CAL ingest must recover glued OR clocks; never invent block windows
+globs: server/app/ingest_schedule_service.py,server/app/ingest_resolve.py,server/tests/test_ingest_schedule.py
+alwaysApply: false
+---
+
+# Desk schedule ingest — times are SSOT
+
+Advent faxes (via Desk) sometimes send OR cases with a blank `start_time` and a procedure like `0715 FOREIGN BODY…`.
+
+Rules:
+
+1. Before computing an OR window, salvage a leading military clock (`0715` / `07:15`) from `procedure` onto `start_time`. Strip it from procedure.
+2. `_block_window_for_cases` must still raise if, after salvage, there are no clocks. Do not invent `session=am` as 07:00–12:00.
+3. Missing time, unknown surgeon, or unknown clinic/OR **location** go to the admin portal as `ingest_correction`. Do **not** fail the Desk fax for those. Do **not** flag Advent room/suite codes or OCR-garbled patient names — rooms are hospital inventory; names are a parser problem.
+4. Co-surgeon reprints (same patient/date/time/room under two surgeons) attach to the primary from `co_surgeon_pairs` and set `assisting_surgeon_id`. Do not double-book the room.

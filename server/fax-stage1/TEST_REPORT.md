@@ -42,6 +42,15 @@ the work directory before rendering, loading, cropping, or recording paths.
 After that fix, the three-page fixture completed with 10 of 10 rows resolved
 and status `stage1_complete_pre_card_match`.
 
+## SQL database-reference correction replay
+
+The correction queue is now reconciled, before vision, against prior resolved
+fax rows and existing operational case/activity/appointment rows. On a clean
+Fax 245 rebuild, native OCR plus the cross-fax audit queued 94 rows. Unique
+high-confidence SQL references resolved 67 of them, leaving 27 for vision.
+Every considered match and selected source row is recorded in
+`fax_stage1.reference_matches`; ambiguous best matches are not selected.
+
 The OpenAI correction leg was not transmitted because no customer API key is
 available to the executable. PHI transmission requires the organization's
 approved API/healthcare agreement and retention configuration. Until that is

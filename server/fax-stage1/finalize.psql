@@ -4,6 +4,7 @@
 
 BEGIN;
 
+DELETE FROM fax_stage1.reference_matches WHERE fax_id = :'fax_id'::integer;
 DELETE FROM fax_stage1.vision_results
 WHERE request_id IN (SELECT request_id FROM fax_stage1.vision_requests WHERE fax_id = :'fax_id'::integer);
 DELETE FROM fax_stage1.vision_response_import

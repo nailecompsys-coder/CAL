@@ -162,6 +162,28 @@ CREATE TABLE IF NOT EXISTS fax_stage1.vision_response_import (
     imported_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS fax_stage1.reference_matches (
+    match_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    fax_id integer NOT NULL,
+    candidate_row_id bigint NOT NULL,
+    source_system text NOT NULL,
+    source_record_key text NOT NULL,
+    match_score integer NOT NULL,
+    matched_on text[] NOT NULL DEFAULT '{}',
+    reference_patient_name text,
+    reference_source_patient_id text,
+    reference_patient_dob date,
+    reference_activity_date date,
+    reference_start_time time,
+    reference_procedure_text text,
+    reference_room_text text,
+    selected boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS reference_matches_fax_candidate
+    ON fax_stage1.reference_matches(fax_id, candidate_row_id, selected);
+
 CREATE TABLE IF NOT EXISTS fax_stage1.defects (
     defect_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     fax_id integer NOT NULL,

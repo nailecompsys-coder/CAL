@@ -94,6 +94,7 @@ done < <(find "$WORK_DIR/pages" -type f -name 'page-*.png' | sort -V)
 "${PSQL[@]}" -v fax_id="$FAX_ID" -f "$SQL_DIR/process.psql" >/dev/null
 "${PSQL[@]}" -v fax_id="$FAX_ID" -v work_dir="$WORK_DIR" -f "$SQL_DIR/finalize.psql" >/dev/null
 "${PSQL[@]}" -v fax_id="$FAX_ID" -v work_dir="$WORK_DIR" -f "$SQL_DIR/cross-fax-audit.psql" >/dev/null
+"${PSQL[@]}" -v fax_id="$FAX_ID" -f "$SQL_DIR/reference-reconcile.psql" >/dev/null
 
 while IFS='|' read -r request_id page_number crop_y crop_height crop_path; do
   [[ -n "$request_id" ]] || continue

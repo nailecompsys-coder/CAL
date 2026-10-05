@@ -14,13 +14,18 @@ The executable path is:
    printed column anchors.
 6. Preserve every row, including overlapping duplicates.
 7. Compare overlapping faxes by patient identifier and activity date. Any
-   disagreement is added to the flagged-only vision queue.
-8. Crop only flagged rows.
-9. If a customer-supplied `OPENAI_API_KEY` is present, send each flagged crop
+   disagreement is added to the correction queue.
+8. Use SQL to compare queued rows with prior Stage-1 fax rows and existing
+   `surgical_cases`, canonical card activities, fax-ingest rows, and Aprima
+   appointment rows. A single high-confidence database value repairs only the
+   flagged fields; every considered and selected match is recorded.
+9. Preserve ambiguous or genuinely new rows in the flagged-only vision queue.
+10. Crop only the rows still flagged after database reconciliation.
+11. If a customer-supplied `OPENAI_API_KEY` is present, send each flagged crop
    to the Responses API using the checked-in prompt and strict JSON schema.
-10. Apply SQL validation gates. Missing, malformed, future, or uncertain
+12. Apply SQL validation gates. Missing, malformed, future, or uncertain
     values remain unresolved and do not block clean rows.
-11. Stop with `stage1_complete_pre_card_match` or
+13. Stop with `stage1_complete_pre_card_match` or
     `stage1_complete_with_unresolved`.
 
 Run:

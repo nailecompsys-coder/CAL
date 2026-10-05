@@ -1,0 +1,360 @@
+\set ON_ERROR_STOP on
+
+-- Repair flagged fields from prior fax rows and existing case/activity rows.
+-- This is evidence gathering only: it never writes operational tables and it
+-- never selects a match when the best database values disagree.
+
+BEGIN;
+
+CREATE TEMP TABLE stage1_reference_rows (
+    source_system text NOT NULL,
+    source_record_key text NOT NULL,
+    surgeon_name text,
+    patient_name text,
+    source_patient_id text,
+    patient_dob date,
+    activity_date date,
+    start_time time,
+    procedure_text text,
+    room_text text
+) ON COMMIT DROP;
+
+-- Repeated faxes are the strongest source because they retain the hospital
+-- patient identifier and DOB that operational scheduling rows may not carry.
+INSERT INTO stage1_reference_rows
+SELECT
+    'prior_stage1_fax',
+    format('%s:%s', fax_id, candidate_row_id),
+    surgeon_name,
+    patient_name,
+    source_patient_id,
+    patient_dob,
+    activity_date,
+    start_time,
+    procedure_text,
+    room_text
+FROM fax_stage1.resolved_rows
+WHERE fax_id <> :'fax_id'::integer
+  AND resolution_status = 'resolved';
+
+-- Operational sources are optional in an isolated lab database. Dynamic SQL
+-- keeps the replay executable when those read-only tables are absent.
+DO $block$
+BEGIN
+    IF to_regclass('public.surgical_cases') IS NOT NULL
+       AND to_regclass('public.surgeons') IS NOT NULL THEN
+        EXECUTE $sql$
+            INSERT INTO stage1_reference_rows
+            SELECT
+                'surgical_cases',
+                surgical.id::text,
+                concat_ws(' ', surgeon.first_name, surgeon.last_name),
+                surgical.patient_name,
+                NULL,
+                CASE
+                    WHEN surgical.patient_dob ~ '^\d{4}-\d{2}-\d{2}$'
+                    THEN surgical.patient_dob::date
+                END,
+                surgical.date,
+                surgical.start_time,
+                surgical.procedure,
+                surgical.room_text
+            FROM public.surgical_cases AS surgical
+            JOIN public.surgeons AS surgeon ON surgeon.id = surgical.surgeon_id
+            WHERE surgical.status IS DISTINCT FROM 'cancelled'
+        $sql$;
+    END IF;
+
+    IF to_regclass('public.schedule_card_activities') IS NOT NULL
+       AND to_regclass('public.surgeons') IS NOT NULL THEN
+        EXECUTE $sql$
+            INSERT INTO stage1_reference_rows
+            SELECT
+                'schedule_card_activities',
+                activity.id::text,
+                concat_ws(' ', surgeon.first_name, surgeon.last_name),
+                activity.patient_name,
+                NULL,
+                NULL,
+                activity.activity_date,
+                activity.start_time,
+                activity.procedure,
+                activity.room_text
+            FROM public.schedule_card_activities AS activity
+            JOIN public.surgeons AS surgeon ON surgeon.id = activity.surgeon_id
+            WHERE activity.is_active
+        $sql$;
+    END IF;
+
+    IF to_regclass('public.fax_ingest_rows') IS NOT NULL
+       AND to_regclass('public.surgeons') IS NOT NULL THEN
+        EXECUTE $sql$
+            INSERT INTO stage1_reference_rows
+            SELECT
+                'fax_ingest_rows',
+                ingest.id::text,
+                concat_ws(' ', surgeon.first_name, surgeon.last_name),
+                ingest.patient_name,
+                NULL,
+                NULL,
+                ingest.case_date,
+                ingest.start_time,
+                ingest.procedure,
+                ingest.room_text
+            FROM public.fax_ingest_rows AS ingest
+            LEFT JOIN public.surgeons AS surgeon ON surgeon.id = ingest.surgeon_id
+        $sql$;
+    END IF;
+
+    IF to_regclass('public.aprima_cached_appointments') IS NOT NULL
+       AND to_regclass('public.surgeons') IS NOT NULL THEN
+        EXECUTE $sql$
+            INSERT INTO stage1_reference_rows
+            SELECT
+                'aprima_cached_appointments',
+                appointment.appointment_id,
+                concat_ws(' ', surgeon.first_name, surgeon.last_name),
+                appointment.patient_name,
+                NULL,
+                NULL,
+                appointment.date,
+                appointment.start_time,
+                coalesce(appointment.reason_text, appointment.appointment_type),
+                appointment.room_text
+            FROM public.aprima_cached_appointments AS appointment
+            LEFT JOIN public.surgeons AS surgeon ON surgeon.id = appointment.surgeon_id
+            WHERE appointment.kind = 'patient'
+        $sql$;
+    END IF;
+END
+$block$;
+
+ALTER TABLE stage1_reference_rows
+    ADD COLUMN name_normalized text,
+    ADD COLUMN procedure_normalized text,
+    ADD COLUMN surgeon_normalized text,
+    ADD COLUMN room_normalized text;
+
+UPDATE stage1_reference_rows
+SET name_normalized = upper(regexp_replace(coalesce(patient_name, ''), '[^[:alnum:]]+', '', 'g')),
+    procedure_normalized = upper(regexp_replace(coalesce(procedure_text, ''), '[^[:alnum:]]+', '', 'g')),
+    surgeon_normalized = upper(regexp_replace(coalesce(surgeon_name, ''), '[^[:alnum:]]+', '', 'g')),
+    room_normalized = upper(regexp_replace(coalesce(room_text, ''), '[^[:alnum:]]+', '', 'g'));
+
+CREATE INDEX stage1_reference_patient_id_idx
+    ON stage1_reference_rows(source_patient_id);
+CREATE INDEX stage1_reference_name_idx
+    ON stage1_reference_rows(name_normalized);
+
+CREATE TEMP TABLE stage1_scored_matches ON COMMIT DROP AS
+WITH targets AS (
+    SELECT
+        target.*,
+        upper(regexp_replace(coalesce(target.patient_name, ''), '[^[:alnum:]]+', '', 'g')) AS target_name,
+        upper(regexp_replace(coalesce(target.procedure_text, ''), '[^[:alnum:]]+', '', 'g')) AS target_procedure,
+        upper(regexp_replace(coalesce(target.surgeon_name, ''), '[^[:alnum:]]+', '', 'g')) AS target_surgeon,
+        upper(regexp_replace(coalesce(target.room_text, ''), '[^[:alnum:]]+', '', 'g')) AS target_room
+    FROM fax_stage1.resolved_rows AS target
+    JOIN fax_stage1.vision_requests AS request
+      ON request.candidate_row_id = target.candidate_row_id
+     AND request.fax_id = target.fax_id
+     AND request.request_status = 'pending'
+    WHERE target.fax_id = :'fax_id'::integer
+), normalized AS (
+    SELECT
+        target.candidate_row_id,
+        reference.*,
+        target.target_name,
+        reference.name_normalized AS reference_name,
+        target.target_procedure,
+        reference.procedure_normalized AS reference_procedure,
+        target.target_surgeon,
+        reference.surgeon_normalized AS reference_surgeon,
+        target.target_room,
+        reference.room_normalized AS reference_room,
+        target.source_patient_id AS target_patient_id,
+        target.patient_dob AS target_dob,
+        target.activity_date AS target_date,
+        target.start_time AS target_time
+    FROM targets AS target
+    JOIN stage1_reference_rows AS reference
+      ON (target.source_patient_id IS NOT NULL
+          AND target.source_patient_id = reference.source_patient_id)
+      OR (target.target_name <> ''
+          AND target.target_name = reference.name_normalized)
+), scored AS (
+    SELECT
+        normalized.*,
+        (CASE WHEN target_patient_id IS NOT NULL
+                    AND target_patient_id = source_patient_id THEN 100 ELSE 0 END
+         + CASE WHEN target_name <> '' AND target_name = reference_name THEN 50 ELSE 0 END
+         + CASE WHEN target_dob IS NOT NULL AND target_dob = patient_dob THEN 25 ELSE 0 END
+         + CASE WHEN target_date IS NOT NULL AND target_date = activity_date THEN 25 ELSE 0 END
+         + CASE WHEN target_procedure <> '' AND target_procedure = reference_procedure THEN 20 ELSE 0 END
+         + CASE WHEN target_time IS NOT NULL AND target_time = start_time THEN 15 ELSE 0 END
+         + CASE WHEN target_surgeon <> '' AND target_surgeon = reference_surgeon THEN 10 ELSE 0 END
+         + CASE WHEN target_room <> '' AND target_room = reference_room THEN 5 ELSE 0 END) AS match_score,
+        array_remove(ARRAY[
+            CASE WHEN target_patient_id IS NOT NULL AND target_patient_id = source_patient_id THEN 'source_patient_id' END,
+            CASE WHEN target_name <> '' AND target_name = reference_name THEN 'patient_name' END,
+            CASE WHEN target_dob IS NOT NULL AND target_dob = patient_dob THEN 'patient_dob' END,
+            CASE WHEN target_date IS NOT NULL AND target_date = activity_date THEN 'activity_date' END,
+            CASE WHEN target_procedure <> '' AND target_procedure = reference_procedure THEN 'procedure_text' END,
+            CASE WHEN target_time IS NOT NULL AND target_time = start_time THEN 'start_time' END,
+            CASE WHEN target_surgeon <> '' AND target_surgeon = reference_surgeon THEN 'surgeon_name' END,
+            CASE WHEN target_room <> '' AND target_room = reference_room THEN 'room_text' END
+        ], NULL) AS matched_on
+    FROM normalized
+)
+SELECT *
+FROM scored
+WHERE match_score >= 70
+  AND (
+      (target_patient_id IS NOT NULL AND target_patient_id = source_patient_id)
+      OR (target_name <> '' AND target_name = reference_name)
+  );
+
+INSERT INTO fax_stage1.reference_matches (
+    fax_id, candidate_row_id, source_system, source_record_key,
+    match_score, matched_on, reference_patient_name,
+    reference_source_patient_id, reference_patient_dob,
+    reference_activity_date, reference_start_time,
+    reference_procedure_text, reference_room_text
+)
+SELECT
+    :'fax_id'::integer,
+    candidate_row_id,
+    source_system,
+    source_record_key,
+    match_score,
+    matched_on,
+    patient_name,
+    source_patient_id,
+    patient_dob,
+    activity_date,
+    start_time,
+    procedure_text,
+    room_text
+FROM stage1_scored_matches;
+
+-- Select only when every highest-scoring database row proposes the same
+-- complete value tuple. This is the no-best-guess-on-ambiguity guardrail.
+CREATE TEMP TABLE stage1_selected_reference ON COMMIT DROP AS
+WITH maximums AS (
+    SELECT candidate_row_id, max(match_score) AS match_score
+    FROM stage1_scored_matches
+    GROUP BY candidate_row_id
+), best AS (
+    SELECT scored.*
+    FROM stage1_scored_matches AS scored
+    JOIN maximums USING (candidate_row_id, match_score)
+), consensus AS (
+    SELECT candidate_row_id
+    FROM best
+    GROUP BY candidate_row_id
+    HAVING count(DISTINCT jsonb_build_array(
+        patient_name, source_patient_id, patient_dob, activity_date,
+        start_time, procedure_text, room_text
+    )) = 1
+)
+SELECT DISTINCT ON (best.candidate_row_id) best.*
+FROM best
+JOIN consensus USING (candidate_row_id)
+ORDER BY best.candidate_row_id, best.source_system, best.source_record_key;
+
+UPDATE fax_stage1.reference_matches AS logged
+SET selected = true
+FROM stage1_selected_reference AS selected
+WHERE logged.fax_id = :'fax_id'::integer
+  AND logged.candidate_row_id = selected.candidate_row_id
+  AND logged.source_system = selected.source_system
+  AND logged.source_record_key = selected.source_record_key;
+
+UPDATE fax_stage1.resolved_rows AS target
+SET patient_name = CASE WHEN 'patient_name' = ANY(request.requested_fields)
+                             AND selected.patient_name IS NOT NULL
+                        THEN selected.patient_name ELSE target.patient_name END,
+    source_patient_id = CASE WHEN 'source_patient_id' = ANY(request.requested_fields)
+                                  AND selected.source_patient_id IS NOT NULL
+                             THEN selected.source_patient_id ELSE target.source_patient_id END,
+    patient_dob = CASE WHEN 'patient_dob' = ANY(request.requested_fields)
+                            AND selected.patient_dob IS NOT NULL
+                       THEN selected.patient_dob ELSE target.patient_dob END,
+    activity_date = CASE WHEN 'activity_date' = ANY(request.requested_fields)
+                              AND selected.activity_date IS NOT NULL
+                         THEN selected.activity_date ELSE target.activity_date END,
+    start_time = CASE WHEN 'start_time' = ANY(request.requested_fields)
+                           AND selected.start_time IS NOT NULL
+                      THEN selected.start_time ELSE target.start_time END,
+    procedure_text = CASE WHEN 'procedure_text' = ANY(request.requested_fields)
+                               AND selected.procedure_text IS NOT NULL
+                          THEN selected.procedure_text ELSE target.procedure_text END,
+    room_text = CASE WHEN 'room_text' = ANY(request.requested_fields)
+                          AND selected.room_text IS NOT NULL
+                     THEN selected.room_text ELSE target.room_text END,
+    resolution_method = 'sql_database_reference'
+FROM fax_stage1.vision_requests AS request
+JOIN stage1_selected_reference AS selected USING (candidate_row_id)
+WHERE target.candidate_row_id = request.candidate_row_id
+  AND target.fax_id = :'fax_id'::integer
+  AND request.request_status = 'pending';
+
+-- Remove only fields actually supplied by the selected reference. If the
+-- operational record lacks a requested value, that field remains queued.
+WITH recalculated AS (
+    SELECT
+        request.request_id,
+        ARRAY(
+            SELECT field
+            FROM unnest(request.requested_fields) AS field
+            WHERE CASE field
+                WHEN 'patient_name' THEN selected.patient_name IS NULL
+                WHEN 'source_patient_id' THEN selected.source_patient_id IS NULL
+                WHEN 'patient_dob' THEN selected.patient_dob IS NULL
+                WHEN 'activity_date' THEN selected.activity_date IS NULL
+                WHEN 'start_time' THEN selected.start_time IS NULL
+                WHEN 'procedure_text' THEN selected.procedure_text IS NULL
+                WHEN 'room_text' THEN selected.room_text IS NULL
+                ELSE true
+            END
+        ) AS fields
+    FROM fax_stage1.vision_requests AS request
+    JOIN stage1_selected_reference AS selected USING (candidate_row_id)
+    WHERE request.fax_id = :'fax_id'::integer
+      AND request.request_status = 'pending'
+)
+UPDATE fax_stage1.vision_requests AS request
+SET requested_fields = recalculated.fields,
+    request_status = CASE WHEN recalculated.fields = ARRAY[]::text[]
+                          THEN 'completed_reference' ELSE 'pending' END
+FROM recalculated
+WHERE request.request_id = recalculated.request_id;
+
+UPDATE fax_stage1.resolved_rows AS target
+SET session = CASE WHEN target.start_time < TIME '12:00' THEN 'am'
+                   WHEN target.start_time IS NOT NULL THEN 'pm'
+                   ELSE target.session END,
+    resolution_status = CASE WHEN request.request_status = 'completed_reference'
+                             THEN 'resolved' ELSE 'unresolved' END,
+    unresolved_fields = request.requested_fields
+FROM fax_stage1.vision_requests AS request
+WHERE target.candidate_row_id = request.candidate_row_id
+  AND target.fax_id = :'fax_id'::integer
+  AND request.request_status IN ('completed_reference', 'pending');
+
+UPDATE fax_stage1.defects AS defect
+SET defect_status = 'resolved',
+    resolution_detail = format(
+        'Resolved from unique SQL database reference %s:%s; score=%s; matched_on=%s.',
+        selected.source_system, selected.source_record_key,
+        selected.match_score, selected.matched_on
+    ),
+    resolved_at = now()
+FROM stage1_selected_reference AS selected
+JOIN fax_stage1.vision_requests AS request USING (candidate_row_id)
+WHERE defect.fax_id = :'fax_id'::integer
+  AND defect.candidate_row_id = selected.candidate_row_id
+  AND request.request_status = 'completed_reference'
+  AND defect.defect_status = 'open';
+
+COMMIT;

@@ -9,10 +9,10 @@ from collections import defaultdict
 from datetime import date
 from typing import Any
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .models import (
-    ClinicSchedule,
     FaxDocument,
     FaxIngestRow,
     FaxIngestRun,
@@ -22,6 +22,7 @@ from .models import (
     Surgeon,
     SurgicalCase,
 )
+from .fax_ingest_engine import mark_fax_ingest_transaction
 from .fax_pdf_intake import cleanup_fax_derivatives, prune_immutable_fax_sources
 from .schedule_build_backup_service import create_fax_snapshot_backup
 
@@ -82,6 +83,16 @@ def _fax_note(notes: str | None, fax_id: int) -> str:
     if marker.lower() in current.lower():
         return current
     return f"{current}\n{marker}".strip()
+
+
+def _applicable_row_ids(db: Session, run_id: int) -> set[int]:
+    return {
+        row_id
+        for (row_id,) in db.execute(
+            text("SELECT fax_row_id FROM fax_ingest_rows_applicable WHERE run_id = :run_id"),
+            {"run_id": run_id},
+        )
+    }
 
 
 def _scope_surgeons(db: Session, run: FaxIngestRun) -> dict[str, Surgeon]:
@@ -178,11 +189,14 @@ def apply_staged_snapshot(
         raise ValueError("Fax ingest run does not belong to this fax.")
     if run.status == "applied":
         raise ValueError("This fax ingest run was already applied.")
-    rows = db.query(FaxIngestRow).filter(FaxIngestRow.run_id == run.id).all()
-    if not rows:
+    all_rows = db.query(FaxIngestRow).filter(FaxIngestRow.run_id == run.id).all()
+    if not all_rows:
         raise ValueError("Fax ingest run has no rows.")
-    if any(row.surgeon_id is None for row in rows):
-        raise ValueError("Fax ingest has unresolved surgeons.")
+    applicable_ids = _applicable_row_ids(db, run.id)
+    rows = [row for row in all_rows if row.id in applicable_ids]
+    skipped_rows = len(all_rows) - len(rows)
+    if not rows:
+        raise ValueError("Fax ingest run has no applicable rows.")
     start = min(row.case_date for row in rows)
     end = max(row.case_date for row in rows)
     if (end - start).days > 7:
@@ -202,31 +216,16 @@ def apply_staged_snapshot(
         ScheduleCard.date <= end,
     ).all()
     cards = {(card.surgeon_id, card.date, card.session): card for card in cards_list}
-    missing = [
-        row for row in rows
-        if (row.surgeon_id, row.case_date, row.session) not in cards
-    ]
-    if missing:
-        row = missing[0]
-        raise ValueError(
-            f"Permanent card missing for {row.surgeon_initials} "
-            f"{row.case_date.isoformat()} {row.session.upper()}."
-        )
 
     activity: dict[tuple[int, date, str], list[FaxIngestRow]] = defaultdict(list)
     for row in rows:
         activity[(row.surgeon_id, row.case_date, row.session)].append(row)
-    effective_locations: dict[tuple[int, date, str], int] = {}
+    effective_locations: dict[tuple[int, date, str], int | None] = {}
     mixed_location_ids: dict[tuple[int, date, str], list[int]] = {}
     for key, group in activity.items():
         card = cards[key]
         explicit = {row.source_location_id for row in group if row.source_location_id}
         location_id = _card_location(card, group)
-        if not location_id:
-            raise ValueError(
-                f"Fax location is unresolved for {group[0].surgeon_initials} "
-                f"{card.date.isoformat()} {card.session.upper()}."
-            )
         effective_locations[key] = location_id
         if len(explicit) > 1:
             mixed_location_ids[key] = sorted(explicit)
@@ -238,15 +237,10 @@ def apply_staged_snapshot(
         end=end,
         fax_id=source_fax_id,
     )
+    # The backup commits, which clears transaction-local settings.
+    mark_fax_ingest_transaction(db, run.id)
 
     conflicts: list[dict[str, Any]] = []
-    for card in cards_list:
-        if (card.source or "").startswith("fax:") and card.effective_state != "off":
-            card.effective_state = card.baseline_state
-            card.effective_location_id = card.baseline_location_id
-            card.source = "master"
-            card.version = (card.version or 0) + 1
-
     for key, location_id in effective_locations.items():
         card = cards[key]
         if card.effective_state == "off":
@@ -267,10 +261,6 @@ def apply_staged_snapshot(
                 "baselineLocationId": card.baseline_location_id,
                 "faxLocationId": location_id,
             })
-        card.effective_state = "assigned"
-        card.effective_location_id = location_id
-        card.source = f"fax:{source_fax_id}"
-        card.version = (card.version or 0) + 1
         if key in mixed_location_ids:
             conflicts.append({
                 "code": "mixed_facilities_in_session",
@@ -281,46 +271,9 @@ def apply_staged_snapshot(
                 "faxLocationIds": mixed_location_ids[key],
             })
 
-    prior_clinic = db.query(ClinicSchedule).filter(
-        ClinicSchedule.surgeon_id.in_(scope_ids),
-        ClinicSchedule.date >= start,
-        ClinicSchedule.date <= end,
-    ).all()
-    for schedule in prior_clinic:
-        if not FAX_NOTE_RE.search(schedule.notes or ""):
-            continue
-        card = cards.get((schedule.surgeon_id, schedule.date, schedule.session))
-        schedule.notes = None
-        if card:
-            schedule.location_id = card.baseline_location_id
-            if schedule.assignment_type != "off":
-                schedule.assignment_type = "assigned"
-
-    clinic_groups: dict[tuple[int, date, str], list[FaxIngestRow]] = defaultdict(list)
-    for row in rows:
-        if row.row_type == "clinic":
-            clinic_groups[(row.surgeon_id, row.case_date, row.session)].append(row)
-    clinic_updated = 0
-    for key, group in clinic_groups.items():
-        surgeon_id, day, session = key
-        schedule = db.query(ClinicSchedule).filter_by(
-            surgeon_id=surgeon_id,
-            date=day,
-            session=session,
-        ).one_or_none()
-        if not schedule:
-            schedule = ClinicSchedule(surgeon_id=surgeon_id, date=day, session=session)
-            db.add(schedule)
-        if schedule.assignment_type != "off":
-            schedule.assignment_type = "assigned"
-            schedule.location_id = effective_locations[key]
-        visits = "; ".join(
-            f"{row.start_time.strftime('%H:%M')} {row.patient_name}"
-            for row in sorted(group, key=lambda value: (value.start_time, value.patient_name))
-            if row.start_time
-        )
-        schedule.notes = f"Fax {source_fax_id} visual SOT · {visits}"
-        clinic_updated += 1
+    clinic_sessions = len({
+        (row.surgeon_id, row.case_date, row.session) for row in rows if row.row_type == "clinic"
+    })
 
     surgical_groups: dict[tuple[date, str, str, str], list[FaxIngestRow]] = defaultdict(list)
     for row in rows:
@@ -383,7 +336,7 @@ def apply_staged_snapshot(
         if assistant_id:
             assisted += 1
 
-    cancelled = 0
+    cancelled = kept_by_database = 0
     for case in existing_cases:
         if case.id in kept_case_ids or case.surgeon_id not in scope_ids:
             continue
@@ -391,9 +344,14 @@ def apply_staged_snapshot(
             continue
         case.status = "cancelled"
         case.notes = _fax_note(case.notes, source_fax_id)
+        db.flush()
+        db.refresh(case)
+        if case.status == "cancelled":
+            cancelled += 1
+        else:
+            kept_by_database += 1
         from .schedule_activity_normalization import normalize_surgical_case_card
         normalize_surgical_case_card(db, case)
-        cancelled += 1
 
     run.status = "applied"
     document.status = "applied"
@@ -404,9 +362,10 @@ def apply_staged_snapshot(
         surgeon_id=None,
         title=f"Fax {source_fax_id} daily schedule snapshot",
         body=(
-            f"Applied fax {source_fax_id} to existing cards only. "
-            f"cases created={created}, updated={updated}, cancelled={cancelled}; "
-            f"clinic sessions={clinic_updated}; conflicts={len(conflicts)}. "
+            f"Applied fax {source_fax_id} line items; block cards unchanged. "
+            f"cases created={created}, updated={updated}, cancelled={cancelled}, "
+            f"kept on unapplied days={kept_by_database}; rows skipped={skipped_rows}; "
+            f"clinic sessions={clinic_sessions}; conflicts={len(conflicts)}. "
             "No surgeon notification sent."
         ),
         payload=json.dumps({
@@ -449,10 +408,13 @@ def apply_staged_snapshot(
         "surgicalCreated": created,
         "surgicalUpdated": updated,
         "surgicalCancelled": cancelled,
+        "surgicalKeptOnUnappliedDays": kept_by_database,
+        "rowsSkipped": skipped_rows,
         "assistedCases": assisted,
-        "clinicSessionsUpdated": clinic_updated,
+        "clinicSessions": clinic_sessions,
         "baselineConflicts": conflicts,
         "cardsCreated": 0,
+        "cardsChanged": 0,
         "notificationsSent": 0,
         "derivativesRemoved": cleanup,
         "immutableSourcesRemoved": source_cleanup,

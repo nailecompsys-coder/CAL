@@ -6,7 +6,7 @@ import json
 import re
 from datetime import date, time
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from .models import (
@@ -235,6 +235,14 @@ def sync_applied_fax_clinic_activities(db: Session, run: FaxIngestRun) -> int:
         .filter(FaxIngestRow.run_id == run.id, FaxIngestRow.row_type == "clinic")
         .all()
     )
+    applicable_ids = {
+        row_id
+        for (row_id,) in db.execute(
+            text("SELECT fax_row_id FROM fax_ingest_rows_applicable WHERE run_id = :run_id"),
+            {"run_id": run.id},
+        )
+    }
+    rows = [item for item in rows if item[0].id in applicable_ids]
     if not rows:
         return 0
     surgeon_ids = {row.surgeon_id for row, _, _ in rows if row.surgeon_id}

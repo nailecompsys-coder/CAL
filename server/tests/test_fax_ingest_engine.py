@@ -9,6 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.fax_ingest_engine import ReviewedFaxRow, stage_reviewed_rows
+from app.migrate_fax_ingest import create_applicable_view
 from app.models import Base, FaxIngestRow, FaxRowDecision, Location, ScheduleCard, ScheduleCardWeek, Surgeon
 
 
@@ -16,6 +17,8 @@ class FaxIngestEngineTest(unittest.TestCase):
     def setUp(self):
         self.engine = create_engine("sqlite:///:memory:")
         Base.metadata.create_all(self.engine)
+        with self.engine.begin() as conn:
+            create_applicable_view(conn)
         self.Session = sessionmaker(bind=self.engine)
         self.db = self.Session()
         self.surgeon = Surgeon(first_name="Jorge", last_name="Florin", is_active=True, staff_type="physician")

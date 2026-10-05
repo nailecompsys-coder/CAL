@@ -105,6 +105,7 @@ def _visual_row(item: VisualFaxRowIn) -> ReviewedFaxRow:
         room=item.room or "",
         patient_name=item.patient_name.strip(),
         procedure=item.procedure or "",
+        extraction_flags=((item.notes or "").strip() or "flagged") if item.visual_confidence == "flagged" else None,
     )
 
 

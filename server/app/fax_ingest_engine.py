@@ -12,6 +12,7 @@ import re
 from dataclasses import dataclass
 from datetime import date, time
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .models import FaxDocument, FaxIngestRow, FaxIngestRun, FaxRowDecision, Location, ScheduleCard, Surgeon
@@ -38,6 +39,7 @@ class ReviewedFaxRow:
     room: str
     patient_name: str
     procedure: str = ""
+    extraction_flags: str | None = None
 
 
 @dataclass
@@ -47,6 +49,16 @@ class _PreparedRow:
     session: str
     source_location: Location | None
     card: ScheduleCard | None
+
+
+def mark_fax_ingest_transaction(db: Session, run_id: int | None = None) -> None:
+    """Postgres triggers reject AM/PM block writes for the rest of this transaction."""
+    if db.bind.dialect.name != "postgresql":
+        return
+    db.execute(
+        text("SELECT set_config('cal.writer', 'fax_ingest', true), set_config('cal.fax_run_id', :run_id, true)"),
+        {"run_id": str(run_id or "")},
+    )
 
 
 def session_for_time(value: time | None) -> str:
@@ -202,6 +214,7 @@ def stage_reviewed_rows(
     """Persist reviewed fax facts and deterministic, non-mutating card decisions."""
     if not rows:
         raise ValueError("rows required")
+    mark_fax_ingest_transaction(db)
     document = db.query(FaxDocument).filter(FaxDocument.external_fax_id == external_fax_id).one_or_none()
     if document is None:
         document = FaxDocument(external_fax_id=external_fax_id, source_label=_text(source_label) or "Desk LlamaParse extraction")
@@ -267,6 +280,7 @@ def stage_reviewed_rows(
             procedure=_text(row.procedure),
             source_location_id=item.source_location.id if item.source_location else None,
             normalized_key=_key(row),
+            extraction_flags=_text(row.extraction_flags) or None,
         )
         db.add(staged)
         db.flush()
@@ -278,6 +292,8 @@ def stage_reviewed_rows(
 
 
 def _decide(db: Session, row: FaxIngestRow) -> FaxRowDecision:
+    if row.extraction_flags:
+        return FaxRowDecision(fax_row_id=row.id, status="needs_review", reason_code="extraction_flagged", detail=f"Desk flagged this row: {row.extraction_flags}")
     if not row.surgeon_id:
         return FaxRowDecision(fax_row_id=row.id, status="needs_review", reason_code="unknown_surgeon", detail="No unique active surgeon matched the fax row.")
     card = db.query(ScheduleCard).filter(

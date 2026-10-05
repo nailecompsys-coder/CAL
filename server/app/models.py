@@ -660,6 +660,7 @@ class FaxIngestRow(Base):
     procedure = Column(Text, nullable=False, default="")
     source_location_id = Column(Integer, ForeignKey("locations.id"), nullable=True)
     normalized_key = Column(String(512), nullable=False)
+    extraction_flags = Column(Text, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
     run = relationship("FaxIngestRun", back_populates="rows")

@@ -13,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from app.fax_ingest_engine import ReviewedFaxRow, stage_reviewed_rows
 from app.fax_snapshot_service import apply_staged_snapshot
 from app.schedule_build_backup_service import revert_schedule_build_backup
+from app.migrate_fax_ingest import create_applicable_view
 from app.models import (
     Base,
     FaxDocument,
@@ -30,6 +31,8 @@ class FaxSnapshotServiceTest(unittest.TestCase):
     def setUp(self):
         self.engine = create_engine("sqlite:///:memory:")
         Base.metadata.create_all(self.engine)
+        with self.engine.begin() as conn:
+            create_applicable_view(conn)
         self.Session = sessionmaker(bind=self.engine)
         self.db = self.Session()
         self.surgeon = Surgeon(
@@ -149,12 +152,14 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         )
 
         self.assertEqual(result["cardsCreated"], 0)
+        self.assertEqual(result["cardsChanged"], 0)
         self.assertEqual(self.db.query(ScheduleCard).count(), 2)
         pm = self.db.query(ScheduleCard).filter_by(session="pm").one()
         self.assertEqual(pm.baseline_state, "na")
-        self.assertEqual(pm.effective_state, "assigned")
-        self.assertEqual(pm.effective_location_id, self.wg_or.id)
-        self.assertEqual(pm.source, "fax:191")
+        self.assertEqual(pm.effective_state, "na")
+        self.assertIsNone(pm.effective_location_id)
+        self.assertEqual(pm.source, "master")
+        self.assertEqual(pm.version, 1)
         cases = self.db.query(SurgicalCase).order_by(SurgicalCase.patient_name).all()
         self.assertEqual(len(cases), 2)
         self.assertEqual(next(row for row in cases if row.patient_name == "Old, Patient").status, "cancelled")
@@ -346,6 +351,51 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.assertEqual(len(result["cleanupErrors"]), 1)
         self.assertIn("read-only source", result["cleanupErrors"][0])
         self.assertEqual(self.db.query(SurgicalCase).filter_by(status="scheduled").count(), 1)
+
+    def _row(self, patient, day=date(2026, 9, 22), flags=None):
+        return ReviewedFaxRow(
+            page=2,
+            surgeon_initials="JF",
+            surgeon_name="Jorge Florin",
+            case_date=day,
+            start_time=time(13, 0),
+            row_type="surgical",
+            room="WGD S07",
+            patient_name=patient,
+            procedure="Test procedure",
+            extraction_flags=flags,
+        )
+
+    def test_flagged_row_is_skipped_and_the_rest_applies(self):
+        staged = stage_reviewed_rows(
+            self.db,
+            external_fax_id=191,
+            source_label="test",
+            surgeon_scope=["JF"],
+            rows=[self._row("Clean, Patient"), self._row("Smudged, Patient", flags="missing_room")],
+        )
+        self.db.commit()
+
+        result = apply_staged_snapshot(self.db, source_fax_id=191, run_id=staged["runId"])
+
+        self.assertEqual(result["rowsSkipped"], 1)
+        self.assertEqual([case.patient_name for case in self.db.query(SurgicalCase).all()], ["Clean, Patient"])
+
+    def test_row_without_existing_am_pm_slot_is_skipped_not_fatal(self):
+        staged = stage_reviewed_rows(
+            self.db,
+            external_fax_id=191,
+            source_label="test",
+            surgeon_scope=["JF"],
+            rows=[self._row("Clean, Patient"), self._row("No Slot, Patient", day=date(2026, 9, 23))],
+        )
+        self.db.commit()
+
+        result = apply_staged_snapshot(self.db, source_fax_id=191, run_id=staged["runId"])
+
+        self.assertEqual(result["rowsSkipped"], 1)
+        self.assertEqual(self.db.query(ScheduleCard).count(), 2)
+        self.assertEqual([case.patient_name for case in self.db.query(SurgicalCase).all()], ["Clean, Patient"])
 
 
 if __name__ == "__main__":

@@ -84,7 +84,7 @@ SELECT
     format(
         '%s/crops/row-%s-page-%s.png',
         :'work_dir',
-        lpad(candidate.candidate_row_id::text, 3, '0'),
+        candidate.candidate_row_id::text,
         lpad(candidate.source_page::text, 2, '0')
     ),
     'pending',

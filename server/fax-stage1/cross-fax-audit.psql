@@ -73,7 +73,7 @@ INSERT INTO fax_stage1.vision_requests (
 SELECT
     :'fax_id'::integer,
     conflict.candidate_row_id,
-    format('%s/crops/row-%s-page-%s.png', :'work_dir', lpad(conflict.candidate_row_id::text,3,'0'), lpad(row.source_page::text,2,'0')),
+    format('%s/crops/row-%s-page-%s.png', :'work_dir', conflict.candidate_row_id::text, lpad(row.source_page::text,2,'0')),
     'pending',
     conflict.fields
 FROM conflict_fields AS conflict

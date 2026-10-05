@@ -136,7 +136,7 @@ if [[ "$PENDING" -gt 0 && "$SKIP_VISION" = false && -n "${OPENAI_API_KEY:-}" ]];
       -H 'Content-Type: application/json' \
       --data-binary "@$body_path" > "$response_path"; then
       structured=$(jq -er '[.output[]?.content[]? | select(.type=="output_text") | .text] | join("") | fromjson' "$response_path") || continue
-      jq -nr --arg id "$request_id" --argjson raw "$structured" '[$id,$raw] | @csv' | \
+      jq -nr --arg id "$request_id" --arg raw "$structured" '[$id,$raw] | @csv' | \
         "${PSQL[@]}" -c "\copy fax_stage1.vision_response_import(request_id,raw_result) FROM STDIN WITH (FORMAT csv)" >/dev/null
     fi
   done < <("${PSQL[@]}" -At -F '|' -c "SELECT request_id,crop_path,array_to_string(requested_fields,',') FROM fax_stage1.vision_requests WHERE fax_id=$FAX_ID AND request_status='pending' ORDER BY request_id")

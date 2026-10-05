@@ -51,6 +51,12 @@ high-confidence SQL references resolved 67 of them, leaving 27 for vision.
 Every considered match and selected source row is recorded in
 `fax_stage1.reference_matches`; ambiguous best matches are not selected.
 
+The first live vision replay exposed two integration defects and stopped
+safely: JSON objects were not serialized as JSON text before PostgreSQL CSV
+import, and three-character `lpad` formatting truncated candidate IDs above
+999, allowing crop filenames to collide. The importer now serializes JSON
+text, and crop filenames retain the complete candidate-row identity.
+
 The OpenAI correction leg was not transmitted because no customer API key is
 available to the executable. PHI transmission requires the organization's
 approved API/healthcare agreement and retention configuration. Until that is

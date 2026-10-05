@@ -268,7 +268,7 @@ def apply_staged_snapshot(
                 "faxLocationId": location_id,
             })
             continue
-        if card.baseline_state != "assigned" or card.baseline_location_id != location_id:
+        if card.baseline_state == "assigned" and card.baseline_location_id != location_id:
             conflicts.append({
                 "code": "baseline_changed_by_epic",
                 "surgeonId": card.surgeon_id,

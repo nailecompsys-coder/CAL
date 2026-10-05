@@ -158,6 +158,7 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.assertEqual(pm.effective_state, "assigned")
         self.assertEqual(pm.effective_location_id, self.wg_or.id)
         self.assertEqual(pm.source, "fax:191")
+        self.assertFalse(any(item["code"] == "baseline_changed_by_epic" for item in result["baselineConflicts"]))
         cases = self.db.query(SurgicalCase).order_by(SurgicalCase.patient_name).all()
         self.assertEqual(len(cases), 2)
         self.assertEqual(next(row for row in cases if row.patient_name == "Old, Patient").status, "cancelled")

@@ -1,7 +1,7 @@
-"""Staging-only fax intake for the permanent schedule-card scaffold.
+"""Staging-only Desk/LlamaParse intake for the permanent card scaffold.
 
 This module has deliberately no imports from legacy schedule writers, email,
-SMS, notifications, or OR block assignment code. It records reviewed PNG/OCR
+SMS, notifications, or OR block assignment code. It records reviewed Desk
 facts and resolves each row to an already-existing AM/PM card for review.
 """
 
@@ -204,7 +204,7 @@ def stage_reviewed_rows(
         raise ValueError("rows required")
     document = db.query(FaxDocument).filter(FaxDocument.external_fax_id == external_fax_id).one_or_none()
     if document is None:
-        document = FaxDocument(external_fax_id=external_fax_id, source_label=_text(source_label) or "Desk visual PNG SOT")
+        document = FaxDocument(external_fax_id=external_fax_id, source_label=_text(source_label) or "Desk LlamaParse extraction")
         db.add(document)
         db.flush()
     scope = sorted({value.strip().upper() for value in (surgeon_scope or []) if value.strip()})

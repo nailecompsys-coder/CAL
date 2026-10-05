@@ -1,89 +1,81 @@
-# Fax Visual Ingest Procedure
+# Fax Schedule Ingest Procedure
 
-This is the locked CAL fax schedule workflow.
+This is the single supported fax schedule path. Desk owns acquisition and
+extraction; CAL accepts structured Stage 1 rows. CAL must not independently
+OCR, visually reinterpret, or reconstruct a fax.
 
-## Rule
+## Authoritative path
 
-Raw Advent/Kno2 fax PDF is rendered to one PNG per page. The page PNG visual read is the current source of truth for that fax cycle. Older fax/OCR data may be wrong and may be superseded by the newest fax.
+1. Kno2 supplies the native fax PDF to Desk in copy-only mode.
+2. Desk sends that PDF to LlamaParse using the agentic layout parser.
+3. Desk parses LlamaParse's tables into surgeon-grouped surgical and clinic
+   rows and displays those same rows for review.
+4. Desk exports or posts the rows to CAL's SQL staging tables:
+   `fax_documents`, `fax_ingest_runs`, and `fax_ingest_rows`.
+5. Stage 1 stops. No schedule card, surgical case, clinic card, notification,
+   or AM/PM placement decision is written by extraction.
+6. A separate reviewed step may match staged rows to existing permanent AM/PM
+   cards. Repeated rows from overlapping daily faxes are not overwritten.
 
-No CAL schedule write may run without a successful database backup receipt.
+LlamaParse is the primary extractor. Desk's local Tesseract parser is an
+availability fallback only; fallback output must remain flagged for review and
+must never be described as equivalent to LlamaParse output.
 
-No SMS, email, native push, or admin notification blast is sent during fax schedule cleanup. Shannon/admin communication stays separate.
+## SQL-only Stage 1 file
 
-## Procedure
-
-1. Prepare the fax:
+Generate the file from the Desk repository with Node (no CAL Python ingest):
 
 ```bash
-cd /opt/cal
-python server/scripts/fax_visual_ingest.py prepare --fax-id 162 --pdf /path/to/fax.pdf --workdir /tmp/fax-162-visual
+cd "/opt/desk"
+node src/scripts/export-fax-stage1-sql.js 245 /tmp/fax-245-llamaparse-stage1.sql --live
 ```
 
-This creates:
+Review row totals and the SQL file before loading it. The generated transaction:
 
-- `/tmp/fax-162-visual/pages/page-XX.png`
-- `/tmp/fax-162-visual/ocr/page-XX.txt`
-- `/tmp/fax-162-visual/visual_temp.sqlite`
+- creates a session-local import table;
+- records or reuses the immutable fax document;
+- creates one `desk-llamaparse-stage1-v1` ingest run;
+- inserts only `fax_ingest_rows` with `surgeon_id` and `source_location_id` left
+  null;
+- returns surgical and clinic row counts;
+- does not insert `fax_row_decisions` or touch schedule tables.
 
-2. Review the page PNGs and OCR text.
+Load it on the CAL database host only after review:
 
-The reviewed rows must be saved as JSON at:
+```bash
+psql "$DATABASE_URL" -f /tmp/fax-245-llamaparse-stage1.sql
+```
+
+## Desk API handoff
+
+Desk's reviewed **Send to CAL** action posts the same Stage 1 fields to:
 
 ```text
-/tmp/fax-162-visual/reviewed_rows.json
+POST /api/ingest/visual-schedule
 ```
 
-Each row must contain:
+The old `/api/ingest/surgeon-schedule` and `/api/ingest/surgical-cases`
+writers are retired and must not be restored. The current endpoint stages facts
+and decisions for review; it does not silently create schedule cards.
 
-- `fax_id`
-- `page`
-- `surgeon_initials`
-- `surgeon_name`
-- `case_date`
-- `start_time`
-- `row_type`: `surgical` or `clinic`
-- `room`
-- `patient_name`
-- `procedure`
+## Required row fields
 
-3. Stage reviewed rows:
+- source fax ID and page number when available
+- surgeon initials and full display name
+- date and time
+- row type: `surgical` or `clinic`
+- room/site
+- patient name
+- procedure or visit type
 
-```bash
-python server/scripts/fax_visual_ingest.py stage --workdir /tmp/fax-162-visual
-```
+DOB is deliberately excluded from schedule staging.
 
-4. Generate reports:
+## Duplicate and unresolved rules
 
-```bash
-python server/scripts/fax_visual_ingest.py report --workdir /tmp/fax-162-visual
-```
-
-This creates:
-
-- `duplicate_first_report.md`
-- `overlay_report.json`
-
-5. Apply only after reviewing reports:
-
-```bash
-python server/scripts/fax_visual_ingest.py apply --workdir /tmp/fax-162-visual --backup-dir /tmp/cal-fax-backups --yes
-```
-
-The apply step refuses to run unless backup succeeds first.
-
-## Write Guardrails
-
-- Same patient and date updates the existing CAL row. This handles daily schedule creep.
-- Exact same patient/date/time/room under multiple surgeons is treated as shared/assist, not a conflict.
-- Active co-surgeon pairs decide primary/assistant when configured.
-- Without a configured pair, the first listed surgeon is primary and the second is assisting.
-- `AHMGGENSRG` is a placeholder clinic room and is not mapped to a new CAL location.
-- CBO/Surgery One remains Aprima-only.
-- Clinic rows are added to one clinic card per surgeon/date/session, not one card per patient.
-- Surgical rows can be written without a matching static block, but they are red-flagged internally so the static board can be corrected.
-- All writes add internal provenance notes and an internal `schedule_change_events` row.
-- The write path does not create `native_schedule_alerts` or `admin_notifications`.
-
-## Rollback
-
-Every apply creates a database dump first. If a fax import must be reversed, restore from the backup created by that apply or write a targeted revert using the internal fax provenance.
+- Daily faxes overlap. Preserve staged history; do not overwrite prior fax rows.
+- Exact duplicates within one ingest run are ignored by the run/key constraint.
+- A later matching process may use patient, procedure, surgeon, date, time,
+  location, and prior fax evidence to resolve a damaged field.
+- If evidence is insufficient, ingest the row and leave it unresolved.
+- A missing patient on a later fax is not automatically a cancellation and does
+  not authorize deletion from a permanent card.

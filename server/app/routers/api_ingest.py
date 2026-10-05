@@ -1,7 +1,7 @@
-"""Service-to-service Desk ingest using the visual fax SOT path only.
+"""Service-to-service staging for reviewed Desk/LlamaParse schedule rows.
 
 Auth: Authorization: Bearer <CAL_INGEST_TOKEN> (or CAL_API_TOKEN).
-Desk must send reviewed PNG/OCR rows. Legacy parser payloads are retired and
+Desk must send reviewed structured rows. Legacy parser payloads are retired and
 cannot write CAL schedules.
 """
 
@@ -57,7 +57,7 @@ class VisualFaxRowIn(BaseModel):
 
 class VisualScheduleBatch(BaseModel):
     source_fax_id: int
-    source_label: str = "Desk visual PNG SOT"
+    source_label: str = "Desk LlamaParse extraction"
     backup_label: str | None = None
     surgeon_scope: list[str] = Field(default_factory=list)
     rows: list[VisualFaxRowIn] = Field(default_factory=list)
@@ -143,7 +143,7 @@ def ingest_visual_schedule_route(
     db: Session = Depends(get_db),
     _: None = Depends(require_ingest_token),
 ) -> dict[str, Any]:
-    """Desk reviewed-PNG/OCR staging path.
+    """Desk reviewed LlamaParse-row staging path.
 
     This route deliberately cannot write schedule cards, legacy schedules, or
     notifications. It records facts and returns placement decisions only.
@@ -197,7 +197,7 @@ def apply_fax_snapshot_route(
 def retired_surgical_cases_route(_: None = Depends(require_ingest_token)) -> None:
     raise HTTPException(
         410,
-        "Retired. Desk must use /api/ingest/visual-schedule with reviewed PNG/OCR rows.",
+        "Retired. Desk must use /api/ingest/visual-schedule with reviewed LlamaParse rows.",
     )
 
 
@@ -205,5 +205,5 @@ def retired_surgical_cases_route(_: None = Depends(require_ingest_token)) -> Non
 def retired_surgeon_schedule_route(_: None = Depends(require_ingest_token)) -> None:
     raise HTTPException(
         410,
-        "Retired. Desk must use /api/ingest/visual-schedule with reviewed PNG/OCR rows.",
+        "Retired. Desk must use /api/ingest/visual-schedule with reviewed LlamaParse rows.",
     )

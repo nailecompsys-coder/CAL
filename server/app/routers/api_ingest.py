@@ -8,17 +8,15 @@ cannot write CAL schedules.
 from __future__ import annotations
 
 import os
-import subprocess
 from datetime import date, time
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..fax_ingest_engine import ReviewedFaxRow, stage_reviewed_rows
-from ..fax_pdf_intake import prepare_fax_pdf
 from ..fax_snapshot_service import apply_staged_snapshot
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
@@ -66,33 +64,6 @@ class VisualScheduleBatch(BaseModel):
 class SnapshotApplyIn(BaseModel):
     run_id: int
     confirm_authoritative_snapshot: bool = False
-
-
-@router.post("/fax/{source_fax_id:int}/prepare")
-def prepare_fax_route(
-    source_fax_id: int,
-    fax_pdf: UploadFile = File(...),
-    source_label: str = Form("Kno2 raw fax PDF"),
-    db: Session = Depends(get_db),
-    _: None = Depends(require_ingest_token),
-) -> dict[str, Any]:
-    """Persist and verify a raw fax PDF. This endpoint cannot write schedules."""
-    try:
-        result = prepare_fax_pdf(
-            db,
-            external_fax_id=source_fax_id,
-            original_filename=fax_pdf.filename or "fax.pdf",
-            source=fax_pdf.file,
-            source_label=source_label,
-        )
-        db.commit()
-        return {"ok": True, "result": result}
-    except ValueError as exc:
-        db.rollback()
-        raise HTTPException(400, str(exc)) from exc
-    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
-        db.rollback()
-        raise HTTPException(500, f"Fax preparation failed: {exc}") from exc
 
 
 def _parse_day(raw: str) -> date:

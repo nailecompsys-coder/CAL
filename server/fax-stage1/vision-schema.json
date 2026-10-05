@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "patient_name": {"type": ["string", "null"]},
+    "source_patient_id": {"type": ["string", "null"]},
+    "patient_dob": {"type": ["string", "null"], "description": "YYYY-MM-DD"},
+    "activity_date": {"type": ["string", "null"], "description": "YYYY-MM-DD"},
+    "start_time": {"type": ["string", "null"], "description": "HH:MM in 24-hour time"},
+    "procedure_text": {"type": ["string", "null"]},
+    "room_text": {"type": ["string", "null"]},
+    "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+    "uncertain_fields": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["patient_name", "source_patient_id", "patient_dob", "activity_date", "start_time", "procedure_text", "room_text"]
+      }
+    }
+  },
+  "required": ["patient_name", "source_patient_id", "patient_dob", "activity_date", "start_time", "procedure_text", "room_text", "confidence", "uncertain_fields"]
+}

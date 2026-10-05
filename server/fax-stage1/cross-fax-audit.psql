@@ -1,0 +1,107 @@
+\set ON_ERROR_STOP on
+
+BEGIN;
+
+WITH repeated AS (
+    SELECT
+        source_patient_id,
+        activity_date,
+        count(DISTINCT fax_id) AS fax_count,
+        count(DISTINCT upper(regexp_replace(patient_name, '[^[:alnum:]]+', '', 'g')))
+            FILTER (WHERE patient_name IS NOT NULL) AS name_values,
+        count(DISTINCT patient_dob) FILTER (WHERE patient_dob IS NOT NULL) AS dob_values,
+        count(DISTINCT start_time) FILTER (WHERE start_time IS NOT NULL) AS time_values,
+        count(DISTINCT lower(regexp_replace(procedure_text, '[^a-z0-9]+', '', 'g'))) FILTER (WHERE procedure_text IS NOT NULL) AS procedure_values,
+        count(DISTINCT upper(regexp_replace(room_text, '[^A-Z0-9]+', '', 'g'))) FILTER (WHERE room_text IS NOT NULL) AS room_values
+    FROM fax_stage1.resolved_rows
+    WHERE source_patient_id IS NOT NULL
+      AND activity_date IS NOT NULL
+    GROUP BY source_patient_id, activity_date
+    HAVING count(DISTINCT fax_id) > 1
+), issues AS (
+    SELECT
+        row.candidate_row_id,
+        row.fax_id,
+        row.section_id,
+        row.source_page,
+        array_remove(ARRAY[
+            CASE WHEN repeated.name_values > 1 THEN 'patient_name' END,
+            CASE WHEN repeated.dob_values > 1 THEN 'patient_dob' END,
+            CASE WHEN repeated.time_values > 1 THEN 'start_time' END,
+            CASE WHEN repeated.procedure_values > 1 THEN 'procedure_text' END,
+            CASE WHEN repeated.room_values > 1 THEN 'room_text' END
+        ], NULL) AS fields
+    FROM fax_stage1.resolved_rows AS row
+    JOIN repeated USING (source_patient_id, activity_date)
+    WHERE row.fax_id = :'fax_id'::integer
+)
+INSERT INTO fax_stage1.defects (
+    fax_id, source_page, section_id, candidate_row_id,
+    defect_code, defect_detail, severity
+)
+SELECT
+    issue.fax_id,
+    issue.source_page,
+    issue.section_id,
+    issue.candidate_row_id,
+    'cross_fax_' || field || '_conflict',
+    format('The same patient identifier and activity date disagree across immutable faxes for %s.', field),
+    'blocking'
+FROM issues AS issue
+CROSS JOIN LATERAL unnest(issue.fields) AS field
+WHERE cardinality(issue.fields) > 0
+  AND NOT EXISTS (
+      SELECT 1 FROM fax_stage1.defects AS existing
+      WHERE existing.fax_id=issue.fax_id
+        AND existing.candidate_row_id=issue.candidate_row_id
+        AND existing.defect_code='cross_fax_' || field || '_conflict'
+  );
+
+WITH conflict_fields AS (
+    SELECT
+        candidate_row_id,
+        array_agg(DISTINCT replace(replace(defect_code, 'cross_fax_', ''), '_conflict', '')) AS fields
+    FROM fax_stage1.defects
+    WHERE fax_id = :'fax_id'::integer
+      AND defect_status = 'open'
+      AND defect_code LIKE 'cross_fax_%_conflict'
+    GROUP BY candidate_row_id
+)
+INSERT INTO fax_stage1.vision_requests (
+    fax_id, candidate_row_id, crop_path, request_status, requested_fields
+)
+SELECT
+    :'fax_id'::integer,
+    conflict.candidate_row_id,
+    format('%s/crops/row-%s-page-%s.png', :'work_dir', lpad(conflict.candidate_row_id::text,3,'0'), lpad(row.source_page::text,2,'0')),
+    'pending',
+    conflict.fields
+FROM conflict_fields AS conflict
+JOIN fax_stage1.resolved_rows AS row USING (candidate_row_id)
+ON CONFLICT (fax_id, candidate_row_id) DO UPDATE
+SET requested_fields = ARRAY(
+        SELECT DISTINCT value
+        FROM unnest(fax_stage1.vision_requests.requested_fields || excluded.requested_fields) AS value
+    ),
+    request_status = 'pending';
+
+UPDATE fax_stage1.resolved_rows AS row
+SET resolution_status = 'unresolved',
+    resolution_method = 'awaiting_cross_fax_vision',
+    unresolved_fields = ARRAY(
+        SELECT DISTINCT value
+        FROM unnest(row.unresolved_fields || conflict.fields) AS value
+    )
+FROM (
+    SELECT
+        candidate_row_id,
+        array_agg(DISTINCT replace(replace(defect_code, 'cross_fax_', ''), '_conflict', '')) AS fields
+    FROM fax_stage1.defects
+    WHERE fax_id = :'fax_id'::integer
+      AND defect_status = 'open'
+      AND defect_code LIKE 'cross_fax_%_conflict'
+    GROUP BY candidate_row_id
+) AS conflict
+WHERE row.candidate_row_id = conflict.candidate_row_id;
+
+COMMIT;

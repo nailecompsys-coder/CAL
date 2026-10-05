@@ -1,0 +1,27 @@
+\set ON_ERROR_STOP on
+
+BEGIN;
+DELETE FROM fax_stage1.ocr_lines WHERE fax_id = :'fax_id'::integer;
+
+INSERT INTO fax_stage1.ocr_lines (
+    fax_id, fax_page, block_num, par_num, line_num, left_px, top_px,
+    width_px, height_px, confidence, raw_text
+)
+SELECT
+    fax_id,
+    fax_page,
+    block_num,
+    par_num,
+    line_num,
+    min(left_px),
+    min(top_px),
+    max(left_px + width_px) - min(left_px),
+    max(top_px + height_px) - min(top_px),
+    round(avg(confidence) FILTER (WHERE confidence >= 0), 1),
+    string_agg(token_text, ' ' ORDER BY word_num)
+FROM fax_stage1.ocr_tokens
+WHERE fax_id = :'fax_id'::integer
+  AND level = 5
+  AND nullif(token_text, '') IS NOT NULL
+GROUP BY fax_id, fax_page, block_num, par_num, line_num;
+COMMIT;

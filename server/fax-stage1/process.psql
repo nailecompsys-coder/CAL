@@ -1,0 +1,388 @@
+-- Convert complete fax OCR tokens into surgeon sections and candidate rows.
+-- This file does not reference operational schedule tables.
+
+BEGIN;
+
+CREATE OR REPLACE FUNCTION fax_stage1.safe_mdy(raw_value text)
+RETURNS date
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+DECLARE
+    pieces text[];
+    month_value integer;
+    day_value integer;
+    year_value integer;
+    parsed date;
+BEGIN
+    IF raw_value IS NULL OR raw_value !~ '^[0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4}$' THEN
+        RETURN NULL;
+    END IF;
+    pieces := string_to_array(raw_value, '/');
+    month_value := pieces[1]::integer;
+    day_value := pieces[2]::integer;
+    year_value := pieces[3]::integer;
+    IF length(pieces[3]) = 2 THEN
+        year_value := 2000 + year_value;
+    END IF;
+    parsed := make_date(year_value, month_value, day_value);
+    RETURN parsed;
+EXCEPTION WHEN OTHERS THEN
+    RETURN NULL;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION fax_stage1.safe_hhmm(raw_value text)
+RETURNS time
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+DECLARE
+    hour_value integer;
+    minute_value integer;
+BEGIN
+    IF raw_value IS NULL OR raw_value !~ '^[0-9]{4}$' THEN
+        RETURN NULL;
+    END IF;
+    hour_value := substring(raw_value, 1, 2)::integer;
+    minute_value := substring(raw_value, 3, 2)::integer;
+    IF hour_value > 23 OR minute_value > 59 THEN
+        RETURN NULL;
+    END IF;
+    RETURN make_time(hour_value, minute_value, 0);
+END;
+$$;
+
+DELETE FROM fax_stage1.vision_results
+WHERE request_id IN (SELECT request_id FROM fax_stage1.vision_requests WHERE fax_id = :'fax_id'::integer);
+DELETE FROM fax_stage1.vision_response_import
+WHERE request_id IN (SELECT request_id FROM fax_stage1.vision_requests WHERE fax_id = :'fax_id'::integer);
+DELETE FROM fax_stage1.vision_requests WHERE fax_id = :'fax_id'::integer;
+DELETE FROM fax_stage1.defects WHERE fax_id = :'fax_id'::integer;
+DELETE FROM fax_stage1.resolved_rows WHERE fax_id = :'fax_id'::integer;
+DELETE FROM fax_stage1.candidate_rows WHERE fax_id = :'fax_id'::integer;
+DELETE FROM fax_stage1.page_sections WHERE fax_id = :'fax_id'::integer;
+DELETE FROM fax_stage1.surgeon_sections WHERE fax_id = :'fax_id'::integer;
+
+WITH headers AS (
+    SELECT
+        fax_id,
+        fax_page AS start_page,
+        raw_text AS header_text,
+        confidence AS header_confidence,
+        substring(raw_text FROM 'Surgeon:\s*(.+),\s*(?:MD|DO)') AS surgeon_name_ocr,
+        row_number() OVER (PARTITION BY fax_id ORDER BY fax_page) AS section_number,
+        lead(
+            fax_page,
+            1,
+            (SELECT source_page_count + 1 FROM fax_stage1.documents WHERE fax_id = :'fax_id'::integer)
+        ) OVER (PARTITION BY fax_id ORDER BY fax_page) - 1 AS end_page
+    FROM fax_stage1.ocr_lines
+    WHERE fax_id = :'fax_id'::integer
+      AND raw_text ~* 'Surgeon:\s*.+,\s*(MD|DO)'
+)
+INSERT INTO fax_stage1.surgeon_sections (
+    fax_id, section_number, surgeon_name_ocr, start_page, end_page,
+    header_text, header_confidence, review_status, review_issues
+)
+SELECT
+    fax_id,
+    section_number,
+    btrim(surgeon_name_ocr),
+    start_page,
+    end_page,
+    header_text,
+    header_confidence,
+    CASE WHEN surgeon_name_ocr IS NULL OR header_confidence < 70 THEN 'needs_review' ELSE 'ready' END,
+    array_remove(ARRAY[
+        CASE WHEN surgeon_name_ocr IS NULL THEN 'unreadable_surgeon_header' END,
+        CASE WHEN header_confidence < 70 THEN 'low_header_confidence' END
+    ], NULL)
+FROM headers
+ORDER BY section_number;
+
+INSERT INTO fax_stage1.page_sections (fax_id, page_number, section_id)
+SELECT
+    page.fax_id,
+    page.page_number,
+    section.section_id
+FROM fax_stage1.pages AS page
+LEFT JOIN fax_stage1.surgeon_sections AS section
+  ON section.fax_id = page.fax_id
+ AND page.page_number BETWEEN section.start_page AND section.end_page
+WHERE page.fax_id = :'fax_id'::integer;
+
+UPDATE fax_stage1.pages AS page
+SET page_kind = CASE
+    WHEN page.page_number = 1 THEN 'cover'
+    WHEN mapping.section_id IS NOT NULL THEN 'schedule'
+    ELSE 'unclassified'
+END
+FROM fax_stage1.page_sections AS mapping
+WHERE mapping.fax_id = page.fax_id
+  AND mapping.page_number = page.page_number;
+
+WITH row_start_lines AS (
+    SELECT
+        line.*,
+        mapping.section_id,
+        section.surgeon_name_ocr,
+        page.width_px AS page_width,
+        CASE
+            WHEN line.raw_text ~ '\m[0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4}\M.*\m[0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4}\M'
+             AND line.raw_text !~* 'Start Date:.*End Date:'
+            THEN 1 ELSE 0
+        END AS is_row_start
+    FROM fax_stage1.ocr_lines AS line
+    JOIN fax_stage1.page_sections AS mapping
+      ON mapping.fax_id = line.fax_id
+     AND mapping.page_number = line.fax_page
+    JOIN fax_stage1.surgeon_sections AS section
+      ON section.section_id = mapping.section_id
+    JOIN fax_stage1.pages AS page
+      ON page.fax_id = line.fax_id
+     AND page.page_number = line.fax_page
+    WHERE line.fax_id = :'fax_id'::integer
+), numbered_lines AS (
+    SELECT
+        line.*,
+        sum(is_row_start) OVER (
+            PARTITION BY section_id
+            ORDER BY fax_page, top_px, left_px
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+        ) AS section_row_number
+    FROM row_start_lines AS line
+), row_bounds AS (
+    SELECT
+        section_id,
+        section_row_number,
+        min(fax_page) FILTER (WHERE is_row_start = 1) AS source_page,
+        min(top_px) FILTER (WHERE is_row_start = 1) AS source_top_px,
+        max(surgeon_name_ocr) AS surgeon_name,
+        max(page_width) AS page_width
+    FROM numbered_lines
+    WHERE section_row_number > 0
+    GROUP BY section_id, section_row_number
+), bounded AS (
+    SELECT
+        bounds.*,
+        coalesce(
+            lead(source_top_px) OVER (PARTITION BY section_id, source_page ORDER BY section_row_number),
+            1000000
+        ) AS source_bottom_px
+    FROM row_bounds AS bounds
+), section_layout AS (
+    SELECT
+        mapping.section_id,
+        coalesce(
+            min(token.left_px / page.width_px::numeric) FILTER (WHERE lower(token.token_text) = 'room'),
+            0.84
+        ) AS room_x,
+        coalesce(
+            min(token.left_px / page.width_px::numeric) FILTER (WHERE lower(token.token_text) = 'procedure'),
+            min(token.left_px / page.width_px::numeric) FILTER (WHERE lower(token.token_text) = 'room') - 0.29
+        ) AS procedure_x,
+        coalesce(
+            min(token.left_px / page.width_px::numeric) FILTER (WHERE lower(token.token_text) = 'time'),
+            min(token.left_px / page.width_px::numeric) FILTER (WHERE lower(token.token_text) = 'procedure') - 0.065,
+            min(token.left_px / page.width_px::numeric) FILTER (WHERE lower(token.token_text) = 'room') - 0.355
+        ) AS time_x
+    FROM fax_stage1.page_sections AS mapping
+    JOIN fax_stage1.pages AS page
+      ON page.fax_id = mapping.fax_id
+     AND page.page_number = mapping.page_number
+    JOIN fax_stage1.ocr_tokens AS token
+      ON token.fax_id = page.fax_id
+     AND token.fax_page = page.page_number
+    WHERE mapping.section_id IS NOT NULL
+      AND lower(token.token_text) IN ('time', 'procedure', 'room')
+      AND token.top_px < 650
+    GROUP BY mapping.section_id
+), row_tokens AS (
+    SELECT
+        bounds.section_id,
+        bounds.section_row_number,
+        bounds.source_page,
+        bounds.source_top_px,
+        bounds.source_bottom_px,
+        bounds.surgeon_name,
+        bounds.page_width,
+        layout.time_x,
+        layout.procedure_x,
+        layout.room_x,
+        token.*
+    FROM bounded AS bounds
+    JOIN section_layout AS layout
+      ON layout.section_id = bounds.section_id
+    JOIN fax_stage1.ocr_tokens AS token
+      ON token.fax_id = :'fax_id'::integer
+     AND (
+          (
+              token.fax_page = bounds.source_page
+              AND token.top_px >= bounds.source_top_px
+              AND token.top_px < bounds.source_bottom_px
+          )
+          OR (
+              bounds.source_bottom_px = 1000000
+              AND token.fax_page = bounds.source_page + 1
+              AND token.top_px >= 200
+              AND token.top_px < coalesce(
+                  (
+                      SELECT min(next_bounds.source_top_px)
+                      FROM bounded AS next_bounds
+                      WHERE next_bounds.section_id = bounds.section_id
+                        AND next_bounds.source_page = bounds.source_page + 1
+                  ),
+                  1000000
+              )
+              AND EXISTS (
+                  SELECT 1
+                  FROM fax_stage1.page_sections AS next_mapping
+                  WHERE next_mapping.fax_id = :'fax_id'::integer
+                    AND next_mapping.page_number = bounds.source_page + 1
+                    AND next_mapping.section_id = bounds.section_id
+              )
+          )
+     )
+), row_anchors AS (
+    SELECT
+        section_id,
+        section_row_number,
+        (array_agg(left_px ORDER BY left_px) FILTER (
+            WHERE token_text ~ '[0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4}'
+              AND left_px / page_width::numeric < time_x
+        ))[1] AS dob_x_px,
+        (array_agg(substring(token_text FROM '[0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4}') ORDER BY left_px) FILTER (
+            WHERE token_text ~ '[0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4}'
+              AND left_px / page_width::numeric < time_x
+        ))[1] AS patient_dob_ocr,
+        (array_agg(substring(token_text FROM '[0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4}') ORDER BY left_px) FILTER (
+            WHERE token_text ~ '[0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4}'
+              AND left_px / page_width::numeric < time_x
+        ))[2] AS activity_date_ocr,
+        (array_agg(left_px ORDER BY left_px) FILTER (
+            WHERE token_text ~ '[0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4}'
+              AND left_px / page_width::numeric < time_x
+        ))[2] AS activity_x_px
+    FROM row_tokens
+    GROUP BY section_id, section_row_number
+), assembled AS (
+    SELECT
+        section_id,
+        section_row_number,
+        source_page,
+        source_top_px,
+        source_bottom_px,
+        surgeon_name,
+        anchor.patient_dob_ocr,
+        anchor.activity_date_ocr,
+        string_agg(token_text, ' ' ORDER BY fax_page, block_num, par_num, line_num, word_num)
+            FILTER (
+                WHERE left_px / page_width::numeric >= 0.09
+                  AND left_px < anchor.dob_x_px
+                  AND token_text !~ '[0-9\[\]{}]'
+            ) AS patient_name_ocr,
+        string_agg(token_text, ' ' ORDER BY fax_page, block_num, par_num, line_num, word_num)
+            FILTER (
+                WHERE left_px / page_width::numeric >= 0.09
+                  AND left_px / page_width::numeric < time_x
+                  AND token_text ~ '[\[\]{][0-9]'
+            ) AS source_patient_id_ocr,
+        (array_agg(token_text ORDER BY left_px, top_px) FILTER (
+            WHERE left_px > anchor.activity_x_px
+              AND left_px / page_width::numeric < procedure_x
+        ))[1] AS start_time_ocr,
+        string_agg(token_text, ' ' ORDER BY fax_page, block_num, par_num, line_num, word_num)
+            FILTER (
+                WHERE left_px / page_width::numeric >= procedure_x - 0.015
+                  AND left_px / page_width::numeric < room_x - 0.005
+                  AND token_text !~ '[\[\]{}]'
+            ) AS procedure_ocr,
+        string_agg(token_text, ' ' ORDER BY fax_page, block_num, par_num, line_num, word_num)
+            FILTER (WHERE left_px / page_width::numeric >= room_x - 0.005) AS room_ocr,
+        round(avg(confidence) FILTER (
+            WHERE left_px / page_width::numeric >= 0.09
+              AND token_text !~ '[\[\]{}]'
+        ), 1) AS ocr_confidence,
+        string_agg(token_text, ' ' ORDER BY fax_page, block_num, par_num, line_num, word_num) AS source_text
+    FROM row_tokens
+    JOIN row_anchors AS anchor
+      USING (section_id, section_row_number)
+    GROUP BY
+        section_id, section_row_number, source_page, source_top_px,
+        source_bottom_px, surgeon_name, anchor.patient_dob_ocr,
+        anchor.activity_date_ocr, anchor.dob_x_px, anchor.activity_x_px
+), normalized AS (
+    SELECT
+        assembled.*,
+        btrim(regexp_replace(coalesce(patient_name_ocr, ''), '^[^[:alpha:]]+', '')) AS patient_name,
+        nullif(regexp_replace(coalesce(source_patient_id_ocr, ''), '[^0-9]', '', 'g'), '') AS source_patient_id,
+        CASE
+            WHEN fax_stage1.safe_mdy(patient_dob_ocr) >
+                 (SELECT created_at::date FROM fax_stage1.documents WHERE fax_id = :'fax_id'::integer)
+            THEN (fax_stage1.safe_mdy(patient_dob_ocr) - INTERVAL '100 years')::date
+            ELSE fax_stage1.safe_mdy(patient_dob_ocr)
+        END AS patient_dob,
+        fax_stage1.safe_mdy(activity_date_ocr) AS activity_date,
+        fax_stage1.safe_hhmm(start_time_ocr) AS start_time,
+        btrim(regexp_replace(coalesce(procedure_ocr, ''), '^[^[:alnum:]]+', '')) AS procedure_text,
+        btrim(coalesce(room_ocr, '')) AS room_text
+    FROM assembled
+), classified AS (
+    SELECT
+        normalized.*,
+        CASE
+            WHEN start_time < TIME '12:00' THEN 'am'
+            WHEN start_time IS NOT NULL THEN 'pm'
+        END AS session,
+        CASE
+            WHEN upper(room_text) ~ '(CLMMFLGS|MGALTGS|MGWGDGS|AHMGGENSRG|MGLKMGENSURG|MGORLGSDLGIO)' THEN 'clinic'
+            WHEN upper(room_text) ~ '(ENDO|OSOR)' THEN 'surgical'
+            WHEN upper(room_text) ~ '\m(WGD|MIN|ALT|APK|AP|AL|MN|WG)\M.*\mS[0-9]+' THEN 'surgical'
+            ELSE 'needs_review'
+        END AS activity_type
+    FROM normalized
+), reviewed AS (
+    SELECT
+        classified.*,
+        array_remove(ARRAY[
+            CASE WHEN nullif(patient_name, '') IS NULL THEN 'missing_patient' END,
+            CASE WHEN patient_name_ocr ~ '[=_]' THEN 'patient_ocr_noise' END,
+            CASE WHEN source_patient_id IS NULL THEN 'missing_source_patient_id' END,
+            CASE WHEN patient_dob IS NULL THEN 'invalid_patient_dob' END,
+            CASE WHEN activity_date IS NULL THEN 'invalid_activity_date' END,
+            CASE WHEN start_time IS NULL THEN 'invalid_start_time' END,
+            CASE WHEN nullif(procedure_text, '') IS NULL THEN 'missing_procedure' END,
+            CASE WHEN procedure_text <> btrim(coalesce(procedure_ocr, '')) THEN 'procedure_ocr_noise' END,
+            CASE WHEN nullif(room_text, '') IS NULL THEN 'missing_room' END,
+            CASE WHEN activity_type = 'needs_review' THEN 'unclassified_activity' END,
+            CASE WHEN ocr_confidence < 75 THEN 'low_ocr_confidence' END
+        ], NULL) AS issues
+    FROM classified
+)
+INSERT INTO fax_stage1.candidate_rows (
+    fax_id, section_id, section_row_number, source_page, source_top_px,
+    source_bottom_px, surgeon_name, patient_name_ocr, source_patient_id_ocr,
+    patient_dob_ocr, activity_date_ocr, start_time_ocr, procedure_ocr,
+    room_ocr, patient_name, source_patient_id, patient_dob, activity_date,
+    start_time, session, activity_type, procedure_text, room_text,
+    ocr_confidence, review_status, review_issues, source_text
+)
+SELECT
+    :'fax_id'::integer, section_id, section_row_number, source_page, source_top_px,
+    source_bottom_px, surgeon_name, patient_name_ocr, source_patient_id_ocr,
+    patient_dob_ocr, activity_date_ocr, start_time_ocr, procedure_ocr,
+    room_ocr, patient_name, source_patient_id, patient_dob, activity_date,
+    start_time, session, activity_type, procedure_text, room_text,
+    ocr_confidence,
+    CASE WHEN cardinality(issues) = 0 THEN 'ready' ELSE 'needs_review' END,
+    issues,
+    source_text
+FROM reviewed
+ORDER BY section_id, section_row_number;
+
+UPDATE fax_stage1.documents
+SET status = 'candidates_built'
+WHERE fax_id = :'fax_id'::integer;
+
+COMMIT;

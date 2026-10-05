@@ -1,0 +1,128 @@
+-- Build one fax's Stage 1 defect ledger, flagged-only vision queue, and
+-- pre-card resolved/unresolved handoff table.  No operational card tables are
+-- referenced by this file.
+
+BEGIN;
+
+DELETE FROM fax_stage1.vision_results
+WHERE request_id IN (SELECT request_id FROM fax_stage1.vision_requests WHERE fax_id = :'fax_id'::integer);
+DELETE FROM fax_stage1.vision_response_import
+WHERE request_id IN (SELECT request_id FROM fax_stage1.vision_requests WHERE fax_id = :'fax_id'::integer);
+DELETE FROM fax_stage1.vision_requests WHERE fax_id = :'fax_id'::integer;
+DELETE FROM fax_stage1.defects WHERE fax_id = :'fax_id'::integer;
+DELETE FROM fax_stage1.resolved_rows WHERE fax_id = :'fax_id'::integer;
+
+-- Every remaining field-level OCR/reconstruction issue gets its own ledger row.
+INSERT INTO fax_stage1.defects (
+    fax_id, source_page, section_id, candidate_row_id,
+    defect_code, defect_detail, severity
+)
+SELECT
+    candidate.fax_id,
+    candidate.source_page,
+    candidate.section_id,
+    candidate.candidate_row_id,
+    issue,
+    format('OCR row requires review: %s', candidate.source_text),
+    CASE
+        WHEN issue IN (
+            'invalid_patient_dob', 'invalid_activity_date', 'invalid_start_time',
+            'missing_source_patient_id'
+        ) THEN 'blocking'
+        ELSE 'warning'
+    END
+FROM fax_stage1.candidate_rows AS candidate
+CROSS JOIN LATERAL unnest(candidate.review_issues) AS issue
+WHERE candidate.fax_id = :'fax_id'::integer;
+
+-- Preserve same-fax duplicate identities as separate rows; never collapse or
+-- overwrite them during Stage 1.
+WITH duplicate_keys AS (
+    SELECT source_patient_id, activity_date, start_time
+    FROM fax_stage1.candidate_rows
+    WHERE fax_id = :'fax_id'::integer
+      AND source_patient_id IS NOT NULL
+      AND activity_date IS NOT NULL
+      AND start_time IS NOT NULL
+    GROUP BY source_patient_id, activity_date, start_time
+    HAVING count(*) > 1
+)
+INSERT INTO fax_stage1.defects (
+    fax_id, source_page, section_id, candidate_row_id,
+    defect_code, defect_detail, severity
+)
+SELECT
+    candidate.fax_id,
+    candidate.source_page,
+    candidate.section_id,
+    candidate.candidate_row_id,
+    'duplicate_case_key_within_fax',
+    format(
+        'Retained without merge: patient_id=%s activity_date=%s start_time=%s surgeon=%s',
+        candidate.source_patient_id, candidate.activity_date,
+        candidate.start_time, candidate.surgeon_name
+    ),
+    'warning'
+FROM fax_stage1.candidate_rows AS candidate
+JOIN duplicate_keys USING (source_patient_id, activity_date, start_time)
+WHERE candidate.fax_id = :'fax_id'::integer;
+
+UPDATE fax_stage1.defects
+SET defect_status = 'accepted',
+    resolution_detail = 'Both fax rows are retained independently; Stage 1 does not merge or overwrite duplicate identities.',
+    resolved_at = now()
+WHERE fax_id = :'fax_id'::integer
+  AND defect_code = 'duplicate_case_key_within_fax';
+
+INSERT INTO fax_stage1.vision_requests (
+    fax_id, candidate_row_id, crop_path, request_status, requested_fields
+)
+SELECT
+    candidate.fax_id,
+    candidate.candidate_row_id,
+    format(
+        '%s/crops/row-%s-page-%s.png',
+        :'work_dir',
+        lpad(candidate.candidate_row_id::text, 3, '0'),
+        lpad(candidate.source_page::text, 2, '0')
+    ),
+    'pending',
+    CASE
+        WHEN 'low_ocr_confidence' = ANY(candidate.review_issues) THEN
+            ARRAY['patient_name','source_patient_id','patient_dob','activity_date','start_time','procedure_text','room_text']::text[]
+        ELSE array_remove(ARRAY[
+            CASE WHEN 'patient_ocr_noise' = ANY(candidate.review_issues) THEN 'patient_name' END,
+            CASE WHEN 'missing_source_patient_id' = ANY(candidate.review_issues) THEN 'source_patient_id' END,
+            CASE WHEN 'invalid_patient_dob' = ANY(candidate.review_issues) THEN 'patient_dob' END,
+            CASE WHEN 'invalid_activity_date' = ANY(candidate.review_issues) THEN 'activity_date' END,
+            CASE WHEN 'invalid_start_time' = ANY(candidate.review_issues) THEN 'start_time' END,
+            CASE WHEN 'procedure_ocr_noise' = ANY(candidate.review_issues) THEN 'procedure_text' END,
+            CASE WHEN 'unclassified_activity' = ANY(candidate.review_issues) THEN 'room_text' END
+        ], NULL)
+    END
+FROM fax_stage1.candidate_rows AS candidate
+WHERE candidate.fax_id = :'fax_id'::integer
+  AND candidate.review_status = 'needs_review';
+
+INSERT INTO fax_stage1.resolved_rows (
+    candidate_row_id, fax_id, section_id, section_row_number, source_page,
+    surgeon_name, patient_name, source_patient_id, patient_dob, activity_date,
+    start_time, session, activity_type, procedure_text, room_text,
+    resolution_method, resolution_status, unresolved_fields, source_text
+)
+SELECT
+    candidate_row_id, fax_id, section_id, section_row_number, source_page,
+    surgeon_name, patient_name, source_patient_id, patient_dob, activity_date,
+    start_time, session, activity_type, procedure_text, room_text,
+    CASE WHEN review_status = 'ready' THEN 'native_ocr_sql' ELSE 'awaiting_flagged_vision' END,
+    CASE WHEN review_status = 'ready' THEN 'resolved' ELSE 'unresolved' END,
+    CASE WHEN review_status = 'ready' THEN ARRAY[]::text[] ELSE review_issues END,
+    source_text
+FROM fax_stage1.candidate_rows
+WHERE fax_id = :'fax_id'::integer;
+
+UPDATE fax_stage1.documents
+SET status = 'stage1_review_queued'
+WHERE fax_id = :'fax_id'::integer;
+
+COMMIT;

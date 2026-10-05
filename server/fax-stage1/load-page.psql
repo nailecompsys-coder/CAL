@@ -1,0 +1,30 @@
+\set ON_ERROR_STOP on
+
+BEGIN;
+INSERT INTO fax_stage1.ocr_tokens (
+    fax_id, fax_page, level, ocr_page_num, block_num, par_num, line_num,
+    word_num, left_px, top_px, width_px, height_px, confidence, token_text
+)
+SELECT
+    :'fax_id'::integer, :'page_number'::integer, level, page_num, block_num,
+    par_num, line_num, word_num, left_px, top_px, width_px, height_px,
+    confidence, token_text
+FROM fax_stage1.ocr_import;
+
+INSERT INTO fax_stage1.pages (
+    fax_id, page_number, width_px, height_px, token_count, average_confidence
+)
+SELECT
+    :'fax_id'::integer,
+    :'page_number'::integer,
+    max(width_px) FILTER (WHERE level = 1),
+    max(height_px) FILTER (WHERE level = 1),
+    count(*) FILTER (WHERE level = 5 AND nullif(token_text, '') IS NOT NULL),
+    round(avg(confidence) FILTER (WHERE level = 5 AND confidence >= 0), 1)
+FROM fax_stage1.ocr_import
+ON CONFLICT (fax_id, page_number) DO UPDATE
+SET width_px = excluded.width_px,
+    height_px = excluded.height_px,
+    token_count = excluded.token_count,
+    average_confidence = excluded.average_confidence;
+COMMIT;

@@ -24,6 +24,7 @@ from .models import (
 )
 from .fax_pdf_intake import cleanup_fax_derivatives, prune_immutable_fax_sources
 from .schedule_build_backup_service import create_fax_snapshot_backup
+from .fax_source_validation import validate_page_ownership
 
 
 FAX_NOTE_RE = re.compile(r"\bFax\s+\d+\b", re.IGNORECASE)
@@ -176,11 +177,20 @@ def apply_staged_snapshot(
     document = db.get(FaxDocument, run.fax_document_id)
     if not document or document.external_fax_id != source_fax_id:
         raise ValueError("Fax ingest run does not belong to this fax.")
+    if document.status == "applied":
+        raise ValueError("This fax was already applied.")
+    newer_applied = db.query(FaxDocument.id).filter(
+        FaxDocument.external_fax_id > source_fax_id,
+        FaxDocument.status == "applied",
+    ).first()
+    if newer_applied:
+        raise ValueError("A newer fax was already applied; older snapshots cannot replace it.")
     if run.status == "applied":
         raise ValueError("This fax ingest run was already applied.")
     rows = db.query(FaxIngestRow).filter(FaxIngestRow.run_id == run.id).all()
     if not rows:
         raise ValueError("Fax ingest run has no rows.")
+    validate_page_ownership(db, document, rows)
     if any(row.surgeon_id is None for row in rows):
         raise ValueError("Fax ingest has unresolved surgeons.")
     start = min(row.case_date for row in rows)

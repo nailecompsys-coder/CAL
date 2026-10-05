@@ -42,7 +42,7 @@ class ApiIngestVisualTest(unittest.TestCase):
                 )
             ],
         )
-        with patch("app.routers.api_ingest.stage_reviewed_rows", return_value={"writeMode": "staging_only"}) as stage:
+        with patch("app.routers.api_ingest.validate_page_ownership"), patch("app.routers.api_ingest.stage_reviewed_rows", return_value={"writeMode": "staging_only"}) as stage:
             result = ingest_visual_schedule_route(body, db=Mock())
         stage.assert_called_once()
         self.assertEqual(result["result"]["writeMode"], "staging_only")
@@ -65,7 +65,7 @@ class ApiIngestVisualTest(unittest.TestCase):
             ],
         )
         db = Mock()
-        with patch("app.routers.api_ingest.stage_reviewed_rows", return_value={"writeMode": "staging_only"}) as stage:
+        with patch("app.routers.api_ingest.validate_page_ownership"), patch("app.routers.api_ingest.stage_reviewed_rows", return_value={"writeMode": "staging_only"}) as stage:
             result = ingest_visual_schedule_route(body, db=db)
 
         stage.assert_called_once()

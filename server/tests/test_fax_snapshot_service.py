@@ -28,6 +28,8 @@ from app.models import (
 
 class FaxSnapshotServiceTest(unittest.TestCase):
     def setUp(self):
+        self.source_validation = patch("app.fax_snapshot_service.validate_page_ownership")
+        self.source_validation.start()
         self.engine = create_engine("sqlite:///:memory:")
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
@@ -91,6 +93,7 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.db.commit()
 
     def tearDown(self):
+        self.source_validation.stop()
         self.db.close()
         self.engine.dispose()
 

@@ -20,6 +20,8 @@ from ..database import get_db
 from ..fax_ingest_engine import ReviewedFaxRow, stage_reviewed_rows
 from ..fax_pdf_intake import prepare_fax_pdf
 from ..fax_snapshot_service import apply_staged_snapshot
+from ..fax_source_validation import validate_page_ownership
+from ..models import FaxDocument
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 
@@ -157,6 +159,10 @@ def ingest_visual_schedule_route(
     if fax_ids != {body.source_fax_id}:
         raise HTTPException(400, "all rows must match source_fax_id")
     try:
+        document = db.query(FaxDocument).filter(FaxDocument.external_fax_id == body.source_fax_id).one_or_none()
+        if document is None:
+            raise ValueError("Fax PDF must be prepared before staging rows.")
+        validate_page_ownership(db, document, rows)
         result = stage_reviewed_rows(
             db,
             external_fax_id=body.source_fax_id,

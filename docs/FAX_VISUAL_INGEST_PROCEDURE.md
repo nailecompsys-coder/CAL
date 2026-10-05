@@ -9,6 +9,18 @@ The latest **applied** fax is authoritative for the surgeon/dates it covers. An 
 3. Apply updates the effective dated cards, current clinic visits, and surgical cases. Cases missing from the new fax snapshot are cancelled within the covered surgeon/date scope. The baseline master cards are not replaced. One shared case may include an assisting surgeon.
 4. After apply, generated PNG/OCR files are removed. Source PDFs are pruned to the newest three for audit/rollback. Database fax records remain as history; the surgeon app reads the current saved cases and activities, not the old fax rows (`server/app/fax_pdf_intake.py`).
 
+## Repeatable ingest command (implemented for fax #245)
+
+`server/scripts/ingest_desk_fax.py` is the supported single command when Desk has produced its structured extract. Run it on the CAL host with the original Desk PDF and Desk extract JSON:
+
+```bash
+python scripts/ingest_desk_fax.py --fax-id 245 --pdf /secure/245.pdf --desk-extract /secure/245-extract.json --apply
+```
+
+If the identical PDF is already prepared in CAL, omit `--pdf`. Omit `--apply` to stage and report without changing the live schedule. The command renders every PDF page to PNG at 300 DPI, OCRs every page, carries each printed surgeon header through continuation pages, reconciles the Desk rows to those pages, corrects office visits mislabeled as OR only when same-day clinic rows corroborate them, checks all SQL placement decisions, creates the existing snapshot backup, and applies the newest fax. It stops on an unreadable header, row without page evidence, duplicate, unresolved placement, mismatched fax ID, or older/already-applied fax. No surgeon notification is sent. After apply, verify saved SQL rows and the authenticated native response before marking the fax complete; only then archive it in Desk.
+
+The `/api/ingest/visual-schedule` staging route and `/api/ingest/fax/{source_fax_id}/apply-snapshot` route independently enforce printed-page ownership. A previously staged run with `page=0` cannot be applied. Desk's `processed` flag remains separate from CAL applied state.
+
 Production evidence on 2026-10-02: fax **#234** (333 reviewed rows, dates September 30–October 7) was applied October 1 at 18:07 Eastern. Its placement decisions were 317 ordinary rows and 16 source-location differences marked for overlay. For October 2–16, the latest applied fax rows for each surgeon/day yielded 27 OR rows; all 27 had active stored cases in the correct AM/PM card, time, and facility and appeared in the surgeon API. All 151 latest clinic rows in that range had active clinic activities; zero older clinic rows were active. These are point-in-time checks, not a standing guarantee for future faxes.
 
 ## Older manual CLI path

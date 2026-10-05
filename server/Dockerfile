@@ -40,6 +40,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY tailwind.config.js .
 COPY app/ ./app/
+COPY scripts/ingest_desk_fax.py ./scripts/ingest_desk_fax.py
 
 # Compile Tailwind CSS from all templates — output served as /static/css/tailwind.css
 RUN /tmp/tailwindcss -c tailwind.config.js \

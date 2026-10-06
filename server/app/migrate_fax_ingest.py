@@ -54,6 +54,22 @@ POSTGRES_RULES = [
     BEFORE INSERT OR UPDATE OR DELETE ON schedule_cards
     FOR EACH ROW EXECUTE FUNCTION cal_block_schedule_no_fax_writes()
     """,
+    """
+    CREATE OR REPLACE FUNCTION cal_cards_no_fax_stamp() RETURNS trigger AS $$
+    BEGIN
+        IF NEW.source LIKE 'fax:%' THEN
+            RAISE EXCEPTION 'AM/PM cards are the permanent block schedule; fax ingest may not change them (source %)', NEW.source;
+        END IF;
+        RETURN NEW;
+    END
+    $$ LANGUAGE plpgsql
+    """,
+    "DROP TRIGGER IF EXISTS schedule_cards_no_fax_stamp ON schedule_cards",
+    """
+    CREATE TRIGGER schedule_cards_no_fax_stamp
+    BEFORE INSERT OR UPDATE ON schedule_cards
+    FOR EACH ROW EXECUTE FUNCTION cal_cards_no_fax_stamp()
+    """,
     "DROP TRIGGER IF EXISTS clinic_schedules_no_fax_writes ON clinic_schedules",
     """
     CREATE TRIGGER clinic_schedules_no_fax_writes

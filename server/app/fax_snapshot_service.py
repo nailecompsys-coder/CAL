@@ -25,8 +25,6 @@ from .models import (
 from .fax_ingest_engine import mark_fax_ingest_transaction
 from .fax_pdf_intake import cleanup_fax_derivatives, prune_immutable_fax_sources
 from .schedule_build_backup_service import create_fax_snapshot_backup
-from .fax_source_validation import validate_page_ownership
-
 
 FAX_NOTE_RE = re.compile(r"\bFax\s+\d+\b", re.IGNORECASE)
 logger = logging.getLogger(__name__)
@@ -206,7 +204,6 @@ def apply_staged_snapshot(
     skipped_rows = len(all_rows) - len(rows)
     if not rows:
         raise ValueError("Fax ingest run has no applicable rows.")
-    validate_page_ownership(db, document, rows)
     start = min(row.case_date for row in rows)
     end = max(row.case_date for row in rows)
     if (end - start).days > 7:

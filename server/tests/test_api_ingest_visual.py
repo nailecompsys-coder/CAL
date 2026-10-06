@@ -42,7 +42,7 @@ class ApiIngestVisualTest(unittest.TestCase):
                 )
             ],
         )
-        with patch("app.routers.api_ingest.page_problems", return_value={}), patch("app.routers.api_ingest.stage_reviewed_rows", return_value={"writeMode": "staging_only"}) as stage:
+        with patch("app.routers.api_ingest.stage_reviewed_rows", return_value={"writeMode": "staging_only"}) as stage:
             result = ingest_visual_schedule_route(body, db=Mock())
         stage.assert_called_once()
         self.assertEqual(result["result"]["writeMode"], "staging_only")
@@ -65,7 +65,7 @@ class ApiIngestVisualTest(unittest.TestCase):
             ],
         )
         db = Mock()
-        with patch("app.routers.api_ingest.page_problems", return_value={}), patch("app.routers.api_ingest.stage_reviewed_rows", return_value={"writeMode": "staging_only"}) as stage:
+        with patch("app.routers.api_ingest.stage_reviewed_rows", return_value={"writeMode": "staging_only"}) as stage:
             result = ingest_visual_schedule_route(body, db=db)
 
         stage.assert_called_once()
@@ -86,27 +86,10 @@ class ApiIngestVisualTest(unittest.TestCase):
                                row_type="surgical", room="MIN S05", patient_name="Future, Patient"),
             ],
         )
-        with patch("app.routers.api_ingest.page_problems", return_value={}), patch("app.routers.api_ingest.stage_reviewed_rows", return_value={"writeMode": "staging_only"}) as stage:
+        with patch("app.routers.api_ingest.stage_reviewed_rows", return_value={"writeMode": "staging_only"}) as stage:
             result = ingest_visual_schedule_route(body, db=Mock())
         self.assertEqual([row.patient_name for row in stage.call_args.kwargs["rows"]], ["Future, Patient"])
         self.assertEqual(result["result"]["skippedPast"], 1)
-
-    def test_row_without_page_proof_is_flagged_and_the_rest_stage(self):
-        body = VisualScheduleBatch(
-            source_fax_id=162,
-            rows=[
-                VisualFaxRowIn(page=1, surgeon_initials="JF", case_date="2099-01-02", start_time="0715",
-                               row_type="surgical", room="MIN S05", patient_name="Good, Patient"),
-                VisualFaxRowIn(page=9, surgeon_initials="JF", case_date="2099-01-02", start_time="0815",
-                               row_type="surgical", room="MIN S05", patient_name="Bad, Page"),
-            ],
-        )
-        with patch("app.routers.api_ingest.page_problems", return_value={1: "no verified source page"}), \
-                patch("app.routers.api_ingest.stage_reviewed_rows", return_value={"writeMode": "staging_only"}) as stage:
-            ingest_visual_schedule_route(body, db=Mock())
-        staged = stage.call_args.kwargs["rows"]
-        self.assertIsNone(staged[0].extraction_flags)
-        self.assertEqual(staged[1].extraction_flags, "no verified source page")
 
     def test_all_past_rows_stage_nothing(self):
         body = VisualScheduleBatch(

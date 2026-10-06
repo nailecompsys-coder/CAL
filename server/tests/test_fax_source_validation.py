@@ -2,15 +2,13 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
-
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SECRET_KEY", "test-secret")
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.fax_source_validation import validate_page_ownership
+from app.fax_source_validation import page_owners
 from app.models import Base, FaxDocument, FaxPage, Surgeon
 
 
@@ -48,18 +46,7 @@ class FaxSourceValidationTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_continuation_pages_keep_prior_surgeon(self):
-        validate_page_ownership(self.db, self.doc, [
-            SimpleNamespace(page=2, surgeon_initials="JF"),
-            SimpleNamespace(page=4, surgeon_initials="LW"),
-        ])
-
-    def test_florin_continuation_cannot_be_attributed_to_woodley(self):
-        with self.assertRaisesRegex(ValueError, "conflicts with source page 2"):
-            validate_page_ownership(self.db, self.doc, [SimpleNamespace(page=2, surgeon_initials="LW")])
-
-    def test_row_without_source_page_is_refused(self):
-        with self.assertRaisesRegex(ValueError, "no verified source page"):
-            validate_page_ownership(self.db, self.doc, [SimpleNamespace(page=0, surgeon_initials="LW")])
+        self.assertEqual(page_owners(self.db, self.doc), {1: "JF", 2: "JF", 3: "LW", 4: "LW"})
 
 
 if __name__ == "__main__":

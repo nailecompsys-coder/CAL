@@ -625,7 +625,7 @@ class FaxDocument(Base):
 
     id = Column(Integer, primary_key=True)
     external_fax_id = Column(Integer, nullable=False, unique=True)
-    source_label = Column(String(255), nullable=False, default="Desk visual PNG SOT")
+    source_label = Column(String(255), nullable=False, default="Desk LlamaParse extraction")
     source_sha256 = Column(String(64))
     original_filename = Column(String(255))
     source_path = Column(Text)
@@ -669,7 +669,7 @@ class FaxIngestRun(Base):
 
 
 class FaxIngestRow(Base):
-    """One reviewed row from a rendered PNG page. This table never creates cards."""
+    """One reviewed Desk extraction row. This table never creates cards."""
     __tablename__ = "fax_ingest_rows"
     __table_args__ = (
         UniqueConstraint("run_id", "normalized_key"),
@@ -691,6 +691,7 @@ class FaxIngestRow(Base):
     procedure = Column(Text, nullable=False, default="")
     source_location_id = Column(Integer, ForeignKey("locations.id"), nullable=True)
     normalized_key = Column(String(512), nullable=False)
+    extraction_flags = Column(Text, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
     run = relationship("FaxIngestRun", back_populates="rows")

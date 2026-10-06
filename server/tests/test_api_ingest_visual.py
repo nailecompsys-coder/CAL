@@ -35,7 +35,7 @@ class ApiIngestVisualTest(unittest.TestCase):
                 VisualFaxRowIn(
                     page=1,
                     surgeon_initials="JF",
-                    case_date="2026-09-16",
+                    case_date="2099-09-16",
                     row_type="surgical",
                     room="MIN S05",
                     patient_name="White, Jeffrey Allan",
@@ -55,7 +55,7 @@ class ApiIngestVisualTest(unittest.TestCase):
                     fax_id=162,
                     page=2,
                     surgeon_initials="jf",
-                    case_date="2026-09-16",
+                    case_date="2099-09-16",
                     start_time="0715",
                     row_type="surgical",
                     room="MIN S05",
@@ -74,7 +74,33 @@ class ApiIngestVisualTest(unittest.TestCase):
         self.assertEqual(kwargs["external_fax_id"], 162)
         self.assertEqual(kwargs["rows"][0].surgeon_initials, "JF")
         self.assertEqual(kwargs["rows"][0].start_time.strftime("%H:%M"), "07:15")
-        self.assertEqual(result["result"], {"writeMode": "staging_only"})
+        self.assertEqual(result["result"], {"writeMode": "staging_only", "skippedPast": 0})
+
+    def test_rows_whose_date_has_passed_are_dropped_before_staging(self):
+        body = VisualScheduleBatch(
+            source_fax_id=162,
+            rows=[
+                VisualFaxRowIn(surgeon_initials="JF", case_date="2020-01-02", start_time="0715",
+                               row_type="surgical", room="MIN S05", patient_name="Past, Patient"),
+                VisualFaxRowIn(surgeon_initials="JF", case_date="2099-01-02", start_time="0715",
+                               row_type="surgical", room="MIN S05", patient_name="Future, Patient"),
+            ],
+        )
+        with patch("app.routers.api_ingest.validate_page_ownership"), patch("app.routers.api_ingest.stage_reviewed_rows", return_value={"writeMode": "staging_only"}) as stage:
+            result = ingest_visual_schedule_route(body, db=Mock())
+        self.assertEqual([row.patient_name for row in stage.call_args.kwargs["rows"]], ["Future, Patient"])
+        self.assertEqual(result["result"]["skippedPast"], 1)
+
+    def test_all_past_rows_stage_nothing(self):
+        body = VisualScheduleBatch(
+            source_fax_id=162,
+            rows=[VisualFaxRowIn(surgeon_initials="JF", case_date="2020-01-02", row_type="clinic",
+                                 room="CLMMFLGS", patient_name="Past, Patient")],
+        )
+        with patch("app.routers.api_ingest.stage_reviewed_rows") as stage:
+            result = ingest_visual_schedule_route(body, db=Mock())
+        stage.assert_not_called()
+        self.assertEqual(result["result"]["skippedPast"], 1)
 
     def test_visual_schedule_endpoint_refuses_invalid_row_type(self):
         body = VisualScheduleBatch(
@@ -83,7 +109,7 @@ class ApiIngestVisualTest(unittest.TestCase):
                 VisualFaxRowIn(
                     page=1,
                     surgeon_initials="JF",
-                    case_date="2026-09-16",
+                    case_date="2099-09-16",
                     row_type="not-a-row",
                     room="CLMMFLGS",
                     patient_name="Flores, Anna",

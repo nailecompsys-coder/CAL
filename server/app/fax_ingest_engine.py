@@ -1,7 +1,7 @@
-"""Staging-only fax intake for the permanent schedule-card scaffold.
+"""Staging-only Desk/LlamaParse intake for the permanent card scaffold.
 
 This module has deliberately no imports from legacy schedule writers, email,
-SMS, notifications, or OR block assignment code. It records reviewed PNG/OCR
+SMS, notifications, or OR block assignment code. It records reviewed Desk
 facts and resolves each row to an already-existing AM/PM card for review.
 """
 
@@ -12,6 +12,7 @@ import re
 from dataclasses import dataclass
 from datetime import date, time
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .models import FaxDocument, FaxIngestRow, FaxIngestRun, FaxRowDecision, Location, ScheduleCard, Surgeon
@@ -22,7 +23,7 @@ ENGINE_VERSION = "fax-png-stage-v1"
 ROOM_LOCATION_ABBREVIATIONS = {
     "ALT": "AL-OR", "AL": "AL-OR", "APK": "AP-OR", "AP": "AP-OR",
     "MIN": "MN-OR", "MN": "MN-OR", "WGD": "WG-OR", "WG": "WG-OR",
-    "CLMMFLGS": "CL-OV", "MGALTGS": "AL-OV", "MGWGDGS": "WG-OV",
+    "CLMMFLGS": "CL-OV", "MGALTGS": "AL-OV", "MGWGDGS": "WG-OV", "MGWGDS": "WG-OV",
 }
 GENERIC_LOCATION_ROOMS = {"AHMGGENSRG", "AHMGGENSURG", "MGLKMGENSRG", "MGLKMGENSURG"}
 
@@ -38,6 +39,7 @@ class ReviewedFaxRow:
     room: str
     patient_name: str
     procedure: str = ""
+    extraction_flags: str | None = None
 
 
 @dataclass
@@ -47,6 +49,16 @@ class _PreparedRow:
     session: str
     source_location: Location | None
     card: ScheduleCard | None
+
+
+def mark_fax_ingest_transaction(db: Session, run_id: int | None = None) -> None:
+    """Postgres triggers reject AM/PM block writes for the rest of this transaction."""
+    if db.bind.dialect.name != "postgresql":
+        return
+    db.execute(
+        text("SELECT set_config('cal.writer', 'fax_ingest', true), set_config('cal.fax_run_id', :run_id, true)"),
+        {"run_id": str(run_id or "")},
+    )
 
 
 def session_for_time(value: time | None) -> str:
@@ -202,9 +214,10 @@ def stage_reviewed_rows(
     """Persist reviewed fax facts and deterministic, non-mutating card decisions."""
     if not rows:
         raise ValueError("rows required")
+    mark_fax_ingest_transaction(db)
     document = db.query(FaxDocument).filter(FaxDocument.external_fax_id == external_fax_id).one_or_none()
     if document is None:
-        document = FaxDocument(external_fax_id=external_fax_id, source_label=_text(source_label) or "Desk visual PNG SOT")
+        document = FaxDocument(external_fax_id=external_fax_id, source_label=_text(source_label) or "Desk LlamaParse extraction")
         db.add(document)
         db.flush()
     scope = sorted({value.strip().upper() for value in (surgeon_scope or []) if value.strip()})
@@ -250,9 +263,24 @@ def stage_reviewed_rows(
             for item in group:
                 item.source_location = inferred
 
-    for item in prepared:
+    # A room code CAL does not know is read off the surgeon's AM/PM card.
+    unknown_room: set[int] = set()
+    row_types: dict[int, str] = {}
+    for index, item in enumerate(prepared):
+        room = _text(item.row.room).upper()
+        if not room or room in GENERIC_LOCATION_ROOMS or item.source_location:
+            continue
+        card = item.card
+        if card and card.baseline_state == "assigned" and card.baseline_location:
+            item.source_location = card.baseline_location
+            row_types[index] = "surgical" if _location_matches_row_type(card.baseline_location, "surgical") else "clinic"
+        else:
+            unknown_room.add(index)
+
+    for index, item in enumerate(prepared):
         row = item.row
         room = _text(row.room).upper()
+        flags = [value for value in (_text(row.extraction_flags), "unknown_room" if index in unknown_room else "") if value]
         staged = FaxIngestRow(
             run_id=run.id,
             page_number=row.page,
@@ -261,12 +289,13 @@ def stage_reviewed_rows(
             case_date=row.case_date,
             start_time=row.start_time,
             session=item.session,
-            row_type=row.row_type,
+            row_type=row_types.get(index, row.row_type),
             room_text=room,
             patient_name=_text(row.patient_name),
             procedure=_text(row.procedure),
             source_location_id=item.source_location.id if item.source_location else None,
             normalized_key=_key(row),
+            extraction_flags="; ".join(flags) or None,
         )
         db.add(staged)
         db.flush()
@@ -278,6 +307,8 @@ def stage_reviewed_rows(
 
 
 def _decide(db: Session, row: FaxIngestRow) -> FaxRowDecision:
+    if row.extraction_flags:
+        return FaxRowDecision(fax_row_id=row.id, status="needs_review", reason_code="extraction_flagged", detail=f"Desk flagged this row: {row.extraction_flags}")
     if not row.surgeon_id:
         return FaxRowDecision(fax_row_id=row.id, status="needs_review", reason_code="unknown_surgeon", detail="No unique active surgeon matched the fax row.")
     card = db.query(ScheduleCard).filter(

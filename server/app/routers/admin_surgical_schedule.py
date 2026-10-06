@@ -6,6 +6,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from ..admin_surgical_schedule_service import (
@@ -149,6 +150,14 @@ def surgical_case_delete(
     surgical_case = db.get(SurgicalCase, case_id)
     if not surgical_case:
         raise HTTPException(404, "Case not found")
-    parsed_date = delete_surgical_case(db, surgical_case)
+    parsed_date = surgical_case.date
+    try:
+        delete_surgical_case(db, surgical_case)
+        msg = "deleted"
+    except DBAPIError as exc:
+        if "Past days are locked" not in str(exc.orig):
+            raise
+        db.rollback()
+        msg = "past_locked"
     offset = week_offset if week_offset is not None else week_offset_for_date(parsed_date)
-    return RedirectResponse(f"/admin/clinic-schedule?week_offset={offset}&msg=deleted", status_code=303)
+    return RedirectResponse(f"/admin/clinic-schedule?week_offset={offset}&msg={msg}", status_code=303)

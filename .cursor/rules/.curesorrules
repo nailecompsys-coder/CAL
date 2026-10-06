@@ -1,0 +1,16 @@
+# Global Constraints
+- Do not invent code, APIs, properties, or library methods.
+- If an API or feature is unknown, say "I do not know" instead of guessing.
+- Never write infinite loops. Always include explicit exit conditions.
+- Do not use placeholder code or "// TODO: implement later" comments. Write full logic.
+
+# iOS (Swift & Xcode) Constraints
+- Use only official, verified Apple Documentation for SwiftUI and UIKit.
+- Target iOS 17+ features only unless specified; do not guess deprecated APIs.
+- Strict Memory Management: Avoid retain cycles. Always use [weak self] in closures where necessary.
+- Do not invent SF Symbols names. Only use verified Apple SF Symbols.
+
+# Web PWA Constraints
+- Use standard, widely supported Web APIs for Service Workers and Manifest files.
+- Do not invent custom browser capabilities; stick strictly to HTTPS-supported PWA features.
+- Ensure all loops handling DOM elements or service worker events have explicit timeouts or error catches.

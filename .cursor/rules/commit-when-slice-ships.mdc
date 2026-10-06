@@ -1,0 +1,26 @@
+---
+description: Commit a finished, shippable slice immediately. Do not wait to be asked. Push and deploy still need Don.
+alwaysApply: true
+---
+
+# Commit when a slice is safe to ship
+
+This **supersedes** waiting for Don to say “commit.” Do not let a dirty tree pile up across slices.
+
+## Do
+
+1. When a unit of work is **done and would be safe to ship**, commit it immediately.
+2. Tell Don the hash and one-line why.
+3. One slice, one commit (Wasabi dates ≠ notification deep links).
+4. If Don says commit *and* keep going: **commit first**, then continue.
+5. Follow the existing git safety protocol: no force push, no secrets, no `--no-verify`, HEREDOC messages, no amend unless the usual amend rules are met.
+
+## Do not
+
+- Wait until the end of the session or until Don says “git commit”
+- Commit mid-debug, speculative spikes, or half-wired pages
+- Push or deploy unless Don asks
+
+## Safe to ship means
+
+The change is complete for that slice, would not leave `main` broken, and does not include unrelated dirty files.

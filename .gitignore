@@ -12,7 +12,8 @@ __pycache__/
 *.py[cod]
 
 # Local tooling state
-.cursor/
+.cursor/*
+!.cursor/rules/
 .vscode/
 .idea/
 memory.md

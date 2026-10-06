@@ -1,0 +1,28 @@
+---
+description: UI design constraints for CAL SwiftUI - semantic stacks, no hardcoded positioning, design tokens only, modifiers isolated into components.
+globs: ios/**/*.swift
+alwaysApply: true
+---
+
+# UI Design Constraint Rules (SwiftUI)
+
+1. **Semantic layout.** Build screens from `VStack` / `HStack` / `ZStack`, `Spacer`, uniform padding, and native spacing wrappers (`.padding()`, `.safeAreaInset`, `Form`, `List`, `Section`, `ScrollView`). Keep the same padding on sibling views.
+2. **No hardcoded positioning.** No raw `.frame(width:height:)`, `.offset`, or `.position` for layout. Use `Spacer`, `.frame(maxWidth: .infinity, alignment:)`, `layoutPriority`, `ViewThatFits`; `GeometryReader` only when bounds truly matter. Fixed sizes are allowed only for standalone icons and geometric shapes (badges, dots, avatars).
+3. **No raw color hex strings.** Colors come from `ClinicalPalette` / asset colorsets only. See `swift-color-standard.mdc` (hard fail).
+4. **Layout isolation.** Do not stack long chains of inline modifiers on one container. Move repeated or multi-modifier styling into a named `ViewModifier` + `View` extension, or a small subview, in `CALNativeComponents.swift` (existing pattern: `CalReadableColumnModifier`).
+
+```swift
+// BAD
+VStack { content }
+  .frame(width: 343, height: 120)
+  .padding(.leading, 13).padding(.top, 9)
+  .background(Color(red: 0.9, green: 0.95, blue: 1))
+  .clipShape(RoundedRectangle(cornerRadius: 14))
+  .shadow(radius: 3)
+  .offset(x: 4)
+
+// GOOD
+VStack(alignment: .leading, spacing: 8) { content }
+  .frame(maxWidth: .infinity, alignment: .leading)
+  .clinicalCard()   // ViewModifier in CALNativeComponents.swift using ClinicalPalette
+```

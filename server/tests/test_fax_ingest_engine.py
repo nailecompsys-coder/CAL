@@ -9,6 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.fax_ingest_engine import ReviewedFaxRow, stage_reviewed_rows
+from app.migrate_fax_ingest import create_applicable_view
 from app.models import Base, FaxIngestRow, FaxRowDecision, Location, ScheduleCard, ScheduleCardWeek, Surgeon
 
 
@@ -16,6 +17,8 @@ class FaxIngestEngineTest(unittest.TestCase):
     def setUp(self):
         self.engine = create_engine("sqlite:///:memory:")
         Base.metadata.create_all(self.engine)
+        with self.engine.begin() as conn:
+            create_applicable_view(conn)
         self.Session = sessionmaker(bind=self.engine)
         self.db = self.Session()
         self.surgeon = Surgeon(first_name="Jorge", last_name="Florin", is_active=True, staff_type="physician")
@@ -118,6 +121,22 @@ class FaxIngestEngineTest(unittest.TestCase):
         decision = self.db.query(FaxRowDecision).one()
         self.assertEqual(decision.reason_code, "off_collision")
         self.assertEqual(self.db.query(ScheduleCard).count(), 10)
+
+    def test_unknown_room_takes_location_and_type_from_assigned_card(self):
+        stage_reviewed_rows(self.db, external_fax_id=170, source_label="Fax 170", rows=[self.row(room="ZZNEWROOM", row_type="clinic")])
+        self.db.commit()
+        staged = self.db.query(FaxIngestRow).one()
+        self.assertEqual(staged.source_location_id, self.location.id)
+        self.assertEqual(staged.row_type, "surgical")
+        self.assertIsNone(staged.extraction_flags)
+
+    def test_unknown_room_on_unassigned_card_is_flagged(self):
+        stage_reviewed_rows(self.db, external_fax_id=171, source_label="Fax 171", rows=[self.row(room="ZZNEWROOM", start_time=time(13, 30))])
+        self.db.commit()
+        staged = self.db.query(FaxIngestRow).one()
+        self.assertIsNone(staged.source_location_id)
+        self.assertEqual(staged.extraction_flags, "unknown_room")
+        self.assertEqual(self.db.query(FaxRowDecision).one().reason_code, "extraction_flagged")
 
 
 if __name__ == "__main__":

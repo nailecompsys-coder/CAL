@@ -27,7 +27,9 @@ SELECT r.page_number AS page, r.surgeon_initials, r.case_date, r.start_time, r.s
        c.effective_state AS card_state, cl.abbreviation AS card_location,
        fl.abbreviation AS fax_location,
        CASE
-           WHEN d.status <> 'ready' OR d.reason_code = 'epic_override' THEN 'fail'
+           WHEN d.status <> 'ready' THEN 'fail'
+           WHEN d.reason_code = 'epic_override'
+                AND r.source_location_id IS DISTINCT FROM COALESCE(c.effective_location_id, c.baseline_location_id) THEN 'fail'
            WHEN EXISTS (SELECT 1 FROM schedule_card_activities a WHERE {SAME_ITEM}) THEN 'match'
            ELSE 'addition'
        END AS label

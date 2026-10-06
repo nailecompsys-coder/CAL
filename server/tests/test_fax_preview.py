@@ -23,6 +23,7 @@ from app.models import (
 
 MONDAY = date(2099, 9, 21)
 TUESDAY = date(2099, 9, 22)
+WEDNESDAY = date(2099, 9, 23)
 SATURDAY = date(2099, 9, 26)
 
 
@@ -55,7 +56,9 @@ class FaxPreviewTest(unittest.TestCase):
             )
 
         mon_am = card(MONDAY, "am", "assigned", wg_or.id)
-        self.db.add_all([mon_am, card(MONDAY, "pm", "na"), card(TUESDAY, "am", "off"), card(TUESDAY, "pm", "assigned", al_or.id)])
+        moved = card(WEDNESDAY, "am", "assigned", al_or.id)
+        moved.effective_location_id = wg_or.id
+        self.db.add_all([mon_am, card(MONDAY, "pm", "na"), card(TUESDAY, "am", "off"), card(TUESDAY, "pm", "assigned", al_or.id), moved])
         self.db.flush()
         for patient, clock in (("Already, There", time(8, 0)), ("Not, OnFax", time(10, 0))):
             self.db.add(ScheduleCardActivity(
@@ -77,6 +80,7 @@ class FaxPreviewTest(unittest.TestCase):
             _row(TUESDAY, time(8, 0), "On, Off"),
             _row(TUESDAY, time(13, 0), "Wrong, Facility"),
             _row(SATURDAY, time(8, 0), "Weekend, Misread"),
+            _row(WEDNESDAY, time(8, 0), "Agrees, WithCard"),
         ])
 
         labels = {row["patient_name"]: (row["label"], row["reason_code"]) for row in result["rows"]}
@@ -85,6 +89,7 @@ class FaxPreviewTest(unittest.TestCase):
         self.assertEqual(labels["On, Off"], ("fail", "off_collision"))
         self.assertEqual(labels["Wrong, Facility"], ("fail", "epic_override"))
         self.assertEqual(labels["Weekend, Misread"], ("fail", "missing_scaffold"))
+        self.assertEqual(labels["Agrees, WithCard"], ("addition", "epic_override"))
         self.assertEqual([row["patient_name"] for row in result["calOnly"]], ["Not, OnFax"])
         self.assertEqual(self.db.query(FaxIngestRow).count(), 0)
         self.assertEqual(self.db.query(FaxDocument).count(), 0)

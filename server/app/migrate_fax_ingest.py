@@ -4,12 +4,15 @@ The AM/PM block schedule (schedule_cards, clinic_schedules) belongs to the
 portal admin. Fax ingest only adds line items on top of it, and the database
 enforces that: while a fax is being applied (cal.writer = 'fax_ingest'), any
 write to the block tables is rejected, and cancelling a case is ignored when
-that surgeon's day has a fax row that could not be applied.
+that surgeon's day has a fax row that could not be applied. Fax rows whose
+date/time has passed are never applied, and ingest cannot change past cases.
 """
 
 from sqlalchemy import text
 
 from .database import engine
+
+PRACTICE_TIMEZONE = "America/New_York"
 
 APPLICABLE_VIEW_SELECT = """
     SELECT r.id AS fax_row_id, r.run_id
@@ -21,9 +24,15 @@ APPLICABLE_VIEW_SELECT = """
     WHERE COALESCE(r.extraction_flags, '') = ''
 """
 
+# Anything on a fax whose date/time has already passed is ignored.
+POSTGRES_APPLICABLE_VIEW_SELECT = (
+    APPLICABLE_VIEW_SELECT
+    + f"      AND r.case_date + COALESCE(r.start_time, time '00:00') > (now() AT TIME ZONE '{PRACTICE_TIMEZONE}')\n"
+)
+
 POSTGRES_RULES = [
     "ALTER TABLE fax_ingest_rows ADD COLUMN IF NOT EXISTS extraction_flags TEXT",
-    f"CREATE OR REPLACE VIEW fax_ingest_rows_applicable AS {APPLICABLE_VIEW_SELECT}",
+    f"CREATE OR REPLACE VIEW fax_ingest_rows_applicable AS {POSTGRES_APPLICABLE_VIEW_SELECT}",
     """
     CREATE OR REPLACE FUNCTION cal_block_schedule_no_fax_writes() RETURNS trigger AS $$
     BEGIN
@@ -78,11 +87,35 @@ POSTGRES_RULES = [
     BEFORE UPDATE ON surgical_cases
     FOR EACH ROW EXECUTE FUNCTION cal_keep_cases_on_unapplied_fax_days()
     """,
+    f"""
+    CREATE OR REPLACE FUNCTION cal_fax_cannot_touch_past_cases() RETURNS trigger AS $$
+    BEGIN
+        IF current_setting('cal.writer', true) = 'fax_ingest'
+           AND OLD.date + COALESCE(OLD.start_time, time '00:00') <= (now() AT TIME ZONE '{PRACTICE_TIMEZONE}')
+        THEN
+            IF TG_OP = 'DELETE' THEN
+                RETURN NULL;
+            END IF;
+            RETURN OLD;
+        END IF;
+        IF TG_OP = 'DELETE' THEN
+            RETURN OLD;
+        END IF;
+        RETURN NEW;
+    END
+    $$ LANGUAGE plpgsql
+    """,
+    "DROP TRIGGER IF EXISTS surgical_cases_fax_cannot_touch_past ON surgical_cases",
+    """
+    CREATE TRIGGER surgical_cases_fax_cannot_touch_past
+    BEFORE UPDATE OR DELETE ON surgical_cases
+    FOR EACH ROW EXECUTE FUNCTION cal_fax_cannot_touch_past_cases()
+    """,
 ]
 
 
 def create_applicable_view(conn) -> None:
-    """SQLite (tests) gets the same view; Postgres creates it in run_migration."""
+    """SQLite (tests) gets the view without the passed-time rule; Postgres creates the full view in run_migration."""
     conn.execute(text(f"CREATE VIEW IF NOT EXISTS fax_ingest_rows_applicable AS {APPLICABLE_VIEW_SELECT}"))
 
 

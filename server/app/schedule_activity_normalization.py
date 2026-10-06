@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import date, time
+from datetime import date, datetime, time
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
+from .migrate_fax_ingest import PRACTICE_TIMEZONE
 from .models import (
     AprimaCachedAppointment,
     FaxDocument,
@@ -270,8 +272,9 @@ def sync_applied_fax_clinic_activities(db: Session, run: FaxIngestRun) -> int:
 
 
 def reconcile_applied_fax_versions(db: Session) -> int:
-    """Make only the newest applied fax rows for each date active."""
+    """Make only the newest applied fax rows for each date active; past dates stay as they were."""
     db.flush()
+    today = datetime.now(ZoneInfo(PRACTICE_TIMEZONE)).date()
     ranked = (
         db.query(
             FaxIngestRow.id.label("row_id"),
@@ -282,12 +285,17 @@ def reconcile_applied_fax_versions(db: Session) -> int:
         )
         .join(FaxIngestRun, FaxIngestRun.id == FaxIngestRow.run_id)
         .join(FaxDocument, FaxDocument.id == FaxIngestRun.fax_document_id)
-        .filter(FaxIngestRun.status == "applied", FaxIngestRow.row_type == "clinic")
+        .filter(
+            FaxIngestRun.status == "applied",
+            FaxIngestRow.row_type == "clinic",
+            FaxIngestRow.case_date >= today,
+        )
         .subquery()
     )
     newest_ids = [row_id for (row_id,) in db.query(ranked.c.row_id).filter(ranked.c.revision_rank == 1).all()]
     db.query(ScheduleCardActivity).filter(
         ScheduleCardActivity.source_system == "fax_clinic",
+        ScheduleCardActivity.activity_date >= today,
     ).update({ScheduleCardActivity.is_active: False}, synchronize_session=False)
     if newest_ids:
         updated = db.query(ScheduleCardActivity).filter(

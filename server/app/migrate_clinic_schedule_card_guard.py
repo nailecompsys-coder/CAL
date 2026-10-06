@@ -11,6 +11,7 @@ def run_migration():
             SELECT id, surgeon_id, location_id, date, assignment_type, notes
             FROM clinic_schedules
             WHERE lower(coalesce(session, '')) = 'full'
+              AND date >= CURRENT_DATE
             ORDER BY id
         """)).mappings().all()
         for row in full_rows:
@@ -47,6 +48,7 @@ def run_migration():
         duplicates = conn.execute(text("""
             SELECT surgeon_id, date, lower(coalesce(session, 'am')) AS session_key, MIN(id) AS keep_id
             FROM clinic_schedules
+            WHERE date >= CURRENT_DATE
             GROUP BY surgeon_id, date, lower(coalesce(session, 'am'))
             HAVING COUNT(*) > 1
         """)).mappings().all()

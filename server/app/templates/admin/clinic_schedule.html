@@ -76,6 +76,8 @@
 <div class="mx-6 mt-4 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3 text-rose-700 text-sm">Please select a date for the case.</div>
 {% elif request.query_params.get('msg') == 'invalid_date' %}
 <div class="mx-6 mt-4 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3 text-rose-700 text-sm">Invalid date.</div>
+{% elif request.query_params.get('msg') == 'past_locked' %}
+<div class="mx-6 mt-4 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3 text-rose-700 text-sm">Past days are locked. This case can be edited but not deleted.</div>
 {% endif %}
 {% if request.query_params.get('warn') %}
 <div class="mx-6 mt-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-start gap-2 text-amber-800 text-sm">

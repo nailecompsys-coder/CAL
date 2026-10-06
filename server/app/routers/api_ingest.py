@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..fax_ingest_engine import ReviewedFaxRow, stage_reviewed_rows
 from ..fax_pdf_intake import prepare_fax_pdf
+from ..fax_preview import preview_reviewed_rows
 from ..fax_snapshot_service import apply_staged_snapshot
 from ..fax_source_validation import validate_page_ownership
 from ..migrate_fax_ingest import PRACTICE_TIMEZONE
@@ -142,6 +143,37 @@ def _visual_row(item: VisualFaxRowIn) -> ReviewedFaxRow:
     )
 
 
+def _upcoming_rows(body: VisualScheduleBatch) -> tuple[list[ReviewedFaxRow], int]:
+    if not body.rows:
+        raise HTTPException(400, "rows required")
+    if len(body.rows) > 1000:
+        raise HTTPException(400, "too many rows (max 1000)")
+    fax_ids = {item.fax_id or body.source_fax_id for item in body.rows}
+    if fax_ids != {body.source_fax_id}:
+        raise HTTPException(400, "all rows must match source_fax_id")
+    now = datetime.now(ZoneInfo(PRACTICE_TIMEZONE)).replace(tzinfo=None)
+    parsed = [_visual_row(item) for item in body.rows]
+    rows = [row for row in parsed if datetime.combine(row.case_date, row.start_time or time.min) > now]
+    return rows, len(parsed) - len(rows)
+
+
+@router.post("/preview")
+def preview_visual_schedule_route(
+    body: VisualScheduleBatch,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_ingest_token),
+) -> dict[str, Any]:
+    """Label each upcoming fax row match / addition / fail against the live schedule. Writes nothing."""
+    rows, skipped_past = _upcoming_rows(body)
+    if not rows:
+        return {"ok": True, "result": {"rows": [], "calOnly": [], "skippedPast": skipped_past}}
+    try:
+        result = preview_reviewed_rows(db, external_fax_id=body.source_fax_id, source_label=body.source_label, rows=rows)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "result": {**result, "skippedPast": skipped_past}}
+
+
 @router.post("/visual-schedule")
 def ingest_visual_schedule_route(
     body: VisualScheduleBatch,
@@ -153,17 +185,7 @@ def ingest_visual_schedule_route(
     This route deliberately cannot write schedule cards, legacy schedules, or
     notifications. It records facts and returns placement decisions only.
     """
-    if not body.rows:
-        raise HTTPException(400, "rows required")
-    if len(body.rows) > 1000:
-        raise HTTPException(400, "too many rows (max 1000)")
-    fax_ids = {item.fax_id or body.source_fax_id for item in body.rows}
-    if fax_ids != {body.source_fax_id}:
-        raise HTTPException(400, "all rows must match source_fax_id")
-    now = datetime.now(ZoneInfo(PRACTICE_TIMEZONE)).replace(tzinfo=None)
-    parsed = [_visual_row(item) for item in body.rows]
-    rows = [row for row in parsed if datetime.combine(row.case_date, row.start_time or time.min) > now]
-    skipped_past = len(parsed) - len(rows)
+    rows, skipped_past = _upcoming_rows(body)
     if not rows:
         return {"ok": True, "result": {"rows": 0, "skippedPast": skipped_past, "writeMode": "staging_only"}}
     try:

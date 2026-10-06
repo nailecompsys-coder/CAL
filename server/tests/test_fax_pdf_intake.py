@@ -127,6 +127,30 @@ class FaxPdfIntakeTest(unittest.TestCase):
         self.assertFalse(image_path.exists())
         self.assertFalse(ocr_path.exists())
 
+    def test_prepare_restores_pages_removed_after_apply(self):
+        with (
+            patch("app.fax_pdf_intake._pdf_page_count", return_value=2),
+            patch("app.fax_pdf_intake._render_and_ocr", side_effect=self.fake_render),
+        ):
+            prepare_fax_pdf(self.db, external_fax_id=168, original_filename="fax.pdf", source=io.BytesIO(b"%PDF-1.7 again"))
+            self.db.commit()
+            document = self.db.query(FaxDocument).one()
+            document.status = "applied"
+            cleanup_fax_derivatives(document)
+            self.db.commit()
+
+            result = prepare_fax_pdf(self.db, external_fax_id=168, original_filename="fax.pdf", source=io.BytesIO(b"%PDF-1.7 again"))
+            self.db.commit()
+
+        self.assertTrue(result["idempotent"])
+        self.assertTrue(result["restoredPages"])
+        self.assertEqual(self.db.query(FaxPage).count(), 2)
+        self.assertEqual(document.status, "applied")
+        for page in self.db.query(FaxPage).all():
+            self.assertTrue(Path(page.image_path).is_file())
+            self.assertTrue(Path(page.ocr_text_path).is_file())
+        self.assertTrue(Path(document.source_path).is_file())
+
     def test_prune_keeps_only_three_newest_immutable_sources(self):
         documents = []
         for fax_id in (168, 181, 187, 191):

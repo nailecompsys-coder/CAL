@@ -155,6 +155,47 @@ def _render_and_ocr(pdf_path: Path, workdir: Path, expected_pages: int) -> list[
     return output
 
 
+def _derivatives_present(document: FaxDocument) -> bool:
+    pages = sorted(document.pages, key=lambda page: page.page_number)
+    if not document.page_count or len(pages) != document.page_count:
+        return False
+    return all(
+        Path(page.image_path or "").is_file() and Path(page.ocr_text_path or "").is_file()
+        for page in pages
+    )
+
+
+def _restore_derivatives(db: Session, document: FaxDocument, source_pdf: Path, scratch: Path) -> None:
+    """Re-render PNG/OCR pages removed after apply, from the same checksum-verified PDF."""
+    page_count = _pdf_page_count(source_pdf)
+    if document.page_count and page_count != document.page_count:
+        raise ValueError("Fax PDF page count no longer matches its recorded pages.")
+    page_rows = _render_and_ocr(source_pdf, scratch, page_count)
+    final_dir = fax_data_root() / str(document.external_fax_id) / document.source_sha256
+    final_dir.mkdir(parents=True, exist_ok=True)
+    kept_pdf = final_dir / "source.pdf"
+    if not kept_pdf.is_file():
+        shutil.copyfile(source_pdf, kept_pdf)
+    document.source_path = str(kept_pdf)
+    for name in ("pages", "ocr"):
+        target = final_dir / name
+        if target.exists():
+            shutil.rmtree(target)
+        (scratch / name).rename(target)
+    document.page_count = page_count
+    by_number = {page.page_number: page for page in document.pages}
+    for row in page_rows:
+        page = by_number.get(row["page_number"])
+        if page is None:
+            page = FaxPage(fax_document_id=document.id, page_number=row["page_number"])
+            db.add(page)
+        page.image_path = str(final_dir / "pages" / row["image_path"].name)
+        page.image_sha256 = row["image_sha256"]
+        page.ocr_text_path = str(final_dir / "ocr" / row["ocr_text_path"].name)
+        page.ocr_text_sha256 = row["ocr_text_sha256"]
+    db.flush()
+
+
 def prepare_fax_pdf(
     db: Session,
     *,
@@ -179,6 +220,9 @@ def prepare_fax_pdf(
         if existing and existing.source_sha256:
             if existing.source_sha256 != source_sha256:
                 raise ValueError("This fax id is already tied to a different immutable PDF.")
+            restored = not _derivatives_present(existing)
+            if restored:
+                _restore_derivatives(db, existing, source_pdf, scratch)
             shutil.rmtree(scratch)
             return {
                 "faxDocumentId": existing.id,
@@ -188,6 +232,7 @@ def prepare_fax_pdf(
                 "sourceSha256": existing.source_sha256,
                 "sourceBytes": source_size,
                 "idempotent": True,
+                "restoredPages": restored,
                 "writeMode": "staging_only",
             }
 

@@ -60,14 +60,22 @@ def page_owners(db: Session, document: FaxDocument) -> dict[int, str]:
     return owners
 
 
-def validate_page_ownership(db: Session, document: FaxDocument, rows: list[object]) -> None:
+def page_problems(db: Session, document: FaxDocument, rows: list[object]) -> dict[int, str]:
+    """Map 0-based row index to why that row's surgeon is not proven by its page header."""
     owners = page_owners(db, document)
-    for index, row in enumerate(rows, start=1):
+    problems: dict[int, str] = {}
+    for index, row in enumerate(rows):
         page = getattr(row, "page", None)
         if page is None:
             page = getattr(row, "page_number", None)
         initials = str(getattr(row, "surgeon_initials", "") or "").strip().upper()
         if not isinstance(page, int) or page not in owners:
-            raise ValueError(f"Fax row {index} has no verified source page.")
-        if initials != owners[page]:
-            raise ValueError(f"Fax row {index} surgeon conflicts with source page {page} header.")
+            problems[index] = "no verified source page"
+        elif initials != owners[page]:
+            problems[index] = f"surgeon conflicts with source page {page} header"
+    return problems
+
+
+def validate_page_ownership(db: Session, document: FaxDocument, rows: list[object]) -> None:
+    for index, problem in page_problems(db, document, rows).items():
+        raise ValueError(f"Fax row {index + 1}: {problem}.")

@@ -201,12 +201,12 @@ def apply_staged_snapshot(
     all_rows = db.query(FaxIngestRow).filter(FaxIngestRow.run_id == run.id).all()
     if not all_rows:
         raise ValueError("Fax ingest run has no rows.")
-    validate_page_ownership(db, document, all_rows)
     applicable_ids = _applicable_row_ids(db, run.id)
     rows = [row for row in all_rows if row.id in applicable_ids]
     skipped_rows = len(all_rows) - len(rows)
     if not rows:
         raise ValueError("Fax ingest run has no applicable rows.")
+    validate_page_ownership(db, document, rows)
     start = min(row.case_date for row in rows)
     end = max(row.case_date for row in rows)
     if (end - start).days > 7:

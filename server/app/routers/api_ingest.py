@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from dataclasses import replace
 from datetime import date, datetime, time
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -22,7 +23,7 @@ from ..fax_ingest_engine import ReviewedFaxRow, stage_reviewed_rows
 from ..fax_pdf_intake import prepare_fax_pdf
 from ..fax_preview import preview_reviewed_rows
 from ..fax_snapshot_service import apply_staged_snapshot
-from ..fax_source_validation import validate_page_ownership
+from ..fax_source_validation import page_problems
 from ..migrate_fax_ingest import PRACTICE_TIMEZONE
 from ..models import FaxDocument
 
@@ -157,6 +158,18 @@ def _upcoming_rows(body: VisualScheduleBatch) -> tuple[list[ReviewedFaxRow], int
     return rows, len(parsed) - len(rows)
 
 
+def _flag_page_problems(db: Session, source_fax_id: int, rows: list[ReviewedFaxRow]) -> list[ReviewedFaxRow]:
+    document = db.query(FaxDocument).filter(FaxDocument.external_fax_id == source_fax_id).one_or_none()
+    if document is None:
+        raise ValueError("Fax PDF must be prepared before staging rows.")
+    problems = page_problems(db, document, rows)
+    return [
+        replace(row, extraction_flags="; ".join(filter(None, (row.extraction_flags, problems[index]))))
+        if index in problems else row
+        for index, row in enumerate(rows)
+    ]
+
+
 @router.post("/preview")
 def preview_visual_schedule_route(
     body: VisualScheduleBatch,
@@ -168,6 +181,7 @@ def preview_visual_schedule_route(
     if not rows:
         return {"ok": True, "result": {"rows": [], "calOnly": [], "skippedPast": skipped_past}}
     try:
+        rows = _flag_page_problems(db, body.source_fax_id, rows)
         result = preview_reviewed_rows(db, external_fax_id=body.source_fax_id, source_label=body.source_label, rows=rows)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -189,10 +203,7 @@ def ingest_visual_schedule_route(
     if not rows:
         return {"ok": True, "result": {"rows": 0, "skippedPast": skipped_past, "writeMode": "staging_only"}}
     try:
-        document = db.query(FaxDocument).filter(FaxDocument.external_fax_id == body.source_fax_id).one_or_none()
-        if document is None:
-            raise ValueError("Fax PDF must be prepared before staging rows.")
-        validate_page_ownership(db, document, rows)
+        rows = _flag_page_problems(db, body.source_fax_id, rows)
         result = stage_reviewed_rows(
             db,
             external_fax_id=body.source_fax_id,

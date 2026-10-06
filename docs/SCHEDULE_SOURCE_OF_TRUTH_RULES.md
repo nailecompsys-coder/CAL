@@ -6,7 +6,7 @@ This is Don's current scheduling rule set for the master calendar, the surgeon a
 
 - The master schedule is the source of truth for each surgeon's weekday AM and PM OR or clinic **baseline**. The permanent `schedule_cards` rows are the dated frame; incoming sources attach detail to them.
 - If a surgeon has no assigned block in one half-day, that half is **NA**: empty time the surgeon controls. They may take personal time without filing a time-off request, or a real OR/clinic/assisting assignment from Epic or Aprima may later fill it. An unused NA can feel like a day off, but it is **not** a formally approved OFF block or a No Call request. Do not infer a block or an OFF state from an empty cell.
-- Do not generate baseline OR or clinic blocks on weekends. Call, approved time off, and actual source activity may still exist on weekends.
+- Do not generate baseline OR or clinic blocks on weekends. On weekends a surgeon is only on call, covering for someone, or OFF; Epic assigns no OR or clinic cases. A weekend OR or clinic line on a fax is a misread and must never be placed on the schedule.
 - A source may fill NA when its surgeon, time, and location are credible. Surgeons can roam to familiar facilities and assist others. An unused NA remains visible as NA; do not invent scheduled work or turn it into formal leave. An NA assignment is not automatically an error.
 
 ## Source overlay

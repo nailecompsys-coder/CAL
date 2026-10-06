@@ -122,6 +122,22 @@ class FaxIngestEngineTest(unittest.TestCase):
         self.assertEqual(decision.reason_code, "off_collision")
         self.assertEqual(self.db.query(ScheduleCard).count(), 10)
 
+    def test_unknown_room_takes_location_and_type_from_assigned_card(self):
+        stage_reviewed_rows(self.db, external_fax_id=170, source_label="Fax 170", rows=[self.row(room="ZZNEWROOM", row_type="clinic")])
+        self.db.commit()
+        staged = self.db.query(FaxIngestRow).one()
+        self.assertEqual(staged.source_location_id, self.location.id)
+        self.assertEqual(staged.row_type, "surgical")
+        self.assertIsNone(staged.extraction_flags)
+
+    def test_unknown_room_on_unassigned_card_is_flagged(self):
+        stage_reviewed_rows(self.db, external_fax_id=171, source_label="Fax 171", rows=[self.row(room="ZZNEWROOM", start_time=time(13, 30))])
+        self.db.commit()
+        staged = self.db.query(FaxIngestRow).one()
+        self.assertIsNone(staged.source_location_id)
+        self.assertEqual(staged.extraction_flags, "unknown_room")
+        self.assertEqual(self.db.query(FaxRowDecision).one().reason_code, "extraction_flagged")
+
 
 if __name__ == "__main__":
     unittest.main()

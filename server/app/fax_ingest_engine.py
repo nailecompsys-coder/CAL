@@ -263,9 +263,24 @@ def stage_reviewed_rows(
             for item in group:
                 item.source_location = inferred
 
-    for item in prepared:
+    # A room code CAL does not know is read off the surgeon's AM/PM card.
+    unknown_room: set[int] = set()
+    row_types: dict[int, str] = {}
+    for index, item in enumerate(prepared):
+        room = _text(item.row.room).upper()
+        if not room or room in GENERIC_LOCATION_ROOMS or item.source_location:
+            continue
+        card = item.card
+        if card and card.baseline_state == "assigned" and card.baseline_location:
+            item.source_location = card.baseline_location
+            row_types[index] = "surgical" if _location_matches_row_type(card.baseline_location, "surgical") else "clinic"
+        else:
+            unknown_room.add(index)
+
+    for index, item in enumerate(prepared):
         row = item.row
         room = _text(row.room).upper()
+        flags = [value for value in (_text(row.extraction_flags), "unknown_room" if index in unknown_room else "") if value]
         staged = FaxIngestRow(
             run_id=run.id,
             page_number=row.page,
@@ -274,13 +289,13 @@ def stage_reviewed_rows(
             case_date=row.case_date,
             start_time=row.start_time,
             session=item.session,
-            row_type=row.row_type,
+            row_type=row_types.get(index, row.row_type),
             room_text=room,
             patient_name=_text(row.patient_name),
             procedure=_text(row.procedure),
             source_location_id=item.source_location.id if item.source_location else None,
             normalized_key=_key(row),
-            extraction_flags=_text(row.extraction_flags) or None,
+            extraction_flags="; ".join(flags) or None,
         )
         db.add(staged)
         db.flush()

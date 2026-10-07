@@ -342,6 +342,18 @@ class NativeHomeContractTest(unittest.TestCase):
             pm_item = next(item for item in items if item["id"] == f"card-{pm.id}")
             self.assertEqual((1, 0), (am_item["caseCount"], am_item["visitCount"]))
             self.assertEqual((0, 2), (pm_item["caseCount"], pm_item["visitCount"]))
+            self.assertEqual((am.id, pm.id), (am_item["cardId"], pm_item["cardId"]))
+            surgery = next(item for item in items if item["type"] == "surgery")
+            self.assertEqual(am.id, surgery["cardId"])
+
+            stored_on_pm = SurgicalCase(surgeon_id=surgeon.id, date=date(2026, 10, 6), start_time=time(11),
+                                        end_time=time(12), patient_name="Late Patient", procedure="Test",
+                                        location_id=clinic.id, schedule_card_id=pm.id, status="scheduled")
+            db.add(stored_on_pm)
+            db.commit()
+            items = build_native_home(db, surgeon, date(2026, 10, 6), date(2026, 10, 6))["days"][0]["items"]
+            self.assertEqual(pm.id, next(item for item in items if item["id"] == f"surg-{stored_on_pm.id}")["cardId"])
+            self.assertEqual(1, next(item for item in items if item["id"] == f"card-{pm.id}")["caseCount"])
         finally:
             db.close()
 

@@ -66,13 +66,20 @@ cards AS (
 ),
 source_cases AS (
     SELECT sc.*, CASE WHEN sc.surgeon_id = :surgeon_id THEN 0 ELSE 1 END AS assisting,
+           c.id AS card_id,
            c.baseline_state AS card_state, c.baseline_location_id AS card_location_id,
            c.is_off AS card_is_off, c.baseline_label AS card_label,
            l.name AS location_name, l.color AS location_color,
            assistant.first_name || ' ' || assistant.last_name AS assisting_name
     FROM surgical_cases sc
-    LEFT JOIN cards c ON c.date = sc.date AND c.session = CASE
-        WHEN substr(CAST(sc.start_time AS TEXT), 1, 5) < '12:00' THEN 'am' ELSE 'pm' END
+    -- The case's stored card for its own surgeon; otherwise (assisting, or no stored card)
+    -- this surgeon's card for the case's half-day.
+    LEFT JOIN cards c ON c.id = CASE
+        WHEN sc.surgeon_id = :surgeon_id AND EXISTS (SELECT 1 FROM cards x WHERE x.id = sc.schedule_card_id)
+            THEN sc.schedule_card_id
+        ELSE (SELECT x.id FROM cards x WHERE x.date = sc.date AND x.session = CASE
+                WHEN substr(CAST(sc.start_time AS TEXT), 1, 5) < '12:00' THEN 'am' ELSE 'pm' END)
+    END
     LEFT JOIN locations l ON l.id = sc.location_id
     LEFT JOIN surgeons assistant ON assistant.id = sc.assisting_surgeon_id
     WHERE (sc.surgeon_id = :surgeon_id OR sc.assisting_surgeon_id = :surgeon_id)
@@ -81,7 +88,9 @@ source_cases AS (
 ),
 items AS (
     SELECT 'card-' || CAST(c.id AS TEXT) AS item_id, c.date AS item_date,
-           CASE WHEN c.baseline_state = 'assigned' AND c.location_type = 'hospital' THEN 'block_or' ELSE 'clinic' END AS item_type,
+           CASE WHEN c.is_off = 0 AND c.location_type = 'hospital'
+                 AND (c.baseline_state = 'assigned' OR c.effective_state = 'assigned')
+                THEN 'block_or' ELSE 'clinic' END AS item_type,
            CASE WHEN c.is_off = 1 THEN 'OFF'
                 WHEN c.baseline_state = 'assigned' THEN c.baseline_label
                 WHEN c.effective_state = 'assigned' THEN c.effective_label
@@ -105,10 +114,8 @@ items AS (
            CAST(NULL AS TEXT) AS status, CAST(NULL AS TEXT) AS surgeon_notes,
            CAST(NULL AS TEXT) AS assisting_surgeon, 0 AS assisting,
            CASE WHEN c.session = 'am' THEN 0 ELSE 2 END AS sort_rank,
-           (SELECT count(*) FROM source_cases sc WHERE sc.date = c.date
-              AND CASE WHEN substr(CAST(sc.start_time AS TEXT),1,5) < '12:00' THEN 'am' ELSE 'pm' END = c.session
-           ) AS case_count,
-           c.visits AS visit_count
+           (SELECT count(*) FROM source_cases sc WHERE sc.card_id = c.id) AS case_count,
+           c.visits AS visit_count, c.id AS card_id
     FROM cards c
     UNION ALL
     SELECT 'surg-' || CAST(sc.id AS TEXT) || CASE WHEN sc.assisting = 1 THEN '-assist' ELSE '' END,
@@ -130,7 +137,7 @@ items AS (
            ) THEN 1 ELSE 0 END,
            sc.id, coalesce(sc.location_color, '#e0f2fe'), sc.status,
            CASE WHEN sc.assisting = 1 THEN '' ELSE coalesce(sc.surgeon_notes, '') END,
-           coalesce(sc.assisting_name, ''), sc.assisting, 1, 0, 0
+           coalesce(sc.assisting_name, ''), sc.assisting, 1, 0, 0, sc.card_id
     FROM source_cases sc
 ),
 legacy_clinic AS (
@@ -146,7 +153,7 @@ legacy_clinic AS (
            coalesce(l.color, '#0ea5e9') AS color,
            CAST(NULL AS TEXT) AS status, CAST(NULL AS TEXT) AS surgeon_notes,
            CAST(NULL AS TEXT) AS assisting_surgeon, 0 AS assisting, 0 AS sort_rank,
-           0 AS case_count, 0 AS visit_count
+           0 AS case_count, 0 AS visit_count, CAST(NULL AS INTEGER) AS card_id
     FROM clinic_schedules cl LEFT JOIN locations l ON l.id = cl.location_id
     WHERE cl.surgeon_id = :surgeon_id AND cl.date BETWEEN :start_date AND :end_date
       AND NOT EXISTS (SELECT 1 FROM cards c WHERE c.date = cl.date AND (c.session = cl.session OR cl.session = 'full'))

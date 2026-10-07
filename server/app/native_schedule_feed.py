@@ -58,6 +58,7 @@ def append_native_schedule(db, surgeon_id, start_date, end_date, by_date):
             "color": row["color"],
             "caseCount": row["case_count"],
             "visitCount": row["visit_count"],
+            "cardId": row["card_id"],
         }
         if row["raw_id"] is not None:
             item.update({

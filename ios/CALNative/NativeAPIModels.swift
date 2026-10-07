@@ -169,6 +169,8 @@ struct NativeScheduleItemResponse: Decodable {
   let notes: String?
   let source: String?
   let needsReview: Bool?
+  let caseCount: Int?
+  let visitCount: Int?
 
   func doctorScheduleItem(dateKey: String) -> DoctorScheduleItem? {
     guard !["personal", "meeting", "oncall", "dayoff"].contains(type), allDay != true else {
@@ -178,7 +180,7 @@ struct NativeScheduleItemResponse: Decodable {
     let procedure = (subtitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     let loc = (location ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     let roomValue = (room ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-    return DoctorScheduleItem(
+    var item = DoctorScheduleItem(
       id: id ?? "\(dateKey)-\(rawId ?? 0)-\(title)",
       period: periodLabel,
       title: displayTitle,
@@ -194,6 +196,9 @@ struct NativeScheduleItemResponse: Decodable {
       source: (source ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
       needsReview: needsReview ?? false
     )
+    item.caseCount = caseCount ?? 0
+    item.visitCount = visitCount ?? 0
+    return item
   }
 
   func meetingItem(dateKey: String) -> DoctorScheduleItem? {

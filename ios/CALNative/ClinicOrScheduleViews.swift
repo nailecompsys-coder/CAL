@@ -64,7 +64,8 @@ enum ClinicOrScheduleBuilder {
           period: clinic.period,
           title: clinic.title,
           details: details,
-          countStyle: isOR ? .cases : .visits
+          countStyle: isOR ? .cases : .visits,
+          bookedCount: isOR ? clinic.caseCount : clinic.visitCount
         )
       )
     }
@@ -114,7 +115,7 @@ enum ClinicOrScheduleBuilder {
   }
 
   /// Month-cell letters per half-day, AM before PM: O = OR, C = clinic, M = meeting.
-  /// A block with nothing booked is inactive (muted); booked work or a meeting is active.
+  /// Read straight from the master cards' SQL counts: zero is muted, one or more is bold.
   static func periodCodes(items: [DoctorScheduleItem], meetings: [DoctorScheduleItem]) -> (am: [PeriodCode], pm: [PeriodCode]) {
     var codes: [String: [PeriodCode]] = ["AM": [], "PM": []]
     func add(_ letter: String, _ period: String, active: Bool) {
@@ -126,11 +127,14 @@ enum ClinicOrScheduleBuilder {
       }
       codes[period] = list
     }
-    for group in groups(from: items) {
-      if group.isEmptyCard {
-        if !group.details.isEmpty { add("O", group.period, active: true) }
+    for card in items where card.source == "master" || card.source == "clinic_schedule" {
+      if isEmptyCard(card) {
+        if card.caseCount > 0 { add("O", card.period, active: true) }
+        if card.visitCount > 0 { add("C", card.period, active: true) }
+      } else if card.isBlockOr || card.title.uppercased().hasSuffix("-OR") {
+        add("O", card.period, active: card.caseCount > 0)
       } else {
-        add(group.countStyle == .cases ? "O" : "C", group.period, active: !group.details.isEmpty)
+        add("C", card.period, active: card.visitCount > 0 || card.caseCount > 0)
       }
     }
     for meeting in meetings {

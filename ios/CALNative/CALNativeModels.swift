@@ -127,6 +127,9 @@ struct DoctorScheduleItem: Identifiable {
   let end: String
   let source: String
   let needsReview: Bool
+  /// SQL counts for a master card's half-day; zero on non-card rows.
+  var caseCount = 0
+  var visitCount = 0
 
   var isBlockOr: Bool { kind == "block_or" }
   var isClinicOrSurgery: Bool { kind == "clinic" || kind == "surgery" }
@@ -177,6 +180,8 @@ struct ClinicOrFacilityGroup: Identifiable {
   let title: String
   let details: [ClinicOrDetailRow]
   let countStyle: CountStyle
+  /// SQL count for the card (visits are not listed on the phone, only counted).
+  var bookedCount = 0
 
   /// OFF / NA cards carry no facility; they only list work that landed on them.
   var isEmptyCard: Bool {
@@ -185,7 +190,7 @@ struct ClinicOrFacilityGroup: Identifiable {
 
   /// "2 cases" / "7 visits"; empty for an OFF / NA card with nothing on it.
   var countLabel: String {
-    let count = details.count
+    let count = max(details.count, bookedCount)
     if isEmptyCard && count == 0 { return "" }
     switch countStyle {
     case .cases: return count == 1 ? "1 case" : "\(count) cases"

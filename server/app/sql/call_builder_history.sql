@@ -40,9 +40,23 @@ SELECT r.id AS surgeon_id,
        (SELECT count(*) FROM effective e
          WHERE e.surgeon_id = r.id
            AND e.call_date >= DRAFT_FROM AND e.call_date < DRAFT_TO) AS month_call_count,
+       (SELECT count(*) FROM effective e
+         WHERE e.surgeon_id = r.id
+           AND e.call_date >= DRAFT_FROM AND e.call_date < DRAFT_TO
+           AND WEEKDAY_EXPR IN (0, 6)) AS month_weekend_count,
        (SELECT count(*) FROM draft d WHERE d.surgeon_id = r.id) AS draft_count,
        (SELECT count(*) FROM draft d
          WHERE d.surgeon_id = r.id AND WEEKDAY_DRAFT IN (0, 6)) AS draft_weekend_count,
+       (SELECT count(*)
+          FROM effective e
+          JOIN holidays h ON h.date = e.call_date
+         WHERE e.surgeon_id = r.id) AS holiday_count,
+       (SELECT h.name
+          FROM effective e
+          JOIN holidays h ON h.date = e.call_date
+         WHERE e.surgeon_id = r.id
+         ORDER BY h.date DESC
+         LIMIT 1) AS last_holiday,
        (SELECT HOLIDAY_LIST
           FROM effective e
           JOIN holidays h ON h.date = e.call_date

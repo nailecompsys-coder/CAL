@@ -249,6 +249,8 @@ struct CallBuilderHomeView: View {
   /// "day|groupId" → surgeon id
   @State private var draft: [String: Int] = [:]
   @State private var picking: CallBuilderPick?
+  @State private var loadBySurgeon: [Int: NativeCallBuilderLoad] = [:]
+  @State private var loadLegend = "YTD calls/wknd · month calls/wknd · holidays/last"
 
   private var roster: [NativeSurgeon] {
     store.surgeons
@@ -290,6 +292,10 @@ struct CallBuilderHomeView: View {
               .font(.caption)
               .foregroundStyle(.secondary)
 
+            Text(loadLegend)
+              .font(.caption2)
+              .foregroundStyle(ClinicalPalette.muted)
+
             ForEach(daysInMonth, id: \.self) { day in
               CallBuilderDayRow(
                 day: day,
@@ -316,11 +322,16 @@ struct CallBuilderHomeView: View {
           .disabled(draft.isEmpty)
         }
       }
+      .task(id: monthKey) {
+        await reloadHistory()
+      }
       .sheet(item: $picking) { pick in
         CallBuilderPickerSheet(
           pick: pick,
           roster: roster,
-          draftCount: { sid in draft.values.filter { $0 == sid }.count },
+          loadBySurgeon: loadBySurgeon,
+          legend: loadLegend,
+          monthLabel: month.formatted(.dateTime.month(.abbreviated)),
           onPick: { surgeonId in
             let key = Self.key(day: pick.day, group: pick.group)
             if let surgeonId {
@@ -333,6 +344,21 @@ struct CallBuilderHomeView: View {
           onCancel: { picking = nil }
         )
       }
+    }
+  }
+
+  private var monthKey: String {
+    let cal = Calendar.current
+    return String(format: "%04d-%02d", cal.component(.year, from: month), cal.component(.month, from: month))
+  }
+
+  private func reloadHistory() async {
+    do {
+      let response = try await store.fetchCallBuilderHistory(month: month)
+      loadLegend = response.legend
+      loadBySurgeon = Dictionary(uniqueKeysWithValues: response.history.map { ($0.surgeonId, $0) })
+    } catch {
+      // Keep prior lines if the feed is unavailable (e.g. preview without access).
     }
   }
 
@@ -436,9 +462,12 @@ private struct CallBuilderSlot: View {
 private struct CallBuilderPickerSheet: View {
   let pick: CallBuilderPick
   let roster: [NativeSurgeon]
-  let draftCount: (Int) -> Int
+  let loadBySurgeon: [Int: NativeCallBuilderLoad]
+  let legend: String
+  let monthLabel: String
   let onPick: (Int?) -> Void
   let onCancel: () -> Void
+  @State private var detailLoad: NativeCallBuilderLoad?
 
   var body: some View {
     CalNavigation {
@@ -447,25 +476,50 @@ private struct CallBuilderPickerSheet: View {
           Text(pick.day.formatted(.dateTime.weekday(.wide).month().day()) + " · " + pick.group.title)
             .font(.subheadline)
             .foregroundStyle(.secondary)
+          Text(legend)
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        if let load = detailLoad {
+          Section("\(load.firstName) \(load.lastName)") {
+            CallBuilderDetailRow(label: "YTD", value: load.detailYTD)
+            CallBuilderDetailRow(label: monthLabel, value: load.detailMonth)
+            CallBuilderDetailRow(label: "Holidays", value: load.detailHolidays)
+            CallBuilderDetailRow(label: "Last holiday", value: load.lastHoliday.isEmpty ? "—" : load.lastHoliday)
+            Button("Hide detail") { detailLoad = nil }
+          }
         }
         Section("Surgeons · practice rank") {
           ForEach(roster) { s in
-            Button {
-              onPick(s.id)
-            } label: {
-              HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                  Text(s.name)
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(ClinicalPalette.ink)
-                  Text("Draft \(draftCount(s.id))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+              Button {
+                onPick(s.id)
+              } label: {
+                HStack {
+                  VStack(alignment: .leading, spacing: 2) {
+                    Text(s.name)
+                      .font(.body.weight(.semibold))
+                      .foregroundStyle(ClinicalPalette.ink)
+                    Text(loadBySurgeon[s.id]?.loadLine ?? "—/— · —/— · —/—")
+                      .font(.caption.monospacedDigit())
+                      .foregroundStyle(.secondary)
+                  }
+                  Spacer()
+                  Text(s.initials)
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(ClinicalPalette.teal)
                 }
-                Spacer()
-                Text(s.initials)
-                  .font(.subheadline.weight(.bold))
-                  .foregroundStyle(ClinicalPalette.teal)
+              }
+              .buttonStyle(.plain)
+              if let load = loadBySurgeon[s.id] {
+                Button {
+                  detailLoad = load
+                } label: {
+                  Image(systemName: "info.circle")
+                    .foregroundStyle(ClinicalPalette.teal)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Call load detail")
               }
             }
           }
@@ -481,6 +535,22 @@ private struct CallBuilderPickerSheet: View {
           Button("Cancel", action: onCancel)
         }
       }
+    }
+  }
+}
+
+private struct CallBuilderDetailRow: View {
+  let label: String
+  let value: String
+
+  var body: some View {
+    HStack(alignment: .top) {
+      Text(label)
+        .foregroundStyle(.secondary)
+      Spacer(minLength: 12)
+      Text(value)
+        .multilineTextAlignment(.trailing)
+        .font(.body.monospacedDigit())
     }
   }
 }

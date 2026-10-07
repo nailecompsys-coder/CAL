@@ -81,7 +81,10 @@ def get_current_surgeon(
     # Support previews are allowed only on the two native read endpoints. They
     # never become a surgeon device/session and cannot reach mutation routes.
     if request.method == "GET" and request.url.path in {
-        "/api/native/home", "/api/native/patient-schedule", "/api/native/whos-where"
+        "/api/native/home",
+        "/api/native/patient-schedule",
+        "/api/native/whos-where",
+        "/api/native/call-builder/history",
     }:
         preview_surgeon = surgeon_for_preview_token(db, token)
         if preview_surgeon is not None:

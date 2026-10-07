@@ -8,12 +8,14 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.call_builder_service import _history_statement, history_for_month
 from app.models import (
     Base,
     CallGroup,
     CallRotation,
     ClinicSchedule,
     DayOff,
+    Holiday,
     Location,
     Meeting,
     NativeScheduleAlert,
@@ -36,6 +38,7 @@ class FixedDate(date):
 
 class NativeHomeContractTest(unittest.TestCase):
     def setUp(self):
+        _history_statement.cache_clear()
         self.engine = create_engine("sqlite:///:memory:")
         Base.metadata.create_all(bind=self.engine)
         self.Session = sessionmaker(bind=self.engine)
@@ -76,6 +79,46 @@ class NativeHomeContractTest(unittest.TestCase):
             payload = build_native_home(db, surgeon, date(2026, 10, 7), date(2026, 10, 7))
             self.assertTrue(payload["canCallBuilder"])
             self.assertTrue(payload["surgeon"]["canCallBuilder"])
+        finally:
+            db.close()
+
+    def test_native_call_builder_history_load_line_contract(self):
+        """GET /api/native/call-builder/history rows carry shared card loadLine."""
+        db = self.Session()
+        try:
+            chris = Surgeon(
+                first_name="Chris",
+                last_name="Johnson",
+                email="chris@example.com",
+                staff_type="physician",
+                sort_order=1,
+                is_active=True,
+                can_call_builder=True,
+            )
+            wg = CallGroup(name="Winter Garden / Apopka / Minneola Hospital", sort_order=0)
+            db.add_all([chris, wg])
+            db.add(Holiday(date=date(2026, 5, 25), name="Memorial Day"))
+            db.commit()
+            db.add(CallRotation(date=date(2026, 5, 23), call_group_id=wg.id, surgeon_id=chris.id))
+            db.add(CallRotation(date=date(2026, 5, 25), call_group_id=wg.id, surgeon_id=chris.id))
+            db.commit()
+
+            rows = history_for_month(db, 2026, 5)
+            self.assertEqual(len(rows), 1)
+            row = rows[0]
+            for key in (
+                "loadLine",
+                "callCount",
+                "weekendCount",
+                "monthCallCount",
+                "monthWeekendCount",
+                "holidayCount",
+                "lastHolidayAbbrev",
+                "holidayNames",
+            ):
+                self.assertIn(key, row)
+            self.assertEqual(row["loadLine"], "2/1 · 2/1 · 1/Mem")
+            self.assertEqual(row["lastHolidayAbbrev"], "Mem")
         finally:
             db.close()
 

@@ -338,6 +338,26 @@ struct NativeCALClient {
     return try JSONDecoder().decode(NativeWhosWhereResponse.self, from: data)
   }
 
+  func fetchCallBuilderHistory(token: String, month: Date) async throws -> NativeCallBuilderHistoryResponse {
+    let cal = Calendar.current
+    let y = cal.component(.year, from: month)
+    let m = cal.component(.month, from: month)
+    var components = URLComponents(url: baseURL.appendingPathComponent("/api/native/call-builder/history"), resolvingAgainstBaseURL: false)!
+    components.queryItems = [URLQueryItem(name: "month", value: String(format: "%04d-%02d", y, m))]
+    guard let url = components.url else {
+      throw NativeCALError.invalidURL
+    }
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.setValue(token, forHTTPHeaderField: "X-CAL-Device-Token")
+
+    let data = try await perform(request)
+    return try JSONDecoder().decode(NativeCallBuilderHistoryResponse.self, from: data)
+  }
+
   func fetchPatientSchedule(token: String, start: Date, end: Date) async throws -> NativePatientScheduleResponse {
     var components = URLComponents(url: baseURL.appendingPathComponent("/api/native/patient-schedule"), resolvingAgainstBaseURL: false)!
     components.queryItems = [

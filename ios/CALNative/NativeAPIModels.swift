@@ -29,6 +29,38 @@ struct NativeWhosWhereResponse: Decodable {
   let rows: [NativeWhosWhereRow]
 }
 
+struct NativeCallBuilderHistoryResponse: Decodable {
+  let month: String
+  let legend: String
+  let history: [NativeCallBuilderLoad]
+}
+
+/// Compact call-load card: `YTD calls/wknd · month calls/wknd · holidays/last`.
+struct NativeCallBuilderLoad: Decodable, Identifiable, Hashable {
+  let surgeonId: Int
+  let initials: String
+  let lastName: String
+  let firstName: String
+  let callCount: Int
+  let weekendCount: Int
+  let monthCallCount: Int
+  let monthWeekendCount: Int
+  let holidayCount: Int
+  let lastHoliday: String
+  let lastHolidayAbbrev: String
+  let holidayNames: [String]
+  let loadLine: String
+
+  var id: Int { surgeonId }
+
+  var detailYTD: String { "\(callCount) calls · \(weekendCount) weekends" }
+  var detailMonth: String { "\(monthCallCount) calls · \(monthWeekendCount) weekends" }
+  var detailHolidays: String {
+    if holidayNames.isEmpty { return "\(holidayCount)" }
+    return "\(holidayCount) · " + holidayNames.joined(separator: ", ")
+  }
+}
+
 /// One surgeon/PA half-day (session "am"/"pm") or a group's on-call row (session "call").
 struct NativeWhosWhereRow: Decodable, Identifiable, Hashable {
   let session: String

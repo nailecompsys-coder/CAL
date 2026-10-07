@@ -32,23 +32,40 @@
 </div>
 {% endif %}
 
-<div class="p-6 grid grid-cols-1 xl:grid-cols-[240px_1fr] gap-6">
+<div class="p-6 grid grid-cols-1 xl:grid-cols-[260px_1fr] gap-6">
   <aside class="space-y-3">
     <p class="text-xs text-slate-500">Drag a surgeon onto a WG or ALT line, or click a surgeon then click a line. Dashed = draft. Solid = already live. Struck-through = Off or No Call that day.</p>
     <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Surgeons · practice rank</p>
+    <p class="text-[10px] text-slate-400 leading-snug">YTD calls/wknd · {{ month_short }} calls/wknd · holidays/last</p>
     <div class="space-y-1.5">
       {% for h in history %}
-      {% set last_hol = h.holidays.split(',')[0].split('/')[0] if h.holidays else 'none' %}
       <div class="roster-tile rounded-lg border border-slate-200 bg-white px-2.5 py-2 cursor-grab select-none hover:border-blue-300"
-           draggable="true" data-surgeon-id="{{ h.surgeonId }}" data-initials="{{ h.initials }}"
+           draggable="true"
+           data-surgeon-id="{{ h.surgeonId }}"
+           data-initials="{{ h.initials }}"
+           data-name="{{ h.firstName }} {{ h.lastName }}"
+           data-load-line="{{ h.loadLine }}"
+           data-ytd="{{ h.callCount }}"
+           data-ytd-wknd="{{ h.weekendCount }}"
+           data-month="{{ h.monthCallCount }}"
+           data-month-wknd="{{ h.monthWeekendCount }}"
+           data-hol-count="{{ h.holidayCount }}"
+           data-last-hol="{{ h.lastHoliday or '—' }}"
+           data-holidays="{{ h.holidayNames|join(', ') if h.holidayNames else 'none' }}"
            onclick="pickSurgeon(this)" title="{{ h.firstName }} {{ h.lastName }}">
         <div class="flex items-center justify-between gap-2">
           <span class="text-sm font-semibold text-slate-800">{{ h.initials }} · {{ h.lastName }}</span>
-          <span class="text-xs font-bold text-slate-800">{{ month_short }} {{ h.monthCallCount }}</span>
         </div>
-        <p class="text-[11px] text-slate-500">{{ h.callCount }} ytd · draft {{ h.draftCount }} · wknd {{ h.weekendCount }} · hol {{ last_hol }}</p>
+        <p class="text-[11px] font-semibold tabular-nums text-slate-600 tracking-tight">{{ h.loadLine }}</p>
       </div>
       {% endfor %}
+    </div>
+    <div id="surgeon-flyover" class="hidden rounded-xl border border-blue-200 bg-blue-50/80 px-3 py-2.5 text-xs text-slate-700 space-y-1">
+      <p id="fly-name" class="text-sm font-bold text-slate-800"></p>
+      <p><span class="text-slate-500">YTD</span> <span id="fly-ytd" class="font-semibold tabular-nums"></span></p>
+      <p><span class="text-slate-500">{{ month_short }}</span> <span id="fly-month" class="font-semibold tabular-nums"></span></p>
+      <p><span class="text-slate-500">Holidays</span> <span id="fly-hol" class="font-semibold"></span></p>
+      <p><span class="text-slate-500">Last holiday</span> <span id="fly-last" class="font-semibold"></span></p>
     </div>
     <div class="flex flex-col gap-2 pt-2">
       <button type="button" onclick="openPublish()" class="bg-blue-600 text-white text-sm font-medium py-2.5 rounded-lg hover:bg-blue-700">
@@ -147,11 +164,30 @@
 const MONTH_OFFSET = {{ month_offset }};
 let penId = null;
 
+function showFlyover(el) {
+  const box = document.getElementById('surgeon-flyover');
+  if (!el) { box.classList.add('hidden'); return; }
+  document.getElementById('fly-name').textContent = el.dataset.name || '';
+  document.getElementById('fly-ytd').textContent =
+    (el.dataset.ytd || '0') + ' calls · ' + (el.dataset.ytdWknd || '0') + ' weekends';
+  document.getElementById('fly-month').textContent =
+    (el.dataset.month || '0') + ' calls · ' + (el.dataset.monthWknd || '0') + ' weekends';
+  document.getElementById('fly-hol').textContent =
+    (el.dataset.holCount || '0') + (el.dataset.holidays && el.dataset.holidays !== 'none'
+      ? ' · ' + el.dataset.holidays : '');
+  document.getElementById('fly-last').textContent = el.dataset.lastHol || '—';
+  box.classList.remove('hidden');
+}
 function pickSurgeon(el) {
   document.querySelectorAll('.roster-tile').forEach(t => t.classList.remove('ring-2', 'ring-blue-500'));
-  if (penId === el.dataset.surgeonId) { penId = null; return; }
+  if (penId === el.dataset.surgeonId) {
+    penId = null;
+    showFlyover(null);
+    return;
+  }
   penId = el.dataset.surgeonId;
   el.classList.add('ring-2', 'ring-blue-500');
+  showFlyover(el);
 }
 document.querySelectorAll('.roster-tile').forEach(el => {
   el.addEventListener('dragstart', e => {

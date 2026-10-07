@@ -201,6 +201,18 @@ final class NativeScheduleStore: ObservableObject {
     }
   }
 
+  func fetchCallBuilderHistory(month: Date) async throws -> NativeCallBuilderHistoryResponse {
+    guard let token = activeToken else {
+      throw NativeCALError.missingSession
+    }
+    do {
+      return try await client.fetchCallBuilderHistory(token: token, month: month)
+    } catch let error as NativeCALError where error.isAuthenticationFailure {
+      expireSession()
+      throw error
+    }
+  }
+
   func loadPatientSchedule(containing date: Date, daysAhead: Int = 6) async {
     guard let token = activeToken else {
       clearScheduleForMissingSession()

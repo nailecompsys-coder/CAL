@@ -73,6 +73,35 @@ def require_surgeon_call_builder(surgeon: Surgeon) -> None:
         raise HTTPException(403, "Call Builder is not enabled for this account")
 
 
+# Compact labels for the roster card third segment (count/abbr).
+_HOLIDAY_ABBREV = {
+    "New Year's": "NY",
+    "Memorial Day": "Mem",
+    "July 4th": "Jul4",
+    "Labor Day": "Lab",
+    "Thanksgiving": "Thx",
+    "Christmas": "Xmas",
+}
+
+
+def holiday_abbrev(name: str | None) -> str:
+    if not name:
+        return "—"
+    return _HOLIDAY_ABBREV.get(name, name[:3])
+
+
+def _holiday_names(raw: str) -> list[str]:
+    """Parse 'Memorial Day/1,July 4th/2' into unique names in list order."""
+    names: list[str] = []
+    seen: set[str] = set()
+    for part in (raw or "").split(","):
+        label = part.split("/", 1)[0].strip()
+        if label and label not in seen:
+            seen.add(label)
+            names.append(label)
+    return names
+
+
 def call_history(
     db: Session,
     *,
@@ -93,19 +122,57 @@ def call_history(
             "draft_to": draft_to.isoformat(),
         },
     ).mappings()
-    return [{
-        "surgeonId": row["surgeon_id"],
-        "initials": row["initials"],
-        "lastName": row["last_name"],
-        "firstName": row["first_name"],
-        "staffType": row["staff_type"],
-        "callCount": int(row["call_count"] or 0),
-        "weekendCount": int(row["weekend_count"] or 0),
-        "monthCallCount": int(row["month_call_count"] or 0),
-        "draftCount": int(row["draft_count"] or 0),
-        "draftWeekendCount": int(row["draft_weekend_count"] or 0),
-        "holidays": row["holidays"] or "",
-    } for row in rows]
+    out = []
+    for row in rows:
+        call_count = int(row["call_count"] or 0)
+        weekend_count = int(row["weekend_count"] or 0)
+        month_call_count = int(row["month_call_count"] or 0)
+        month_weekend_count = int(row["month_weekend_count"] or 0)
+        holiday_count = int(row["holiday_count"] or 0)
+        last_holiday = row["last_holiday"] or ""
+        last_abbr = holiday_abbrev(last_holiday) if holiday_count else "—"
+        # Card: YTD calls/wknd · month calls/wknd · holiday count/last abbr
+        load_line = (
+            f"{call_count}/{weekend_count} · "
+            f"{month_call_count}/{month_weekend_count} · "
+            f"{holiday_count}/{last_abbr}"
+        )
+        out.append({
+            "surgeonId": row["surgeon_id"],
+            "initials": row["initials"],
+            "lastName": row["last_name"],
+            "firstName": row["first_name"],
+            "staffType": row["staff_type"],
+            "callCount": call_count,
+            "weekendCount": weekend_count,
+            "monthCallCount": month_call_count,
+            "monthWeekendCount": month_weekend_count,
+            "draftCount": int(row["draft_count"] or 0),
+            "draftWeekendCount": int(row["draft_weekend_count"] or 0),
+            "holidayCount": holiday_count,
+            "lastHoliday": last_holiday,
+            "lastHolidayAbbrev": last_abbr,
+            "holidayNames": _holiday_names(row["holidays"] or ""),
+            "holidays": row["holidays"] or "",
+            "loadLine": load_line,
+        })
+    return out
+
+
+def history_for_month(db: Session, year: int, month: int) -> list[dict]:
+    """YTD through end of month; month window = that calendar month."""
+    start = date(year, month, 1)
+    if month == 12:
+        month_end = date(year + 1, 1, 1)
+    else:
+        month_end = date(year, month + 1, 1)
+    return call_history(
+        db,
+        from_date=date(year, 1, 1),
+        to_date=month_end,
+        draft_from=start,
+        draft_to=month_end,
+    )
 
 
 def holidays_between(db: Session, start: date, end: date) -> list[Holiday]:

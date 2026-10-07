@@ -9,6 +9,7 @@ from ..auth import get_current_surgeon
 from ..conflicts import check_conflicts
 from ..database import get_db
 from ..native_availability_service import save_native_availability as save_native_availability_service
+from ..call_builder_service import history_for_month, require_surgeon_call_builder
 from ..native_call_coverage_service import assign_native_call_coverage, cancel_native_call_coverage
 from ..native_home_service import build_native_home
 from ..native_support_preview_service import SESSION_MINUTES, redeem_preview_code
@@ -76,6 +77,29 @@ def native_whos_where(
     except ValueError:
         raise HTTPException(400, "day must be YYYY-MM-DD")
     return {"date": target.isoformat(), "rows": whos_where(db, target)}
+
+
+@router.get("/call-builder/history")
+def native_call_builder_history(
+    month: str,
+    db: Session = Depends(get_db),
+    auth=Depends(get_current_surgeon),
+):
+    """Roster load lines for Call Builder. month = YYYY-MM."""
+    surgeon, _ = auth
+    require_surgeon_call_builder(surgeon)
+    try:
+        year_s, month_s = month.split("-", 1)
+        year, month_n = int(year_s), int(month_s)
+        if month_n < 1 or month_n > 12:
+            raise ValueError
+    except ValueError:
+        raise HTTPException(400, "month must be YYYY-MM")
+    return {
+        "month": f"{year:04d}-{month_n:02d}",
+        "legend": "YTD calls/wknd · month calls/wknd · holidays/last",
+        "history": history_for_month(db, year, month_n),
+    }
 
 
 @router.get("/patient-schedule")

@@ -381,6 +381,37 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.assertEqual(result["rowsSkipped"], 1)
         self.assertEqual([case.patient_name for case in self.db.query(SurgicalCase).all()], ["Clean, Patient"])
 
+    def test_corrected_rerun_of_the_latest_applied_fax_moves_and_cancels_its_cases(self):
+        first = stage_reviewed_rows(
+            self.db, external_fax_id=191, source_label="test", surgeon_scope=["JF"],
+            rows=[self._row("Kept, Patient"), self._row("Misread, Patient")],
+        )
+        self.db.commit()
+        apply_staged_snapshot(self.db, source_fax_id=191, run_id=first["runId"])
+
+        second = stage_reviewed_rows(
+            self.db, external_fax_id=191, source_label="test", surgeon_scope=["JF"],
+            rows=[self._row("Kept, Patient")],
+        )
+        self.db.commit()
+        apply_staged_snapshot(self.db, source_fax_id=191, run_id=second["runId"])
+
+        statuses = {case.patient_name: case.status for case in self.db.query(SurgicalCase).all()}
+        self.assertEqual(statuses, {"Kept, Patient": "scheduled", "Misread, Patient": "cancelled"})
+
+    def test_older_fax_cannot_be_applied_after_a_newer_one(self):
+        newer = stage_reviewed_rows(
+            self.db, external_fax_id=192, source_label="test", surgeon_scope=["JF"], rows=[self._row("New, Patient")],
+        )
+        self.db.commit()
+        apply_staged_snapshot(self.db, source_fax_id=192, run_id=newer["runId"])
+        older = stage_reviewed_rows(
+            self.db, external_fax_id=191, source_label="test", surgeon_scope=["JF"], rows=[self._row("Old, Patient")],
+        )
+        self.db.commit()
+        with self.assertRaisesRegex(ValueError, "newer fax was already applied"):
+            apply_staged_snapshot(self.db, source_fax_id=191, run_id=older["runId"])
+
     def test_row_without_existing_am_pm_slot_is_skipped_not_fatal(self):
         staged = stage_reviewed_rows(
             self.db,

@@ -186,8 +186,6 @@ def apply_staged_snapshot(
     document = db.get(FaxDocument, run.fax_document_id)
     if not document or document.external_fax_id != source_fax_id:
         raise ValueError("Fax ingest run does not belong to this fax.")
-    if document.status == "applied":
-        raise ValueError("This fax was already applied.")
     newer_applied = db.query(FaxDocument.id).filter(
         FaxDocument.external_fax_id > source_fax_id,
         FaxDocument.status == "applied",

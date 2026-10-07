@@ -22,6 +22,7 @@ from ..native_request_off_service import (
     update_native_request_off,
 )
 from ..native_surgery_notes_service import save_native_surgery_notes as save_native_surgery_notes_service
+from ..native_whos_where import whos_where
 from ..push import send_native_push_to_surgeon
 from .api_common import parse_iso_date_range
 
@@ -62,6 +63,19 @@ def native_home(
     surgeon, _ = auth
     start_date, end_date = parse_iso_date_range(start, end)
     return build_native_home(db, surgeon, start_date, end_date)
+
+
+@router.get("/whos-where")
+def native_whos_where(
+    day: str,
+    db: Session = Depends(get_db),
+    auth=Depends(get_current_surgeon),
+):
+    try:
+        target = date.fromisoformat(day)
+    except ValueError:
+        raise HTTPException(400, "day must be YYYY-MM-DD")
+    return {"date": target.isoformat(), "rows": whos_where(db, target)}
 
 
 @router.get("/patient-schedule")

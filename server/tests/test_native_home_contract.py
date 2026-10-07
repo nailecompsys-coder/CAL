@@ -58,6 +58,27 @@ class NativeHomeContractTest(unittest.TestCase):
         finally:
             db.close()
 
+    @patch("app.aprima_cache_service.patient_appointments_for_api", return_value={"appointments": []})
+    def test_native_home_exposes_call_builder_access(self, _aprima):
+        db = self.Session()
+        try:
+            surgeon = Surgeon(
+                first_name="Chris",
+                last_name="Johnson",
+                email="chris@example.com",
+                staff_type="physician",
+                sort_order=1,
+                is_active=True,
+                can_call_builder=True,
+            )
+            db.add(surgeon)
+            db.commit()
+            payload = build_native_home(db, surgeon, date(2026, 10, 7), date(2026, 10, 7))
+            self.assertTrue(payload["canCallBuilder"])
+            self.assertTrue(payload["surgeon"]["canCallBuilder"])
+        finally:
+            db.close()
+
     def test_native_home_payload_shape(self):
         db = self.Session()
         try:

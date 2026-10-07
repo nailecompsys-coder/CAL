@@ -414,7 +414,6 @@ private struct CallBuilderSlot: View {
           Text(chip.initials)
             .font(.subheadline.weight(.bold))
             .foregroundStyle(chip.flagged ? ClinicalPalette.muted : ClinicalPalette.ink)
-            .strikethrough(chip.flagged)
         } else {
           Text("Tap to assign")
             .font(.caption)

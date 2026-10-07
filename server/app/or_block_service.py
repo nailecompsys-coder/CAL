@@ -12,7 +12,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 
-from sqlalchemy import or_
+from sqlalchemy import case as sql_case, func as sql_func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from .conflicts import check_conflicts_structured
@@ -2094,8 +2094,13 @@ def clear_block_assignment(db: Session, block_id: int, admin_id: int | None = No
 def candidate_surgeon_rows(db: Session, block: ORBlockInstance) -> list[dict]:
     surgeons = (
         db.query(Surgeon)
-        .filter(Surgeon.is_active == True, Surgeon.staff_type == "physician")  # noqa: E712
-        .order_by(Surgeon.sort_order, Surgeon.last_name, Surgeon.first_name)
+        .filter(Surgeon.is_active == True)  # noqa: E712
+        .order_by(
+            sql_case((sql_func.coalesce(Surgeon.staff_type, "physician") == "physician", 0), else_=1),
+            Surgeon.sort_order,
+            Surgeon.last_name,
+            Surgeon.first_name,
+        )
         .all()
     )
     rows = []

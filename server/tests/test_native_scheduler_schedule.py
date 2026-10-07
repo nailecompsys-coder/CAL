@@ -85,7 +85,8 @@ class NativeSchedulerScheduleTest(unittest.TestCase):
         self.db.commit()
 
         rows = scheduler_schedule(self.db, monday, monday)
-        self.assertNotIn(staff.id, {row["surgeonId"] for row in rows})
+        self.assertIn(staff.id, {row["surgeonId"] for row in rows})
+        self.assertEqual(staff.id, rows[-1]["surgeonId"])
         self.assertEqual(assistant.id, rows[0]["surgeonId"])
         primary_rows = [row for row in rows if row["surgeonId"] == primary.id]
         assistant_rows = [row for row in rows if row["surgeonId"] == assistant.id]

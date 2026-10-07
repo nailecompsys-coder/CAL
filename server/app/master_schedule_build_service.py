@@ -120,10 +120,7 @@ def build_missing_master_cards(db: Session, *, start: date, end: date) -> dict:
     as a conflict if its location differs.
     """
     surgeons = [
-        row for row in db.query(Surgeon).filter(
-            Surgeon.is_active == True,  # noqa: E712
-            Surgeon.staff_type == "physician",
-        ).all()
+        row for row in db.query(Surgeon).filter(Surgeon.is_active == True).all()  # noqa: E712
         if surgeon_is_visible(row)
     ]
     surgeon_ids = [row.id for row in surgeons]

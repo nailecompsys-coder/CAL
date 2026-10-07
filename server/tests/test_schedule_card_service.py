@@ -54,6 +54,27 @@ class ScheduleCardServiceTest(unittest.TestCase):
         finally:
             db.close()
 
+    def test_pa_gets_master_cards_like_a_surgeon(self):
+        db = self.Session()
+        try:
+            pa = Surgeon(first_name="Amy", last_name="Pa", email="pa@example.com", is_active=True, staff_type="staff")
+            location = Location(name="Altamonte OR", abbreviation="AL-OR", location_type="hospital", is_active=True)
+            db.add_all([pa, location])
+            db.commit()
+            db.add(SurgeonLocationSchedule(
+                surgeon_id=pa.id, day_of_week=0, session="am", location_id=location.id,
+                assignment_type="assigned", week_pattern="all",
+            ))
+            db.commit()
+
+            result = materialize_master_schedule_cards(db, start=date(2026, 9, 14), end=date(2026, 9, 18), surgeon_ids=[pa.id])
+            db.commit()
+            self.assertEqual(result["cardsCreated"], 10)
+            monday_am = db.query(ScheduleCard).filter_by(surgeon_id=pa.id, date=date(2026, 9, 14), session="am").one()
+            self.assertEqual(monday_am.baseline_location_id, location.id)
+        finally:
+            db.close()
+
     def test_database_unique_key_rejects_a_third_card_for_a_session(self):
         db = self.Session()
         try:

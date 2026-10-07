@@ -12,7 +12,6 @@ roster AS (
            s.last_name, s.first_name
     FROM surgeons s
     WHERE s.is_active = TRUE
-      AND coalesce(s.staff_type, 'physician') = 'physician'
       AND lower(coalesce(s.email, '')) <> 'don@clermontitstore.com'
       AND NOT (lower(s.first_name) = 'developer' AND lower(s.last_name) = 'admin')
 ),

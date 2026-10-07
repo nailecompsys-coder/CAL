@@ -64,10 +64,7 @@ def materialize_master_schedule_cards(
     """Create the permanent 10-card weeks. Existing card identity is preserved."""
     if end < start:
         raise ValueError("end must be on or after start")
-    surgeons_query = db.query(Surgeon).filter(
-        Surgeon.is_active == True,  # noqa: E712
-        Surgeon.staff_type == "physician",
-    )
+    surgeons_query = db.query(Surgeon).filter(Surgeon.is_active == True)  # noqa: E712
     if surgeon_ids is not None:
         surgeons_query = surgeons_query.filter(Surgeon.id.in_(surgeon_ids))
     surgeons = [row for row in surgeons_query.order_by(Surgeon.id).all() if surgeon_is_visible(row)]
@@ -144,10 +141,7 @@ def apply_master_schedule_to_cards(
     """
     if end < start:
         raise ValueError("end must be on or after start")
-    surgeons_query = db.query(Surgeon).filter(
-        Surgeon.is_active == True,  # noqa: E712
-        Surgeon.staff_type == "physician",
-    )
+    surgeons_query = db.query(Surgeon).filter(Surgeon.is_active == True)  # noqa: E712
     if surgeon_ids is not None:
         surgeons_query = surgeons_query.filter(Surgeon.id.in_(surgeon_ids))
     surgeons = [row for row in surgeons_query.order_by(Surgeon.id).all() if surgeon_is_visible(row)]

@@ -23,72 +23,58 @@ struct CompactWeekDayCard: View {
   @Binding var scope: ScheduleScope
   let coverAction: (ScheduleAssignment) -> Void
 
-  private var clinicSummary: String {
-    let parts = ClinicOrScheduleBuilder.groups(from: day.mySchedule).prefix(3).map { group in
-      [group.period, group.title].filter { !$0.isEmpty }.joined(separator: " ")
-    }
-    return parts.joined(separator: " · ")
+  private var groups: [ClinicOrFacilityGroup] {
+    ClinicOrScheduleBuilder.groups(from: day.mySchedule)
   }
 
+  private var isToday: Bool { Calendar.current.isDateInToday(day.date) }
+
   var body: some View {
-    HStack(alignment: .center, spacing: 10) {
-      VStack(spacing: 1) {
+    HStack(alignment: .top, spacing: 12) {
+      VStack(spacing: 2) {
         Text(day.date.formatted(.dateTime.weekday(.abbreviated)))
-          .font(.caption2.weight(.bold))
-          .foregroundStyle(.secondary)
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(isToday ? ClinicalPalette.teal : .secondary)
         Text(day.date.formatted(.dateTime.day()))
-          .font(.subheadline.weight(.bold))
-          .foregroundStyle(Calendar.current.isDateInToday(day.date) ? ClinicalPalette.teal : ClinicalPalette.ink)
+          .font(.title3.weight(.bold))
+          .foregroundStyle(isToday ? ClinicalPalette.teal : ClinicalPalette.ink)
       }
-      .frame(width: 34)
+      .frame(minWidth: 36)
 
-      VStack(alignment: .leading, spacing: 4) {
-        HStack(alignment: .center, spacing: 8) {
-          ScheduleAssignmentActionLine(
-            prefix: "ON",
-            assignments: Array(day.assignments.prefix(3)),
-            tint: ClinicalPalette.teal,
-            action: coverAction
-          )
-
+      VStack(alignment: .leading, spacing: 6) {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+          WeekCallLine(assignments: Array(day.assignments.prefix(3)), action: coverAction)
           if !day.meetings.isEmpty {
             Image(systemName: "person.2.fill")
-              .font(ClinicalTypography.captionEmphasized)
-              .foregroundStyle(ClinicalPalette.lavender)
+              .font(.caption)
+              .foregroundStyle(ClinicalPalette.meetingStrong)
           }
-
           Spacer(minLength: 8)
-
-          ScheduleStatusLine(
-            prefix: "OFF",
-            value: day.off.prefix(4).joined(separator: " "),
-            tint: ClinicalPalette.scrubInk,
-            alignment: .trailing
-          )
+          if !day.off.isEmpty {
+            Text("Off  " + day.off.prefix(4).joined(separator: " "))
+              .font(.caption)
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+              .minimumScaleFactor(0.8)
+          }
         }
 
-        if !clinicSummary.isEmpty {
-          ScheduleStatusLine(
-            prefix: "OR/CL",
-            value: clinicSummary,
-            tint: ClinicalPalette.teal,
-            alignment: .leading
-          )
+        ForEach(["AM", "PM"], id: \.self) { period in
+          let periodGroups = groups.filter { $0.period == period }
+          if !periodGroups.isEmpty {
+            WeekPeriodLine(period: period, groups: periodGroups)
+          }
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
     }
-    .padding(.horizontal, 12)
-    .padding(.vertical, 8)
-    .frame(maxWidth: .infinity, minHeight: 58, alignment: .leading)
     .contentShape(Rectangle())
-    .onTapGesture {
-      openDay()
+    .onTapGesture { openDay() }
+    .calCard(padding: 12)
+    .overlay {
+      RoundedRectangle(cornerRadius: 16, style: .continuous)
+        .stroke(isToday ? ClinicalPalette.teal : Color.clear, lineWidth: 1.5)
     }
-    .liquidGlassCard(
-      cornerRadius: 14,
-      tint: Calendar.current.isDateInToday(day.date) ? ClinicalPalette.tealSoft : ClinicalPalette.card
-    )
   }
 
   private func openDay() {
@@ -99,35 +85,57 @@ struct CompactWeekDayCard: View {
   }
 }
 
-private struct ScheduleAssignmentActionLine: View {
-  let prefix: String
+/// "Call  WG LW  ALT JD" — each surgeon still opens the cover sheet.
+private struct WeekCallLine: View {
   let assignments: [ScheduleAssignment]
-  let tint: Color
   let action: (ScheduleAssignment) -> Void
 
   var body: some View {
-    HStack(spacing: 6) {
-      Text(prefix)
-        .font(.caption2.weight(.bold))
-        .foregroundStyle(tint)
-        .frame(width: 26, alignment: .leading)
-
+    HStack(spacing: 8) {
+      Text("Call")
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(ClinicalPalette.teal)
       if assignments.isEmpty {
-        Text("—")
-          .font(.caption.weight(.medium))
-          .foregroundStyle(.secondary)
+        Text("—").font(.caption).foregroundStyle(.secondary)
       } else {
-        HStack(spacing: 4) {
-          ForEach(assignments) { assignment in
-            Button {
-              action(assignment)
-            } label: {
+        ForEach(assignments) { assignment in
+          Button {
+            action(assignment)
+          } label: {
+            HStack(spacing: 3) {
+              Text(assignment.locationShort.replacingOccurrences(of: " Group", with: ""))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
               SmallCoverageInitialsView(assignment: assignment)
             }
-            .buttonStyle(.plain)
-            .disabled(assignment.rotationId == nil)
           }
+          .buttonStyle(.plain)
+          .disabled(assignment.rotationId == nil)
         }
+      }
+    }
+  }
+}
+
+/// "AM  Winter Garden OR" — OFF with booked work shows its case count in red.
+private struct WeekPeriodLine: View {
+  let period: String
+  let groups: [ClinicOrFacilityGroup]
+
+  var body: some View {
+    HStack(alignment: .firstTextBaseline, spacing: 8) {
+      Text(period)
+        .font(.caption.weight(.bold))
+        .foregroundStyle(.secondary)
+      Text(groups.map(\.title).joined(separator: " · "))
+        .font(.subheadline)
+        .foregroundStyle(ClinicalPalette.ink)
+        .lineLimit(1)
+        .minimumScaleFactor(0.8)
+      ForEach(groups.filter { $0.isEmptyCard && !$0.details.isEmpty }) { group in
+        Text(group.countLabel)
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(Color.red)
       }
     }
   }
@@ -169,41 +177,5 @@ private struct SmallCoverageInitialsView: View {
         .padding(.vertical, 1)
         .background(ClinicalPalette.teal.opacity(0.08), in: Capsule())
     }
-  }
-}
-
-private struct ScheduleStatusLine: View {
-  let prefix: String
-  let value: String
-  let tint: Color
-  var alignment: HorizontalAlignment = .leading
-
-  private var isTrailing: Bool { alignment == .trailing }
-
-  var body: some View {
-    HStack(spacing: 6) {
-      if isTrailing {
-        Spacer(minLength: 0)
-      }
-
-      Text(prefix)
-        .font(ClinicalTypography.badge)
-        .foregroundStyle(tint)
-        .frame(width: isTrailing ? nil : (prefix.count > 3 ? 40 : 26), alignment: .leading)
-
-      if value.isEmpty {
-        Text("—")
-          .font(.caption.weight(.medium))
-          .foregroundStyle(.secondary)
-      } else {
-        Text(value)
-          .font(ClinicalTypography.caption)
-          .foregroundStyle(.primary)
-          .lineLimit(1)
-          .minimumScaleFactor(0.72)
-          .multilineTextAlignment(isTrailing ? .trailing : .leading)
-      }
-    }
-    .frame(maxWidth: isTrailing ? nil : .infinity, alignment: isTrailing ? .trailing : .leading)
   }
 }

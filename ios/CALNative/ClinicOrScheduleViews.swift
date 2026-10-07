@@ -14,13 +14,13 @@ enum ClinicOrScheduleBuilder {
 
     var matchedByClinic: [String: [DoctorScheduleItem]] = [:]
     for clinic in clinics where !isEmptyCard(clinic) {
-      let matched = surgeries.filter { surgeryBelongs($0, to: clinic) }
+      let matched = surgeries.filter { samePeriod($0, clinic) && surgeryBelongs($0, to: clinic) }
       matched.forEach { claimed.insert($0.id) }
       matchedByClinic[clinic.id] = matched
     }
     // A case on an OFF / NA half-day is listed under that card (flagged), not as a separate row.
     for clinic in clinics where isEmptyCard(clinic) {
-      let matched = surgeries.filter { !claimed.contains($0.id) && $0.period == clinic.period }
+      let matched = surgeries.filter { !claimed.contains($0.id) && samePeriod($0, clinic) }
       matched.forEach { claimed.insert($0.id) }
       matchedByClinic[clinic.id] = matched
     }
@@ -40,7 +40,7 @@ enum ClinicOrScheduleBuilder {
         continue
       }
       let isOR = looksLikeOperatingRoom(clinic.title)
-      let matchingBlock = blocks.first { blockMatchesFacility($0, clinic.title) }
+      let matchingBlock = blocks.first { samePeriod($0, clinic) && blockMatchesFacility($0, clinic.title) }
       if let matchingBlock {
         claimedBlocks.insert(matchingBlock.id)
       }
@@ -70,19 +70,20 @@ enum ClinicOrScheduleBuilder {
     }
 
     let leftover = surgeries.filter { !claimed.contains($0.id) }
-    let byLocation = Dictionary(grouping: leftover) { locationKey(for: $0) }
-    for key in byLocation.keys.sorted() {
-      guard let cases = byLocation[key], !cases.isEmpty else { continue }
+    let byLocation = Dictionary(grouping: leftover) { "\($0.period)|\(locationKey(for: $0))" }
+    for groupKey in byLocation.keys.sorted() {
+      guard let cases = byLocation[groupKey], let first = cases.first else { continue }
+      let key = locationKey(for: first)
       let sorted = cases.sorted { $0.start < $1.start }
       let isOR = looksLikeOperatingRoom(key)
-      let matchingBlock = blocks.first { blockMatchesFacility($0, key) }
+      let matchingBlock = blocks.first { samePeriod($0, first) && blockMatchesFacility($0, key) }
       if let matchingBlock {
         claimedBlocks.insert(matchingBlock.id)
       }
       groups.append(
         ClinicOrFacilityGroup(
-          id: "loc-\(key)",
-          period: matchingBlock?.period ?? sorted.first?.period ?? "",
+          id: "loc-\(groupKey)",
+          period: matchingBlock?.period ?? first.period,
           title: displayFacilityTitle(key),
           details: sorted.map { surgeryDetail($0) },
           countStyle: isOR ? .cases : .visits
@@ -92,7 +93,7 @@ enum ClinicOrScheduleBuilder {
 
     for block in blocks where !claimedBlocks.contains(block.id) {
       let title = displayFacilityTitle(blockFacilityName(block))
-      if groups.contains(where: { facilityKey($0.title) == facilityKey(title) }) {
+      if groups.contains(where: { $0.period == block.period && facilityKey($0.title) == facilityKey(title) }) {
         continue
       }
       groups.append(
@@ -110,6 +111,36 @@ enum ClinicOrScheduleBuilder {
     return groups.enumerated()
       .sorted { (periodRank[$0.element.period] ?? 2, $0.offset) < (periodRank[$1.element.period] ?? 2, $1.offset) }
       .map(\.element)
+  }
+
+  /// Month-cell letters per half-day: O = OR, C = clinic, M = meeting (AM before PM).
+  static func periodCodes(items: [DoctorScheduleItem], meetings: [DoctorScheduleItem]) -> (am: String, pm: String) {
+    var codes = ["AM": "", "PM": ""]
+    for group in groups(from: items) where codes[group.period] != nil {
+      let letter: String
+      if group.isEmptyCard {
+        guard !group.details.isEmpty else { continue }
+        letter = "O"
+      } else {
+        letter = group.countStyle == .cases ? "O" : "C"
+      }
+      if !(codes[group.period] ?? "").contains(letter) {
+        codes[group.period, default: ""] += letter
+      }
+    }
+    for meeting in meetings {
+      let period = meeting.start.isEmpty || meeting.start < "12:00" ? "AM" : "PM"
+      if !(codes[period] ?? "").contains("M") {
+        codes[period, default: ""] += "M"
+      }
+    }
+    return (codes["AM"] ?? "", codes["PM"] ?? "")
+  }
+
+  /// AM and PM cards only claim their own half-day; FULL / DAY rows span both.
+  private static func samePeriod(_ a: DoctorScheduleItem, _ b: DoctorScheduleItem) -> Bool {
+    let spans: Set<String> = ["FULL", "DAY"]
+    return a.period == b.period || spans.contains(a.period) || spans.contains(b.period)
   }
 
   private static func isEmptyCard(_ item: DoctorScheduleItem) -> Bool {

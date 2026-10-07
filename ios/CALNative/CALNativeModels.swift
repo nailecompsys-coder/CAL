@@ -462,6 +462,16 @@ struct MonthCell: Identifiable {
   let hasClinicOr: Bool
   let hasBlockTime: Bool
   let hasMeeting: Bool
+  var amCode = ""
+  var pmCode = ""
+
+  /// On-call initials for one call group ("WG" / "ALT"); the covering surgeon when covered.
+  func callInitials(group prefix: String) -> String {
+    assignments
+      .filter { !$0.isBackup && $0.locationShort.uppercased().hasPrefix(prefix) }
+      .map { $0.isCovered ? ($0.coveringInitials ?? $0.surgeon) : $0.surgeon }
+      .first ?? ""
+  }
 
   var callSummary: String {
     summarized(callInitials, limit: 2)

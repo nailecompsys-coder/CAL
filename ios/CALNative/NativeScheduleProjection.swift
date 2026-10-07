@@ -34,6 +34,7 @@ struct NativeScheduleProjection {
       guard let day = self.day(for: cellDate) else {
         return MonthCell.empty(for: cellDate, isCurrentMonth: isCurrentMonth, isToday: isToday)
       }
+      let codes = ClinicOrScheduleBuilder.periodCodes(items: day.mySchedule, meetings: day.meetings)
       return MonthCell(
         id: dateKey(cellDate),
         date: cellDate,
@@ -46,7 +47,9 @@ struct NativeScheduleProjection {
         hasMyApprovedOff: day.hasMyApprovedOff,
         hasClinicOr: day.hasClinicOr,
         hasBlockTime: day.hasBlockTime,
-        hasMeeting: day.hasMeeting
+        hasMeeting: day.hasMeeting,
+        amCode: codes.am,
+        pmCode: codes.pm
       )
     }
   }

@@ -6,6 +6,22 @@ struct NativeHomeResponse: Decodable {
   let requests: [NativeDayOffRequestResponse]
   let surgeons: [NativeSurgeon]?
   let alerts: NativeAlertSummary?
+  let canCallBuilder: Bool?
+
+  init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    surgeon = try c.decodeIfPresent(NativeSurgeon.self, forKey: .surgeon)
+    days = try c.decode([NativeDayResponse].self, forKey: .days)
+    requests = try c.decodeIfPresent([NativeDayOffRequestResponse].self, forKey: .requests) ?? []
+    surgeons = try c.decodeIfPresent([NativeSurgeon].self, forKey: .surgeons)
+    alerts = try c.decodeIfPresent(NativeAlertSummary.self, forKey: .alerts)
+    canCallBuilder = try c.decodeIfPresent(Bool.self, forKey: .canCallBuilder)
+      ?? surgeon?.canCallBuilder
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case surgeon, days, requests, surgeons, alerts, canCallBuilder
+  }
 }
 
 struct NativeWhosWhereResponse: Decodable {

@@ -239,9 +239,9 @@ private struct CALAuthBackground: View {
     ZStack {
       LinearGradient(
         colors: [
-          Color(.systemBackground),
           ClinicalPalette.pageTop,
-          Color(.secondarySystemBackground).opacity(0.55)
+          ClinicalPalette.pageMiddle,
+          ClinicalPalette.pageBottom
         ],
         startPoint: .topLeading,
         endPoint: .bottomTrailing
@@ -249,14 +249,14 @@ private struct CALAuthBackground: View {
 
       LinearGradient(
         colors: [
-          ClinicalPalette.tealSoft.opacity(0.28),
+          ClinicalPalette.teal.opacity(0.22),
           .clear,
-          ClinicalPalette.teal.opacity(0.06)
+          ClinicalPalette.authAccent.opacity(0.14)
         ],
         startPoint: .topTrailing,
         endPoint: .bottomLeading
       )
-      .blur(radius: 24)
+      .blur(radius: 28)
     }
     .ignoresSafeArea()
   }
@@ -294,7 +294,7 @@ private extension LinearGradient {
       ClinicalPalette.teal,
       ClinicalPalette.authAccent
     ],
-    startPoint: .topLeading,
-    endPoint: .bottomTrailing
+    startPoint: .leading,
+    endPoint: .trailing
   )
 }

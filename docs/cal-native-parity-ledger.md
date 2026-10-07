@@ -2,6 +2,8 @@
 
 Last updated: 2026-10-07
 
+Call Builder + blue chrome (2026-10-07, not in TestFlight): title menu adds **Call Builder** when `canCallBuilder` is true (or during support preview). Phone UI is a scrolling day list with WG/ALT tap slots and a bottom picker sheet; draft is local until native publish ships. App accent/mint/scrub/page and login wash retinted from green/teal to Clinical Trust blue (`#0066CC` family). `GET /api/native/home` includes `canCallBuilder`.
+
 Who's where (2026-10-07, not in TestFlight): the Calendar day view has a **Block Schedule** button that opens a sheet for that date. It calls the SQL-backed `GET /api/native/whos-where?day=` and groups every active surgeon and PA by the location's geographic block group (`locations.block_group_id`, set on portal Locations; never used for call assignment). Two tabs, **WG Group** and **ALT Group**. Each shows a Surgeon | AM | PM table (surgeons, then PAs) with a site-colored chip per half-day (OR solid, clinic tinted) or Off / Open, plus Call and No Call tags beside the name. A person appears in a group only when a half-day location is in that group or they are on call for it. Locations and sessions only; no patient details. The admin support-preview session may read this feed. Android: not integrated.
 
 Day view Clinic / OR (2026-10-07, not in TestFlight): rows are labeled **AM** / **PM**; clock times appear only on case/visit detail lines. A case on an OFF or NA half-day nests under that card in red (e.g. `OFF - 1 Case`) with its location, instead of appearing as a separate row. Empty OFF/NA cards show just `OFF` / `NA` with no visit count or filler. On Call group headings read **WG Group** and **ALT Group**.

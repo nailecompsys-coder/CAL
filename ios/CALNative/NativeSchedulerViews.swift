@@ -895,7 +895,7 @@ private struct SchedulerBlockPill: View {
       }
       Spacer()
       Image(systemName: block.isOpen ? "chevron.right.circle.fill" : "checkmark.circle.fill")
-        .foregroundStyle(block.isOpen ? ClinicalPalette.teal : .green)
+        .foregroundStyle(block.isOpen ? ClinicalPalette.teal : ClinicalPalette.scrubInk)
     }
     .padding(10)
     .frame(maxWidth: .infinity, alignment: .leading)

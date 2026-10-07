@@ -21,7 +21,13 @@ final class NativeScheduleStore: ObservableObject {
   @Published private(set) var sessionRole: NativeSessionRole = .surgeon
   @Published private(set) var isSupportPreview = false
   @Published private(set) var supportPreviewSurgeonName: String?
+  @Published private(set) var canCallBuilder = false
   @Published private(set) var availableRoles: [NativeSessionRole] = [.surgeon]
+
+  /// Call Builder in the title menu: access flag, or Johnson support preview for demos.
+  var showsCallBuilder: Bool {
+    canCallBuilder || isSupportPreview
+  }
   @Published private(set) var schedulerBlocks: [NativeSchedulerBlock] = []
   @Published private(set) var schedulerSchedule: [NativeSchedulerScheduleRow] = []
   @Published private(set) var schedulerChanges: [NativeSchedulerChange] = []
@@ -241,6 +247,7 @@ final class NativeScheduleStore: ObservableObject {
     days = snapshot.days
     timeOffRequests = snapshot.timeOffRequests
     alerts = snapshot.alerts
+    canCallBuilder = snapshot.canCallBuilder
     if !isSupportPreview {
       Task { await registerForPushIfPossible() }
     }
@@ -324,6 +331,7 @@ final class NativeScheduleStore: ObservableObject {
     sessionToken = nil
     isSupportPreview = false
     supportPreviewSurgeonName = nil
+    canCallBuilder = false
     days = []
     timeOffRequests = []
     patientAppointments = []
@@ -347,6 +355,7 @@ final class NativeScheduleStore: ObservableObject {
     sessionToken = nil
     isSupportPreview = false
     supportPreviewSurgeonName = nil
+    canCallBuilder = false
     days = []
     timeOffRequests = []
     patientAppointments = []

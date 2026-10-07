@@ -37,6 +37,9 @@ SELECT r.id AS surgeon_id,
        (SELECT count(*) FROM effective e WHERE e.surgeon_id = r.id) AS call_count,
        (SELECT count(*) FROM effective e
          WHERE e.surgeon_id = r.id AND WEEKDAY_EXPR IN (0, 6)) AS weekend_count,
+       (SELECT count(*) FROM effective e
+         WHERE e.surgeon_id = r.id
+           AND e.call_date >= DRAFT_FROM AND e.call_date < DRAFT_TO) AS month_call_count,
        (SELECT count(*) FROM draft d WHERE d.surgeon_id = r.id) AS draft_count,
        (SELECT count(*) FROM draft d
          WHERE d.surgeon_id = r.id AND WEEKDAY_DRAFT IN (0, 6)) AS draft_weekend_count,

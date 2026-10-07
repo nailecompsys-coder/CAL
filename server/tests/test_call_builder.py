@@ -151,6 +151,17 @@ class CallBuilderTest(unittest.TestCase):
             self.assertEqual(by_id[chris.id]["weekendCount"], 1)
             self.assertIn("Memorial Day/1", by_id[chris.id]["holidays"])
             self.assertEqual(by_id[chris.id]["draftCount"], 2)
+            # Month window is December; Chris's published calls are in May — month count 0
+            self.assertEqual(by_id[chris.id]["monthCallCount"], 0)
+            may = call_history(
+                db,
+                from_date=date(2026, 1, 1),
+                to_date=date(2026, 6, 1),
+                draft_from=date(2026, 5, 1),
+                draft_to=date(2026, 6, 1),
+            )
+            may_by = {r["surgeonId"]: r for r in may}
+            self.assertEqual(may_by[chris.id]["monthCallCount"], 2)
 
             self.assertEqual(by_id[nelson.id]["callCount"], 1)
             self.assertIn("July 4th/2", by_id[nelson.id]["holidays"])

@@ -51,7 +51,12 @@ class NativeHomeService:
         alerts = native_alerts(self.db, self.surgeon)
 
         return {
-            "surgeon": {"id": self.surgeon.id, "name": self.surgeon.full_name, "staffType": self.surgeon.staff_type},
+            "surgeon": {
+                "id": self.surgeon.id,
+                "name": self.surgeon.full_name,
+                "staffType": self.surgeon.staff_type,
+                "canCallBuilder": bool(getattr(self.surgeon, "can_call_builder", False)),
+            },
             "range": {"start": self.start_date.isoformat(), "end": self.end_date.isoformat()},
             "days": self.days,
             "availability": availability_rows,
@@ -61,6 +66,7 @@ class NativeHomeService:
             "surgeons": surgeons(self.db),
             "callSchedule": call_schedule,
             "alerts": alerts,
+            "canCallBuilder": bool(getattr(self.surgeon, "can_call_builder", False)),
         }
 
 def build_native_home(db: Session, surgeon: Surgeon, start_date: date, end_date: date) -> dict:

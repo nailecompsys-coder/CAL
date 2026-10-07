@@ -101,6 +101,7 @@ def call_history(
         "staffType": row["staff_type"],
         "callCount": int(row["call_count"] or 0),
         "weekendCount": int(row["weekend_count"] or 0),
+        "monthCallCount": int(row["month_call_count"] or 0),
         "draftCount": int(row["draft_count"] or 0),
         "draftWeekendCount": int(row["draft_weekend_count"] or 0),
         "holidays": row["holidays"] or "",
@@ -322,14 +323,15 @@ def page_data(db: Session, month_offset: int) -> dict:
     month = month_schedule_days(month_offset)
     days: list[date] = month["schedule_days"]
     start, end = days[0], days[-1]
-    # History: year-to-date through the first of this month; draft = this month
+    # History: year through end of this month (published call days); draft = this month
     history_from = date(start.year, 1, 1)
+    month_end = end + timedelta(days=1)
     history = call_history(
         db,
         from_date=history_from,
-        to_date=start,
+        to_date=month_end,
         draft_from=start,
-        draft_to=end + timedelta(days=1),
+        draft_to=month_end,
     )
     groups = db.query(CallGroup).order_by(CallGroup.sort_order, CallGroup.id).all()
     surgeons = {

@@ -44,9 +44,9 @@
            onclick="pickSurgeon(this)" title="{{ h.firstName }} {{ h.lastName }}">
         <div class="flex items-center justify-between gap-2">
           <span class="text-sm font-semibold text-slate-800">{{ h.initials }} · {{ h.lastName }}</span>
-          <span class="text-xs font-bold text-slate-600">{{ month_short }} {{ h.draftCount }}</span>
+          <span class="text-xs font-bold text-slate-800">{{ month_short }} {{ h.monthCallCount }}</span>
         </div>
-        <p class="text-[11px] text-slate-500">{{ h.callCount }} before this month · wknd {{ h.weekendCount }} · hol {{ last_hol }}</p>
+        <p class="text-[11px] text-slate-500">{{ h.callCount }} ytd · draft {{ h.draftCount }} · wknd {{ h.weekendCount }} · hol {{ last_hol }}</p>
       </div>
       {% endfor %}
     </div>

@@ -62,6 +62,7 @@ struct NativeSurgeon: Identifiable, Decodable {
   let initials: String
   let staffType: String
   let sortOrder: Int?
+  let canCallBuilder: Bool
 
   enum CodingKeys: String, CodingKey {
     case id
@@ -69,6 +70,7 @@ struct NativeSurgeon: Identifiable, Decodable {
     case initials
     case staffType
     case sortOrder
+    case canCallBuilder
   }
 
   init(from decoder: Decoder) throws {
@@ -78,6 +80,7 @@ struct NativeSurgeon: Identifiable, Decodable {
     initials = try container.decodeIfPresent(String.self, forKey: .initials) ?? Self.initials(from: name)
     staffType = try container.decodeIfPresent(String.self, forKey: .staffType) ?? "physician"
     sortOrder = try container.decodeIfPresent(Int.self, forKey: .sortOrder)
+    canCallBuilder = try container.decodeIfPresent(Bool.self, forKey: .canCallBuilder) ?? false
   }
 
   private static func initials(from name: String) -> String {

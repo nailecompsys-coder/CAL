@@ -6,6 +6,7 @@ struct NativeScheduleSnapshot {
   let days: [ScheduleDay]
   let timeOffRequests: [TimeOffRequest]
   let alerts: NativeAlertSummary
+  let canCallBuilder: Bool
 }
 
 struct NativeScheduleLoader {
@@ -34,7 +35,8 @@ struct NativeScheduleLoader {
       surgeons: home.surgeons ?? [],
       days: home.days.map(\.scheduleDay),
       timeOffRequests: home.requests.map(\.timeOffRequest),
-      alerts: home.alerts ?? NativeAlertSummary(unreadCount: 0, recent: [])
+      alerts: home.alerts ?? NativeAlertSummary(unreadCount: 0, recent: []),
+      canCallBuilder: home.canCallBuilder ?? home.surgeon?.canCallBuilder ?? false
     )
   }
 }

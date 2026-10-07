@@ -232,25 +232,27 @@ struct CALNativeTitleMenu: View {
   }
 }
 
-// MARK: - Call Builder (phone: day list + tap sheet; local draft until publish API)
+// MARK: - Call Builder (phone: day list + tap sheet; draft saved server-side until publish)
 
-private enum CallBuilderGroup: String, CaseIterable, Identifiable {
-  case wg = "WG"
-  case alt = "ALT"
-  var id: String { rawValue }
-  var title: String { "\(rawValue) Group" }
-  var groupId: Int { self == .wg ? 1 : 2 }
+private struct CallBuilderChip: Equatable {
+  let initials: String
+  let flagged: Bool
+  let source: String // draft | live
+  var isDraft: Bool { source == "draft" }
 }
 
 struct CallBuilderHomeView: View {
   @ObservedObject var store: NativeScheduleStore
   @Binding var selectedSection: CALNativeSection
   @State private var month = CallBuilderHomeView.defaultMonth()
-  /// "day|groupId" → surgeon id
-  @State private var draft: [String: Int] = [:]
+  @State private var cellsByKey: [String: NativeCallBuilderCell] = [:]
+  @State private var groups: [NativeCallBuilderGroup] = []
+  @State private var draftCount = 0
   @State private var picking: CallBuilderPick?
   @State private var loadBySurgeon: [Int: NativeCallBuilderLoad] = [:]
   @State private var loadLegend = "YTD calls/wknd · month calls/wknd · holidays/last"
+  @State private var saveError: String?
+  @State private var isSaving = false
 
   private var roster: [NativeSurgeon] {
     store.surgeons
@@ -266,6 +268,14 @@ struct CallBuilderHomeView: View {
     return range.compactMap { day in
       cal.date(from: DateComponents(year: cal.component(.year, from: month), month: cal.component(.month, from: month), day: day))
     }
+  }
+
+  private var wgGroup: NativeCallBuilderGroup? {
+    groups.first { $0.short == "WG" } ?? groups.first
+  }
+
+  private var altGroup: NativeCallBuilderGroup? {
+    groups.first { $0.short == "ALT" } ?? groups.dropFirst().first
   }
 
   var body: some View {
@@ -288,20 +298,38 @@ struct CallBuilderHomeView: View {
             }
             .foregroundStyle(ClinicalPalette.teal)
 
-            Text("Tap a WG or ALT slot, then pick a surgeon. Draft stays on this phone until Publish is deployed.")
+            Text(store.isSupportPreview
+                 ? "Read-only preview. Sign in as Chris or Amy to save drafts."
+                 : "Tap a WG or ALT slot, then pick a surgeon. Drafts save to the server (same as portal) until Publish.")
               .font(.caption)
               .foregroundStyle(.secondary)
+
+            if draftCount > 0 {
+              Text("\(draftCount) draft cell\(draftCount == 1 ? "" : "s") saved · publish from portal")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(ClinicalPalette.teal)
+            }
 
             Text(loadLegend)
               .font(.caption2)
               .foregroundStyle(ClinicalPalette.muted)
 
+            if let saveError {
+              Text(saveError)
+                .font(.caption)
+                .foregroundStyle(.red)
+            }
+
             ForEach(daysInMonth, id: \.self) { day in
               CallBuilderDayRow(
                 day: day,
-                wg: chip(day: day, group: .wg),
-                alt: chip(day: day, group: .alt),
-                onTap: { group in picking = CallBuilderPick(day: day, group: group) }
+                wg: chip(day: day, group: wgGroup),
+                alt: chip(day: day, group: altGroup),
+                onTap: { short in
+                  guard let group = groups.first(where: { $0.short == short }) ?? (short == "WG" ? wgGroup : altGroup) else { return }
+                  if store.isSupportPreview { return }
+                  picking = CallBuilderPick(day: day, group: group)
+                }
               )
             }
           }
@@ -314,16 +342,17 @@ struct CallBuilderHomeView: View {
           CALNativeTitleMenu(selectedSection: $selectedSection, store: store)
         }
         ToolbarItem(placement: .topBarTrailing) {
-          Button("Publish") {
-            // Preview / local draft only until native publish ships.
+          if isSaving {
+            ProgressView()
+          } else {
+            Text(draftCount > 0 ? "Saved" : "")
+              .font(.caption.weight(.semibold))
+              .foregroundStyle(ClinicalPalette.muted)
           }
-          .font(.subheadline.weight(.semibold))
-          .foregroundStyle(ClinicalPalette.teal)
-          .disabled(draft.isEmpty)
         }
       }
       .task(id: monthKey) {
-        await reloadHistory()
+        await reloadBoard()
       }
       .sheet(item: $picking) { pick in
         CallBuilderPickerSheet(
@@ -333,13 +362,7 @@ struct CallBuilderHomeView: View {
           legend: loadLegend,
           monthLabel: month.formatted(.dateTime.month(.abbreviated)),
           onPick: { surgeonId in
-            let key = Self.key(day: pick.day, group: pick.group)
-            if let surgeonId {
-              draft[key] = surgeonId
-            } else {
-              draft.removeValue(forKey: key)
-            }
-            picking = nil
+            Task { await applyPick(pick: pick, surgeonId: surgeonId) }
           },
           onCancel: { picking = nil }
         )
@@ -352,20 +375,44 @@ struct CallBuilderHomeView: View {
     return String(format: "%04d-%02d", cal.component(.year, from: month), cal.component(.month, from: month))
   }
 
-  private func reloadHistory() async {
+  private func reloadBoard() async {
     do {
-      let response = try await store.fetchCallBuilderHistory(month: month)
+      let response = try await store.fetchCallBuilderMonth(month: month)
       loadLegend = response.legend
       loadBySurgeon = Dictionary(uniqueKeysWithValues: response.history.map { ($0.surgeonId, $0) })
+      groups = response.groups
+      cellsByKey = Dictionary(uniqueKeysWithValues: response.cells.map { ($0.key, $0) })
+      draftCount = response.draftCount ?? response.cells.filter(\.isDraft).count
+      saveError = nil
     } catch {
-      // Keep prior lines if the feed is unavailable (e.g. preview without access).
+      saveError = "Could not load Call Builder board."
     }
   }
 
-  private func chip(day: Date, group: CallBuilderGroup) -> (initials: String, flagged: Bool)? {
-    guard let id = draft[Self.key(day: day, group: group)] else { return nil }
-    let surg = roster.first { $0.id == id }
-    return (surg?.initials ?? "?", false)
+  private func applyPick(pick: CallBuilderPick, surgeonId: Int?) async {
+    picking = nil
+    isSaving = true
+    defer { isSaving = false }
+    do {
+      if let surgeonId {
+        try await store.placeCallBuilderDraft(
+          date: pick.day, callGroupId: pick.group.id, surgeonId: surgeonId
+        )
+      } else {
+        try await store.clearCallBuilderDraft(date: pick.day, callGroupId: pick.group.id)
+      }
+      await reloadBoard()
+    } catch {
+      saveError = (error as? LocalizedError)?.errorDescription ?? "Could not save draft."
+    }
+  }
+
+  private func chip(day: Date, group: NativeCallBuilderGroup?) -> CallBuilderChip? {
+    guard let group else { return nil }
+    let key = Self.key(day: day, groupId: group.id)
+    guard let cell = cellsByKey[key], cell.hasAssignment else { return nil }
+    let initials = cell.initials.isEmpty ? "?" : cell.initials
+    return CallBuilderChip(initials: initials, flagged: !cell.flag.isEmpty, source: cell.source)
   }
 
   private func shiftMonth(_ delta: Int) {
@@ -374,32 +421,29 @@ struct CallBuilderHomeView: View {
     }
   }
 
-  private static func key(day: Date, group: CallBuilderGroup) -> String {
+  private static func key(day: Date, groupId: Int) -> String {
     let d = day.formatted(.iso8601.year().month().day())
-    return "\(d)|\(group.groupId)"
+    return "\(d)|\(groupId)"
   }
 
   private static func defaultMonth() -> Date {
-    // Prefer December 2026 while building the first empty month; else current month.
-    var c = DateComponents()
-    c.year = 2026
-    c.month = 12
-    c.day = 1
-    return Calendar.current.date(from: c) ?? Date()
+    let cal = Calendar.current
+    let parts = cal.dateComponents([.year, .month], from: Date())
+    return cal.date(from: DateComponents(year: parts.year, month: parts.month, day: 1)) ?? Date()
   }
 }
 
 private struct CallBuilderPick: Identifiable {
   let day: Date
-  let group: CallBuilderGroup
-  var id: String { "\(day.timeIntervalSince1970)-\(group.rawValue)" }
+  let group: NativeCallBuilderGroup
+  var id: String { "\(day.timeIntervalSince1970)-\(group.id)" }
 }
 
 private struct CallBuilderDayRow: View {
   let day: Date
-  let wg: (initials: String, flagged: Bool)?
-  let alt: (initials: String, flagged: Bool)?
-  let onTap: (CallBuilderGroup) -> Void
+  let wg: CallBuilderChip?
+  let alt: CallBuilderChip?
+  let onTap: (String) -> Void
 
   private var isWeekend: Bool {
     let w = Calendar.current.component(.weekday, from: day)
@@ -418,8 +462,8 @@ private struct CallBuilderDayRow: View {
       }
       .frame(width: 44, alignment: .leading)
 
-      CallBuilderSlot(label: "WG Group", chip: wg) { onTap(.wg) }
-      CallBuilderSlot(label: "ALT Group", chip: alt) { onTap(.alt) }
+      CallBuilderSlot(label: "WG Group", chip: wg) { onTap("WG") }
+      CallBuilderSlot(label: "ALT Group", chip: alt) { onTap("ALT") }
     }
     .padding(.vertical, 4)
   }
@@ -427,7 +471,7 @@ private struct CallBuilderDayRow: View {
 
 private struct CallBuilderSlot: View {
   let label: String
-  let chip: (initials: String, flagged: Bool)?
+  let chip: CallBuilderChip?
   let action: () -> Void
 
   var body: some View {
@@ -451,8 +495,12 @@ private struct CallBuilderSlot: View {
       .padding(.vertical, 6)
       .background(ClinicalPalette.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
       .overlay {
+        let dashed = chip == nil || chip?.isDraft == true
         RoundedRectangle(cornerRadius: 10, style: .continuous)
-          .stroke(chip == nil ? ClinicalPalette.stroke.opacity(0.7) : ClinicalPalette.teal.opacity(0.55), style: StrokeStyle(lineWidth: 1, dash: chip == nil ? [4, 3] : []))
+          .stroke(
+            chip == nil ? ClinicalPalette.stroke.opacity(0.7) : ClinicalPalette.teal.opacity(0.55),
+            style: StrokeStyle(lineWidth: 1, dash: dashed ? [4, 3] : [])
+          )
       }
     }
     .buttonStyle(.plain)
@@ -473,7 +521,7 @@ private struct CallBuilderPickerSheet: View {
     CalNavigation {
       List {
         Section {
-          Text(pick.day.formatted(.dateTime.weekday(.wide).month().day()) + " · " + pick.group.title)
+          Text(pick.day.formatted(.dateTime.weekday(.wide).month().day()) + " · " + pick.group.short + " Group")
             .font(.subheadline)
             .foregroundStyle(.secondary)
           Text(legend)

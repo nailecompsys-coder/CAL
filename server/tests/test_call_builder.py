@@ -182,6 +182,28 @@ class CallBuilderTest(unittest.TestCase):
         finally:
             db.close()
 
+
+    def test_surgeon_draft_persists_on_board(self):
+        db = self.Session()
+        try:
+            _, _, chris, alex, _, wg, alt = self._seed(db)
+            day = date(2026, 12, 8)
+            upsert_draft(db, day=day, call_group_id=wg.id, surgeon_id=chris.id, surgeon=chris)
+            from app.call_builder_service import board_for_month
+            board = board_for_month(db, 2026, 12)
+            self.assertEqual(board["draftCount"], 1)
+            cell = next(
+                c for c in board["cells"]
+                if c["date"] == day.isoformat() and c["callGroupId"] == wg.id
+            )
+            self.assertEqual(cell["source"], "draft")
+            self.assertEqual(cell["surgeonId"], chris.id)
+            clear_draft(db, day=day, call_group_id=wg.id, surgeon=chris)
+            board2 = board_for_month(db, 2026, 12)
+            self.assertEqual(board2["draftCount"], 0)
+        finally:
+            db.close()
+
     def test_publish_writes_live_and_clears_draft(self):
         db = self.Session()
         try:

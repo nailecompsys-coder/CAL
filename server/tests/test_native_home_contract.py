@@ -122,6 +122,38 @@ class NativeHomeContractTest(unittest.TestCase):
         finally:
             db.close()
 
+    def test_native_call_builder_month_board_contract(self):
+        """GET /api/native/call-builder/month returns cells + history for draft UI."""
+        from app.call_builder_service import board_for_month, upsert_draft
+        db = self.Session()
+        try:
+            chris = Surgeon(
+                first_name="Chris",
+                last_name="Johnson",
+                email="chris@example.com",
+                staff_type="physician",
+                sort_order=1,
+                is_active=True,
+                can_call_builder=True,
+            )
+            wg = CallGroup(name="Winter Garden / Apopka / Minneola Hospital", sort_order=0)
+            db.add_all([chris, wg])
+            db.commit()
+            upsert_draft(
+                db, day=date(2026, 10, 10), call_group_id=wg.id, surgeon_id=chris.id, surgeon=chris
+            )
+            board = board_for_month(db, 2026, 10)
+            self.assertEqual(board["month"], "2026-10")
+            self.assertIn("cells", board)
+            self.assertIn("history", board)
+            self.assertIn("groups", board)
+            self.assertEqual(board["draftCount"], 1)
+            cell = next(c for c in board["cells"] if c["date"] == "2026-10-10")
+            self.assertEqual(cell["source"], "draft")
+            self.assertEqual(cell["surgeonId"], chris.id)
+        finally:
+            db.close()
+
     def test_native_home_payload_shape(self):
         db = self.Session()
         try:

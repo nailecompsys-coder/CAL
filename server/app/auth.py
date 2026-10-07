@@ -85,6 +85,7 @@ def get_current_surgeon(
         "/api/native/patient-schedule",
         "/api/native/whos-where",
         "/api/native/call-builder/history",
+        "/api/native/call-builder/month",
     }:
         preview_surgeon = surgeon_for_preview_token(db, token)
         if preview_surgeon is not None:

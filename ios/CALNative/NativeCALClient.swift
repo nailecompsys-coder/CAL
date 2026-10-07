@@ -358,6 +358,52 @@ struct NativeCALClient {
     return try JSONDecoder().decode(NativeCallBuilderHistoryResponse.self, from: data)
   }
 
+  func fetchCallBuilderMonth(token: String, month: Date) async throws -> NativeCallBuilderMonthResponse {
+    let cal = Calendar.current
+    let y = cal.component(.year, from: month)
+    let m = cal.component(.month, from: month)
+    var components = URLComponents(url: baseURL.appendingPathComponent("/api/native/call-builder/month"), resolvingAgainstBaseURL: false)!
+    components.queryItems = [URLQueryItem(name: "month", value: String(format: "%04d-%02d", y, m))]
+    guard let url = components.url else {
+      throw NativeCALError.invalidURL
+    }
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.setValue(token, forHTTPHeaderField: "X-CAL-Device-Token")
+
+    let data = try await perform(request)
+    return try JSONDecoder().decode(NativeCallBuilderMonthResponse.self, from: data)
+  }
+
+  func placeCallBuilderDraft(token: String, date: Date, callGroupId: Int, surgeonId: Int?) async throws -> NativeCallBuilderMutateResponse {
+    var request = URLRequest(url: baseURL.appendingPathComponent("/api/native/call-builder/place"))
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.setValue(token, forHTTPHeaderField: "X-CAL-Device-Token")
+    request.httpBody = try JSONEncoder().encode(
+      NativeCallBuilderPlacePayload(date: isoDate(date), callGroupId: callGroupId, surgeonId: surgeonId)
+    )
+    let data = try await perform(request)
+    return try JSONDecoder().decode(NativeCallBuilderMutateResponse.self, from: data)
+  }
+
+  func clearCallBuilderDraft(token: String, date: Date, callGroupId: Int) async throws -> NativeCallBuilderMutateResponse {
+    var request = URLRequest(url: baseURL.appendingPathComponent("/api/native/call-builder/clear"))
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.setValue(token, forHTTPHeaderField: "X-CAL-Device-Token")
+    request.httpBody = try JSONEncoder().encode(
+      NativeCallBuilderClearPayload(date: isoDate(date), callGroupId: callGroupId)
+    )
+    let data = try await perform(request)
+    return try JSONDecoder().decode(NativeCallBuilderMutateResponse.self, from: data)
+  }
+
   func fetchPatientSchedule(token: String, start: Date, end: Date) async throws -> NativePatientScheduleResponse {
     var components = URLComponents(url: baseURL.appendingPathComponent("/api/native/patient-schedule"), resolvingAgainstBaseURL: false)!
     components.queryItems = [

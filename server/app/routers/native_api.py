@@ -9,7 +9,13 @@ from ..auth import get_current_surgeon
 from ..conflicts import check_conflicts
 from ..database import get_db
 from ..native_availability_service import save_native_availability as save_native_availability_service
-from ..call_builder_service import history_for_month, require_surgeon_call_builder
+from ..call_builder_service import (
+    board_for_month,
+    clear_draft,
+    history_for_month,
+    require_surgeon_call_builder,
+    upsert_draft,
+)
 from ..native_call_coverage_service import assign_native_call_coverage, cancel_native_call_coverage
 from ..native_home_service import build_native_home
 from ..native_support_preview_service import SESSION_MINUTES, redeem_preview_code
@@ -79,6 +85,28 @@ def native_whos_where(
     return {"date": target.isoformat(), "rows": whos_where(db, target)}
 
 
+def _parse_call_builder_month(month: str) -> tuple[int, int]:
+    try:
+        year_s, month_s = month.split("-", 1)
+        year, month_n = int(year_s), int(month_s)
+        if month_n < 1 or month_n > 12:
+            raise ValueError
+        return year, month_n
+    except ValueError:
+        raise HTTPException(400, "month must be YYYY-MM")
+
+
+class CallBuilderPlaceBody(BaseModel):
+    date: str
+    callGroupId: int
+    surgeonId: int | None = None
+
+
+class CallBuilderClearBody(BaseModel):
+    date: str
+    callGroupId: int
+
+
 @router.get("/call-builder/history")
 def native_call_builder_history(
     month: str,
@@ -88,18 +116,69 @@ def native_call_builder_history(
     """Roster load lines for Call Builder. month = YYYY-MM."""
     surgeon, _ = auth
     require_surgeon_call_builder(surgeon)
-    try:
-        year_s, month_s = month.split("-", 1)
-        year, month_n = int(year_s), int(month_s)
-        if month_n < 1 or month_n > 12:
-            raise ValueError
-    except ValueError:
-        raise HTTPException(400, "month must be YYYY-MM")
+    year, month_n = _parse_call_builder_month(month)
     return {
         "month": f"{year:04d}-{month_n:02d}",
         "legend": "YTD calls/wknd · month calls/wknd · holidays/last",
         "history": history_for_month(db, year, month_n),
     }
+
+
+@router.get("/call-builder/month")
+def native_call_builder_month(
+    month: str,
+    db: Session = Depends(get_db),
+    auth=Depends(get_current_surgeon),
+):
+    """Month board: history + cells (draft overlays live). Shared draft table with portal."""
+    surgeon, _ = auth
+    require_surgeon_call_builder(surgeon)
+    year, month_n = _parse_call_builder_month(month)
+    return board_for_month(db, year, month_n)
+
+
+@router.post("/call-builder/place")
+def native_call_builder_place(
+    body: CallBuilderPlaceBody,
+    db: Session = Depends(get_db),
+    auth=Depends(get_current_surgeon),
+):
+    """Persist one draft cell. Does not touch live call_rotations until publish."""
+    surgeon, _ = auth
+    require_surgeon_call_builder(surgeon)
+    try:
+        day = date.fromisoformat(body.date)
+    except ValueError:
+        raise HTTPException(400, "date must be YYYY-MM-DD")
+    row = upsert_draft(
+        db,
+        day=day,
+        call_group_id=body.callGroupId,
+        surgeon_id=body.surgeonId,
+        surgeon=surgeon,
+    )
+    return {
+        "ok": True,
+        "date": day.isoformat(),
+        "callGroupId": body.callGroupId,
+        "surgeonId": row.surgeon_id,
+    }
+
+
+@router.post("/call-builder/clear")
+def native_call_builder_clear(
+    body: CallBuilderClearBody,
+    db: Session = Depends(get_db),
+    auth=Depends(get_current_surgeon),
+):
+    surgeon, _ = auth
+    require_surgeon_call_builder(surgeon)
+    try:
+        day = date.fromisoformat(body.date)
+    except ValueError:
+        raise HTTPException(400, "date must be YYYY-MM-DD")
+    clear_draft(db, day=day, call_group_id=body.callGroupId, surgeon=surgeon)
+    return {"ok": True, "date": day.isoformat(), "callGroupId": body.callGroupId}
 
 
 @router.get("/patient-schedule")

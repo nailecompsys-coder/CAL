@@ -159,13 +159,17 @@ def call_history(
     return out
 
 
+def month_bounds(year: int, month: int) -> tuple[date, date, date]:
+    """Return (month_start, month_end inclusive, month_end exclusive)."""
+    start = date(year, month, 1)
+    last = calendar_lib.monthrange(year, month)[1]
+    end = date(year, month, last)
+    return start, end, end + timedelta(days=1)
+
+
 def history_for_month(db: Session, year: int, month: int) -> list[dict]:
     """YTD through end of month; month window = that calendar month."""
-    start = date(year, month, 1)
-    if month == 12:
-        month_end = date(year + 1, 1, 1)
-    else:
-        month_end = date(year, month + 1, 1)
+    start, _, month_end = month_bounds(year, month)
     return call_history(
         db,
         from_date=date(year, 1, 1),
@@ -173,6 +177,56 @@ def history_for_month(db: Session, year: int, month: int) -> list[dict]:
         draft_from=start,
         draft_to=month_end,
     )
+
+
+def board_for_month(db: Session, year: int, month: int) -> dict:
+    """Native/portal-shared month board: groups, cells (draft overlays live), history."""
+    start, end, month_end = month_bounds(year, month)
+    history = history_for_month(db, year, month)
+    groups = db.query(CallGroup).order_by(CallGroup.sort_order, CallGroup.id).all()
+    surgeons = {
+        s.id: s
+        for s in db.query(Surgeon)
+        .filter(Surgeon.is_active.is_(True), func.coalesce(Surgeon.staff_type, "physician") == "physician")
+        .all()
+    }
+    leave = leave_flag_map(db, start, end)
+    live = published_map(db, start, end)
+    draft = draft_map(db, start, end)
+    holidays = {h.date.isoformat(): h.name for h in holidays_between(db, start, end)}
+    cells = []
+    day = start
+    while day <= end:
+        for group in groups:
+            key = f"{day.isoformat()}|{group.id}"
+            has_draft = key in draft
+            has_live = key in live
+            draft_id = draft.get(key) if has_draft else None
+            live_id = live.get(key) if has_live else None
+            surgeon_id = draft_id if has_draft else live_id
+            source = "draft" if has_draft else ("live" if has_live else "empty")
+            flag = leave.get(f"{day.isoformat()}|{surgeon_id}", "") if surgeon_id else ""
+            surg = surgeons.get(surgeon_id) if surgeon_id else None
+            cells.append({
+                "date": day.isoformat(),
+                "callGroupId": group.id,
+                "group": short_group_label(group),
+                "surgeonId": surgeon_id,
+                "initials": surg.initials if surg else ("NC" if source != "empty" and surgeon_id is None else ""),
+                "source": source,
+                "flag": flag,
+                "holiday": holidays.get(day.isoformat(), ""),
+            })
+        day += timedelta(days=1)
+    return {
+        "month": f"{year:04d}-{month:02d}",
+        "legend": "YTD calls/wknd · month calls/wknd · holidays/last",
+        "history": history,
+        "groups": [{"id": g.id, "name": g.name, "short": short_group_label(g)} for g in groups],
+        "cells": cells,
+        "draftCount": len(draft),
+        "changeCount": len(publish_changes(db, start, end)),
+    }
 
 
 def holidays_between(db: Session, start: date, end: date) -> list[Holiday]:

@@ -20,6 +20,7 @@ class AdminUser(Base):
     notify_day_off_requests = Column(Boolean, default=True, server_default="true")
     notify_schedule_changes = Column(Boolean, default=True, server_default="true")
     sms_fallback_enabled = Column(Boolean, default=False, server_default="false")
+    can_call_builder = Column(Boolean, default=False, server_default="false", nullable=False)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
 
@@ -124,6 +125,7 @@ class Surgeon(Base):
     phone = Column(String(32))
     color = Column(String(16), default="#ffffff", server_default="#ffffff")  # reserved; calendar uses facility colors only
     sort_order = Column(Integer, default=0, server_default="0")
+    can_call_builder = Column(Boolean, default=False, server_default="false", nullable=False)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
 
@@ -378,6 +380,33 @@ class CallDailyAssignment(Base):
     call_group = relationship("CallGroup")
     call_rotation = relationship("CallRotation")
     call_coverage = relationship("CallCoverage")
+
+
+class Holiday(Base):
+    """National holidays used for call-load history (Call Builder)."""
+    __tablename__ = "holidays"
+    __table_args__ = (UniqueConstraint("date"),)
+    id = Column(Integer, primary_key=True)
+    date = Column(Date, nullable=False)
+    name = Column(String(64), nullable=False)
+
+
+class CallDraftAssignment(Base):
+    """Shared Call Builder draft — never published until Publish writes call_rotations."""
+    __tablename__ = "call_draft_assignments"
+    __table_args__ = (UniqueConstraint("date", "call_group_id"),)
+    id = Column(Integer, primary_key=True)
+    date = Column(Date, nullable=False, index=True)
+    call_group_id = Column(Integer, ForeignKey("call_groups.id"), nullable=False)
+    surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=True)  # null = drafted NO call
+    updated_by_admin_id = Column(Integer, ForeignKey("admin_users.id"), nullable=True)
+    updated_by_surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=True)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    call_group = relationship("CallGroup")
+    surgeon = relationship("Surgeon", foreign_keys=[surgeon_id])
+    updated_by_admin = relationship("AdminUser", foreign_keys=[updated_by_admin_id])
+    updated_by_surgeon = relationship("Surgeon", foreign_keys=[updated_by_surgeon_id])
 
 
 class CallScheduleAuditLog(Base):

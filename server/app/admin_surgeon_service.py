@@ -26,6 +26,7 @@ def surgeon_fields(
     phone: str,
     sort_order: int,
     next_physician_sort_order,
+    can_call_builder: bool = False,
 ) -> dict:
     assigned_sort_order = sort_order
     if (staff_type or "physician") == "physician" and assigned_sort_order <= 0:
@@ -39,6 +40,7 @@ def surgeon_fields(
         "phone": format_us_phone(phone),
         "color": "#ffffff",
         "sort_order": assigned_sort_order,
+        "can_call_builder": bool(can_call_builder),
     }
 
 

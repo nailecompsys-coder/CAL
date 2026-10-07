@@ -35,6 +35,7 @@ from .routers import (
     surgeon_pwa_retired, surgeon_surgical_cases,
 )
 from . import migrate_call_groups
+from . import migrate_call_builder
 from . import migrate_grok_bot_rules
 
 
@@ -77,6 +78,7 @@ async def lifespan(app: FastAPI):
         migrate_fax_ingest.run_migration()
         migrate_normalized_schedule_activity.run_migration()
         migrate_grok_bot_rules.run_migration()
+        migrate_call_builder.run_migration()
         db = SessionLocal()
         try:
             from .schedule_activity_normalization import backfill_normalized_schedule_activity

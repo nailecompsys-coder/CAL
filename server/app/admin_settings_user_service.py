@@ -93,6 +93,7 @@ def add_admin_user(
     notify_day_off_requests: bool = True,
     notify_schedule_changes: bool = True,
     sms_fallback_enabled: bool = False,
+    can_call_builder: bool = False,
 ) -> str:
     email = (email or "").strip().lower()
     phone_fmt = format_us_phone(phone)
@@ -131,6 +132,7 @@ def add_admin_user(
             notify_day_off_requests=notify_day_off_requests,
             notify_schedule_changes=notify_schedule_changes,
             sms_fallback_enabled=sms_fallback_enabled,
+            can_call_builder=can_call_builder,
             is_active=True,
         )
     )
@@ -174,6 +176,7 @@ def edit_admin_user(
     notify_day_off_requests: bool = True,
     notify_schedule_changes: bool = True,
     sms_fallback_enabled: bool = False,
+    can_call_builder: bool = False,
 ) -> str:
     user = db.get(AdminUser, user_id)
     if not user:
@@ -200,6 +203,7 @@ def edit_admin_user(
     user.notify_day_off_requests = notify_day_off_requests
     user.notify_schedule_changes = notify_schedule_changes
     user.sms_fallback_enabled = sms_fallback_enabled
+    user.can_call_builder = can_call_builder
     if new_password and len(new_password.strip()) >= 8:
         user.password_hash = hash_password(new_password.strip())
     db.commit()

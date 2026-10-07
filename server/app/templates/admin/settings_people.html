@@ -101,6 +101,9 @@
             <div class="lg:col-span-2 flex flex-wrap gap-1.5">
               <span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-100">Mobile</span>
               <span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-50 text-slate-600 border border-slate-200">OTP</span>
+              {% if s.can_call_builder %}
+              <span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-teal-50 text-teal-800 border border-teal-100">Call Builder</span>
+              {% endif %}
             </div>
 
             <div class="lg:col-span-2">
@@ -124,7 +127,8 @@
                   data-suffix="{{ (s.suffix or '')|e }}"
                   data-email="{{ (s.email or '')|e }}"
                   data-phone="{{ (s.phone or '')|e }}"
-                  data-sort-order="{{ s.sort_order or 0 }}">Edit</button>
+                  data-sort-order="{{ s.sort_order or 0 }}"
+                  data-can-call-builder="{{ '1' if s.can_call_builder else '0' }}">Edit</button>
                 {% if s.is_active %}
                 {% if admin.role in ['admin', 'superadmin'] %}
                 <button type="button" data-preview-url="/admin/surgeons/{{ s.id }}/native-preview-code"
@@ -177,6 +181,9 @@
               {% else %}
               <span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-50 text-slate-700 border border-slate-200">Admin</span>
               {% endif %}
+              {% if u.can_call_builder %}
+              <span class="text-[10px] font-bold px-2 py-0.5 rounded-md bg-teal-50 text-teal-800 border border-teal-100">Call Builder</span>
+              {% endif %}
             </div>
 
             <div class="lg:col-span-2">
@@ -208,7 +215,8 @@
                   data-phone="{{ (u.phone or '')|e }}"
                   data-notify-day-off="{{ '1' if u.notify_day_off_requests else '0' }}"
                   data-notify-schedule="{{ '1' if u.notify_schedule_changes else '0' }}"
-                  data-sms-fallback="{{ '1' if u.sms_fallback_enabled else '0' }}">Edit</button>
+                  data-sms-fallback="{{ '1' if u.sms_fallback_enabled else '0' }}"
+                  data-can-call-builder="{{ '1' if u.can_call_builder else '0' }}">Edit</button>
                 <button type="button" class="set-admin-password text-xs font-semibold text-slate-500 hover:text-slate-800 px-2 py-1 rounded-lg hover:bg-slate-100"
                   data-user-id="{{ u.id }}"
                   data-username="{{ u.username|e }}">Password</button>
@@ -313,6 +321,11 @@
         </div>
       </div>
 
+      <div class="grid gap-2 text-xs text-slate-600">
+        <label class="flex items-center gap-2"><input type="checkbox" name="can_call_builder" id="add-can-call-builder" value="1"> Call Builder</label>
+        <p class="text-[11px] text-slate-400">Lets this person plan call on the phone and in the portal. Does not change the live Call Schedule until they publish.</p>
+      </div>
+
       <div class="flex gap-2 pt-1">
         <button type="submit" class="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">Add user</button>
         <button type="button" onclick="document.getElementById('add-user-modal').classList.add('hidden')" class="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-lg text-sm font-medium">Cancel</button>
@@ -403,6 +416,11 @@
           <label class="flex items-center gap-2"><input type="checkbox" name="notify_schedule_changes" id="edit-notify-schedule" value="1"> Schedule change alerts</label>
           <label class="flex items-center gap-2"><input type="checkbox" name="sms_fallback_enabled" id="edit-sms-fallback" value="1"> SMS fallback</label>
         </div>
+      </div>
+
+      <div class="grid gap-2 text-xs text-slate-600">
+        <label class="flex items-center gap-2"><input type="checkbox" name="can_call_builder" id="edit-can-call-builder" value="1"> Call Builder</label>
+        <p class="text-[11px] text-slate-400">Lets this person plan call on the phone and in the portal. Does not change the live Call Schedule until they publish.</p>
       </div>
 
       <div class="flex gap-2 pt-1">
@@ -569,6 +587,7 @@ function openEditUser(btn) {
   document.getElementById('edit-notify-day-off').checked = btn.dataset.notifyDayOff !== '0';
   document.getElementById('edit-notify-schedule').checked = btn.dataset.notifySchedule !== '0';
   document.getElementById('edit-sms-fallback').checked = btn.dataset.smsFallback === '1';
+  document.getElementById('edit-can-call-builder').checked = btn.dataset.canCallBuilder === '1';
   // Clinical rows have no alert flags — default portal extras on when switching later.
   if (kind === 'clinical') {
     document.getElementById('edit-notify-day-off').checked = true;

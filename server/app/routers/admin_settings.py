@@ -350,6 +350,7 @@ def add_people_user(
     notify_day_off_requests: str = Form(""),
     notify_schedule_changes: str = Form(""),
     sms_fallback_enabled: str = Form(""),
+    can_call_builder: str = Form(""),
     db: Session = Depends(get_db),
     current_admin=Depends(get_current_admin),
 ):
@@ -371,6 +372,7 @@ def add_people_user(
             phone_clean,
             sort_order,
             lambda: _next_physician_sort_order(db),
+            can_call_builder == "1",
         )
         add_surgeon_service(db, fields)
         filt = "pas" if staff_type == "staff" else "surgeons"
@@ -396,6 +398,7 @@ def add_people_user(
             notify_day_off_requests == "1",
             notify_schedule_changes == "1",
             sms_fallback_enabled == "1",
+            can_call_builder == "1",
         )
         return _users_portal_redirect(role, msg)
 
@@ -514,6 +517,7 @@ def edit_people_user(
     notify_day_off_requests: str = Form(""),
     notify_schedule_changes: str = Form(""),
     sms_fallback_enabled: str = Form(""),
+    can_call_builder: str = Form(""),
     db: Session = Depends(get_db),
     current_admin=Depends(get_current_admin),
 ):
@@ -545,6 +549,7 @@ def edit_people_user(
     notify_day = notify_day_off_requests == "1"
     notify_sched = notify_schedule_changes == "1"
     sms_fb = sms_fallback_enabled == "1"
+    call_builder = can_call_builder == "1"
 
     # Same-table updates
     if kind == "clinical" and clinical_target:
@@ -561,6 +566,7 @@ def edit_people_user(
             phone_clean,
             sort_order,
             lambda: _next_physician_sort_order(db),
+            call_builder,
         )
         update_surgeon_service(db, user_id, fields)
         filt = "pas" if staff_type == "staff" else "surgeons"
@@ -581,6 +587,7 @@ def edit_people_user(
             notify_day,
             notify_sched,
             sms_fb,
+            call_builder,
         )
         return _users_portal_redirect(role, msg if msg != "user_edited" else "updated")
 
@@ -602,6 +609,7 @@ def edit_people_user(
             notify_day,
             notify_sched,
             sms_fb,
+            call_builder,
         )
         if msg != "user_added":
             return _users_portal_redirect(role, msg)
@@ -628,6 +636,7 @@ def edit_people_user(
             phone_clean,
             sort_order,
             lambda: _next_physician_sort_order(db),
+            call_builder,
         )
         add_surgeon_service(db, fields)
         if row.is_active:

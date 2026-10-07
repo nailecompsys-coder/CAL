@@ -83,7 +83,7 @@ struct MonthSelectedDayAgenda: View {
           .tint(ClinicalPalette.teal)
       }
 
-      if !day.mySchedule.filter({ $0.kind != "block_or" }).isEmpty {
+      if !day.mySchedule.isEmpty {
         DaySection(title: "Clinic & OR") {
           ClinicOrScheduleList(dayId: day.id, items: day.mySchedule)
         }

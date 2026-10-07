@@ -71,3 +71,5 @@ Current tracked lane imports:
 - Mark temporary gaps plainly. Do not hide platform differences in code comments only.
 - If a backend endpoint changes shape, update this ledger and the backend native contract tests together.
 - Compose cannot move from `Not integrated` to production status until auth, schedule, time off, on-call coverage, patients, and push behavior all use real CAL APIs.
+
+Card ids (2026-10-07): `GET /api/native/home` card rows carry `cardId`, `caseCount`, `visitCount`; every case row carries the `cardId` of the card it belongs to (its stored `schedule_card_id`, or for an assistant the assistant's card for that half-day). The card's `type` is `block_or` whenever its assigned location is a hospital. iOS attaches cases to cards by that id only; all facility-name matching (Aprima codes, "MN-OR" vs "Minneola OR", clinic-note parsing) was deleted. Rows with no card (weekend cases, Aprima review rows) are listed by half-day and location.

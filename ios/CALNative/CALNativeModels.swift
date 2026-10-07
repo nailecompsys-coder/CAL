@@ -130,6 +130,10 @@ struct DoctorScheduleItem: Identifiable {
   /// SQL counts for a master card's half-day; zero on non-card rows.
   var caseCount = 0
   var visitCount = 0
+  /// The master card this row belongs to (the card's own id on card rows), from SQL.
+  var cardId: Int?
+
+  var isCard: Bool { source == "master" || source == "clinic_schedule" }
 
   var isBlockOr: Bool { kind == "block_or" }
   var isClinicOrSurgery: Bool { kind == "clinic" || kind == "surgery" }

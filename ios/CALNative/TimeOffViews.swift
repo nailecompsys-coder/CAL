@@ -269,8 +269,7 @@ private struct TimeOffRequestRow: View {
   let request: TimeOffRequest
 
   private var reasonLabel: String {
-    let reason = request.reason.replacingOccurrences(of: "_", with: " ")
-    return reason.isEmpty ? "Time off" : reason.prefix(1).uppercased() + reason.dropFirst()
+    request.displayReason
   }
 
   var body: some View {

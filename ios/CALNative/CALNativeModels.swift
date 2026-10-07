@@ -334,7 +334,7 @@ struct TimeOffRequest: Identifiable, Equatable {
     return "\(formatShortDate(startDate)) - \(formatShortDate(endDate))"
   }
 
-  /// One-line roster summary, e.g. `CJ 7-19 Vacation` or `CJ 7-19–22 Vacation`.
+  /// One-line roster summary, e.g. `CJ Oct 7 Day Off` or `CJ Oct 7-19 Vacation`.
   var rosterSummaryLine: String {
     let initials = surgeonInitials.isEmpty ? "?" : surgeonInitials
     return "\(initials) \(compactDateSpan) \(displayReason)"
@@ -346,26 +346,31 @@ struct TimeOffRequest: Identifiable, Equatable {
 
   var displayReason: String {
     let raw = reason.replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !raw.isEmpty else { return "Time off" }
-    if raw.lowercased() == "day off" { return "Day Off" }
-    return raw.prefix(1).uppercased() + raw.dropFirst()
+    guard !raw.isEmpty else { return "Time Off" }
+    return raw
+      .split(separator: " ", omittingEmptySubsequences: true)
+      .map { part in
+        let word = String(part)
+        return word.prefix(1).uppercased() + word.dropFirst().lowercased()
+      }
+      .joined(separator: " ")
   }
 
   private var compactDateSpan: String {
     guard let start = parsedStartDate else { return startDate }
     let cal = Calendar.current
-    let sm = cal.component(.month, from: start)
-    let sd = cal.component(.day, from: start)
+    let startMonth = start.formatted(.dateTime.month(.abbreviated))
+    let startDay = cal.component(.day, from: start)
     if startDate == endDate {
-      return "\(sm)-\(sd)"
+      return "\(startMonth) \(startDay)"
     }
-    guard let end = parsedEndDate else { return "\(sm)-\(sd)" }
-    let em = cal.component(.month, from: end)
-    let ed = cal.component(.day, from: end)
-    if sm == em {
-      return "\(sm)-\(sd)–\(ed)"
+    guard let end = parsedEndDate else { return "\(startMonth) \(startDay)" }
+    let endDay = cal.component(.day, from: end)
+    if cal.isDate(start, equalTo: end, toGranularity: .month) {
+      return "\(startMonth) \(startDay)-\(endDay)"
     }
-    return "\(sm)-\(sd)–\(em)-\(ed)"
+    let endMonth = end.formatted(.dateTime.month(.abbreviated))
+    return "\(startMonth) \(startDay)-\(endMonth) \(endDay)"
   }
 
   private func formatShortDate(_ iso: String) -> String {

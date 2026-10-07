@@ -325,7 +325,7 @@ struct WhosWhereView: View {
           groupSections(selectedGroupId)
         }
       }
-      .navigationTitle("Who's where")
+      .navigationTitle("Block Schedule")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .confirmationAction) {
@@ -338,15 +338,7 @@ struct WhosWhereView: View {
 
   @ViewBuilder
   private func groupSections(_ groupId: Int) -> some View {
-    let onCall = rows.filter { $0.session == "call" && $0.groupId == groupId }
     let people = WhosWherePerson.people(in: groupId, from: rows)
-    if !onCall.isEmpty {
-      Section("On call") {
-        ForEach(onCall) { row in
-          Text(row.name).font(ClinicalTypography.rowTitle)
-        }
-      }
-    }
     Section {
       WhosWhereTableHeader()
       ForEach(people.filter { !$0.isPA }) { WhosWhereTableRow(person: $0) }
@@ -386,8 +378,8 @@ struct WhosWhereView: View {
   }
 }
 
-/// One person's AM and PM half-days, shown in a group when either half-day is there,
-/// they are on call there, or they have no location at all that day.
+/// One person's AM and PM half-days, shown in a group when either half-day is there
+/// or they are on call there.
 private struct WhosWherePerson: Identifiable {
   let id: Int
   let lastName: String
@@ -409,7 +401,7 @@ private struct WhosWherePerson: Identifiable {
       let am = mine.first { $0.session == "am" }
       let pm = mine.first { $0.session == "pm" }
       let groupIds = Set(mine.compactMap(\.groupId))
-      guard groupIds.contains(groupId) || groupIds.isEmpty || onCallIds.contains(id),
+      guard groupIds.contains(groupId) || onCallIds.contains(id),
             let any = am ?? pm else { return nil }
       return WhosWherePerson(
         id: id,

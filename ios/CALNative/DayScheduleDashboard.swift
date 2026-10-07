@@ -102,7 +102,7 @@ struct DayScheduleDashboard: View {
             HStack(spacing: 8) {
               Image(systemName: "map")
                 .foregroundStyle(ClinicalPalette.teal)
-              Text("Who's where")
+              Text("Block Schedule")
                 .font(ClinicalTypography.rowTitle)
                 .foregroundStyle(ClinicalPalette.ink)
               Spacer(minLength: 0)

@@ -21,7 +21,8 @@ draft AS (
 roster AS (
     SELECT s.id, s.first_name, s.last_name,
            upper(substr(s.first_name, 1, 1) || substr(s.last_name, 1, 1)) AS initials,
-           coalesce(s.staff_type, 'physician') AS staff_type
+           coalesce(s.staff_type, 'physician') AS staff_type,
+           CASE WHEN s.sort_order > 0 THEN s.sort_order ELSE 999999 END AS practice_rank
     FROM surgeons s
     WHERE s.is_active = TRUE
       AND coalesce(s.staff_type, 'physician') = 'physician'
@@ -44,4 +45,4 @@ SELECT r.id AS surgeon_id,
           JOIN holidays h ON h.date = e.call_date
          WHERE e.surgeon_id = r.id) AS holidays
 FROM roster r
-ORDER BY call_count ASC, r.last_name ASC, r.first_name ASC, r.id ASC
+ORDER BY r.practice_rank ASC, r.last_name ASC, r.first_name ASC, r.id ASC

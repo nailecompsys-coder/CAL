@@ -11,6 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.call_builder_service import (
+    _history_statement,
     call_history,
     clear_draft,
     publish_changes,
@@ -32,6 +33,7 @@ from app.models import (
 
 class CallBuilderTest(unittest.TestCase):
     def setUp(self):
+        _history_statement.cache_clear()
         self.engine = create_engine("sqlite:///:memory:")
         Base.metadata.create_all(bind=self.engine)
         self.Session = sessionmaker(bind=self.engine)
@@ -66,6 +68,7 @@ class CallBuilderTest(unittest.TestCase):
             is_active=True,
             staff_type="physician",
             can_call_builder=True,
+            sort_order=10,
         )
         alex = Surgeon(
             first_name="Alex",
@@ -73,6 +76,7 @@ class CallBuilderTest(unittest.TestCase):
             email="as@example.com",
             is_active=True,
             staff_type="physician",
+            sort_order=20,
         )
         nelson = Surgeon(
             first_name="Larry",
@@ -80,6 +84,7 @@ class CallBuilderTest(unittest.TestCase):
             email="ln@example.com",
             is_active=True,
             staff_type="physician",
+            sort_order=30,
         )
         wg = CallGroup(name="Winter Garden / Apopka / Minneola Hospital", sort_order=0)
         alt = CallGroup(name="Altamonte Hospital", sort_order=1)
@@ -151,9 +156,8 @@ class CallBuilderTest(unittest.TestCase):
             self.assertIn("July 4th/2", by_id[nelson.id]["holidays"])
             # Alex was covered — not credited
             self.assertEqual(by_id[alex.id]["callCount"], 0)
-            # Lowest load first among zeros is alphabetical — alex before nelson when both 0?
-            # nelson has 1, chris 2, alex 0 → alex first
-            self.assertEqual(rows[0]["surgeonId"], alex.id)
+            # Practice rank order: chris 10, alex 20, nelson 30
+            self.assertEqual([r["surgeonId"] for r in rows], [chris.id, alex.id, nelson.id])
         finally:
             db.close()
 

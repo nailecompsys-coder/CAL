@@ -35,7 +35,7 @@
 <div class="p-6 grid grid-cols-1 xl:grid-cols-[240px_1fr] gap-6">
   <aside class="space-y-3">
     <p class="text-xs text-slate-500">Drag a surgeon onto a WG or ALT line, or click a surgeon then click a line. Dashed = draft. Solid = already live. Struck-through = Off or No Call that day.</p>
-    <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Surgeons · fewest calls first</p>
+    <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Surgeons · practice rank</p>
     <div class="space-y-1.5">
       {% for h in history %}
       {% set last_hol = h.holidays.split(',')[0].split('/')[0] if h.holidays else 'none' %}

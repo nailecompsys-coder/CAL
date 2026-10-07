@@ -104,7 +104,11 @@ items AS (
            CAST(NULL AS INTEGER) AS raw_id, c.color AS color,
            CAST(NULL AS TEXT) AS status, CAST(NULL AS TEXT) AS surgeon_notes,
            CAST(NULL AS TEXT) AS assisting_surgeon, 0 AS assisting,
-           CASE WHEN c.session = 'am' THEN 0 ELSE 2 END AS sort_rank
+           CASE WHEN c.session = 'am' THEN 0 ELSE 2 END AS sort_rank,
+           (SELECT count(*) FROM source_cases sc WHERE sc.date = c.date
+              AND CASE WHEN substr(CAST(sc.start_time AS TEXT),1,5) < '12:00' THEN 'am' ELSE 'pm' END = c.session
+           ) AS case_count,
+           c.visits AS visit_count
     FROM cards c
     UNION ALL
     SELECT 'surg-' || CAST(sc.id AS TEXT) || CASE WHEN sc.assisting = 1 THEN '-assist' ELSE '' END,
@@ -126,7 +130,7 @@ items AS (
            ) THEN 1 ELSE 0 END,
            sc.id, coalesce(sc.location_color, '#e0f2fe'), sc.status,
            CASE WHEN sc.assisting = 1 THEN '' ELSE coalesce(sc.surgeon_notes, '') END,
-           coalesce(sc.assisting_name, ''), sc.assisting, 1
+           coalesce(sc.assisting_name, ''), sc.assisting, 1, 0, 0
     FROM source_cases sc
 ),
 legacy_clinic AS (
@@ -141,7 +145,8 @@ legacy_clinic AS (
            0 AS needs_review, CAST(NULL AS INTEGER) AS raw_id,
            coalesce(l.color, '#0ea5e9') AS color,
            CAST(NULL AS TEXT) AS status, CAST(NULL AS TEXT) AS surgeon_notes,
-           CAST(NULL AS TEXT) AS assisting_surgeon, 0 AS assisting, 0 AS sort_rank
+           CAST(NULL AS TEXT) AS assisting_surgeon, 0 AS assisting, 0 AS sort_rank,
+           0 AS case_count, 0 AS visit_count
     FROM clinic_schedules cl LEFT JOIN locations l ON l.id = cl.location_id
     WHERE cl.surgeon_id = :surgeon_id AND cl.date BETWEEN :start_date AND :end_date
       AND NOT EXISTS (SELECT 1 FROM cards c WHERE c.date = cl.date AND (c.session = cl.session OR cl.session = 'full'))

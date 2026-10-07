@@ -304,6 +304,47 @@ class NativeHomeContractTest(unittest.TestCase):
         finally:
             db.close()
 
+    @patch("app.aprima_cache_service.patient_appointments_for_api")
+    def test_cards_carry_sql_case_and_visit_counts(self, aprima_payload):
+        aprima_payload.return_value = {"appointments": []}
+        db = self.Session()
+        try:
+            surgeon = Surgeon(first_name="Chris", last_name="Johnson", is_active=True)
+            hospital = Location(name="Altamonte Hospital", abbreviation="ALT", location_type="hospital")
+            clinic = Location(name="Lake Mary Clinic", abbreviation="LM", location_type="clinic")
+            db.add_all([surgeon, hospital, clinic])
+            db.flush()
+            week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=date(2026, 10, 5))
+            db.add(week)
+            db.flush()
+            am = ScheduleCard(week_id=week.id, surgeon_id=surgeon.id, date=date(2026, 10, 6),
+                              session="am", baseline_state="assigned", effective_state="assigned",
+                              baseline_location_id=hospital.id, effective_location_id=hospital.id)
+            pm = ScheduleCard(week_id=week.id, surgeon_id=surgeon.id, date=date(2026, 10, 6),
+                              session="pm", baseline_state="assigned", effective_state="assigned",
+                              baseline_location_id=clinic.id, effective_location_id=clinic.id)
+            db.add_all([am, pm])
+            db.flush()
+            db.add(SurgicalCase(surgeon_id=surgeon.id, date=date(2026, 10, 6), start_time=time(8),
+                                end_time=time(9), patient_name="Test Patient", procedure="Test procedure",
+                                location_id=hospital.id, schedule_card_id=am.id, status="scheduled"))
+            for index, key in enumerate(["a", "b", "b"]):
+                db.add(ScheduleCardActivity(
+                    schedule_card_id=pm.id, surgeon_id=surgeon.id, location_id=clinic.id,
+                    activity_date=date(2026, 10, 6), session="pm", activity_type="clinic",
+                    patient_name="Test Visit", source_system="test", source_record_key=f"k{index}",
+                    identity_key=key,
+                ))
+            db.commit()
+
+            items = build_native_home(db, surgeon, date(2026, 10, 6), date(2026, 10, 6))["days"][0]["items"]
+            am_item = next(item for item in items if item["id"] == f"card-{am.id}")
+            pm_item = next(item for item in items if item["id"] == f"card-{pm.id}")
+            self.assertEqual((1, 0), (am_item["caseCount"], am_item["visitCount"]))
+            self.assertEqual((0, 2), (pm_item["caseCount"], pm_item["visitCount"]))
+        finally:
+            db.close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -28,6 +28,11 @@ def run_migration():
                 ALTER TABLE locations
                 ADD COLUMN IF NOT EXISTS abbreviation VARCHAR(12)
             """))
+            conn.execute(text("""
+                ALTER TABLE locations
+                ADD COLUMN IF NOT EXISTS block_group_id INTEGER
+                REFERENCES call_groups(id) ON DELETE SET NULL
+            """))
 
     db = SessionLocal()
     try:

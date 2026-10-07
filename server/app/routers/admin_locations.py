@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from ..auth import get_current_admin
 from ..database import get_db
 from ..jinja_env import templates
-from ..models import Location
+from ..models import CallGroup, Location
 from .admin import _base
 
 router = APIRouter(prefix="/admin")
@@ -48,6 +48,7 @@ def locations_page(request: Request, db: Session = Depends(get_db), admin=Depend
             admin,
             db=db,
             locations=locations,
+            block_groups=db.query(CallGroup).order_by(CallGroup.sort_order, CallGroup.name).all(),
             default_clinic_color=DEFAULT_CLINIC_COLOR,
             default_hospital_color=DEFAULT_HOSPITAL_COLOR,
         ),
@@ -109,6 +110,23 @@ def edit_location(
         loc.phone = phone
         loc.location_type = location_type
         loc.color = color_value
+        db.commit()
+    return RedirectResponse("/admin/locations?msg=updated", status_code=303)
+
+
+@router.post("/locations/{location_id}/group")
+def set_location_group(
+    location_id: int,
+    block_group_id: str = Form(""),
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    loc = db.get(Location, location_id)
+    if loc:
+        group_id = int(block_group_id) if block_group_id.strip().isdigit() else None
+        if group_id is not None and db.get(CallGroup, group_id) is None:
+            return RedirectResponse("/admin/locations?msg=invalid_group", status_code=303)
+        loc.block_group_id = group_id
         db.commit()
     return RedirectResponse("/admin/locations?msg=updated", status_code=303)
 

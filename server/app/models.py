@@ -108,6 +108,8 @@ class Location(Base):
     location_type = Column(String(16), default="clinic", server_default="clinic")  # clinic | hospital
     color = Column(String(16), default="#0ea5e9")  # color for calendar
     is_active = Column(Boolean, default=True)
+    # Geographic block group for "who's where"; never used for call assignment.
+    block_group_id = Column(Integer, ForeignKey("call_groups.id", ondelete="SET NULL"))
 
 
 class Surgeon(Base):

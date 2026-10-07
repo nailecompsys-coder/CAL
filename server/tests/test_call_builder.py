@@ -1,6 +1,7 @@
 import os
 import unittest
 from datetime import date
+from unittest.mock import patch
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SECRET_KEY", "test-secret")
@@ -12,6 +13,8 @@ from sqlalchemy.orm import sessionmaker
 from app.call_builder_service import (
     call_history,
     clear_draft,
+    publish_changes,
+    publish_draft,
     require_admin_call_builder,
     upsert_draft,
 )
@@ -151,6 +154,28 @@ class CallBuilderTest(unittest.TestCase):
             # Lowest load first among zeros is alphabetical — alex before nelson when both 0?
             # nelson has 1, chris 2, alex 0 → alex first
             self.assertEqual(rows[0]["surgeonId"], alex.id)
+        finally:
+            db.close()
+
+    def test_publish_writes_live_and_clears_draft(self):
+        db = self.Session()
+        try:
+            admin, _, chris, alex, _, wg, alt = self._seed(db)
+            day = date(2026, 12, 12)
+            upsert_draft(db, day=day, call_group_id=wg.id, surgeon_id=chris.id, admin=admin)
+            upsert_draft(db, day=day, call_group_id=alt.id, surgeon_id=alex.id, admin=admin)
+            changes = publish_changes(db, date(2026, 12, 1), date(2026, 12, 31))
+            self.assertEqual(len(changes), 2)
+            with patch("app.admin_call_schedule_action_service.send_push_to_surgeon"):
+                warnings = publish_draft(
+                    db, start=date(2026, 12, 1), end=date(2026, 12, 31), admin=admin,
+                )
+            self.assertEqual(warnings, [])
+            self.assertEqual(db.query(CallDraftAssignment).count(), 0)
+            live = db.query(CallRotation).filter(CallRotation.date == day).all()
+            by_group = {r.call_group_id: r.surgeon_id for r in live}
+            self.assertEqual(by_group[wg.id], chris.id)
+            self.assertEqual(by_group[alt.id], alex.id)
         finally:
             db.close()
 

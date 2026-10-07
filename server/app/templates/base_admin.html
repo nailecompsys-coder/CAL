@@ -104,6 +104,11 @@
       <a href="/admin/call-schedule" onclick="closeSidebar()" class="sidebar-link {% if '/call-schedule' in request.url.path or '/call-audit' in request.url.path %}active{% endif %}">
         <i class="fa-solid fa-bell" style="width:1rem;text-align:center"></i> Call
       </a>
+      {% if admin.can_call_builder %}
+      <a href="/admin/call-builder" onclick="closeSidebar()" class="sidebar-link {% if '/call-builder' in request.url.path %}active{% endif %}">
+        <i class="fa-solid fa-pen-ruler" style="width:1rem;text-align:center"></i> Call Builder
+      </a>
+      {% endif %}
       <a href="/admin/daysoff" onclick="closeSidebar()" class="sidebar-link {% if request.url.path == '/admin/daysoff' %}active{% endif %}">
         <i class="fa-solid fa-umbrella-beach" style="width:1rem;text-align:center"></i> Time Off
         {% if pending_count and pending_count > 0 %}<span class="badge">{{ pending_count }}</span>{% endif %}

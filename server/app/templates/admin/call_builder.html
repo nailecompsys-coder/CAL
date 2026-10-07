@@ -1,0 +1,225 @@
+{% extends "base_admin.html" %}
+{% block title %}Call Builder{% endblock %}
+
+{% block content %}
+<header class="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10 flex-shrink-0 gap-4">
+  <div class="min-w-0">
+    <h1 class="text-xl font-bold text-slate-800">Call Builder</h1>
+    <p class="text-sm text-slate-500">{{ month_label }} · draft only · {{ draft_count }} cell{{ 's' if draft_count != 1 else '' }} · {{ change_count }} to publish</p>
+  </div>
+  <div class="flex items-center gap-2 flex-shrink-0">
+    <a href="/admin/call-schedule?month_offset={{ month_offset }}" class="bg-slate-100 text-slate-600 text-sm px-3 py-2 rounded-lg hover:bg-slate-200">Live Call Schedule</a>
+    <a href="/admin/call-builder?month_offset={{ month_offset - 1 }}"
+       class="w-9 h-9 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 flex items-center justify-center">
+      <i class="fa-solid fa-chevron-left text-xs"></i>
+    </a>
+    <a href="/admin/call-builder?month_offset=0"
+       class="bg-blue-600 text-white text-sm px-3 py-2 rounded-lg hover:bg-blue-700">Today</a>
+    <a href="/admin/call-builder?month_offset={{ month_offset + 1 }}"
+       class="w-9 h-9 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 flex items-center justify-center">
+      <i class="fa-solid fa-chevron-right text-xs"></i>
+    </a>
+  </div>
+</header>
+
+{% if request.query_params.get('msg') == 'published' %}
+<div class="mx-6 mt-4 bg-green-50 border border-green-200 rounded-xl px-4 py-3 text-green-700 text-sm">Published to the live Call Schedule. Draft cells for those days were cleared.</div>
+{% endif %}
+{% if request.query_params.get('warn') %}
+<div class="mx-6 mt-4 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-start gap-2 text-amber-800 text-sm">
+  <i class="fa-solid fa-triangle-exclamation text-amber-500 mt-0.5 flex-shrink-0"></i>
+  <div><strong>Note:</strong> {{ request.query_params.get('warn') }}</div>
+</div>
+{% endif %}
+
+<div class="p-6 grid grid-cols-1 xl:grid-cols-[240px_1fr] gap-6">
+  <aside class="space-y-3">
+    <p class="text-xs text-slate-500">Drag a surgeon onto a WG or ALT line, or click a surgeon then click a line. Dashed = draft. Solid = already live. Struck-through = Off or No Call that day.</p>
+    <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Surgeons · fewest calls first</p>
+    <div class="space-y-1.5">
+      {% for h in history %}
+      {% set last_hol = h.holidays.split(',')[0].split('/')[0] if h.holidays else 'none' %}
+      <div class="roster-tile rounded-lg border border-slate-200 bg-white px-2.5 py-2 cursor-grab select-none hover:border-blue-300"
+           draggable="true" data-surgeon-id="{{ h.surgeonId }}" data-initials="{{ h.initials }}"
+           onclick="pickSurgeon(this)" title="{{ h.firstName }} {{ h.lastName }}">
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-sm font-semibold text-slate-800">{{ h.initials }} · {{ h.lastName }}</span>
+          <span class="text-xs font-bold text-slate-600">{{ month_short }} {{ h.draftCount }}</span>
+        </div>
+        <p class="text-[11px] text-slate-500">{{ h.callCount }} before this month · wknd {{ h.weekendCount }} · hol {{ last_hol }}</p>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="flex flex-col gap-2 pt-2">
+      <button type="button" onclick="openPublish()" class="bg-blue-600 text-white text-sm font-medium py-2.5 rounded-lg hover:bg-blue-700">
+        Publish {{ change_count }}…
+      </button>
+      <form method="post" action="/admin/call-builder/clear-month" onsubmit="return confirm('Clear every draft cell for {{ month_label }}? Live Call Schedule is not changed.')">
+        <input type="hidden" name="month_offset" value="{{ month_offset }}" />
+        <button type="submit" class="w-full bg-slate-100 text-slate-700 text-sm font-medium py-2.5 rounded-lg hover:bg-slate-200">Clear draft</button>
+      </form>
+    </div>
+  </aside>
+
+  <div class="overflow-x-auto">
+    {% set total_cells = pad_start + schedule_days|length %}
+    {% set pad_end = (7 - (total_cells % 7)) % 7 %}
+    <table class="w-full border-collapse min-w-[720px]">
+      <thead>
+        <tr>
+          {% for wd in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'] %}
+          <th class="px-2 py-3 bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wide">{{ wd }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+        {% for _ in range(pad_start) %}
+          <td class="px-2 py-2 border border-slate-200 bg-slate-50/60 align-top h-[7.5rem]"></td>
+        {% endfor %}
+        {% for day in schedule_days %}
+          {% if (pad_start + loop.index0) % 7 == 0 and not loop.first %}</tr><tr>{% endif %}
+          {% set iso = day.isoformat() %}
+          {% set is_today = day == today %}
+          {% set hol = holidays.get(iso, '') %}
+          <td class="px-2 py-2 border border-slate-200 align-top {% if is_today %}bg-blue-50/30{% elif hol %}bg-amber-50/40{% else %}bg-white{% endif %}">
+            <div class="min-h-[88px] space-y-1">
+              <div class="flex items-center justify-between gap-1">
+                <span class="text-[11px] font-extrabold {% if is_today %}text-blue-600{% elif day.weekday() >= 5 %}text-slate-400{% else %}text-slate-700{% endif %}">
+                  {{ day.day }}
+                </span>
+                {% if hol %}<span class="text-[10px] font-semibold text-amber-800 truncate">{{ hol }}</span>{% endif %}
+              </div>
+              {% for g in groups %}
+              {% set cell = cells_by_key.get(iso ~ '|' ~ g.id) %}
+              <div class="drop-slot flex items-center gap-1 rounded-md px-1 py-0.5 min-h-[1.5rem] cursor-pointer hover:bg-slate-50"
+                   data-date="{{ iso }}" data-group-id="{{ g.id }}" data-group="{{ g.short }}"
+                   data-source="{{ cell.source if cell else 'empty' }}"
+                   ondragover="event.preventDefault(); this.classList.add('ring-1','ring-blue-400')"
+                   ondragleave="this.classList.remove('ring-1','ring-blue-400')"
+                   ondrop="onDrop(event, this)"
+                   onclick="onSlotClick(this)">
+                <span class="text-[9px] font-extrabold text-slate-400 w-6">{{ g.short }}</span>
+                {% if cell and cell.initials %}
+                <span class="slot-chip text-[11px] font-bold px-1.5 rounded
+                  {% if cell.source == 'draft' %}border border-dashed border-blue-500 text-slate-800{% else %}border border-slate-300 text-slate-700{% endif %}
+                  {% if cell.flag %}line-through text-slate-400 border-slate-300{% endif %}"
+                  data-surgeon-id="{{ cell.surgeonId or '' }}"
+                  title="{% if cell.flag %}{{ cell.flag }} — kept, flagged{% elif cell.source == 'live' %}Live assignment{% else %}Draft{% endif %}">
+                  {{ cell.initials }}{% if cell.flag %} <span class="font-medium">{{ cell.flag }}</span>{% endif %}
+                </span>
+                {% else %}
+                <span class="text-[10px] text-slate-300">drop</span>
+                {% endif %}
+              </div>
+              {% endfor %}
+            </div>
+          </td>
+        {% endfor %}
+        {% for _ in range(pad_end) %}
+          <td class="px-2 py-2 border border-slate-200 bg-slate-50/60 align-top"></td>
+        {% endfor %}
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div id="publish-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden">
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-6 max-h-[90vh] overflow-y-auto">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="font-bold text-slate-800">Publish to Call Schedule</h3>
+      <button type="button" onclick="document.getElementById('publish-modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <p class="text-sm text-slate-600 mb-3">These draft cells write through the same path as the Call Schedule page (change log, No Call exceptions, pushes).</p>
+    <ul id="publish-list" class="space-y-1 text-sm text-slate-700 mb-4 max-h-64 overflow-y-auto"></ul>
+    <form method="post" action="/admin/call-builder/publish" class="flex gap-2">
+      <input type="hidden" name="month_offset" value="{{ month_offset }}" />
+      <button type="submit" id="publish-submit" class="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">Publish</button>
+      <button type="button" onclick="document.getElementById('publish-modal').classList.add('hidden')" class="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-lg text-sm font-medium">Cancel</button>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const MONTH_OFFSET = {{ month_offset }};
+let penId = null;
+
+function pickSurgeon(el) {
+  document.querySelectorAll('.roster-tile').forEach(t => t.classList.remove('ring-2', 'ring-blue-500'));
+  if (penId === el.dataset.surgeonId) { penId = null; return; }
+  penId = el.dataset.surgeonId;
+  el.classList.add('ring-2', 'ring-blue-500');
+}
+document.querySelectorAll('.roster-tile').forEach(el => {
+  el.addEventListener('dragstart', e => {
+    e.dataTransfer.setData('text/plain', el.dataset.surgeonId);
+    penId = el.dataset.surgeonId;
+  });
+});
+
+async function place(date, groupId, surgeonId) {
+  const res = await fetch('/admin/call-builder/place', {
+    method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify({ date, callGroupId: groupId, surgeonId }),
+  });
+  if (!res.ok) { alert('Could not save draft cell'); return; }
+  location.reload();
+}
+async function clearCell(date, groupId) {
+  const res = await fetch('/admin/call-builder/clear', {
+    method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify({ date, callGroupId: groupId }),
+  });
+  if (!res.ok) { alert('Could not clear draft cell'); return; }
+  location.reload();
+}
+function onDrop(e, slot) {
+  e.preventDefault();
+  slot.classList.remove('ring-1', 'ring-blue-400');
+  const id = e.dataTransfer.getData('text/plain') || penId;
+  if (!id) return;
+  place(slot.dataset.date, parseInt(slot.dataset.groupId, 10), parseInt(id, 10));
+}
+function onSlotClick(slot) {
+  const chip = slot.querySelector('.slot-chip');
+  if (!penId) {
+    if (chip && slot.dataset.source === 'draft') clearCell(slot.dataset.date, parseInt(slot.dataset.groupId, 10));
+    return;
+  }
+  if (chip && String(chip.dataset.surgeonId) === String(penId) && slot.dataset.source === 'draft') {
+    clearCell(slot.dataset.date, parseInt(slot.dataset.groupId, 10));
+    return;
+  }
+  place(slot.dataset.date, parseInt(slot.dataset.groupId, 10), parseInt(penId, 10));
+}
+async function openPublish() {
+  const res = await fetch('/admin/call-builder/publish-preview?month_offset=' + MONTH_OFFSET, { credentials: 'same-origin' });
+  if (!res.ok) { alert('Could not load publish preview'); return; }
+  const data = await res.json();
+  const list = document.getElementById('publish-list');
+  list.innerHTML = '';
+  if (!data.changes.length) {
+    list.innerHTML = '<li class="text-slate-500">Nothing to publish — draft matches the live schedule.</li>';
+    document.getElementById('publish-submit').disabled = true;
+  } else {
+    document.getElementById('publish-submit').disabled = false;
+    data.changes.forEach(c => {
+      const li = document.createElement('li');
+      li.className = 'flex justify-between gap-2 border-b border-slate-100 py-1';
+      li.innerHTML = '<span>' + c.date + ' · ' + c.group + '</span><span class="font-semibold">' +
+        c.fromInitials + ' → ' + c.toInitials + (c.flag ? ' <span class="text-amber-700">(' + c.flag + ')</span>' : '') + '</span>';
+      list.appendChild(li);
+    });
+  }
+  document.getElementById('publish-modal').classList.remove('hidden');
+}
+document.getElementById('publish-modal').addEventListener('click', function(e) {
+  if (e.target === this) this.classList.add('hidden');
+});
+</script>
+{% endblock %}

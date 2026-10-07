@@ -2,15 +2,27 @@
 
 from __future__ import annotations
 
-from datetime import date
+import calendar as calendar_lib
+from datetime import date, timedelta
 from functools import lru_cache
 from pathlib import Path
 
 from fastapi import HTTPException
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
-from .models import AdminUser, CallDraftAssignment, CallGroup, Holiday, Surgeon
+from .admin_call_schedule_action_service import assign_rotation
+from .admin_call_schedule_page_service import month_schedule_days
+from .models import (
+    AdminUser,
+    CallDraftAssignment,
+    CallGroup,
+    CallRotation,
+    DayOff,
+    Holiday,
+    Surgeon,
+)
+from .practice_time import practice_today
 
 
 @lru_cache(maxsize=2)
@@ -176,3 +188,199 @@ def clear_draft(
     if row:
         db.delete(row)
         db.commit()
+
+
+def clear_draft_month(
+    db: Session,
+    *,
+    start: date,
+    end: date,
+    admin: AdminUser | None = None,
+    surgeon: Surgeon | None = None,
+) -> int:
+    if admin is not None:
+        require_admin_call_builder(admin)
+    if surgeon is not None:
+        require_surgeon_call_builder(surgeon)
+    rows = draft_assignments(db, start, end)
+    n = len(rows)
+    for row in rows:
+        db.delete(row)
+    db.commit()
+    return n
+
+
+def short_group_label(group: CallGroup) -> str:
+    name = (group.name or "").lower()
+    if "altamonte" in name or name.startswith("alt"):
+        return "ALT"
+    return "WG"
+
+
+def _is_no_call(reason: str | None) -> bool:
+    return " ".join((reason or "").strip().lower().split()) == "no call"
+
+
+def leave_flag_map(db: Session, start: date, end: date) -> dict[str, str]:
+    """Keys are 'YYYY-MM-DD|surgeon_id' → 'Off' or 'No Call' (approved only)."""
+    rows = (
+        db.query(DayOff)
+        .filter(
+            DayOff.status == "approved",
+            DayOff.start_date <= end,
+            DayOff.end_date >= start,
+        )
+        .all()
+    )
+    out: dict[str, str] = {}
+    for row in rows:
+        kind = "No Call" if _is_no_call(row.reason) else "Off"
+        current = max(row.start_date, start)
+        last = min(row.end_date, end)
+        while current <= last:
+            key = f"{current.isoformat()}|{row.surgeon_id}"
+            # No Call wins over Off if both somehow present
+            if key not in out or kind == "No Call":
+                out[key] = kind
+            current += timedelta(days=1)
+    return out
+
+
+def published_map(db: Session, start: date, end: date) -> dict[str, int | None]:
+    """Keys 'YYYY-MM-DD|group_id' → surgeon_id (None = NO call row)."""
+    rows = (
+        db.query(CallRotation)
+        .filter(CallRotation.date >= start, CallRotation.date <= end)
+        .all()
+    )
+    return {
+        f"{row.date.isoformat()}|{row.call_group_id}": row.surgeon_id
+        for row in rows
+        if row.call_group_id is not None
+    }
+
+
+def draft_map(db: Session, start: date, end: date) -> dict[str, int | None]:
+    return {
+        f"{row.date.isoformat()}|{row.call_group_id}": row.surgeon_id
+        for row in draft_assignments(db, start, end)
+    }
+
+
+def publish_changes(db: Session, start: date, end: date) -> list[dict]:
+    """Diff draft vs live Call Schedule for the month. Does not write."""
+    groups = {g.id: g for g in db.query(CallGroup).order_by(CallGroup.sort_order, CallGroup.id).all()}
+    surgeons = {s.id: s for s in db.query(Surgeon).all()}
+    live = published_map(db, start, end)
+    draft = draft_map(db, start, end)
+    leave = leave_flag_map(db, start, end)
+    changes = []
+    for key, surgeon_id in sorted(draft.items()):
+        day_s, group_s = key.split("|", 1)
+        group_id = int(group_s)
+        live_id = live.get(key, object())  # missing live cell ≠ None (NO call)
+        if live_id is surgeon_id:
+            continue
+        group = groups.get(group_id)
+        to_s = surgeons.get(surgeon_id) if surgeon_id else None
+        from_s = surgeons.get(live_id) if isinstance(live_id, int) else None
+        changes.append({
+            "date": day_s,
+            "callGroupId": group_id,
+            "group": short_group_label(group) if group else str(group_id),
+            "groupName": group.name if group else "",
+            "fromSurgeonId": live_id if isinstance(live_id, int) else None,
+            "fromInitials": from_s.initials if from_s else ("NC" if key in live and live[key] is None else "—"),
+            "toSurgeonId": surgeon_id,
+            "toInitials": to_s.initials if to_s else "NC",
+            "flag": leave.get(f"{day_s}|{surgeon_id}", "") if surgeon_id else "",
+        })
+    return changes
+
+
+def publish_draft(
+    db: Session,
+    *,
+    start: date,
+    end: date,
+    admin: AdminUser,
+) -> list[str]:
+    """Write draft cells through the same assign path as Call Schedule, then clear them."""
+    require_admin_call_builder(admin)
+    warnings: list[str] = []
+    changes = publish_changes(db, start, end)
+    for change in changes:
+        day = date.fromisoformat(change["date"])
+        group_id = change["callGroupId"]
+        to_id = change["toSurgeonId"]
+        warnings.extend(assign_rotation(db, day, to_id, group_id, admin=admin) or [])
+        clear_draft(db, day=day, call_group_id=group_id, admin=admin)
+    return warnings
+
+
+def page_data(db: Session, month_offset: int) -> dict:
+    month = month_schedule_days(month_offset)
+    days: list[date] = month["schedule_days"]
+    start, end = days[0], days[-1]
+    # History: year-to-date through the first of this month; draft = this month
+    history_from = date(start.year, 1, 1)
+    history = call_history(
+        db,
+        from_date=history_from,
+        to_date=start,
+        draft_from=start,
+        draft_to=end + timedelta(days=1),
+    )
+    groups = db.query(CallGroup).order_by(CallGroup.sort_order, CallGroup.id).all()
+    surgeons = {
+        s.id: s
+        for s in db.query(Surgeon)
+        .filter(Surgeon.is_active.is_(True), func.coalesce(Surgeon.staff_type, "physician") == "physician")
+        .all()
+    }
+    leave = leave_flag_map(db, start, end)
+    live = published_map(db, start, end)
+    draft = draft_map(db, start, end)
+    holidays = {h.date.isoformat(): h.name for h in holidays_between(db, start, end)}
+    cells = []
+    for day in days:
+        for group in groups:
+            key = f"{day.isoformat()}|{group.id}"
+            draft_id = draft.get(key) if key in draft else None
+            has_draft = key in draft
+            live_id = live.get(key) if key in live else None
+            has_live = key in live
+            surgeon_id = draft_id if has_draft else live_id
+            source = "draft" if has_draft else ("live" if has_live else "empty")
+            flag = leave.get(f"{day.isoformat()}|{surgeon_id}", "") if surgeon_id else ""
+            surg = surgeons.get(surgeon_id) if surgeon_id else None
+            cells.append({
+                "date": day.isoformat(),
+                "day": day.day,
+                "weekday": day.weekday(),  # Mon=0
+                "callGroupId": group.id,
+                "group": short_group_label(group),
+                "surgeonId": surgeon_id,
+                "initials": surg.initials if surg else ("NC" if source != "empty" and surgeon_id is None else ""),
+                "source": source,
+                "flag": flag,
+                "holiday": holidays.get(day.isoformat(), ""),
+            })
+    cells_by_key = {f"{c['date']}|{c['callGroupId']}": c for c in cells}
+    return {
+        **month,
+        "month_offset": month_offset,
+        "groups": [{"id": g.id, "name": g.name, "short": short_group_label(g)} for g in groups],
+        "history": history,
+        "cells": cells,
+        "cells_by_key": cells_by_key,
+        "leave": leave,
+        "holidays": holidays,
+        "draft_count": len(draft),
+        "change_count": len(publish_changes(db, start, end)),
+        "today": practice_today(),
+        "days_in_month": calendar_lib.monthrange(start.year, start.month)[1],
+        "year": start.year,
+        "month": start.month,
+        "month_short": start.strftime("%b"),
+    }

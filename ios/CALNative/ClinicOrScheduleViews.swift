@@ -113,28 +113,30 @@ enum ClinicOrScheduleBuilder {
       .map(\.element)
   }
 
-  /// Month-cell letters per half-day: O = OR, C = clinic, M = meeting (AM before PM).
-  static func periodCodes(items: [DoctorScheduleItem], meetings: [DoctorScheduleItem]) -> (am: String, pm: String) {
-    var codes = ["AM": "", "PM": ""]
-    for group in groups(from: items) where codes[group.period] != nil {
-      let letter: String
-      if group.isEmptyCard {
-        guard !group.details.isEmpty else { continue }
-        letter = "O"
+  /// Month-cell letters per half-day, AM before PM: O = OR, C = clinic, M = meeting.
+  /// A block with nothing booked is inactive (muted); booked work or a meeting is active.
+  static func periodCodes(items: [DoctorScheduleItem], meetings: [DoctorScheduleItem]) -> (am: [PeriodCode], pm: [PeriodCode]) {
+    var codes: [String: [PeriodCode]] = ["AM": [], "PM": []]
+    func add(_ letter: String, _ period: String, active: Bool) {
+      guard var list = codes[period] else { return }
+      if let index = list.firstIndex(where: { $0.letter == letter }) {
+        list[index].isActive = list[index].isActive || active
       } else {
-        letter = group.countStyle == .cases ? "O" : "C"
+        list.append(PeriodCode(letter: letter, isActive: active))
       }
-      if !(codes[group.period] ?? "").contains(letter) {
-        codes[group.period, default: ""] += letter
+      codes[period] = list
+    }
+    for group in groups(from: items) {
+      if group.isEmptyCard {
+        if !group.details.isEmpty { add("O", group.period, active: true) }
+      } else {
+        add(group.countStyle == .cases ? "O" : "C", group.period, active: !group.details.isEmpty)
       }
     }
     for meeting in meetings {
-      let period = meeting.start.isEmpty || meeting.start < "12:00" ? "AM" : "PM"
-      if !(codes[period] ?? "").contains("M") {
-        codes[period, default: ""] += "M"
-      }
+      add("M", meeting.start.isEmpty || meeting.start < "12:00" ? "AM" : "PM", active: true)
     }
-    return (codes["AM"] ?? "", codes["PM"] ?? "")
+    return (codes["AM"] ?? [], codes["PM"] ?? [])
   }
 
   /// AM and PM cards only claim their own half-day; FULL / DAY rows span both.

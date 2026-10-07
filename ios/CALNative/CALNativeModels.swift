@@ -449,6 +449,12 @@ enum RequestSegmentPreset: String, CaseIterable, Identifiable {
   }
 }
 
+/// One month-cell letter (C / O / M); inactive when the block has nothing booked.
+struct PeriodCode: Hashable {
+  let letter: String
+  var isActive: Bool
+}
+
 struct MonthCell: Identifiable {
   let id: String
   let date: Date
@@ -462,8 +468,8 @@ struct MonthCell: Identifiable {
   let hasClinicOr: Bool
   let hasBlockTime: Bool
   let hasMeeting: Bool
-  var amCode = ""
-  var pmCode = ""
+  var amCodes: [PeriodCode] = []
+  var pmCodes: [PeriodCode] = []
 
   /// On-call initials for one call group ("WG" / "ALT"); the covering surgeon when covered.
   func callInitials(group prefix: String) -> String {

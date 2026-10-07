@@ -83,8 +83,6 @@ struct MonthSelectedDayAgenda: View {
           .tint(ClinicalPalette.teal)
       }
 
-      ScheduleDailyGlanceCard(day: day, coverAction: coverAction)
-
       if !day.mySchedule.filter({ $0.kind != "block_or" }).isEmpty {
         DaySection(title: "Clinic & OR") {
           ClinicOrScheduleList(dayId: day.id, items: day.mySchedule)
@@ -125,11 +123,11 @@ private struct MonthHeatmapCell: View {
         }
 
         HStack(spacing: 3) {
-          if cell.amCode.isEmpty && cell.pmCode.isEmpty {
+          if cell.amCodes.isEmpty && cell.pmCodes.isEmpty {
             Text(" ").font(.caption2)
           } else {
-            MonthPeriodCode(text: cell.amCode)
-            MonthPeriodCode(text: cell.pmCode)
+            MonthPeriodCode(codes: cell.amCodes)
+            MonthPeriodCode(codes: cell.pmCodes)
           }
         }
       }
@@ -169,15 +167,24 @@ private struct MonthCallInitials: View {
   }
 }
 
-/// AM or PM letters (C / O / M); a faint dot when the half-day is empty.
+/// AM or PM letters (C / O / M): bold teal when booked, muted when the block is empty.
 private struct MonthPeriodCode: View {
-  let text: String
+  let codes: [PeriodCode]
 
   var body: some View {
-    Text(text.isEmpty ? "·" : text)
-      .font(.caption2.weight(.bold))
-      .foregroundStyle(text.isEmpty ? Color.secondary.opacity(0.5) : ClinicalPalette.teal)
-      .lineLimit(1)
-      .minimumScaleFactor(0.7)
+    HStack(spacing: 0) {
+      if codes.isEmpty {
+        Text("·").foregroundStyle(Color.secondary.opacity(0.5))
+      } else {
+        ForEach(codes, id: \.letter) { code in
+          Text(code.letter)
+            .fontWeight(code.isActive ? .black : .regular)
+            .foregroundStyle(code.isActive ? ClinicalPalette.teal : ClinicalPalette.muted.opacity(0.6))
+        }
+      }
+    }
+    .font(.caption2)
+    .lineLimit(1)
+    .minimumScaleFactor(0.7)
   }
 }

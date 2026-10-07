@@ -48,8 +48,8 @@ struct NativeScheduleProjection {
         hasClinicOr: day.hasClinicOr,
         hasBlockTime: day.hasBlockTime,
         hasMeeting: day.hasMeeting,
-        amCode: codes.am,
-        pmCode: codes.pm
+        amCodes: codes.am,
+        pmCodes: codes.pm
       )
     }
   }

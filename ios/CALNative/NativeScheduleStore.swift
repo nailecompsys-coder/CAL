@@ -12,6 +12,8 @@ enum NativeLoadState: Equatable {
 final class NativeScheduleStore: ObservableObject {
   @Published private(set) var days: [ScheduleDay] = []
   @Published private(set) var timeOffRequests: [TimeOffRequest] = []
+  /// Practice-wide time off (from home dayOffSections), one row per request.
+  @Published private(set) var rosterTimeOff: [TimeOffRequest] = []
   @Published private(set) var patientAppointments: [PatientAppointment] = []
   @Published private(set) var currentSurgeon: NativeSurgeon?
   @Published private(set) var surgeons: [NativeSurgeon] = []
@@ -213,6 +215,50 @@ final class NativeScheduleStore: ObservableObject {
     }
   }
 
+  func fetchCallBuilderMonth(month: Date) async throws -> NativeCallBuilderMonthResponse {
+    guard let token = activeToken else {
+      throw NativeCALError.missingSession
+    }
+    do {
+      return try await client.fetchCallBuilderMonth(token: token, month: month)
+    } catch let error as NativeCALError where error.isAuthenticationFailure {
+      expireSession()
+      throw error
+    }
+  }
+
+  func placeCallBuilderDraft(date: Date, callGroupId: Int, surgeonId: Int?) async throws {
+    guard !isSupportPreview else {
+      throw NativeCALError.requestRejected("Support preview is read-only.")
+    }
+    guard let token = activeToken else {
+      throw NativeCALError.missingSession
+    }
+    do {
+      _ = try await client.placeCallBuilderDraft(
+        token: token, date: date, callGroupId: callGroupId, surgeonId: surgeonId
+      )
+    } catch let error as NativeCALError where error.isAuthenticationFailure {
+      expireSession()
+      throw error
+    }
+  }
+
+  func clearCallBuilderDraft(date: Date, callGroupId: Int) async throws {
+    guard !isSupportPreview else {
+      throw NativeCALError.requestRejected("Support preview is read-only.")
+    }
+    guard let token = activeToken else {
+      throw NativeCALError.missingSession
+    }
+    do {
+      _ = try await client.clearCallBuilderDraft(token: token, date: date, callGroupId: callGroupId)
+    } catch let error as NativeCALError where error.isAuthenticationFailure {
+      expireSession()
+      throw error
+    }
+  }
+
   func loadPatientSchedule(containing date: Date, daysAhead: Int = 6) async {
     guard let token = activeToken else {
       clearScheduleForMissingSession()
@@ -258,6 +304,7 @@ final class NativeScheduleStore: ObservableObject {
     surgeons = snapshot.surgeons
     days = snapshot.days
     timeOffRequests = snapshot.timeOffRequests
+    rosterTimeOff = snapshot.rosterTimeOff
     alerts = snapshot.alerts
     canCallBuilder = snapshot.canCallBuilder
     if !isSupportPreview {
@@ -322,6 +369,7 @@ final class NativeScheduleStore: ObservableObject {
       if role == .scheduler {
         days = []
         timeOffRequests = []
+        rosterTimeOff = []
         patientAppointments = []
         await loadScheduler(containing: Date())
       } else {
@@ -346,6 +394,7 @@ final class NativeScheduleStore: ObservableObject {
     canCallBuilder = false
     days = []
     timeOffRequests = []
+    rosterTimeOff = []
     patientAppointments = []
     schedulerBlocks = []
     schedulerSchedule = []
@@ -370,6 +419,7 @@ final class NativeScheduleStore: ObservableObject {
     canCallBuilder = false
     days = []
     timeOffRequests = []
+    rosterTimeOff = []
     patientAppointments = []
     schedulerBlocks = []
     schedulerSchedule = []

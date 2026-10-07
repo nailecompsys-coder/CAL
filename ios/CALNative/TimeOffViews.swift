@@ -35,6 +35,28 @@ struct TimeOffHomeView: View {
       }
   }
 
+  /// Practice-wide requests overlapping the selected month (one line each; no No Call).
+  private var monthRosterSummaries: [TimeOffRequest] {
+    let calendar = Calendar.current
+    guard let interval = calendar.dateInterval(of: .month, for: selectedMonth) else { return [] }
+    let monthStart = NativeDayResponse.dateFormatter.string(from: interval.start)
+    let lastDay = calendar.date(byAdding: .day, value: -1, to: interval.end) ?? interval.start
+    let monthEnd = NativeDayResponse.dateFormatter.string(from: lastDay)
+    return store.rosterTimeOff
+      .filter { request in
+        !request.isNoCall
+          && request.startDate <= monthEnd
+          && request.endDate >= monthStart
+      }
+      .sorted { lhs, rhs in
+        if lhs.startDate != rhs.startDate { return lhs.startDate < rhs.startDate }
+        if lhs.surgeonInitials != rhs.surgeonInitials {
+          return lhs.surgeonInitials < rhs.surgeonInitials
+        }
+        return lhs.id < rhs.id
+      }
+  }
+
   private var monthLabel: String {
     selectedMonth.formatted(.dateTime.month(.abbreviated).year())
   }
@@ -104,6 +126,23 @@ struct TimeOffHomeView: View {
                   }
                   .buttonStyle(.plain)
                   .disabled(!request.canManage || store.isSupportPreview)
+                }
+              }
+            }
+
+            DaySection(title: "Time Off · \(monthLabel)") {
+              if monthRosterSummaries.isEmpty {
+                Text("No time off in \(monthLabel).")
+                  .font(.subheadline)
+                  .foregroundStyle(.secondary)
+              } else {
+                VStack(alignment: .leading, spacing: 4) {
+                  ForEach(monthRosterSummaries) { request in
+                    Text(request.rosterSummaryLine)
+                      .font(.subheadline.monospacedDigit())
+                      .foregroundStyle(request.status.lowercased() == "pending" ? .secondary : ClinicalPalette.ink)
+                      .frame(maxWidth: .infinity, alignment: .leading)
+                  }
                 }
               }
             }

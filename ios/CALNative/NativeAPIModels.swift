@@ -4,6 +4,7 @@ struct NativeHomeResponse: Decodable {
   let surgeon: NativeSurgeon?
   let days: [NativeDayResponse]
   let requests: [NativeDayOffRequestResponse]
+  let dayOffSections: [NativeDayOffSectionResponse]
   let surgeons: [NativeSurgeon]?
   let alerts: NativeAlertSummary?
   let canCallBuilder: Bool?
@@ -13,6 +14,7 @@ struct NativeHomeResponse: Decodable {
     surgeon = try c.decodeIfPresent(NativeSurgeon.self, forKey: .surgeon)
     days = try c.decode([NativeDayResponse].self, forKey: .days)
     requests = try c.decodeIfPresent([NativeDayOffRequestResponse].self, forKey: .requests) ?? []
+    dayOffSections = try c.decodeIfPresent([NativeDayOffSectionResponse].self, forKey: .dayOffSections) ?? []
     surgeons = try c.decodeIfPresent([NativeSurgeon].self, forKey: .surgeons)
     alerts = try c.decodeIfPresent(NativeAlertSummary.self, forKey: .alerts)
     canCallBuilder = try c.decodeIfPresent(Bool.self, forKey: .canCallBuilder)
@@ -20,8 +22,14 @@ struct NativeHomeResponse: Decodable {
   }
 
   private enum CodingKeys: String, CodingKey {
-    case surgeon, days, requests, surgeons, alerts, canCallBuilder
+    case surgeon, days, requests, dayOffSections, surgeons, alerts, canCallBuilder
   }
+}
+
+struct NativeDayOffSectionResponse: Decodable {
+  let header: String
+  let isCurrentMonth: Bool?
+  let requests: [NativeDayOffRequestResponse]
 }
 
 struct NativeWhosWhereResponse: Decodable {
@@ -33,6 +41,56 @@ struct NativeCallBuilderHistoryResponse: Decodable {
   let month: String
   let legend: String
   let history: [NativeCallBuilderLoad]
+}
+
+struct NativeCallBuilderMonthResponse: Decodable {
+  let month: String
+  let legend: String
+  let history: [NativeCallBuilderLoad]
+  let groups: [NativeCallBuilderGroup]
+  let cells: [NativeCallBuilderCell]
+  let draftCount: Int?
+  let changeCount: Int?
+}
+
+struct NativeCallBuilderGroup: Decodable, Identifiable, Hashable {
+  let id: Int
+  let name: String
+  let short: String
+}
+
+struct NativeCallBuilderCell: Decodable, Hashable {
+  let date: String
+  let callGroupId: Int
+  let group: String
+  let surgeonId: Int?
+  let initials: String
+  let source: String
+  let flag: String
+  let holiday: String
+
+  var key: String { "\(date)|\(callGroupId)" }
+  var isDraft: Bool { source == "draft" }
+  var isLive: Bool { source == "live" }
+  var hasAssignment: Bool { source == "draft" || source == "live" }
+}
+
+struct NativeCallBuilderPlacePayload: Encodable {
+  let date: String
+  let callGroupId: Int
+  let surgeonId: Int?
+}
+
+struct NativeCallBuilderClearPayload: Encodable {
+  let date: String
+  let callGroupId: Int
+}
+
+struct NativeCallBuilderMutateResponse: Decodable {
+  let ok: Bool
+  let date: String?
+  let callGroupId: Int?
+  let surgeonId: Int?
 }
 
 /// Compact call-load card: `YTD calls/wknd · month calls/wknd · holidays/last`.

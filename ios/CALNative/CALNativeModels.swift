@@ -334,6 +334,40 @@ struct TimeOffRequest: Identifiable, Equatable {
     return "\(formatShortDate(startDate)) - \(formatShortDate(endDate))"
   }
 
+  /// One-line roster summary, e.g. `CJ 7-19 Vacation` or `CJ 7-19–22 Vacation`.
+  var rosterSummaryLine: String {
+    let initials = surgeonInitials.isEmpty ? "?" : surgeonInitials
+    return "\(initials) \(compactDateSpan) \(displayReason)"
+  }
+
+  var isNoCall: Bool {
+    reason.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "no call"
+  }
+
+  var displayReason: String {
+    let raw = reason.replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !raw.isEmpty else { return "Time off" }
+    if raw.lowercased() == "day off" { return "Day Off" }
+    return raw.prefix(1).uppercased() + raw.dropFirst()
+  }
+
+  private var compactDateSpan: String {
+    guard let start = parsedStartDate else { return startDate }
+    let cal = Calendar.current
+    let sm = cal.component(.month, from: start)
+    let sd = cal.component(.day, from: start)
+    if startDate == endDate {
+      return "\(sm)-\(sd)"
+    }
+    guard let end = parsedEndDate else { return "\(sm)-\(sd)" }
+    let em = cal.component(.month, from: end)
+    let ed = cal.component(.day, from: end)
+    if sm == em {
+      return "\(sm)-\(sd)–\(ed)"
+    }
+    return "\(sm)-\(sd)–\(em)-\(ed)"
+  }
+
   private func formatShortDate(_ iso: String) -> String {
     guard let date = NativeDayResponse.dateFormatter.date(from: iso) else {
       return iso

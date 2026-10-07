@@ -5,6 +5,8 @@ struct NativeScheduleSnapshot {
   let surgeons: [NativeSurgeon]
   let days: [ScheduleDay]
   let timeOffRequests: [TimeOffRequest]
+  /// All practice time-off rows from home `dayOffSections` (grouped requests, not per-day).
+  let rosterTimeOff: [TimeOffRequest]
   let alerts: NativeAlertSummary
   let canCallBuilder: Bool
 }
@@ -30,11 +32,23 @@ struct NativeScheduleLoader {
 
   private func load(token: String, start: Date, end: Date) async throws -> NativeScheduleSnapshot {
     let home = try await client.fetchHome(token: token, start: start, end: end)
+    var seen = Set<Int>()
+    var roster: [TimeOffRequest] = []
+    for section in home.dayOffSections {
+      for req in section.requests.map(\.timeOffRequest) where seen.insert(req.id).inserted {
+        roster.append(req)
+      }
+    }
+    roster.sort {
+      if $0.startDate != $1.startDate { return $0.startDate < $1.startDate }
+      return $0.id < $1.id
+    }
     return NativeScheduleSnapshot(
       currentSurgeon: home.surgeon,
       surgeons: home.surgeons ?? [],
       days: home.days.map(\.scheduleDay),
       timeOffRequests: home.requests.map(\.timeOffRequest),
+      rosterTimeOff: roster,
       alerts: home.alerts ?? NativeAlertSummary(unreadCount: 0, recent: []),
       canCallBuilder: home.canCallBuilder ?? home.surgeon?.canCallBuilder ?? false
     )

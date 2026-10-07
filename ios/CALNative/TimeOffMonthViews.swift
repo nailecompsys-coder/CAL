@@ -11,10 +11,7 @@ struct TimeOffInfoBanner: View {
       Image(systemName: "info.circle.fill")
         .foregroundStyle(ClinicalPalette.teal)
     }
-    .padding(.horizontal, 12)
-    .padding(.vertical, 9)
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.tealSoft)
+    .calCard(padding: 12)
   }
 }
 

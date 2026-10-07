@@ -62,7 +62,7 @@ struct TimeOffHomeView: View {
         ScheduleWaterBackground()
 
         ScrollView {
-          VStack(alignment: .leading, spacing: 8) {
+          VStack(alignment: .leading, spacing: 18) {
             if !store.isSupportPreview {
               HStack(spacing: 8) {
                 Button {
@@ -78,48 +78,35 @@ struct TimeOffHomeView: View {
               }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-              Text("WHO'S OUT")
-                .font(.caption.weight(.black))
-                .foregroundStyle(.secondary)
+            ScheduleDateStepper(
+              title: selectedMonth.formatted(.dateTime.month(.wide).year()),
+              subtitle: "Practice coverage",
+              previousAction: { shiftMonth(-1) },
+              nextAction: { shiftMonth(1) },
+              onTitleTap: { showingMonthMenu = true }
+            )
 
-              ScheduleDateStepper(
-                title: selectedMonth.formatted(.dateTime.month(.wide).year()),
-                subtitle: "Practice coverage",
-                previousAction: { shiftMonth(-1) },
-                nextAction: { shiftMonth(1) },
-                onTitleTap: { showingMonthMenu = true }
-              )
-
+            DaySection(title: "Who's Out") {
               TimeOffGanttView(model: ganttModel, selectedMonth: selectedMonth)
+            }
 
-              VStack(alignment: .leading, spacing: 6) {
-                Text("MY REQUESTS · \(monthLabel.uppercased())")
-                  .font(.caption.weight(.black))
+            DaySection(title: "My Requests · \(monthLabel)") {
+              if monthRequests.isEmpty {
+                Text(store.sessionToken == nil ? "Sign in to see requests." : "No requests in \(monthLabel).")
+                  .font(.subheadline)
                   .foregroundStyle(.secondary)
-
-                if monthRequests.isEmpty {
-                  Text(store.sessionToken == nil ? "Sign in to see requests." : "No requests in \(monthLabel).")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 4)
-                } else {
-                  ForEach(monthRequests) { request in
-                    Button {
-                      selectedRequest = request
-                    } label: {
-                      TimeOffRequestRow(request: request)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!request.canManage || store.isSupportPreview)
+              } else {
+                ForEach(monthRequests) { request in
+                  Button {
+                    selectedRequest = request
+                  } label: {
+                    TimeOffRequestRow(request: request)
                   }
+                  .buttonStyle(.plain)
+                  .disabled(!request.canManage || store.isSupportPreview)
                 }
               }
-              .padding(.top, 4)
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.tealSoft)
             .confirmationDialog("Select month", isPresented: $showingMonthMenu, titleVisibility: .visible) {
               ForEach(months, id: \.self) { month in
                 Button(month.formatted(.dateTime.month(.wide).year())) {
@@ -242,37 +229,40 @@ struct TimeOffHomeView: View {
 private struct TimeOffRequestRow: View {
   let request: TimeOffRequest
 
+  private var reasonLabel: String {
+    let reason = request.reason.replacingOccurrences(of: "_", with: " ")
+    return reason.isEmpty ? "Time off" : reason.prefix(1).uppercased() + reason.dropFirst()
+  }
+
   var body: some View {
-    HStack(spacing: 8) {
+    HStack(spacing: 12) {
       StatusDot(status: request.status)
 
-      Text(request.dateRange)
-        .font(ClinicalTypography.caption)
-        .foregroundStyle(ClinicalPalette.ink)
-        .lineLimit(1)
-        .minimumScaleFactor(0.8)
-        .fixedSize(horizontal: true, vertical: false)
-        .layoutPriority(1)
-
-      Text(request.reason.isEmpty ? "Time off" : request.reason)
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
-        .minimumScaleFactor(0.85)
+      VStack(alignment: .leading, spacing: 2) {
+        Text(request.dateRange)
+          .font(.subheadline.weight(.semibold))
+          .foregroundStyle(ClinicalPalette.ink)
+          .lineLimit(1)
+        Text(reasonLabel)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+      }
 
       Spacer(minLength: 4)
 
       Text(request.status.capitalized)
-        .font(ClinicalTypography.badge)
+        .font(.footnote.weight(.semibold))
         .foregroundStyle(statusColor(request.status))
         .fixedSize(horizontal: true, vertical: false)
 
       if request.canManage {
         Image(systemName: "chevron.right")
-          .font(.caption2.weight(.semibold))
-          .foregroundStyle(.secondary)
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.tertiary)
       }
     }
+    .contentShape(Rectangle())
   }
 
   private func statusColor(_ status: String) -> Color {

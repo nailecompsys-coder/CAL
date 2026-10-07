@@ -387,10 +387,10 @@ struct WhosWhereView: View {
   static func shortGroupName(_ group: String) -> String {
     let upper = group.uppercased()
     if upper.contains("WINTER") || upper.contains("APOPKA") || upper.contains("MINNEOLA") {
-      return "WG / AP / MN"
+      return "WG Group"
     }
     if upper.contains("ALTAMONTE") {
-      return "Altamonte"
+      return "ALT Group"
     }
     return group
   }

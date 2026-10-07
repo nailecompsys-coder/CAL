@@ -330,10 +330,10 @@ struct NativeCallAssignmentResponse: Decodable {
   private func shortGroupName(_ group: String) -> String {
     let upper = group.uppercased()
     if upper.contains("WINTER") || upper.contains("APOPKA") || upper.contains("MINNEOLA") {
-      return "WG / A / Minneola"
+      return "WG Group"
     }
     if upper.contains("ALTAMONTE") {
-      return "Altamonte Hosp"
+      return "ALT Group"
     }
     return group
   }

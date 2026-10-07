@@ -12,9 +12,33 @@ enum ClinicOrScheduleBuilder {
     var claimedBlocks = Set<String>()
     var groups: [ClinicOrFacilityGroup] = []
 
-    for clinic in clinics {
+    var matchedByClinic: [String: [DoctorScheduleItem]] = [:]
+    for clinic in clinics where !isEmptyCard(clinic) {
       let matched = surgeries.filter { surgeryBelongs($0, to: clinic) }
       matched.forEach { claimed.insert($0.id) }
+      matchedByClinic[clinic.id] = matched
+    }
+    // A case on an OFF / NA half-day is listed under that card (flagged), not as a separate row.
+    for clinic in clinics where isEmptyCard(clinic) {
+      let matched = surgeries.filter { !claimed.contains($0.id) && $0.period == clinic.period }
+      matched.forEach { claimed.insert($0.id) }
+      matchedByClinic[clinic.id] = matched
+    }
+
+    for clinic in clinics {
+      let matched = matchedByClinic[clinic.id] ?? []
+      if isEmptyCard(clinic) {
+        groups.append(
+          ClinicOrFacilityGroup(
+            id: clinic.id,
+            period: clinic.period,
+            title: clinic.title,
+            details: matched.sorted { $0.start < $1.start }.map { surgeryDetail($0, showsLocation: true) },
+            countStyle: .cases
+          )
+        )
+        continue
+      }
       let isOR = looksLikeOperatingRoom(clinic.title)
       let matchingBlock = blocks.first { blockMatchesFacility($0, clinic.title) }
       if let matchingBlock {
@@ -25,21 +49,20 @@ enum ClinicOrScheduleBuilder {
       if isOR {
         details = matched
           .sorted { $0.start < $1.start }
-          .map(surgeryDetail(_:))
+          .map { surgeryDetail($0) }
       } else if !matched.isEmpty {
-        let fromAprima = matched.sorted { $0.start < $1.start }.map(surgeryDetail(_:))
+        let fromAprima = matched.sorted { $0.start < $1.start }.map { surgeryDetail($0) }
         let fromNotes = parseClinicVisits(from: clinic.notes)
         details = mergeDetails(fromAprima, fromNotes)
       } else {
         details = parseClinicVisits(from: clinic.notes)
       }
 
-      let timeAnchor = matchingBlock ?? clinic
       groups.append(
         ClinicOrFacilityGroup(
           id: clinic.id,
+          period: clinic.period,
           title: clinic.title,
-          timeRange: expandedTimeRange(facility: timeAnchor, cases: matched),
           details: details,
           countStyle: isOR ? .cases : .visits
         )
@@ -56,13 +79,12 @@ enum ClinicOrScheduleBuilder {
       if let matchingBlock {
         claimedBlocks.insert(matchingBlock.id)
       }
-      let timeRange = matchingBlock.map { expandedTimeRange(facility: $0, cases: sorted) } ?? timeSpan(for: sorted)
       groups.append(
         ClinicOrFacilityGroup(
           id: "loc-\(key)",
+          period: matchingBlock?.period ?? sorted.first?.period ?? "",
           title: displayFacilityTitle(key),
-          timeRange: timeRange,
-          details: sorted.map(surgeryDetail(_:)),
+          details: sorted.map { surgeryDetail($0) },
           countStyle: isOR ? .cases : .visits
         )
       )
@@ -76,15 +98,22 @@ enum ClinicOrScheduleBuilder {
       groups.append(
         ClinicOrFacilityGroup(
           id: block.id,
+          period: block.period,
           title: title,
-          timeRange: expandedTimeRange(facility: block, cases: []),
           details: [],
           countStyle: .cases
         )
       )
     }
 
-    return groups
+    let periodRank = ["AM": 0, "PM": 1]
+    return groups.enumerated()
+      .sorted { (periodRank[$0.element.period] ?? 2, $0.offset) < (periodRank[$1.element.period] ?? 2, $1.offset) }
+      .map(\.element)
+  }
+
+  private static func isEmptyCard(_ item: DoctorScheduleItem) -> Bool {
+    ["OFF", "NA"].contains(item.title.uppercased())
   }
 
   private static func blockFacilityName(_ block: DoctorScheduleItem) -> String {
@@ -134,11 +163,14 @@ enum ClinicOrScheduleBuilder {
     return false
   }
 
-  private static func surgeryDetail(_ item: DoctorScheduleItem) -> ClinicOrDetailRow {
+  private static func surgeryDetail(_ item: DoctorScheduleItem, showsLocation: Bool = false) -> ClinicOrDetailRow {
     let procedure = item.procedure.trimmingCharacters(in: .whitespacesAndNewlines)
     let room = item.room.trimmingCharacters(in: .whitespacesAndNewlines)
-    let reviewLabel = item.needsReview ? "Aprima review" : ""
-    let secondary = [reviewLabel, procedure, room].filter { !$0.isEmpty }.joined(separator: " · ")
+    let location = showsLocation ? locationKey(for: item) : ""
+    let reviewLabel = item.needsReview && !showsLocation ? "Aprima review" : ""
+    let secondary = [reviewLabel, location, procedure, room == location ? "" : room]
+      .filter { !$0.isEmpty }
+      .joined(separator: " · ")
     return ClinicOrDetailRow(
       id: item.id,
       time: displayClock(item.start),
@@ -217,38 +249,6 @@ enum ClinicOrScheduleBuilder {
     case "surgery one": return "Surgery One"
     default: return value
     }
-  }
-
-  private static func expandedTimeRange(facility: DoctorScheduleItem, cases: [DoctorScheduleItem]) -> String {
-    var starts = [facility.start].filter { !$0.isEmpty }
-    var ends = [facility.end].filter { !$0.isEmpty }
-    for item in cases {
-      if !item.start.isEmpty { starts.append(item.start) }
-      if !item.end.isEmpty { ends.append(item.end) }
-    }
-    guard let first = starts.sorted().first else {
-      return facility.timeRange
-    }
-    let last = ends.sorted().last ?? facility.end
-    if last.isEmpty {
-      return displayClock(first)
-    }
-    // Earliest case/start through facility (or latest case) end — e.g. 07:15 - 12:00
-    return "\(displayClock(first)) - \(displayClock(last))"
-  }
-
-  private static func timeSpan(for items: [DoctorScheduleItem]) -> String {
-    let starts = items.map(\.start).filter { !$0.isEmpty }.sorted()
-    let ends = items.map(\.end).filter { !$0.isEmpty }.sorted()
-    guard let first = starts.first else { return "" }
-    let startText = displayClock(first)
-    if let lastEnd = ends.last, !lastEnd.isEmpty {
-      return "\(startText) - \(displayClock(lastEnd))"
-    }
-    if let lastStart = starts.last, lastStart != first {
-      return "\(startText) - \(displayClock(lastStart))"
-    }
-    return startText
   }
 
   private static func normalizeFacility(_ value: String) -> String {
@@ -372,21 +372,23 @@ private struct ClinicOrFacilityBlock: View {
         }
       } label: {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
-          Text(group.timeRange.isEmpty ? "—" : group.timeRange)
-            .font(ClinicalTypography.monoCaption)
+          Text(group.period.isEmpty ? "—" : group.period)
+            .font(ClinicalTypography.monoCaption.weight(.bold))
             .foregroundStyle(ClinicalPalette.ink)
             .frame(width: 96, alignment: .leading)
 
           Text(group.headerTitle)
             .font(.subheadline.weight(.semibold))
-            .foregroundStyle(ClinicalPalette.ink)
+            .foregroundStyle(group.isEmptyCard && !group.details.isEmpty ? Color.red : ClinicalPalette.ink)
             .multilineTextAlignment(.leading)
             .frame(maxWidth: .infinity, alignment: .leading)
 
-          Image(systemName: "chevron.down")
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(ClinicalPalette.muted)
-            .rotationEffect(.degrees(isExpanded ? 0 : -90))
+          if !group.details.isEmpty {
+            Image(systemName: "chevron.down")
+              .font(.caption2.weight(.semibold))
+              .foregroundStyle(ClinicalPalette.muted)
+              .rotationEffect(.degrees(isExpanded ? 0 : -90))
+          }
         }
         .padding(.vertical, 8)
         .contentShape(Rectangle())
@@ -395,7 +397,7 @@ private struct ClinicOrFacilityBlock: View {
 
       if isExpanded {
         if group.details.isEmpty {
-          if group.countStyle != .cases {
+          if group.countStyle != .cases && !group.isEmptyCard {
             Text("No visits listed")
               .font(.caption)
               .foregroundStyle(ClinicalPalette.muted)

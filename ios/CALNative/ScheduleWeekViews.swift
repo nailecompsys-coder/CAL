@@ -25,10 +25,7 @@ struct CompactWeekDayCard: View {
 
   private var clinicSummary: String {
     let parts = ClinicOrScheduleBuilder.groups(from: day.mySchedule).prefix(3).map { group in
-      if group.timeRange.isEmpty {
-        return group.title
-      }
-      return "\(group.timeRange) \(group.title)"
+      [group.period, group.title].filter { !$0.isEmpty }.joined(separator: " ")
     }
     return parts.joined(separator: " · ")
   }

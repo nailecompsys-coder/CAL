@@ -172,14 +172,21 @@ struct ClinicOrFacilityGroup: Identifiable {
   }
 
   let id: String
+  /// "AM" / "PM" header label; clock times stay on the detail rows.
+  let period: String
   let title: String
-  let timeRange: String
   let details: [ClinicOrDetailRow]
   let countStyle: CountStyle
 
-  /// e.g. "Apopka OR - 0 Cases" / "Apopka OR - 2 Cases" / "Apopka Clinic - 7 Visits"
+  /// OFF / NA cards carry no facility; they only list work that landed on them.
+  var isEmptyCard: Bool {
+    ["OFF", "NA"].contains(title.uppercased())
+  }
+
+  /// e.g. "Apopka OR - 2 Cases" / "Apopka Clinic - 7 Visits" / "OFF" / "OFF - 1 Case"
   var headerTitle: String {
     let count = details.count
+    if isEmptyCard && count == 0 { return title }
     switch countStyle {
     case .cases:
       let noun = count == 1 ? "Case" : "Cases"

@@ -286,22 +286,18 @@ struct WhosWhereView: View {
   @State var day: Date
   @Environment(\.dismiss) private var dismiss
   @State private var rows: [NativeWhosWhereRow] = []
-  @State private var selectedTab = ""
+  @State private var selectedGroupId = 0
   @State private var isLoading = false
   @State private var errorMessage: String?
 
-  private static let openTab = "open"
-
-  private var groupTabs: [(key: String, label: String)] {
+  private var groups: [(id: Int, label: String)] {
     var seen = Set<Int>()
-    var tabs: [(key: String, label: String)] = []
-    for row in rows where row.session != "call" {
-      guard let id = row.groupId, !seen.contains(id) else { continue }
-      seen.insert(id)
-      tabs.append((key: String(id), label: Self.shortGroupName(row.group)))
+    var out: [(id: Int, label: String)] = []
+    for row in rows {
+      guard let id = row.groupId, seen.insert(id).inserted else { continue }
+      out.append((id: id, label: Self.shortGroupName(row.group)))
     }
-    tabs.append((key: Self.openTab, label: "Open / Off"))
-    return tabs
+    return out.sorted { $0.id < $1.id }
   }
 
   var body: some View {
@@ -309,14 +305,12 @@ struct WhosWhereView: View {
       List {
         Section {
           WhosWhereDayStepper(day: $day)
-          Picker("Group", selection: $selectedTab) {
-            ForEach(groupTabs, id: \.key) { tab in
-              Text(tab.label).tag(tab.key)
+          Picker("Group", selection: $selectedGroupId) {
+            ForEach(groups, id: \.id) { group in
+              Text(group.label).tag(group.id)
             }
           }
           .pickerStyle(.segmented)
-        } footer: {
-          Text("Locations and sessions only. No patient details.")
         }
 
         if let errorMessage {
@@ -327,10 +321,8 @@ struct WhosWhereView: View {
           }
         } else if isLoading && rows.isEmpty {
           Section { ProgressView() }
-        } else if selectedTab == Self.openTab {
-          openSections
-        } else if let groupId = Int(selectedTab) {
-          groupSections(groupId)
+        } else {
+          groupSections(selectedGroupId)
         }
       }
       .navigationTitle("Who's where")
@@ -347,6 +339,7 @@ struct WhosWhereView: View {
   @ViewBuilder
   private func groupSections(_ groupId: Int) -> some View {
     let onCall = rows.filter { $0.session == "call" && $0.groupId == groupId }
+    let people = WhosWherePerson.people(in: groupId, from: rows)
     if !onCall.isEmpty {
       Section("On call") {
         ForEach(onCall) { row in
@@ -354,20 +347,17 @@ struct WhosWhereView: View {
         }
       }
     }
-    ForEach(["am", "pm"], id: \.self) { session in
-      let sessionRows = rows.filter { $0.session == session && $0.groupId == groupId }
-      WhosWhereSessionSection(session: session, rows: sessionRows, onCallIds: Set(onCall.map(\.surgeonId)))
+    Section {
+      WhosWhereTableHeader()
+      ForEach(people.filter { !$0.isPA }) { WhosWhereTableRow(person: $0) }
+      let pas = people.filter(\.isPA)
+      if !pas.isEmpty {
+        Text("PAs")
+          .font(ClinicalTypography.sectionLabel)
+          .foregroundStyle(ClinicalPalette.muted)
+        ForEach(pas) { WhosWhereTableRow(person: $0) }
+      }
     }
-  }
-
-  @ViewBuilder
-  private var openSections: some View {
-    ForEach(["am", "pm"], id: \.self) { session in
-      let open = rows.filter { $0.session == session && $0.groupId == nil && $0.state == "na" && !$0.onLeave }
-      WhosWhereSessionSection(session: session, rows: open, onCallIds: [], title: "\(session.uppercased()) · Open (NA)")
-    }
-    let off = rows.filter { $0.session != "call" && ($0.state == "off" || $0.onLeave) }
-    WhosWhereSessionSection(session: "off", rows: off, onCallIds: [], title: "Off")
   }
 
   private func load() async {
@@ -376,8 +366,8 @@ struct WhosWhereView: View {
     do {
       rows = try await store.fetchWhosWhere(day: day)
       errorMessage = nil
-      if !groupTabs.contains(where: { $0.key == selectedTab }) {
-        selectedTab = groupTabs.first?.key ?? Self.openTab
+      if !groups.contains(where: { $0.id == selectedGroupId }) {
+        selectedGroupId = groups.first?.id ?? 0
       }
     } catch {
       errorMessage = error.localizedDescription
@@ -393,6 +383,100 @@ struct WhosWhereView: View {
       return "ALT Group"
     }
     return group
+  }
+}
+
+/// One person's AM and PM half-days, shown in a group when either half-day is there,
+/// they are on call there, or they have no location at all that day.
+private struct WhosWherePerson: Identifiable {
+  let id: Int
+  let lastName: String
+  let isPA: Bool
+  let am: NativeWhosWhereRow?
+  let pm: NativeWhosWhereRow?
+  let isOnCall: Bool
+  let noCall: Bool
+
+  static func people(in groupId: Int, from rows: [NativeWhosWhereRow]) -> [WhosWherePerson] {
+    let halfDays = rows.filter { $0.session != "call" }
+    let onCallIds = Set(rows.filter { $0.session == "call" && $0.groupId == groupId }.map(\.surgeonId))
+    var order: [Int] = []
+    for row in halfDays where !order.contains(row.surgeonId) {
+      order.append(row.surgeonId)
+    }
+    return order.compactMap { id in
+      let mine = halfDays.filter { $0.surgeonId == id }
+      let am = mine.first { $0.session == "am" }
+      let pm = mine.first { $0.session == "pm" }
+      let groupIds = Set(mine.compactMap(\.groupId))
+      guard groupIds.contains(groupId) || groupIds.isEmpty || onCallIds.contains(id),
+            let any = am ?? pm else { return nil }
+      return WhosWherePerson(
+        id: id,
+        lastName: any.name.split(separator: " ").last.map(String.init) ?? any.name,
+        isPA: any.isPA,
+        am: am,
+        pm: pm,
+        isOnCall: onCallIds.contains(id),
+        noCall: mine.contains(where: \.noCall)
+      )
+    }
+  }
+}
+
+private struct WhosWhereTableHeader: View {
+  var body: some View {
+    HStack(spacing: 8) {
+      Text("Surgeon").frame(maxWidth: .infinity, alignment: .leading)
+      HStack(spacing: 8) {
+        Text("AM").frame(maxWidth: .infinity, alignment: .leading)
+        Text("PM").frame(maxWidth: .infinity, alignment: .leading)
+      }
+      .frame(maxWidth: .infinity)
+    }
+    .font(ClinicalTypography.caption)
+    .foregroundStyle(ClinicalPalette.muted)
+  }
+}
+
+private struct WhosWhereTableRow: View {
+  let person: WhosWherePerson
+
+  var body: some View {
+    HStack(spacing: 8) {
+      HStack(spacing: 6) {
+        Text(person.lastName)
+          .font(ClinicalTypography.rowTitle)
+          .foregroundStyle(ClinicalPalette.ink)
+          .lineLimit(1)
+        if person.isOnCall { StatusTag(text: "Call", tint: ClinicalPalette.teal) }
+        if person.noCall { StatusTag(text: "No Call") }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      HStack(spacing: 8) {
+        WhosWhereCell(row: person.am).frame(maxWidth: .infinity, alignment: .leading)
+        WhosWhereCell(row: person.pm).frame(maxWidth: .infinity, alignment: .leading)
+      }
+      .frame(maxWidth: .infinity)
+    }
+  }
+}
+
+private struct WhosWhereCell: View {
+  let row: NativeWhosWhereRow?
+
+  var body: some View {
+    if let row {
+      if row.onLeave || row.state == "off" {
+        StatusTag(text: "Off")
+      } else if !row.location.isEmpty {
+        LocationChip(code: row.location)
+      } else {
+        StatusTag(text: "Open")
+      }
+    } else {
+      StatusTag(text: "Open")
+    }
   }
 }
 
@@ -413,69 +497,5 @@ private struct WhosWhereDayStepper: View {
 
   private func step(_ days: Int) {
     day = Calendar.current.date(byAdding: .day, value: days, to: day) ?? day
-  }
-}
-
-private struct WhosWhereSessionSection: View {
-  let session: String
-  let rows: [NativeWhosWhereRow]
-  let onCallIds: Set<Int>
-  var title: String?
-
-  var body: some View {
-    Section(title ?? session.uppercased()) {
-      if rows.isEmpty {
-        EmptyDashboardRow(title: "No one")
-      } else {
-        let surgeons = rows.filter { !$0.isPA }
-        let pas = rows.filter(\.isPA)
-        if !surgeons.isEmpty {
-          WhosWhereSubheader(text: "Surgeons")
-          ForEach(surgeons) { WhosWhereRowView(row: $0, isOnCall: onCallIds.contains($0.surgeonId), showsSession: session == "off") }
-        }
-        if !pas.isEmpty {
-          WhosWhereSubheader(text: "PAs")
-          ForEach(pas) { WhosWhereRowView(row: $0, isOnCall: onCallIds.contains($0.surgeonId), showsSession: session == "off") }
-        }
-      }
-    }
-  }
-}
-
-private struct WhosWhereSubheader: View {
-  let text: String
-
-  var body: some View {
-    Text(text)
-      .font(ClinicalTypography.sectionLabel)
-      .foregroundStyle(ClinicalPalette.muted)
-  }
-}
-
-private struct WhosWhereRowView: View {
-  let row: NativeWhosWhereRow
-  let isOnCall: Bool
-  var showsSession = false
-
-  var body: some View {
-    HStack(spacing: 8) {
-      Text(row.name)
-        .font(ClinicalTypography.rowTitle)
-        .foregroundStyle(row.onLeave ? ClinicalPalette.muted : ClinicalPalette.ink)
-        .lineLimit(1)
-      if showsSession {
-        StatusTag(text: row.session.uppercased())
-      }
-      Spacer(minLength: 4)
-      if isOnCall { StatusTag(text: "Call", tint: ClinicalPalette.teal) }
-      if row.noCall { StatusTag(text: "No Call") }
-      if row.onLeave || row.state == "off" { StatusTag(text: "Off") }
-      if !row.location.isEmpty {
-        LocationChip(code: row.location)
-          .opacity(row.onLeave ? 0.45 : 1)
-      } else if row.state == "na" && !row.onLeave {
-        StatusTag(text: "NA")
-      }
-    }
   }
 }

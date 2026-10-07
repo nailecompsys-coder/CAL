@@ -113,9 +113,6 @@
       </a>
 
       <div class="nav-section-label">Tools</div>
-      <a href="/admin/ingest-fixes" onclick="closeSidebar()" class="sidebar-link {% if '/ingest-fixes' in request.url.path %}active{% endif %}">
-        <i class="fa-solid fa-triangle-exclamation" style="width:1rem;text-align:center"></i> Ingest fixes
-      </a>
       <a href="/admin/schedule-templates" onclick="closeSidebar()" class="sidebar-link {% if '/schedule-templates' in request.url.path %}active{% endif %}">
         <i class="fa-solid fa-table-cells" style="width:1rem;text-align:center"></i> Master Schedule
       </a>
@@ -126,11 +123,6 @@
       <div class="nav-section-label">Admin</div>
       <a href="/admin/settings/practice" onclick="closeSidebar()" class="sidebar-link {% if '/admin/settings' in request.url.path or request.url.path in ['/admin/surgeons','/admin/users','/admin/locations','/admin/clinic-groups','/admin/scheduling-rules','/admin/branding','/admin/backup','/admin/notifications','/admin/mobile-devices','/admin/otp-sign-in'] %}active{% endif %}">
         <i class="fa-solid fa-gear" style="width:1rem;text-align:center"></i> Settings
-      </a>
-      {% else %}
-      <div class="nav-section-label">Scheduler</div>
-      <a href="/admin/ingest-fixes" onclick="closeSidebar()" class="sidebar-link {% if '/ingest-fixes' in request.url.path %}active{% endif %}">
-        <i class="fa-solid fa-triangle-exclamation" style="width:1rem;text-align:center"></i> Ingest fixes
       </a>
       {% endif %}
     </nav>

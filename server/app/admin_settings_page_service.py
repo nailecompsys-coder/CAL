@@ -494,7 +494,7 @@ def recent_admin_notifications(db: Session, admin_user_id: int, limit: int = 20)
                 data = json.loads(row.payload or "{}") or {}
             except (TypeError, ValueError):
                 data = {}
-            # Only the one-line digest belongs on the dashboard. Cases live on Ingest fixes.
+            # Only the one-line digest belongs on the dashboard.
             if (data.get("reason") or "") != "ingest_digest":
                 continue
             if "ingest_digest" in seen_corrections:

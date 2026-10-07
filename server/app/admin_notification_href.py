@@ -125,15 +125,7 @@ def _ingest_href(payload: dict) -> str:
     elif reason == "or_location_not_found":
         room = room or extra
     elif reason == "ingest_digest":
-        return "/admin/ingest-fixes"
-    elif reason in {"block_not_found", "missing_time", "missing_block_window"}:
-        case_id = _as_int(payload.get("caseId"))
-        if case_id:
-            return f"/admin/ingest-fixes?case_id={case_id}"
-        day = _as_date(payload.get("date"))
-        if day:
-            return f"/admin/ingest-fixes?focus_date={day.isoformat()}"
-        return "/admin/ingest-fixes"
+        return "/admin/dashboard"
     elif reason in _CASE_FIXES:
         procedure = procedure or extra
     return clinic_schedule_fix_href(

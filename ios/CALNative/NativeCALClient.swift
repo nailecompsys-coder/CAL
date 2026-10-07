@@ -321,6 +321,23 @@ struct NativeCALClient {
     return try JSONDecoder().decode(NativeHomeResponse.self, from: data)
   }
 
+  func fetchWhosWhere(token: String, day: Date) async throws -> NativeWhosWhereResponse {
+    var components = URLComponents(url: baseURL.appendingPathComponent("/api/native/whos-where"), resolvingAgainstBaseURL: false)!
+    components.queryItems = [URLQueryItem(name: "day", value: isoDate(day))]
+    guard let url = components.url else {
+      throw NativeCALError.invalidURL
+    }
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.setValue(token, forHTTPHeaderField: "X-CAL-Device-Token")
+
+    let data = try await perform(request)
+    return try JSONDecoder().decode(NativeWhosWhereResponse.self, from: data)
+  }
+
   func fetchPatientSchedule(token: String, start: Date, end: Date) async throws -> NativePatientScheduleResponse {
     var components = URLComponents(url: baseURL.appendingPathComponent("/api/native/patient-schedule"), resolvingAgainstBaseURL: false)!
     components.queryItems = [

@@ -8,6 +8,7 @@ struct DayScheduleDashboard: View {
   let coverAction: (ScheduleAssignment) -> Void
   let onSavePersonalItem: (PersonalCalendarItem?, String, String, String?, String?, Date, Date) async throws -> Void
   let onDeletePersonalItem: (PersonalCalendarItem) async throws -> Void
+  var whosWhereAction: (() -> Void)? = nil
 
   @State private var personalEditor: PersonalEditorTarget?
   @State private var selectedMeeting: MeetingDetail?
@@ -95,6 +96,26 @@ struct DayScheduleDashboard: View {
         }
 
         ScheduleDailyGlanceCard(day: day, coverAction: isReadOnly ? nil : coverAction)
+
+        if let whosWhereAction {
+          Button(action: whosWhereAction) {
+            HStack(spacing: 8) {
+              Image(systemName: "map")
+                .foregroundStyle(ClinicalPalette.teal)
+              Text("Who's where")
+                .font(ClinicalTypography.rowTitle)
+                .foregroundStyle(ClinicalPalette.ink)
+              Spacer(minLength: 0)
+              Image(systemName: "chevron.right")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.tealSoft)
+          }
+          .buttonStyle(.plain)
+        }
 
         DashboardSection(title: "Clinic / OR Schedule", tint: ClinicalPalette.cardStrong) {
           ClinicOrScheduleList(dayId: day.id, items: day.mySchedule)

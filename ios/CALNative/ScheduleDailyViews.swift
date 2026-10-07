@@ -279,3 +279,203 @@ private struct FlexibleInitialsWrap: View {
     return rows
   }
 }
+
+/// Tap a date: every surgeon and PA, AM and PM, by geographic block group. Locations only.
+struct WhosWhereView: View {
+  @ObservedObject var store: NativeScheduleStore
+  @State var day: Date
+  @Environment(\.dismiss) private var dismiss
+  @State private var rows: [NativeWhosWhereRow] = []
+  @State private var selectedTab = ""
+  @State private var isLoading = false
+  @State private var errorMessage: String?
+
+  private static let openTab = "open"
+
+  private var groupTabs: [(key: String, label: String)] {
+    var seen = Set<Int>()
+    var tabs: [(key: String, label: String)] = []
+    for row in rows where row.session != "call" {
+      guard let id = row.groupId, !seen.contains(id) else { continue }
+      seen.insert(id)
+      tabs.append((key: String(id), label: Self.shortGroupName(row.group)))
+    }
+    tabs.append((key: Self.openTab, label: "Open / Off"))
+    return tabs
+  }
+
+  var body: some View {
+    CalNavigation {
+      List {
+        Section {
+          WhosWhereDayStepper(day: $day)
+          Picker("Group", selection: $selectedTab) {
+            ForEach(groupTabs, id: \.key) { tab in
+              Text(tab.label).tag(tab.key)
+            }
+          }
+          .pickerStyle(.segmented)
+        } footer: {
+          Text("Locations and sessions only. No patient details.")
+        }
+
+        if let errorMessage {
+          Section {
+            Label(errorMessage, systemImage: "exclamationmark.triangle")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+        } else if isLoading && rows.isEmpty {
+          Section { ProgressView() }
+        } else if selectedTab == Self.openTab {
+          openSections
+        } else if let groupId = Int(selectedTab) {
+          groupSections(groupId)
+        }
+      }
+      .navigationTitle("Who's where")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .confirmationAction) {
+          Button("Done") { dismiss() }
+        }
+      }
+      .task(id: day) { await load() }
+    }
+  }
+
+  @ViewBuilder
+  private func groupSections(_ groupId: Int) -> some View {
+    let onCall = rows.filter { $0.session == "call" && $0.groupId == groupId }
+    if !onCall.isEmpty {
+      Section("On call") {
+        ForEach(onCall) { row in
+          Text(row.name).font(ClinicalTypography.rowTitle)
+        }
+      }
+    }
+    ForEach(["am", "pm"], id: \.self) { session in
+      let sessionRows = rows.filter { $0.session == session && $0.groupId == groupId }
+      WhosWhereSessionSection(session: session, rows: sessionRows, onCallIds: Set(onCall.map(\.surgeonId)))
+    }
+  }
+
+  @ViewBuilder
+  private var openSections: some View {
+    ForEach(["am", "pm"], id: \.self) { session in
+      let open = rows.filter { $0.session == session && $0.groupId == nil && $0.state == "na" && !$0.onLeave }
+      WhosWhereSessionSection(session: session, rows: open, onCallIds: [], title: "\(session.uppercased()) · Open (NA)")
+    }
+    let off = rows.filter { $0.session != "call" && ($0.state == "off" || $0.onLeave) }
+    WhosWhereSessionSection(session: "off", rows: off, onCallIds: [], title: "Off")
+  }
+
+  private func load() async {
+    isLoading = true
+    defer { isLoading = false }
+    do {
+      rows = try await store.fetchWhosWhere(day: day)
+      errorMessage = nil
+      if !groupTabs.contains(where: { $0.key == selectedTab }) {
+        selectedTab = groupTabs.first?.key ?? Self.openTab
+      }
+    } catch {
+      errorMessage = error.localizedDescription
+    }
+  }
+
+  static func shortGroupName(_ group: String) -> String {
+    let upper = group.uppercased()
+    if upper.contains("WINTER") || upper.contains("APOPKA") || upper.contains("MINNEOLA") {
+      return "WG / AP / MN"
+    }
+    if upper.contains("ALTAMONTE") {
+      return "Altamonte"
+    }
+    return group
+  }
+}
+
+private struct WhosWhereDayStepper: View {
+  @Binding var day: Date
+
+  var body: some View {
+    HStack {
+      Button { step(-1) } label: { Image(systemName: "chevron.left") }
+      Spacer()
+      Text(day.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+        .font(ClinicalTypography.rowTitle)
+      Spacer()
+      Button { step(1) } label: { Image(systemName: "chevron.right") }
+    }
+    .buttonStyle(.borderless)
+  }
+
+  private func step(_ days: Int) {
+    day = Calendar.current.date(byAdding: .day, value: days, to: day) ?? day
+  }
+}
+
+private struct WhosWhereSessionSection: View {
+  let session: String
+  let rows: [NativeWhosWhereRow]
+  let onCallIds: Set<Int>
+  var title: String?
+
+  var body: some View {
+    Section(title ?? session.uppercased()) {
+      if rows.isEmpty {
+        EmptyDashboardRow(title: "No one")
+      } else {
+        let surgeons = rows.filter { !$0.isPA }
+        let pas = rows.filter(\.isPA)
+        if !surgeons.isEmpty {
+          WhosWhereSubheader(text: "Surgeons")
+          ForEach(surgeons) { WhosWhereRowView(row: $0, isOnCall: onCallIds.contains($0.surgeonId), showsSession: session == "off") }
+        }
+        if !pas.isEmpty {
+          WhosWhereSubheader(text: "PAs")
+          ForEach(pas) { WhosWhereRowView(row: $0, isOnCall: onCallIds.contains($0.surgeonId), showsSession: session == "off") }
+        }
+      }
+    }
+  }
+}
+
+private struct WhosWhereSubheader: View {
+  let text: String
+
+  var body: some View {
+    Text(text)
+      .font(ClinicalTypography.sectionLabel)
+      .foregroundStyle(ClinicalPalette.muted)
+  }
+}
+
+private struct WhosWhereRowView: View {
+  let row: NativeWhosWhereRow
+  let isOnCall: Bool
+  var showsSession = false
+
+  var body: some View {
+    HStack(spacing: 8) {
+      Text(row.name)
+        .font(ClinicalTypography.rowTitle)
+        .foregroundStyle(row.onLeave ? ClinicalPalette.muted : ClinicalPalette.ink)
+        .lineLimit(1)
+      if showsSession {
+        StatusTag(text: row.session.uppercased())
+      }
+      Spacer(minLength: 4)
+      if isOnCall { StatusTag(text: "Call", tint: ClinicalPalette.teal) }
+      if row.noCall { StatusTag(text: "No Call") }
+      if row.onLeave || row.state == "off" { StatusTag(text: "Off") }
+      if !row.location.isEmpty {
+        LocationChip(code: row.location)
+          .opacity(row.onLeave ? 0.45 : 1)
+      } else if row.state == "na" && !row.onLeave {
+        StatusTag(text: "NA")
+      }
+    }
+  }
+}

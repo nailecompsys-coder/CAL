@@ -40,6 +40,7 @@ struct ScheduleHomeView: View {
   @State private var scope: ScheduleScope = .day
   @State private var showingDatePicker = false
   @State private var coveringAssignment: ScheduleAssignment?
+  @State private var showingWhosWhere = false
 
   private var selectedDay: ScheduleDay {
     store.day(for: selectedDate) ?? ScheduleDay.empty(for: selectedDate)
@@ -158,7 +159,8 @@ struct ScheduleHomeView: View {
                 },
                 onDeletePersonalItem: { item in
                   try await store.deletePersonalItem(itemId: item.id, on: selectedDate)
-                }
+                },
+                whosWhereAction: { showingWhosWhere = true }
               )
               .calReadableColumn(ClinicalLayout.contentColumn)
               .transition(.opacity)
@@ -262,6 +264,9 @@ struct ScheduleHomeView: View {
               }
             }
         }
+      }
+      .sheet(isPresented: $showingWhosWhere) {
+        WhosWhereView(store: store, day: selectedDate)
       }
       .sheet(item: $coveringAssignment) { assignment in
         CallCoverageSheet(

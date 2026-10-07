@@ -8,6 +8,30 @@ struct NativeHomeResponse: Decodable {
   let alerts: NativeAlertSummary?
 }
 
+struct NativeWhosWhereResponse: Decodable {
+  let date: String
+  let rows: [NativeWhosWhereRow]
+}
+
+/// One surgeon/PA half-day (session "am"/"pm") or a group's on-call row (session "call").
+struct NativeWhosWhereRow: Decodable, Identifiable, Hashable {
+  let session: String
+  let groupId: Int?
+  let group: String
+  let surgeonId: Int
+  let name: String
+  let initials: String
+  let staffType: String
+  let state: String
+  let onLeave: Bool
+  let noCall: Bool
+  let location: String
+  let locationName: String
+
+  var id: String { "\(session)-\(surgeonId)-\(groupId ?? 0)" }
+  var isPA: Bool { staffType != "physician" }
+}
+
 struct NativePatientScheduleResponse: Decodable {
   let appointments: [NativePatientAppointmentResponse]
   let warning: String?

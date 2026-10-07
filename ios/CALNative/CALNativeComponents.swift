@@ -27,6 +27,60 @@ enum ClinicalPalette {
   static let stroke = Color("ClinicalStroke")
   static let shadow = Color("ClinicalShadow")
   static let authAccent = Color("ClinicalAuthAccent")
+
+  /// One color per site; a location code's site is the part before "-" (AL-OR, AL-OV → AL).
+  static func site(_ locationCode: String) -> Color {
+    let site = locationCode.split(separator: "-").first.map { $0.uppercased() } ?? ""
+    switch site {
+    case "AL": return Color("ClinicalSiteAl")
+    case "AP": return Color("ClinicalSiteAp")
+    case "MN": return Color("ClinicalSiteMn")
+    case "WG": return Color("ClinicalSiteWg")
+    case "CL": return Color("ClinicalSiteCl")
+    case "DP": return Color("ClinicalSiteDp")
+    case "LM": return Color("ClinicalSiteLm")
+    case "CBO": return Color("ClinicalSiteCbo")
+    case "FL": return Color("ClinicalSiteFl")
+    default: return muted
+    }
+  }
+}
+
+/// Location code chip: the OR is the solid site color, the office is its light tint.
+struct LocationChip: View {
+  let code: String
+
+  private var isOR: Bool { code.uppercased().hasSuffix("-OR") }
+  private var siteColor: Color { ClinicalPalette.site(code) }
+
+  var body: some View {
+    Text(code)
+      .font(ClinicalTypography.monoChip)
+      .lineLimit(1)
+      .fixedSize()
+      .padding(.horizontal, 7)
+      .padding(.vertical, 2)
+      .foregroundStyle(isOR ? Color.white : ClinicalPalette.ink)
+      .background(isOR ? siteColor : siteColor.opacity(0.28), in: Capsule())
+      .overlay { Capsule().stroke(siteColor, lineWidth: 1) }
+  }
+}
+
+/// Small outlined status tag (Off, No Call, Call).
+struct StatusTag: View {
+  let text: String
+  var tint: Color = ClinicalPalette.muted
+
+  var body: some View {
+    Text(text)
+      .font(ClinicalTypography.badge)
+      .lineLimit(1)
+      .fixedSize()
+      .padding(.horizontal, 6)
+      .padding(.vertical, 2)
+      .foregroundStyle(tint)
+      .overlay { Capsule().stroke(tint.opacity(0.6), lineWidth: 0.75) }
+  }
 }
 
 enum ClinicalTypography {

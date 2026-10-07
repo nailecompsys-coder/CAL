@@ -183,6 +183,18 @@ final class NativeScheduleStore: ObservableObject {
     }
   }
 
+  func fetchWhosWhere(day: Date) async throws -> [NativeWhosWhereRow] {
+    guard let token = activeToken else {
+      throw NativeCALError.missingSession
+    }
+    do {
+      return try await client.fetchWhosWhere(token: token, day: day).rows
+    } catch let error as NativeCALError where error.isAuthenticationFailure {
+      expireSession()
+      throw error
+    }
+  }
+
   func loadPatientSchedule(containing date: Date, daysAhead: Int = 6) async {
     guard let token = activeToken else {
       clearScheduleForMissingSession()

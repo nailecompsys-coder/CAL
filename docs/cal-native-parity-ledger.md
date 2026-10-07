@@ -1,6 +1,8 @@
 # CAL Native Parity Ledger
 
-Last updated: 2026-10-02
+Last updated: 2026-10-07
+
+Who's where (2026-10-07, not in TestFlight): the Calendar day view has a **Who's where** button that opens a sheet for that date. It calls the SQL-backed `GET /api/native/whos-where?day=` and groups every active surgeon and PA by the location's geographic block group (`locations.block_group_id`, set on portal Locations; never used for call assignment). Each group shows its on-call surgeons, then AM and PM split into Surgeons and PAs with a site-colored location chip (OR solid, clinic tinted) and Off / No Call / Call tags. An **Open / Off** tab lists unassigned (NA) half-days and people on leave. Locations and sessions only; no patient details. The admin support-preview session may read this feed. Android: not integrated.
 
 Admin surgeon preview (2026-10-02): an administrator can issue a one-use, ten-minute code for a selected surgeon from Users → Surgeons. The Release iOS simulator exchanges it for a memory-only, thirty-minute, read-only session showing that surgeon's native schedule and patient list. This sends no surgeon OTP. The backend permits only the two native GET feeds for this session; it cannot submit schedule changes. This is a support verification path and has not been distributed through TestFlight.
 

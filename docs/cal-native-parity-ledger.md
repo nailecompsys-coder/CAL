@@ -6,6 +6,8 @@ Who's where (2026-10-07, not in TestFlight): the Calendar day view has a **Block
 
 Day view Clinic / OR (2026-10-07, not in TestFlight): rows are labeled **AM** / **PM**; clock times appear only on case/visit detail lines. A case on an OFF or NA half-day nests under that card in red (e.g. `OFF - 1 Case`) with its location, instead of appearing as a separate row. Empty OFF/NA cards show just `OFF` / `NA` with no visit count or filler. On Call group headings read **WG Group** and **ALT Group**.
 
+Day view restyle (2026-10-07, not in TestFlight): same functions, plain white cards (`calCard`, `DaySection`, `DayAgendaRow` in `CALNativeComponents.swift`) instead of tinted glass. Sections: On Call / Off, Block Schedule row, **Clinic & OR** (AM/PM label column, location title, grey count, divider between half-days), Meetings, Personal (Add Personal Item as a text button).
+
 Admin surgeon preview (2026-10-02): an administrator can issue a one-use, ten-minute code for a selected surgeon from Users → Surgeons. The Release iOS simulator exchanges it for a memory-only, thirty-minute, read-only session showing that surgeon's native schedule and patient list. This sends no surgeon OTP. The backend permits only the two native GET feeds for this session; it cannot submit schedule changes. This is a support verification path and has not been distributed through TestFlight.
 
 Preview navigation fix (2026-10-02): the read-only indicator and exit action live in the Calendar/Time Off title menu. The full-width top banner has been removed so it cannot cover the navigation bar or prevent switching screens.

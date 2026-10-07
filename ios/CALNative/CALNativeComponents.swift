@@ -184,6 +184,80 @@ struct DashboardSection<Content: View>: View {
   }
 }
 
+/// Plain inset card for the Calendar day view: solid card fill, soft shadow, no tint.
+struct CalCardModifier: ViewModifier {
+  var padding: CGFloat = 14
+
+  func body(content: Content) -> some View {
+    content
+      .padding(padding)
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .background(ClinicalPalette.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+      .shadow(color: ClinicalPalette.shadow.opacity(0.08), radius: 10, x: 0, y: 3)
+  }
+}
+
+extension View {
+  func calCard(padding: CGFloat = 14) -> some View {
+    modifier(CalCardModifier(padding: padding))
+  }
+}
+
+/// Titled day-view section: headline title above a plain card.
+struct DaySection<Content: View>: View {
+  let title: String
+  @ViewBuilder let content: Content
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Text(title)
+        .font(.headline)
+        .foregroundStyle(ClinicalPalette.ink)
+        .padding(.horizontal, 4)
+      VStack(alignment: .leading, spacing: 12) {
+        content
+      }
+      .calCard()
+    }
+  }
+}
+
+/// Two-line tappable day-view row: title, secondary line, trailing chevron.
+struct DayAgendaRow: View {
+  let systemImage: String
+  let title: String
+  let subtitle: String
+  var isMuted = false
+  var showsChevron = true
+
+  var body: some View {
+    HStack(spacing: 12) {
+      Image(systemName: systemImage)
+        .font(.body.weight(.semibold))
+        .foregroundStyle(isMuted ? ClinicalPalette.muted : ClinicalPalette.teal)
+      VStack(alignment: .leading, spacing: 2) {
+        Text(title)
+          .font(.subheadline.weight(.semibold))
+          .foregroundStyle(isMuted ? ClinicalPalette.muted : ClinicalPalette.ink)
+          .multilineTextAlignment(.leading)
+        if !subtitle.isEmpty {
+          Text(subtitle)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+      }
+      Spacer(minLength: 0)
+      if showsChevron {
+        Image(systemName: "chevron.right")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(.tertiary)
+      }
+    }
+    .contentShape(Rectangle())
+  }
+}
+
 struct EmptyDashboardRow: View {
   let title: String
 

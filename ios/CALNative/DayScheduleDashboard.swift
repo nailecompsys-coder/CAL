@@ -84,133 +84,95 @@ struct DayScheduleDashboard: View {
 
   var body: some View {
     ScrollView {
-      VStack(alignment: .leading, spacing: 8) {
+      VStack(alignment: .leading, spacing: 18) {
         if let statusMessage {
           Label(statusMessage, systemImage: "exclamationmark.triangle")
-            .font(.caption)
+            .font(.footnote)
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.amber)
+            .calCard(padding: 12)
         }
 
-        ScheduleDailyGlanceCard(day: day, coverAction: isReadOnly ? nil : coverAction)
+        VStack(spacing: 10) {
+          ScheduleDailyGlanceCard(day: day, coverAction: isReadOnly ? nil : coverAction)
 
-        if let whosWhereAction {
-          Button(action: whosWhereAction) {
-            HStack(spacing: 8) {
-              Image(systemName: "map")
-                .foregroundStyle(ClinicalPalette.teal)
-              Text("Block Schedule")
-                .font(ClinicalTypography.rowTitle)
-                .foregroundStyle(ClinicalPalette.ink)
-              Spacer(minLength: 0)
-              Image(systemName: "chevron.right")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.tertiary)
+          if let whosWhereAction {
+            Button(action: whosWhereAction) {
+              DayAgendaRow(
+                systemImage: "square.grid.2x2.fill",
+                title: "Block Schedule",
+                subtitle: "Who's working where, by group"
+              )
+              .calCard()
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.tealSoft)
+            .buttonStyle(.plain)
           }
-          .buttonStyle(.plain)
         }
 
-        DashboardSection(title: "Clinic / OR Schedule", tint: ClinicalPalette.cardStrong) {
+        DaySection(title: "Clinic & OR") {
           ClinicOrScheduleList(dayId: day.id, items: day.mySchedule)
         }
 
-        DashboardSection(title: "Meetings", tint: ClinicalPalette.meeting) {
+        DaySection(title: "Meetings") {
           if day.meetings.isEmpty {
-            HStack(spacing: 6) {
-              Text("Today").font(.caption.weight(.bold))
-              Text("No meetings").font(.caption).foregroundStyle(.secondary)
-            }
+            DayAgendaRow(systemImage: "person.2", title: "No meetings today", subtitle: "", isMuted: true, showsChevron: false)
           } else {
             ForEach(day.meetings) { meeting in
               meetingPreview(MeetingDetail(date: day.date, item: meeting), label: "Today")
             }
           }
           if let nextMeeting {
-            meetingPreview(nextMeeting, label: "Next meeting · \(nextMeeting.date.formatted(.dateTime.month(.abbreviated).day()))")
+            Divider()
+            meetingPreview(nextMeeting, label: "Next · \(nextMeeting.date.formatted(.dateTime.month(.abbreviated).day()))")
           }
         }
 
-        DashboardSection(title: "Personal", tint: ClinicalPalette.mint) {
-          VStack(alignment: .leading, spacing: 8) {
-            if day.personalItems.isEmpty {
-              AgendaPreviewRows(
-                todayContent: nil,
-                emptyTodayText: "none — add a personal item",
-                nextDate: nextPersonal?.date,
-                nextContent: nextPersonal?.content,
-                systemImage: "note.text"
-              )
-            } else {
-              ForEach(day.personalItems) { item in
-                Button {
-                  personalEditor = .edit(item)
-                } label: {
-                  HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Image(systemName: "note.text")
-                      .font(.caption.weight(.semibold))
-                      .foregroundStyle(ClinicalPalette.teal)
-                    VStack(alignment: .leading, spacing: 2) {
-                      Text(item.title)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(ClinicalPalette.ink)
-                        .multilineTextAlignment(.leading)
-                      if !item.timeRangeLabel.isEmpty {
-                        Text(item.timeRangeLabel)
-                          .font(.caption.weight(.semibold))
-                          .foregroundStyle(.secondary)
-                      } else if !item.notes.isEmpty {
-                        Text(item.notes)
-                          .font(.caption)
-                          .foregroundStyle(.secondary)
-                          .lineLimit(1)
-                      }
-                    }
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.right")
-                      .font(.caption2.weight(.bold))
-                      .foregroundStyle(.secondary)
-                  }
-                  .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(isReadOnly)
-              }
-
-              if let nextPersonal {
-                AgendaPreviewRow(
-                  prefix: nextPersonal.date.formatted(.dateTime.month(.defaultDigits).day()),
-                  content: nextPersonal.content,
-                  systemImage: "calendar",
-                  isMuted: false
+        DaySection(title: "Personal") {
+          if day.personalItems.isEmpty {
+            DayAgendaRow(systemImage: "note.text", title: "Nothing today", subtitle: "", isMuted: true, showsChevron: false)
+          } else {
+            ForEach(day.personalItems) { item in
+              Button {
+                personalEditor = .edit(item)
+              } label: {
+                DayAgendaRow(
+                  systemImage: "note.text",
+                  title: item.title,
+                  subtitle: item.timeRangeLabel.isEmpty ? item.notes : item.timeRangeLabel
                 )
               }
+              .buttonStyle(.plain)
+              .disabled(isReadOnly)
             }
+          }
 
-            if !isReadOnly {
-              Button {
-                personalEditor = .create
-              } label: {
-                Label("Add personal item", systemImage: "plus.circle.fill")
-                  .font(.subheadline.weight(.bold))
-                  .frame(maxWidth: .infinity)
-                  .padding(.vertical, 8)
-              }
-              .buttonStyle(.borderedProminent)
-              .tint(ClinicalPalette.teal)
+          if let nextPersonal {
+            Divider()
+            DayAgendaRow(
+              systemImage: "calendar",
+              title: nextPersonal.content,
+              subtitle: "Next · \(nextPersonal.date.formatted(.dateTime.month(.abbreviated).day()))",
+              showsChevron: false
+            )
+          }
+
+          if !isReadOnly {
+            Divider()
+            Button {
+              personalEditor = .create
+            } label: {
+              Label("Add Personal Item", systemImage: "plus.circle.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(ClinicalPalette.teal)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
           }
         }
       }
       .padding(.horizontal, 16)
       .padding(.top, 4)
-      .padding(.bottom, 18)
+      .padding(.bottom, 24)
     }
     .sheet(item: $personalEditor) { target in
       PersonalItemEditorSheet(
@@ -257,17 +219,11 @@ struct DayScheduleDashboard: View {
     Button {
       selectedMeeting = detail
     } label: {
-      HStack(alignment: .firstTextBaseline, spacing: 6) {
-        Image(systemName: "person.2").font(.caption2).foregroundStyle(ClinicalPalette.teal)
-        Text(label).font(.caption.weight(.bold))
-        Text([detail.item.timeRange, detail.item.title].filter { !$0.isEmpty }.joined(separator: " · "))
-          .font(.caption)
-          .lineLimit(1)
-        Spacer(minLength: 0)
-        Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
-      }
-      .foregroundStyle(ClinicalPalette.ink)
-      .contentShape(Rectangle())
+      DayAgendaRow(
+        systemImage: "person.2.fill",
+        title: detail.item.title,
+        subtitle: [label, detail.item.timeRange].filter { !$0.isEmpty }.joined(separator: " · ")
+      )
     }
     .buttonStyle(.plain)
   }
@@ -506,55 +462,4 @@ private enum PersonalItemPresets {
     "Errand",
     other,
   ]
-}
-
-private struct AgendaPreviewRows: View {
-  let todayContent: String?
-  let emptyTodayText: String
-  let nextDate: Date?
-  let nextContent: String?
-  let systemImage: String
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 5) {
-      AgendaPreviewRow(
-        prefix: "Today:",
-        content: todayContent ?? emptyTodayText,
-        systemImage: systemImage,
-        isMuted: todayContent == nil
-      )
-
-      if let nextDate, let nextContent, !nextContent.isEmpty {
-        AgendaPreviewRow(
-          prefix: nextDate.formatted(.dateTime.month(.defaultDigits).day()),
-          content: nextContent,
-          systemImage: "calendar",
-          isMuted: false
-        )
-      }
-    }
-  }
-}
-
-private struct AgendaPreviewRow: View {
-  let prefix: String
-  let content: String
-  let systemImage: String
-  let isMuted: Bool
-
-  var body: some View {
-    HStack(alignment: .firstTextBaseline, spacing: 6) {
-      Image(systemName: systemImage)
-        .font(.caption2.weight(.semibold))
-        .foregroundStyle(isMuted ? .secondary : ClinicalPalette.teal)
-      Text(prefix)
-        .font(.caption.weight(.bold))
-        .foregroundStyle(isMuted ? .secondary : ClinicalPalette.ink)
-      Text(content)
-        .font(.caption)
-        .foregroundStyle(isMuted ? .secondary : ClinicalPalette.ink)
-        .multilineTextAlignment(.leading)
-      Spacer(minLength: 0)
-    }
-  }
 }

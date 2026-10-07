@@ -328,11 +328,12 @@ struct ClinicOrScheduleList: View {
   @State private var collapsedIds: Set<String> = []
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 2) {
+    VStack(alignment: .leading, spacing: 0) {
       if groups.isEmpty {
         EmptyDashboardRow(title: "No clinic or hospital schedule")
       } else {
-        ForEach(groups) { group in
+        ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
+          if index > 0 { Divider().padding(.vertical, 4) }
           ClinicOrFacilityBlock(
             group: group,
             isExpanded: expansionBinding(for: group.id)
@@ -363,9 +364,14 @@ struct ClinicOrScheduleList: View {
 private struct ClinicOrFacilityBlock: View {
   let group: ClinicOrFacilityGroup
   @Binding var isExpanded: Bool
+  @ScaledMetric(relativeTo: .footnote) private var labelColumn: CGFloat = 46
+
+  private var titleColor: Color {
+    group.isEmptyCard && !group.details.isEmpty ? Color.red : ClinicalPalette.ink
+  }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 0) {
+    VStack(alignment: .leading, spacing: 8) {
       Button {
         withAnimation(.easeInOut(duration: 0.18)) {
           isExpanded.toggle()
@@ -373,45 +379,41 @@ private struct ClinicOrFacilityBlock: View {
       } label: {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
           Text(group.period.isEmpty ? "—" : group.period)
-            .font(ClinicalTypography.monoCaption.weight(.bold))
-            .foregroundStyle(ClinicalPalette.ink)
-            .frame(width: 96, alignment: .leading)
+            .font(.footnote.weight(.bold))
+            .foregroundStyle(.secondary)
+            .frame(width: labelColumn, alignment: .leading)
 
-          Text(group.headerTitle)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(group.isEmptyCard && !group.details.isEmpty ? Color.red : ClinicalPalette.ink)
+          Text(group.title)
+            .font(.body.weight(.semibold))
+            .foregroundStyle(titleColor)
             .multilineTextAlignment(.leading)
             .frame(maxWidth: .infinity, alignment: .leading)
 
+          if !group.countLabel.isEmpty {
+            Text(group.countLabel)
+              .font(.footnote)
+              .foregroundStyle(group.isEmptyCard ? titleColor : Color.secondary)
+          }
+
           if !group.details.isEmpty {
             Image(systemName: "chevron.down")
-              .font(.caption2.weight(.semibold))
-              .foregroundStyle(ClinicalPalette.muted)
+              .font(.caption.weight(.semibold))
+              .foregroundStyle(.tertiary)
               .rotationEffect(.degrees(isExpanded ? 0 : -90))
           }
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 4)
         .contentShape(Rectangle())
       }
       .buttonStyle(.plain)
 
-      if isExpanded {
-        if group.details.isEmpty {
-          if group.countStyle != .cases && !group.isEmptyCard {
-            Text("No visits listed")
-              .font(.caption)
-              .foregroundStyle(ClinicalPalette.muted)
-              .padding(.leading, 106)
-              .padding(.bottom, 8)
+      if isExpanded && !group.details.isEmpty {
+        VStack(alignment: .leading, spacing: 10) {
+          ForEach(group.details) { row in
+            ClinicOrDetailLine(row: row, labelColumn: labelColumn)
           }
-        } else {
-          VStack(alignment: .leading, spacing: 6) {
-            ForEach(group.details) { row in
-              ClinicOrDetailLine(row: row)
-            }
-          }
-          .padding(.bottom, 8)
         }
+        .padding(.bottom, 4)
       }
     }
   }
@@ -419,25 +421,26 @@ private struct ClinicOrFacilityBlock: View {
 
 private struct ClinicOrDetailLine: View {
   let row: ClinicOrDetailRow
+  let labelColumn: CGFloat
 
   var body: some View {
-    HStack(alignment: .top, spacing: 10) {
+    HStack(alignment: .firstTextBaseline, spacing: 10) {
       Text(row.time.isEmpty ? "—" : row.time)
-        .font(ClinicalTypography.monoCaption)
-        .foregroundStyle(ClinicalPalette.ink)
-        .frame(width: 96, alignment: .leading)
+        .font(.footnote.monospacedDigit())
+        .foregroundStyle(.secondary)
+        .frame(width: labelColumn, alignment: .leading)
 
       VStack(alignment: .leading, spacing: 2) {
         Text(row.primary)
-          .font(.subheadline.weight(.semibold))
+          .font(.subheadline.weight(.medium))
           .foregroundStyle(row.isReviewWarning ? Color.red : ClinicalPalette.ink)
           .multilineTextAlignment(.leading)
 
         if !row.secondary.isEmpty {
           Text(row.secondary)
-            .font(.caption2)
-            .foregroundStyle(row.isReviewWarning ? Color.red.opacity(0.82) : ClinicalPalette.muted)
-            .lineLimit(1)
+            .font(.caption)
+            .foregroundStyle(row.isReviewWarning ? Color.red.opacity(0.82) : Color.secondary)
+            .lineLimit(2)
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)

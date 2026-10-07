@@ -183,17 +183,13 @@ struct ClinicOrFacilityGroup: Identifiable {
     ["OFF", "NA"].contains(title.uppercased())
   }
 
-  /// e.g. "Apopka OR - 2 Cases" / "Apopka Clinic - 7 Visits" / "OFF" / "OFF - 1 Case"
-  var headerTitle: String {
+  /// "2 cases" / "7 visits"; empty for an OFF / NA card with nothing on it.
+  var countLabel: String {
     let count = details.count
-    if isEmptyCard && count == 0 { return title }
+    if isEmptyCard && count == 0 { return "" }
     switch countStyle {
-    case .cases:
-      let noun = count == 1 ? "Case" : "Cases"
-      return "\(title) - \(count) \(noun)"
-    case .visits:
-      let noun = count == 1 ? "Visit" : "Visits"
-      return "\(title) - \(count) \(noun)"
+    case .cases: return count == 1 ? "1 case" : "\(count) cases"
+    case .visits: return count == 1 ? "1 visit" : "\(count) visits"
     }
   }
 }

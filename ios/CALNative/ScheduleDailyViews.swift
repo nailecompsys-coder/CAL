@@ -127,46 +127,55 @@ struct ScheduleDailyGlanceCard: View {
   var coverAction: ((ScheduleAssignment) -> Void)?
 
   var body: some View {
-    HStack(alignment: .top, spacing: 8) {
-      VStack(alignment: .leading, spacing: 6) {
-        Text("On Call")
-          .font(.caption2.weight(.semibold))
-          .foregroundStyle(.secondary)
-
+    HStack(alignment: .top, spacing: 10) {
+      VStack(alignment: .leading, spacing: 8) {
+        GlanceHeader(title: "On Call", systemImage: "phone.fill", tint: ClinicalPalette.teal)
         if day.assignments.isEmpty {
-          Text("None")
-            .font(.caption.weight(.medium))
-            .foregroundStyle(.secondary)
+          GlanceEmptyText()
         } else {
-          VStack(alignment: .leading, spacing: 4) {
+          VStack(alignment: .leading, spacing: 6) {
             ForEach(day.assignments.prefix(3)) { assignment in
               GlanceOnCallLine(assignment: assignment, coverAction: coverAction)
             }
           }
         }
       }
-      .padding(10)
-      .frame(maxWidth: .infinity, minHeight: 72, alignment: .topLeading)
-      .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.tealSoft)
+      .frame(maxHeight: .infinity, alignment: .topLeading)
+      .calCard(padding: 12)
 
-      VStack(alignment: .leading, spacing: 6) {
-        Text("Off")
-          .font(.caption2.weight(.semibold))
-          .foregroundStyle(.secondary)
-
+      VStack(alignment: .leading, spacing: 8) {
+        GlanceHeader(title: "Off", systemImage: "moon.fill", tint: ClinicalPalette.muted)
         if day.off.isEmpty {
-          Text("None")
-            .font(.caption.weight(.medium))
-            .foregroundStyle(.secondary)
+          GlanceEmptyText()
         } else {
           FlowLine(items: Array(day.off.prefix(8)))
             .frame(maxWidth: .infinity, alignment: .leading)
         }
       }
-      .padding(10)
-      .frame(maxWidth: .infinity, minHeight: 72, alignment: .topLeading)
-      .liquidGlassCard(cornerRadius: 14, tint: ClinicalPalette.scrub)
+      .frame(maxHeight: .infinity, alignment: .topLeading)
+      .calCard(padding: 12)
     }
+    .fixedSize(horizontal: false, vertical: true)
+  }
+}
+
+private struct GlanceHeader: View {
+  let title: String
+  let systemImage: String
+  let tint: Color
+
+  var body: some View {
+    Label(title, systemImage: systemImage)
+      .font(.footnote.weight(.semibold))
+      .foregroundStyle(tint)
+  }
+}
+
+private struct GlanceEmptyText: View {
+  var body: some View {
+    Text("None")
+      .font(.subheadline)
+      .foregroundStyle(.secondary)
   }
 }
 
@@ -181,7 +190,7 @@ private struct GlanceOnCallLine: View {
       } label: {
         HStack(spacing: 6) {
           Text(assignment.locationShort)
-            .font(.caption.weight(.semibold))
+            .font(.subheadline)
             .foregroundStyle(ClinicalPalette.ink)
             .lineLimit(1)
 
@@ -249,18 +258,13 @@ private struct FlexibleInitialsWrap: View {
         HStack(spacing: 4) {
           ForEach(row, id: \.self) { item in
             Text(item)
-              .font(ClinicalTypography.captionEmphasized)
+              .font(.caption.weight(.semibold))
               .lineLimit(1)
               .fixedSize(horizontal: true, vertical: false)
-              .frame(minWidth: 20, minHeight: 20)
-              .padding(.horizontal, 6)
-              .padding(.vertical, 3)
-              .background(ClinicalPalette.porcelainChip.opacity(0.94), in: Capsule())
-              .overlay {
-                Capsule()
-                  .stroke(ClinicalPalette.scrubInk.opacity(0.26), lineWidth: 0.75)
-              }
-              .foregroundStyle(ClinicalPalette.scrubInk)
+              .padding(.horizontal, 8)
+              .padding(.vertical, 4)
+              .background(ClinicalPalette.muted.opacity(0.12), in: Capsule())
+              .foregroundStyle(ClinicalPalette.ink)
           }
         }
       }

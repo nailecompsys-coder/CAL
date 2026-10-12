@@ -13,6 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .models import (
+    CoSurgeonPair,
     FaxDocument,
     FaxIngestRow,
     FaxIngestRun,
@@ -137,9 +138,29 @@ def _case_group_key(row: FaxIngestRow) -> tuple[date, str, str, str]:
     return row.case_date, clock, (row.room_text or "").upper(), _normal(row.patient_name)
 
 
+def _co_surgeon_primary(db: Session, surgeon_ids: list[int]) -> int | None:
+    """Return the configured primary when two surgeons match an active pair."""
+    if len(surgeon_ids) != 2:
+        return None
+    left, right = surgeon_ids
+    pair = (
+        db.query(CoSurgeonPair)
+        .filter(
+            CoSurgeonPair.is_active == True,  # noqa: E712
+            (
+                ((CoSurgeonPair.primary_surgeon_id == left) & (CoSurgeonPair.assisting_surgeon_id == right))
+                | ((CoSurgeonPair.primary_surgeon_id == right) & (CoSurgeonPair.assisting_surgeon_id == left))
+            ),
+        )
+        .one_or_none()
+    )
+    return pair.primary_surgeon_id if pair else None
+
+
 def _choose_primary(
     rows: list[FaxIngestRow],
     *,
+    db: Session,
     existing: SurgicalCase | None,
     cards: dict[tuple[int, date, str], ScheduleCard],
     location_id: int,
@@ -162,12 +183,16 @@ def _choose_primary(
             if card.baseline_state == "assigned" and card.baseline_location_id == location_id:
                 baseline_matches.append(row.surgeon_id)
         baseline_matches = list(dict.fromkeys(baseline_matches))
-        if len(baseline_matches) != 1:
-            raise ValueError(
-                f"Shared case on {rows[0].case_date.isoformat()} at "
-                f"{rows[0].start_time} has no unique primary surgeon."
-            )
-        primary = baseline_matches[0]
+        if len(baseline_matches) == 1:
+            primary = baseline_matches[0]
+        else:
+            paired = _co_surgeon_primary(db, surgeon_ids)
+            if paired is None:
+                raise ValueError(
+                    f"Shared case on {rows[0].case_date.isoformat()} at "
+                    f"{rows[0].start_time} has no unique primary surgeon."
+                )
+            primary = paired
     assistant = next((value for value in surgeon_ids if value != primary), None)
     return primary, assistant
 
@@ -307,6 +332,7 @@ def apply_staged_snapshot(
         location_id = first.source_location_id or effective_locations[(first.surgeon_id, first.case_date, first.session)]
         primary_id, assistant_id = _choose_primary(
             group,
+            db=db,
             existing=existing,
             cards=cards,
             location_id=location_id,

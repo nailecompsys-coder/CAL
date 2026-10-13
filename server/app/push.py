@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -22,6 +23,7 @@ APNS_AUTH_KEY_P8 = os.environ.get("APNS_AUTH_KEY_P8", "")
 APNS_BUNDLE_ID = os.environ.get("APNS_BUNDLE_ID", "com.midfloridasurgical.calnative")
 APNS_USE_SANDBOX = os.environ.get("APNS_USE_SANDBOX", "true").lower() in ("1", "true", "yes")
 APNS_ALERT_SOUND = os.environ.get("APNS_ALERT_SOUND", "cal_alert.wav")
+_PUSH_SOUND_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}\.(wav|caf|aiff)$")
 STALE_WEB_PUSH_STATUSES = {404, 410}
 STALE_NATIVE_PUSH_ERRORS = {"DeviceNotRegistered", "InvalidCredentials"}
 STALE_APNS_REASONS = {"BadDeviceToken", "DeviceTokenNotForTopic", "Unregistered"}
@@ -36,6 +38,15 @@ FCM_SERVICE_ACCOUNT_JSON = os.environ.get("FCM_SERVICE_ACCOUNT_JSON", "").strip(
 FCM_SERVICE_ACCOUNT_PATH = os.environ.get("FCM_SERVICE_ACCOUNT_PATH", "").strip()
 _APNS_JWT: tuple[str, datetime] | None = None
 _FCM_ACCESS_TOKEN: tuple[str, datetime] | None = None
+
+
+def resolve_push_sound(surgeon: Surgeon | None = None, override: str | None = None) -> str:
+    """Bundle filename for this surgeon's native alert sound; default CAL chime otherwise."""
+    for candidate in (override, getattr(surgeon, "push_sound", None) if surgeon else None):
+        name = (candidate or "").strip()
+        if name and _PUSH_SOUND_RE.match(name):
+            return name
+    return APNS_ALERT_SOUND
 
 
 def create_native_schedule_alert(
@@ -68,11 +79,13 @@ def send_push_to_surgeon(
     data: dict | None = None,
     *,
     also_sms: bool = True,
+    sound: str | None = None,
 ):
     """Alert a surgeon: in-app + web/native push, and always SMS when a phone is on file.
 
     SMS is intentional for meetings / call / clinic / schedule edits so surgeons
     are notified immediately even when the app is closed or push is quieted.
+    Optional sound overrides surgeons.push_sound / default cal_alert.wav.
     """
     payload = {"url": url, "kind": "schedule"}
     if data:
@@ -82,14 +95,24 @@ def send_push_to_surgeon(
         subs = db.query(PushSubscription).filter(PushSubscription.surgeon_id == surgeon_id).all()
         for sub in subs:
             _send_web_push(sub, title, body, url, db)
-    send_native_push_to_surgeon(surgeon_id, title, body, db, payload)
+    surgeon = db.get(Surgeon, surgeon_id)
+    send_native_push_to_surgeon(
+        surgeon_id, title, body, db, payload, sound=resolve_push_sound(surgeon, sound)
+    )
     if also_sms:
-        surgeon = db.get(Surgeon, surgeon_id)
         if surgeon and surgeon.phone:
             send_sms(surgeon.phone, f"{title}: {body}")
 
 
-def send_native_push_to_surgeon(surgeon_id: int, title: str, body: str, db: Session, data: dict | None = None):
+def send_native_push_to_surgeon(
+    surgeon_id: int,
+    title: str,
+    body: str,
+    db: Session,
+    data: dict | None = None,
+    *,
+    sound: str | None = None,
+):
     """Send Expo/APNs/FCM push notifications to active native devices."""
     tokens = db.query(NativePushToken).filter(
         NativePushToken.surgeon_id == surgeon_id,
@@ -97,21 +120,32 @@ def send_native_push_to_surgeon(surgeon_id: int, title: str, body: str, db: Sess
     ).all()
     if not tokens:
         return
+    if sound is None:
+        sound = resolve_push_sound(db.get(Surgeon, surgeon_id))
     expo_tokens = [token for token in tokens if (token.provider or "expo") == "expo"]
     apns_tokens = [token for token in tokens if token.provider == "apns"]
     fcm_tokens = [token for token in tokens if token.provider == "fcm"]
-    _send_expo_push(expo_tokens, title, body, db, data)
-    _send_apns_push(apns_tokens, title, body, db, data)
+    _send_expo_push(expo_tokens, title, body, db, data, sound=sound)
+    _send_apns_push(apns_tokens, title, body, db, data, sound=sound)
     _send_fcm_push(fcm_tokens, title, body, db, data)
 
 
-def _send_expo_push(tokens: list[NativePushToken], title: str, body: str, db: Session, data: dict | None = None):
+def _send_expo_push(
+    tokens: list[NativePushToken],
+    title: str,
+    body: str,
+    db: Session,
+    data: dict | None = None,
+    *,
+    sound: str | None = None,
+):
     if not tokens:
         return
+    ios_sound = resolve_push_sound(None, sound)
     messages = [
         {
             "to": token.token,
-            "sound": "default" if (token.platform or "ios") == "android" else APNS_ALERT_SOUND,
+            "sound": "default" if (token.platform or "ios") == "android" else ios_sound,
             "title": title,
             "body": body,
             "data": data or {},
@@ -164,7 +198,15 @@ def _apns_jwt() -> str | None:
     return token
 
 
-def _send_apns_push(tokens: list[NativePushToken], title: str, body: str, db: Session, data: dict | None = None):
+def _send_apns_push(
+    tokens: list[NativePushToken],
+    title: str,
+    body: str,
+    db: Session,
+    data: dict | None = None,
+    *,
+    sound: str | None = None,
+):
     if not tokens:
         return
     bearer = _apns_jwt()
@@ -180,7 +222,7 @@ def _send_apns_push(tokens: list[NativePushToken], title: str, body: str, db: Se
     payload = {
         "aps": {
             "alert": {"title": title, "body": body},
-            "sound": APNS_ALERT_SOUND,
+            "sound": resolve_push_sound(None, sound),
             "badge": 1,
         },
         "cal": data or {},

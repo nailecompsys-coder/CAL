@@ -126,6 +126,8 @@ class Surgeon(Base):
     color = Column(String(16), default="#ffffff", server_default="#ffffff")  # reserved; calendar uses facility colors only
     sort_order = Column(Integer, default=0, server_default="0")
     can_call_builder = Column(Boolean, default=False, server_default="false", nullable=False)
+    # Native APNs/Expo custom sound filename in the iOS app bundle (e.g. bagpipes.wav). Null = default.
+    push_sound = Column(String(64), nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
 

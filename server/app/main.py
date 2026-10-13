@@ -36,6 +36,7 @@ from .routers import (
 )
 from . import migrate_call_groups
 from . import migrate_call_builder
+from . import migrate_push_sound
 from . import migrate_grok_bot_rules
 
 
@@ -79,6 +80,7 @@ async def lifespan(app: FastAPI):
         migrate_normalized_schedule_activity.run_migration()
         migrate_grok_bot_rules.run_migration()
         migrate_call_builder.run_migration()
+        migrate_push_sound.run_migration()
         db = SessionLocal()
         try:
             from .schedule_activity_normalization import backfill_normalized_schedule_activity

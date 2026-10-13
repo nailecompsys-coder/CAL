@@ -236,16 +236,6 @@
   #surgeon-flyover td:first-child { width: 52%; text-align: left; }
   #surgeon-flyover th:not(:first-child),
   #surgeon-flyover td:not(:first-child) { width: 16%; text-align: center; }
-  #fly-worked {
-    margin: 0.15rem 0 0;
-    font-size: 8px;
-    color: #64748b;
-    line-height: 1.2;
-    overflow: hidden;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-  }
 </style>
 <script>document.querySelector('main')?.classList.add('cb-viewport-lock');</script>
 
@@ -335,7 +325,6 @@
         </thead>
         <tbody id="fly-holiday-body"></tbody>
       </table>
-      <p id="fly-worked"></p>
     </div>
     <div class="flex-shrink-0 flex gap-1">
       <button type="button" onclick="openPublish()" class="flex-1 bg-blue-600 text-white text-[11px] font-medium py-1.5 rounded-lg hover:bg-blue-700">
@@ -466,10 +455,8 @@ function showFlyover(el) {
     (el.dataset.month || '0') + '/' + (el.dataset.monthWknd || '0');
   let years = [2025, 2026, 2027];
   let grid = [];
-  let worked = [];
   try { years = JSON.parse(el.dataset.holidayYears || '[2025,2026,2027]'); } catch (_) {}
   try { grid = JSON.parse(el.dataset.holidayGrid || '[]'); } catch (_) {}
-  try { worked = JSON.parse(el.dataset.holidaysWorked || '[]'); } catch (_) {}
   years.forEach((y, i) => {
     const th = document.getElementById('fly-y' + i);
     if (th) th.textContent = String(y).slice(-2);
@@ -493,9 +480,6 @@ function showFlyover(el) {
     });
     body.appendChild(tr);
   });
-  const workedEl = document.getElementById('fly-worked');
-  workedEl.textContent = worked.length ? worked.join(' · ') : 'None credited 25–27.';
-  workedEl.title = workedEl.textContent;
   box.classList.remove('hidden');
 }
 function pickSurgeon(el, opts) {
@@ -523,8 +507,10 @@ document.querySelectorAll('.roster-tile').forEach(el => {
   el.addEventListener('dragstart', e => {
     e.dataTransfer.setData('text/plain', el.dataset.surgeonId);
     penId = el.dataset.surgeonId;
+    persistPen(penId);
   });
 });
+restorePen();
 
 async function place(date, groupId, surgeonId, initials) {
   const body = { date, callGroupId: groupId };

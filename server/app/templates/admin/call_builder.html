@@ -328,7 +328,7 @@
     </div>
     <div class="flex-shrink-0 flex gap-1">
       <button type="button" onclick="openPublish()" class="flex-1 bg-blue-600 text-white text-[11px] font-medium py-1.5 rounded-lg hover:bg-blue-700">
-        Publish {{ change_count }}…
+        Publish
       </button>
       <form method="post" action="/admin/call-builder/clear-month" class="flex-1" onsubmit="return confirm('Clear every draft cell for {{ month_label }}? Live Call Schedule is not changed.')">
         <input type="hidden" name="month_offset" value="{{ month_offset }}" />

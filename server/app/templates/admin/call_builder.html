@@ -49,13 +49,9 @@
            data-hol-count="{{ h.holidayCount }}"
            data-last-hol="{{ h.lastHoliday or '—' }}"
            data-holidays="{{ h.holidayNames|join(', ') if h.holidayNames else 'none' }}"
-           data-leave-line="{{ h.leaveLine or '' }}"
            onclick="pickSurgeon(this)" title="{{ h.firstName }} {{ h.lastName }}">
         <div class="flex items-baseline justify-between gap-1.5 leading-tight">
           <span class="text-[13px] font-semibold text-slate-800 truncate">{{ h.initials }} · {{ h.lastName }}</span>
-          {% if h.leaveLine %}
-          <span class="text-[9px] font-bold text-amber-800 truncate flex-shrink-0">{{ h.leaveLine }}</span>
-          {% endif %}
         </div>
         <p class="text-[10px] font-semibold tabular-nums text-slate-600 tracking-tight leading-tight">{{ h.loadLine }}</p>
       </div>

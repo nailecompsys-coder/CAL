@@ -342,6 +342,8 @@ struct ScheduleDateStepper: View {
     .padding(.horizontal, 8)
     .padding(.vertical, 6)
     .liquidGlassCard(cornerRadius: 16, tint: ClinicalPalette.cardStrong)
+    // Keep the glass shadow from painting over the first week/month row below.
+    .compositingGroup()
   }
 }
 

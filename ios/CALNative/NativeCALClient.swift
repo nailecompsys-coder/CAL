@@ -640,7 +640,8 @@ struct NativeCALClient {
     let formatter = DateFormatter()
     formatter.calendar = Calendar(identifier: .gregorian)
     formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    // Match NativeDayResponse parsing: calendar dates are local civil days, not UTC.
+    formatter.timeZone = Calendar.current.timeZone
     formatter.dateFormat = "yyyy-MM-dd"
     return formatter
   }()

@@ -40,6 +40,10 @@ final class NativeScheduleStore: ObservableObject {
   @Published private(set) var authMessage: String?
   @Published private(set) var authMessageIsError = false
 
+  /// Last Calendar focus — foreground refresh must reload this, not a fresh 30-day cliff from today.
+  private var focusDate: Date = Date()
+  private var focusScope: ScheduleScope = .day
+
   var canSwitchModes: Bool {
     availableRoles.contains(.surgeon) && availableRoles.contains(.scheduler)
   }
@@ -177,6 +181,8 @@ final class NativeScheduleStore: ObservableObject {
       clearScheduleForMissingSession()
       return
     }
+    focusDate = date
+    focusScope = scope
     await loadSnapshot {
       try await loader.load(token: token, containing: date, scope: scope)
     }
@@ -187,8 +193,19 @@ final class NativeScheduleStore: ObservableObject {
       clearScheduleForMissingSession()
       return
     }
+    focusDate = date
+    focusScope = .day
     await loadSnapshot {
       try await loader.loadLookahead(token: token, containing: date, daysAhead: daysAhead)
+    }
+  }
+
+  /// Foreground / pull-to-refresh: keep Week/Month Call for the on-screen range.
+  func reloadFocusedSchedule() async {
+    if focusScope == .day {
+      await loadLookahead(containing: focusDate)
+    } else {
+      await load(containing: focusDate, scope: focusScope)
     }
   }
 
@@ -358,7 +375,7 @@ final class NativeScheduleStore: ObservableObject {
         schedulerSchedule = []
         schedulerChanges = []
         selectedSchedulerDetail = nil
-        await loadLookahead(containing: Date(), daysAhead: 30)
+        await loadLookahead(containing: Date())
       }
     } catch {
       authMessage = error.localizedDescription
@@ -580,7 +597,7 @@ final class NativeScheduleStore: ObservableObject {
           createdAt: $0.createdAt
         ) }
       )
-      await loadLookahead(containing: Date(), daysAhead: 30)
+      await reloadFocusedSchedule()
     } catch {
       authMessage = error.localizedDescription
     }

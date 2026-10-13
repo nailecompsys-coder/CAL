@@ -1,6 +1,6 @@
 """Native on-call coverage serialization helpers."""
 
-from .models import CallCoverage, CallRotation
+from .models import CallCoverage, CallDraftAssignment, CallRotation
 from .surgeon_visibility import surgeon_is_visible
 
 
@@ -9,6 +9,35 @@ def active_coverage_for_rotation(rotation: CallRotation) -> CallCoverage | None:
         if coverage.status == "active" and surgeon_is_visible(coverage.covering_surgeon):
             return coverage
     return None
+
+
+def serialize_draft_call_assignment(draft: CallDraftAssignment, viewer_id: int) -> dict:
+    """Calendar Call chip for a Call Builder draft cell (not yet published)."""
+    group = draft.call_group
+    surgeon = draft.surgeon if draft.surgeon_id and surgeon_is_visible(draft.surgeon) else None
+    return {
+        "rotationId": None,
+        "groupId": draft.call_group_id,
+        "group": group.name if group else "Call",
+        "surgeon": surgeon.full_name if surgeon else "No call",
+        "surgeonId": surgeon.id if surgeon else None,
+        "initials": surgeon.initials if surgeon else "NC",
+        "isSelf": bool(surgeon and surgeon.id == viewer_id),
+        "originalSurgeon": surgeon.full_name if surgeon else "No call",
+        "originalSurgeonId": surgeon.id if surgeon else None,
+        "originalInitials": surgeon.initials if surgeon else "NC",
+        "coveringSurgeon": None,
+        "coveringSurgeonId": None,
+        "coveringInitials": None,
+        "isCovered": False,
+        "coverageId": None,
+        "backupSurgeon": None,
+        "backupSurgeonId": None,
+        "isBackup": False,
+        "backupInitials": None,
+        "backupNote": None,
+        "source": "draft",
+    }
 
 
 def serialize_call_assignment(rotation: CallRotation, viewer_id: int) -> dict:
@@ -40,4 +69,5 @@ def serialize_call_assignment(rotation: CallRotation, viewer_id: int) -> dict:
         "isBackup": bool(backup and backup.id == viewer_id),
         "backupInitials": backup.initials if backup else None,
         "backupNote": rotation.backup.note if backup else None,
+        "source": "live",
     }

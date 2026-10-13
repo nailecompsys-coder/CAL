@@ -593,5 +593,8 @@ struct DateRange {
 
 func dateKey(_ date: Date) -> String {
   let components = Calendar.current.dateComponents([.year, .month, .day], from: date)
-  return "\(components.year ?? 0)-\(components.month ?? 0)-\(components.day ?? 0)"
+  let year = components.year ?? 0
+  let month = components.month ?? 0
+  let day = components.day ?? 0
+  return String(format: "%04d-%02d-%02d", year, month, day)
 }

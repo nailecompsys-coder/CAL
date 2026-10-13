@@ -394,7 +394,8 @@ struct NativeOffSurgeonResponse: Decodable {
 }
 
 struct NativeCallAssignmentResponse: Decodable {
-  let rotationId: Int
+  /// Nil when the chip is a Call Builder draft (not yet published to call_rotations).
+  let rotationId: Int?
   let surgeonId: Int?
   let group: String
   let surgeon: String
@@ -412,8 +413,9 @@ struct NativeCallAssignmentResponse: Decodable {
 
   func scheduleAssignment(dateKey: String) -> ScheduleAssignment {
     let displayedInitials = coveringInitials ?? initials ?? surgeonInitials(from: surgeon)
+    let chipId = rotationId.map(String.init) ?? "draft-\(group)-\(displayedInitials)"
     return ScheduleAssignment(
-      id: "\(dateKey)-\(rotationId)",
+      id: "\(dateKey)-\(chipId)",
       rotationId: rotationId,
       coverageId: coverageId,
       location: group,

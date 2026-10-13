@@ -26,7 +26,8 @@ struct CALNativeRootView: View {
         if store.sessionRole == .scheduler {
           await store.loadScheduler(containing: Date())
         } else {
-          await store.loadLookahead(containing: Date(), daysAhead: 30)
+          // Do not replace Month/Week with a 30-day window from today (Call looked truncated).
+          await store.reloadFocusedSchedule()
         }
       }
     }
@@ -368,6 +369,7 @@ struct ScheduleHomeView: View {
   private func loadCurrentScope(containing date: Date? = nil) async {
     let targetDate = date ?? selectedDate
     if scope == .day {
+      // Month-aligned window (this month + next), not today→+30.
       await store.loadLookahead(containing: targetDate)
     } else {
       await store.load(containing: targetDate, scope: scope)

@@ -5,8 +5,17 @@ from datetime import date, timedelta
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session, joinedload
 
-from .models import CallBackup, CallCoverage, CallRotation, DayOff, NativeScheduleAlert, Surgeon
-from .native_support import date_label, serialize_call_assignment, serialize_native_alert
+from .models import (
+    CallBackup,
+    CallCoverage,
+    CallDraftAssignment,
+    CallRotation,
+    DayOff,
+    NativeScheduleAlert,
+    Surgeon,
+)
+from .native_call_support import serialize_call_assignment, serialize_draft_call_assignment
+from .native_support import date_label, serialize_native_alert
 from .surgeon_visibility import surgeon_is_visible
 
 
@@ -17,6 +26,11 @@ def build_native_call_schedule(
     end_date: date,
     days_by_date: dict[str, dict],
 ) -> list[dict]:
+    """Practice Call for the requested range: live rotations, with Call Builder drafts on top.
+
+    Draft cells are what CJ has built but not Published yet. Calendar must show them
+    for any month in range — including years ahead — not only near-term live rows.
+    """
     rotations = db.query(CallRotation).options(
         joinedload(CallRotation.surgeon),
         joinedload(CallRotation.call_group),
@@ -27,12 +41,40 @@ def build_native_call_schedule(
         CallRotation.date <= end_date,
     ).order_by(CallRotation.date, CallRotation.call_group_id, CallRotation.id).all()
 
-    call_by_date: dict[str, list[dict]] = defaultdict(list)
+    drafts = db.query(CallDraftAssignment).options(
+        joinedload(CallDraftAssignment.surgeon),
+        joinedload(CallDraftAssignment.call_group),
+    ).filter(
+        CallDraftAssignment.date >= start_date,
+        CallDraftAssignment.date <= end_date,
+    ).order_by(CallDraftAssignment.date, CallDraftAssignment.call_group_id).all()
+
+    live_by_cell: dict[tuple[date, int | None], CallRotation] = {}
     for rotation in rotations:
-        if rotation.surgeon and not surgeon_is_visible(rotation.surgeon):
-            continue
-        assignment = serialize_call_assignment(rotation, viewer.id)
-        key = rotation.date.isoformat()
+        live_by_cell[(rotation.date, rotation.call_group_id)] = rotation
+
+    draft_by_cell: dict[tuple[date, int], CallDraftAssignment] = {
+        (row.date, row.call_group_id): row for row in drafts
+    }
+
+    cell_keys = sorted(
+        set(live_by_cell.keys()) | {(day, group_id) for day, group_id in draft_by_cell},
+        key=lambda item: (item[0], item[1] is None, item[1] or 0),
+    )
+
+    call_by_date: dict[str, list[dict]] = defaultdict(list)
+    for day, group_id in cell_keys:
+        draft = draft_by_cell.get((day, group_id)) if group_id is not None else None
+        if draft is not None:
+            if draft.surgeon and not surgeon_is_visible(draft.surgeon):
+                continue
+            assignment = serialize_draft_call_assignment(draft, viewer.id)
+        else:
+            rotation = live_by_cell[(day, group_id)]
+            if rotation.surgeon and not surgeon_is_visible(rotation.surgeon):
+                continue
+            assignment = serialize_call_assignment(rotation, viewer.id)
+        key = day.isoformat()
         call_by_date[key].append(assignment)
         if key in days_by_date:
             days_by_date[key]["callAssignments"].append(assignment)

@@ -2,6 +2,8 @@
 
 Last updated: 2026-10-13
 
+Calendar Call range + draft overlay (2026-10-13, not in TestFlight yet): `GET /api/native/home` returns Call for the exact requested `start`/`end` (up to 3 years). Practice Call chips are live `call_rotations` with Call Builder `call_draft_assignments` overlaid — so months CJ has built but not Published (e.g. Dec 2026+) show on Calendar Month/Week/Day. Draft chips have `rotationId: null` (cover disabled until Publish). Week Call/ALT initials stay single-line and scale with width; Off drops under Call via `ViewThatFits` on narrow phones. Foreground refresh reloads the focused Week/Month, not a today→+30 cliff.
+
 Call Builder phone month grid (2026-10-13, TestFlight 2.0 (25)): title menu shows **Call Builder** only when portal Phone is checked for that surgeon (`canCallBuilder`). Phone UI is a read-only month calendar (WG/ALT site-colored initials, holiday Apple emoji including Halloween pumpkin). Edits and Publish stay on the portal; draft cells still use `call_draft_assignments` until Publish writes `call_rotations`. Roster Phone checkboxes are for Chris/Amy/admins. Selected roster tile uses an inset outline (no outer ring bleed).
 
 Call Builder + blue chrome (2026-10-07): portal + shared draft/history APIs. App accent/mint/scrub/page and login wash retinted from green/teal to Clinical Trust blue (`#0066CC` family). `GET /api/native/home` includes `canCallBuilder`. Surgeon cards share one load line: `YTD calls/wknd · month calls/wknd · holidayCount/lastAbbrev`.

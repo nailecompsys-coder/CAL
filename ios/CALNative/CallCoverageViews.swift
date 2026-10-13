@@ -8,6 +8,8 @@ struct StruckInitialsText: View {
     Text(text)
       .font(font)
       .foregroundStyle(.red)
+      .lineLimit(1)
+      .minimumScaleFactor(0.7)
       .overlay(alignment: .center) {
         Rectangle()
           .fill(.red)

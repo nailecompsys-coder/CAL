@@ -42,22 +42,12 @@ struct CompactWeekDayCard: View {
       .frame(minWidth: 36)
 
       VStack(alignment: .leading, spacing: 6) {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-          WeekCallLine(assignments: Array(day.assignments.prefix(3)), action: coverAction)
-          if !day.meetings.isEmpty {
-            Image(systemName: "person.2.fill")
-              .font(.caption)
-              .foregroundStyle(ClinicalPalette.meetingStrong)
-          }
-          Spacer(minLength: 8)
-          if !day.off.isEmpty {
-            Text("Off  " + day.off.prefix(4).joined(separator: " "))
-              .font(.caption)
-              .foregroundStyle(.secondary)
-              .lineLimit(1)
-              .minimumScaleFactor(0.8)
-          }
-        }
+        WeekCallOffRow(
+          assignments: Array(day.assignments.prefix(3)),
+          offInitials: Array(day.off.prefix(4)),
+          showsMeeting: !day.meetings.isEmpty,
+          coverAction: coverAction
+        )
 
         ForEach(["AM", "PM"], id: \.self) { period in
           let periodGroups = groups.filter { $0.period == period }
@@ -85,18 +75,89 @@ struct CompactWeekDayCard: View {
   }
 }
 
+/// Call + Off share one row when width allows; Off drops under Call on narrow phones.
+private struct WeekCallOffRow: View {
+  let assignments: [ScheduleAssignment]
+  let offInitials: [String]
+  let showsMeeting: Bool
+  let coverAction: (ScheduleAssignment) -> Void
+
+  var body: some View {
+    if #available(iOS 16.0, *) {
+      ViewThatFits(in: .horizontal) {
+        sideBySideRow
+        stackedRow
+      }
+    } else {
+      // Narrow phones: keep Call intact; Off on the next line.
+      stackedRow
+    }
+  }
+
+  private var sideBySideRow: some View {
+    HStack(alignment: .firstTextBaseline, spacing: 8) {
+      WeekCallLine(assignments: assignments, action: coverAction)
+      if showsMeeting {
+        meetingMark
+      }
+      Spacer(minLength: 8)
+      if !offInitials.isEmpty {
+        WeekOffLine(initials: offInitials)
+      }
+    }
+  }
+
+  private var stackedRow: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      HStack(alignment: .firstTextBaseline, spacing: 8) {
+        WeekCallLine(assignments: assignments, action: coverAction)
+        if showsMeeting {
+          meetingMark
+        }
+        Spacer(minLength: 0)
+      }
+      if !offInitials.isEmpty {
+        WeekOffLine(initials: offInitials)
+      }
+    }
+  }
+
+  private var meetingMark: some View {
+    Image(systemName: "person.2.fill")
+      .font(.caption)
+      .foregroundStyle(ClinicalPalette.meetingStrong)
+  }
+}
+
+private struct WeekOffLine: View {
+  let initials: [String]
+
+  var body: some View {
+    Text("Off  " + initials.joined(separator: " "))
+      .font(.caption)
+      .foregroundStyle(.secondary)
+      .lineLimit(1)
+      .minimumScaleFactor(0.7)
+  }
+}
+
 /// "Call  WG LW  ALT JD" — each surgeon still opens the cover sheet.
 private struct WeekCallLine: View {
   let assignments: [ScheduleAssignment]
   let action: (ScheduleAssignment) -> Void
 
   var body: some View {
-    HStack(spacing: 8) {
+    HStack(spacing: 6) {
       Text("Call")
         .font(.caption.weight(.semibold))
         .foregroundStyle(ClinicalPalette.teal)
+        .lineLimit(1)
+        .layoutPriority(1)
       if assignments.isEmpty {
-        Text("—").font(.caption).foregroundStyle(.secondary)
+        Text("—")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
       } else {
         ForEach(assignments) { assignment in
           Button {
@@ -106,14 +167,19 @@ private struct WeekCallLine: View {
               Text(assignment.locationShort.replacingOccurrences(of: " Group", with: ""))
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
               SmallCoverageInitialsView(assignment: assignment)
             }
           }
           .buttonStyle(.plain)
           .disabled(assignment.rotationId == nil)
+          .layoutPriority(1)
         }
       }
     }
+    .lineLimit(1)
+    .minimumScaleFactor(0.7)
   }
 }
 
@@ -151,6 +217,8 @@ private struct SmallCoverageInitialsView: View {
         Text("Backup")
           .font(.caption2.weight(.semibold))
           .foregroundStyle(ClinicalPalette.teal)
+          .lineLimit(1)
+          .minimumScaleFactor(0.7)
       }
     }
   }
@@ -165,7 +233,11 @@ private struct SmallCoverageInitialsView: View {
         Text(assignment.coveringInitials ?? assignment.surgeon)
           .font(ClinicalTypography.monoChip)
           .foregroundStyle(.primary)
+          .lineLimit(1)
+          .minimumScaleFactor(0.7)
       }
+      .lineLimit(1)
+      .minimumScaleFactor(0.7)
       .padding(.horizontal, 3)
       .padding(.vertical, 1)
       .background(ClinicalPalette.teal.opacity(0.08), in: Capsule())
@@ -173,6 +245,8 @@ private struct SmallCoverageInitialsView: View {
       Text(assignment.surgeon)
         .font(ClinicalTypography.monoChip)
         .foregroundStyle(.primary)
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
         .padding(.horizontal, 4)
         .padding(.vertical, 1)
         .background(ClinicalPalette.teal.opacity(0.08), in: Capsule())

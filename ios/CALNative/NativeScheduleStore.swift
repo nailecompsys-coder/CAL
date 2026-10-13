@@ -28,7 +28,8 @@ final class NativeScheduleStore: ObservableObject {
 
   /// Call Builder in the title menu: access flag, or Johnson support preview for demos.
   var showsCallBuilder: Bool {
-    canCallBuilder || isSupportPreview
+    // Phone Call Builder appears only when portal Phone checkbox is on for this surgeon.
+    canCallBuilder
   }
   @Published private(set) var schedulerBlocks: [NativeSchedulerBlock] = []
   @Published private(set) var schedulerSchedule: [NativeSchedulerScheduleRow] = []

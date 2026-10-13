@@ -2,7 +2,7 @@ import SwiftUI
 
 struct CALNativeTabShell: View {
   @ObservedObject var store: NativeScheduleStore
-  @State private var selectedSection: CALNativeSection = .schedule
+  @State private var selectedSection: CALNativeSection = Self.launchSection()
   @State private var sharedFocusDate = Date()
 
   var body: some View {
@@ -21,6 +21,20 @@ struct CALNativeTabShell: View {
       }
     }
     .tint(ClinicalPalette.teal)
+  }
+
+  /// Simulator-only: `--cal-section=Call Builder` opens that title-menu section on launch.
+  private static func launchSection() -> CALNativeSection {
+    #if targetEnvironment(simulator)
+    if let arg = CommandLine.arguments.first(where: { $0.hasPrefix("--cal-section=") }) {
+      let raw = String(arg.dropFirst("--cal-section=".count))
+        .replacingOccurrences(of: "+", with: " ")
+      if let section = CALNativeSection(rawValue: raw) {
+        return section
+      }
+    }
+    #endif
+    return .schedule
   }
 }
 

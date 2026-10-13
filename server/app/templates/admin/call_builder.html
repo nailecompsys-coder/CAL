@@ -21,7 +21,7 @@
     flex: 1 1 0;
     min-height: 0;
     display: grid;
-    grid-template-columns: minmax(0, 11.75rem) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 13rem) minmax(0, 1fr);
     gap: 0.4rem;
     padding: 0.4rem 0.65rem;
     overflow: hidden;
@@ -233,9 +233,9 @@
     white-space: nowrap;
   }
   #surgeon-flyover th:first-child,
-  #surgeon-flyover td:first-child { width: 42%; text-align: left; }
+  #surgeon-flyover td:first-child { width: 52%; text-align: left; }
   #surgeon-flyover th:not(:first-child),
-  #surgeon-flyover td:not(:first-child) { width: 19.333%; text-align: center; }
+  #surgeon-flyover td:not(:first-child) { width: 16%; text-align: center; }
   #fly-worked {
     margin: 0.15rem 0 0;
     font-size: 8px;
@@ -427,26 +427,34 @@
 {% block scripts %}
 <script>
 const MONTH_OFFSET = {{ month_offset }};
+const PEN_KEY = 'cal_call_builder_pen';
 const HOL_SHORT = {
-  'Memorial Day': 'Mem',
-  'July 4th': 'Jul4',
-  'Labor Day': 'Lab',
-  'Thanksgiving': 'TG',
-  'Christmas Eve': 'XE',
+  'Memorial Day': 'Mem Day',
+  'July 4th': 'July 4th',
+  'Labor Day': 'Labor Day',
+  'Thanksgiving': 'Thanks',
+  'Christmas Eve': 'Xmas Eve',
   'Christmas': 'Xmas',
-  "New Year's Eve": 'NYE',
-  "New Year's Day": 'NY',
-  "New Year's": 'NY',
+  "New Year's Eve": 'New Years Eve',
+  "New Year's Day": 'New Years',
+  "New Year's": 'New Years',
 };
 let penId = null;
 let editingSlot = null;
 let savingEdit = false;
 let skipBlurCommit = false;
 
+function persistPen(id) {
+  try {
+    if (id) sessionStorage.setItem(PEN_KEY, String(id));
+    else sessionStorage.removeItem(PEN_KEY);
+  } catch (_) {}
+}
 function closeFlyover() {
   document.getElementById('surgeon-flyover').classList.add('hidden');
   document.querySelectorAll('.roster-tile').forEach(t => t.classList.remove('ring-2', 'ring-blue-500'));
   penId = null;
+  persistPen(null);
 }
 function showFlyover(el) {
   const box = document.getElementById('surgeon-flyover');
@@ -474,7 +482,7 @@ function showFlyover(el) {
     const nameTd = document.createElement('td');
     nameTd.className = 'text-slate-600';
     const raw = row.name || '';
-    nameTd.textContent = HOL_SHORT[raw] || raw.slice(0, 4);
+    nameTd.textContent = HOL_SHORT[raw] || raw;
     nameTd.title = raw;
     tr.appendChild(nameTd);
     (row.cells || []).forEach(cell => {
@@ -490,18 +498,26 @@ function showFlyover(el) {
   workedEl.title = workedEl.textContent;
   box.classList.remove('hidden');
 }
-function pickSurgeon(el) {
+function pickSurgeon(el, opts) {
+  const keepToggle = !(opts && opts.forceOpen);
   blurActiveField();
   document.querySelectorAll('.roster-tile').forEach(t => t.classList.remove('ring-2', 'ring-blue-500'));
-  if (penId === el.dataset.surgeonId) {
-    penId = null;
+  if (keepToggle && penId === el.dataset.surgeonId) {
     closeFlyover();
     return;
   }
   penId = el.dataset.surgeonId;
+  persistPen(penId);
   el.classList.add('ring-2', 'ring-blue-500');
   el.scrollIntoView({ block: 'nearest' });
   showFlyover(el);
+}
+function restorePen() {
+  let saved = null;
+  try { saved = sessionStorage.getItem(PEN_KEY); } catch (_) {}
+  if (!saved) return;
+  const tile = document.querySelector('.roster-tile[data-surgeon-id="' + saved + '"]');
+  if (tile) pickSurgeon(tile, { forceOpen: true });
 }
 document.querySelectorAll('.roster-tile').forEach(el => {
   el.addEventListener('dragstart', e => {

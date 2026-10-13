@@ -291,8 +291,22 @@
            data-holiday-years='{{ h.holidayYears|default([2025,2026,2027])|tojson }}'
            data-holidays-worked='{{ h.holidaysWorked|default([])|tojson }}'
            onclick="pickSurgeon(this)" title="{{ h.firstName }} {{ h.lastName }}">
-        <div class="flex items-baseline justify-between gap-1 leading-tight">
+        <div class="flex items-center justify-between gap-1 leading-tight">
           <span class="text-[12px] font-normal text-slate-800 truncate">{{ h.initials }} · {{ h.lastName }}</span>
+          {% if show_phone_access %}
+          <label class="cb-phone-access flex items-center gap-0.5 flex-shrink-0 cursor-pointer"
+                 title="Show Call Builder on this surgeon's iPhone"
+                 onclick="event.stopPropagation()"
+                 onmousedown="event.stopPropagation()">
+            <input type="checkbox"
+                   class="cb-phone-check rounded border-slate-300"
+                   data-surgeon-id="{{ h.surgeonId }}"
+                   {% if h.canCallBuilder %}checked{% endif %}
+                   onchange="togglePhoneAccess(this)"
+                   onclick="event.stopPropagation()" />
+            <span class="text-[8px] font-bold uppercase tracking-wide text-slate-500">Phone</span>
+          </label>
+          {% endif %}
         </div>
         <p class="text-[9px] font-semibold tabular-nums text-slate-600 tracking-tight leading-tight">
           <span>{{ h.callCount }}/{{ h.weekendCount }}</span>
@@ -438,6 +452,32 @@ function persistPen(id) {
     if (id) sessionStorage.setItem(PEN_KEY, String(id));
     else sessionStorage.removeItem(PEN_KEY);
   } catch (_) {}
+}
+async function togglePhoneAccess(input) {
+  const surgeonId = parseInt(input.dataset.surgeonId, 10);
+  const enabled = !!input.checked;
+  input.disabled = true;
+  try {
+    const res = await fetch('/admin/call-builder/phone-access', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ surgeonId, enabled }),
+    });
+    if (!res.ok) {
+      input.checked = !enabled;
+      let msg = 'Could not update phone access';
+      try {
+        const err = await res.json();
+        if (err && err.detail) msg = typeof err.detail === 'string' ? err.detail : msg;
+      } catch (_) {}
+      alert(msg);
+    }
+  } catch (_) {
+    input.checked = !enabled;
+    alert('Could not update phone access');
+  } finally {
+    input.disabled = false;
+  }
 }
 function closeFlyover() {
   document.getElementById('surgeon-flyover').classList.add('hidden');

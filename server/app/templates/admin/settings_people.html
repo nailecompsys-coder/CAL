@@ -263,15 +263,6 @@
         </select>
       </div>
 
-      <div class="rounded-xl border border-teal-200 bg-teal-50/50 px-3 py-3 space-y-1.5">
-        <p class="text-[11px] font-semibold text-teal-900 uppercase tracking-wide">Call Builder</p>
-        <label class="flex items-center gap-2 text-sm text-slate-800 font-medium">
-          <input type="checkbox" name="can_call_builder" id="add-can-call-builder" value="1" class="rounded border-slate-300">
-          Allow Call Builder access
-        </label>
-        <p class="text-[11px] text-slate-500">View on the phone; edit drafts and Publish in the portal.</p>
-      </div>
-
       <div class="grid grid-cols-2 gap-3">
         <div>
           <label class="block text-xs font-medium text-slate-600 mb-1">First name *</label>
@@ -362,15 +353,6 @@
         <p id="edit-cross-type-hint" class="text-[11px] text-amber-700 mt-1.5 hidden">
           Changing between mobile (Surgeon/PA) and portal (Scheduler/Admin) deactivates the current account and creates a new one.
         </p>
-      </div>
-
-      <div class="rounded-xl border border-teal-200 bg-teal-50/50 px-3 py-3 space-y-1.5">
-        <p class="text-[11px] font-semibold text-teal-900 uppercase tracking-wide">Call Builder</p>
-        <label class="flex items-center gap-2 text-sm text-slate-800 font-medium">
-          <input type="checkbox" name="can_call_builder" id="edit-can-call-builder" value="1" class="rounded border-slate-300">
-          Allow Call Builder access
-        </label>
-        <p class="text-[11px] text-slate-500">View on the phone; edit drafts and Publish in the portal.</p>
       </div>
 
       <div class="grid grid-cols-2 gap-3">
@@ -595,7 +577,6 @@ function openEditUser(btn) {
   document.getElementById('edit-notify-day-off').checked = btn.dataset.notifyDayOff !== '0';
   document.getElementById('edit-notify-schedule').checked = btn.dataset.notifySchedule !== '0';
   document.getElementById('edit-sms-fallback').checked = btn.dataset.smsFallback === '1';
-  document.getElementById('edit-can-call-builder').checked = btn.dataset.canCallBuilder === '1';
   // Clinical rows have no alert flags — default portal extras on when switching later.
   if (kind === 'clinical') {
     document.getElementById('edit-notify-day-off').checked = true;

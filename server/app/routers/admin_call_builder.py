@@ -8,13 +8,16 @@ from sqlalchemy.orm import Session
 
 from ..auth import get_current_admin
 from ..call_builder_service import (
+    admin_can_manage_phone_access,
     clear_draft,
     clear_draft_month,
     page_data,
     publish_changes,
     publish_draft,
     require_admin_call_builder,
+    require_admin_phone_access_manager,
     resolve_surgeon_id_by_initials,
+    set_surgeon_phone_access,
     upsert_draft,
 )
 from ..database import get_db
@@ -39,10 +42,30 @@ def call_builder_page(
 ):
     require_admin_call_builder(admin)
     data = page_data(db, month_offset)
+    data["show_phone_access"] = admin_can_manage_phone_access(admin)
     return templates.TemplateResponse(
         "admin/call_builder.html",
         _base(request, admin, db=db, **data),
     )
+
+
+@router.post("/call-builder/phone-access")
+async def call_builder_phone_access(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    """Toggle iPhone Call Builder for a physician from the roster card checkbox."""
+    require_admin_phone_access_manager(admin)
+    body = await request.json()
+    surgeon_id = int(body["surgeonId"])
+    enabled = bool(body.get("enabled"))
+    surgeon = set_surgeon_phone_access(db, surgeon_id=surgeon_id, enabled=enabled, admin=admin)
+    return JSONResponse({
+        "ok": True,
+        "surgeonId": surgeon.id,
+        "canCallBuilder": bool(surgeon.can_call_builder),
+    })
 
 
 @router.post("/call-builder/place")

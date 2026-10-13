@@ -372,7 +372,7 @@ def add_people_user(
             phone_clean,
             sort_order,
             lambda: _next_physician_sort_order(db),
-            can_call_builder == "1",
+            False,  # phone Call Builder toggled on Call Builder roster
         )
         add_surgeon_service(db, fields)
         filt = "pas" if staff_type == "staff" else "surgeons"
@@ -398,7 +398,7 @@ def add_people_user(
             notify_day_off_requests == "1",
             notify_schedule_changes == "1",
             sms_fallback_enabled == "1",
-            can_call_builder == "1",
+            False,  # phone Call Builder toggled on Call Builder roster
         )
         return _users_portal_redirect(role, msg)
 
@@ -549,7 +549,6 @@ def edit_people_user(
     notify_day = notify_day_off_requests == "1"
     notify_sched = notify_schedule_changes == "1"
     sms_fb = sms_fallback_enabled == "1"
-    call_builder = can_call_builder == "1"
 
     # Same-table updates
     if kind == "clinical" and clinical_target:
@@ -566,13 +565,16 @@ def edit_people_user(
             phone_clean,
             sort_order,
             lambda: _next_physician_sort_order(db),
-            call_builder,
+            bool(row.can_call_builder),  # preserve; toggled on Call Builder roster
         )
         update_surgeon_service(db, user_id, fields)
         filt = "pas" if staff_type == "staff" else "surgeons"
         return RedirectResponse(f"/admin/settings/people?filter={filt}&msg=updated", status_code=303)
 
     if kind == "portal" and portal_target:
+        row = db.get(AdminUser, user_id)
+        if not row:
+            return RedirectResponse("/admin/settings/people?msg=user_not_found", status_code=303)
         role = _portal_role()
         msg = edit_admin_user_service(
             db,
@@ -587,7 +589,7 @@ def edit_people_user(
             notify_day,
             notify_sched,
             sms_fb,
-            call_builder,
+            bool(row.can_call_builder),  # preserve; portal access via role / seed
         )
         return _users_portal_redirect(role, msg if msg != "user_edited" else "updated")
 

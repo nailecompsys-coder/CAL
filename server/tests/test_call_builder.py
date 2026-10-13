@@ -12,6 +12,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.call_builder_service import (
     _history_statement,
+    admin_can_manage_phone_access,
     attach_holiday_grids,
     attach_leave_to_history,
     call_history,
@@ -24,7 +25,9 @@ from app.call_builder_service import (
     publish_changes,
     publish_draft,
     require_admin_call_builder,
+    require_admin_phone_access_manager,
     resolve_surgeon_id_by_initials,
+    set_surgeon_phone_access,
     upsert_draft,
 )
 from app.models import (
@@ -191,6 +194,27 @@ class CallBuilderTest(unittest.TestCase):
         finally:
             db.close()
 
+
+    def test_phone_access_checkbox_chris_amy_or_admin_only(self):
+        db = self.Session()
+        try:
+            admin, blocked, chris, alex, _, _, _ = self._seed(db)
+            self.assertTrue(admin_can_manage_phone_access(admin))
+            self.assertFalse(admin_can_manage_phone_access(blocked))
+            with self.assertRaises(HTTPException) as ctx:
+                require_admin_phone_access_manager(blocked)
+            self.assertEqual(ctx.exception.status_code, 403)
+
+            self.assertFalse(alex.can_call_builder)
+            set_surgeon_phone_access(db, surgeon_id=alex.id, enabled=True, admin=admin)
+            db.refresh(alex)
+            self.assertTrue(alex.can_call_builder)
+            set_surgeon_phone_access(db, surgeon_id=alex.id, enabled=False, admin=admin)
+            db.refresh(alex)
+            self.assertFalse(alex.can_call_builder)
+            self.assertTrue(chris.can_call_builder)
+        finally:
+            db.close()
 
     def test_surgeon_draft_rejected_phone_is_readonly(self):
         db = self.Session()

@@ -56,8 +56,37 @@ def _history_statement(dialect: str):
     return text(sql)
 
 
+def _is_portal_admin_role(admin: AdminUser | None) -> bool:
+    return bool(admin and (admin.role or "").strip().lower() in ("admin", "superadmin"))
+
+
+def _is_chris_or_amy_admin(admin: AdminUser | None) -> bool:
+    if not admin:
+        return False
+    un = (admin.username or "").strip().lower()
+    if un in ("cjohnson", "amydiehl13"):
+        return True
+    fn = (admin.first_name or "").strip().lower()
+    ln = (admin.last_name or "").strip().lower()
+    if ln == "johnson" and fn in ("chris", "christopher"):
+        return True
+    if ln == "diehl" and fn == "amy":
+        return True
+    return False
+
+
 def admin_can_call_builder(admin: AdminUser | None) -> bool:
-    return bool(admin and getattr(admin, "can_call_builder", False))
+    """Portal Call Builder: flagged accounts, Chris/Amy, or any admin/superadmin."""
+    if not admin:
+        return False
+    if getattr(admin, "can_call_builder", False):
+        return True
+    return _is_portal_admin_role(admin) or _is_chris_or_amy_admin(admin)
+
+
+def admin_can_manage_phone_access(admin: AdminUser | None) -> bool:
+    """Phone-access checkboxes on Call Builder roster: Chris, Amy, or any admin."""
+    return _is_portal_admin_role(admin) or _is_chris_or_amy_admin(admin)
 
 
 def surgeon_can_call_builder(surgeon: Surgeon | None) -> bool:
@@ -69,9 +98,34 @@ def require_admin_call_builder(admin: AdminUser) -> None:
         raise HTTPException(403, "Call Builder is not enabled for this account")
 
 
+def require_admin_phone_access_manager(admin: AdminUser) -> None:
+    if not admin_can_manage_phone_access(admin):
+        raise HTTPException(403, "Only Chris, Amy, or an admin can change phone Call Builder access")
+
+
 def require_surgeon_call_builder(surgeon: Surgeon) -> None:
     if not surgeon_can_call_builder(surgeon):
         raise HTTPException(403, "Call Builder is not enabled for this account")
+
+
+def set_surgeon_phone_access(
+    db: Session,
+    *,
+    surgeon_id: int,
+    enabled: bool,
+    admin: AdminUser,
+) -> Surgeon:
+    """Toggle iPhone Call Builder visibility for one physician (portal roster checkbox)."""
+    require_admin_phone_access_manager(admin)
+    surgeon = db.get(Surgeon, surgeon_id)
+    if not surgeon or not surgeon.is_active:
+        raise HTTPException(404, "Surgeon not found")
+    if (getattr(surgeon, "staff_type", None) or "physician") != "physician":
+        raise HTTPException(400, "Phone Call Builder is for physicians only")
+    surgeon.can_call_builder = bool(enabled)
+    db.commit()
+    db.refresh(surgeon)
+    return surgeon
 
 
 # Compact labels for the roster card third segment (count/abbr).
@@ -698,6 +752,9 @@ def page_data(db: Session, month_offset: int) -> dict:
     leave = leave_flag_map(db, start, end)
     attach_leave_to_history(history, leave)
     attach_holiday_grids(history, holiday_work_lookup(db))
+    for row in history:
+        surg = surgeons.get(int(row["surgeonId"]))
+        row["canCallBuilder"] = bool(surg and getattr(surg, "can_call_builder", False))
     leave_by_date = leave_entries_by_date(db, start, end, surgeons=surgeons)
     leave_groups = leave_groups_by_date(leave_by_date)
     live = published_map(db, start, end)

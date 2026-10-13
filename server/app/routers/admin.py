@@ -73,6 +73,8 @@ def _get_settings(db: Session) -> SiteSettings:
 
 def _base(request: Request, admin: AdminUser, db: Session | None = None, **kwargs):
     """Build base template context. Pass db= so settings is loaded in current session (avoids DetachedInstanceError)."""
+    from ..call_builder_service import admin_can_call_builder
+
     settings = _get_settings(db) if db is not None else _settings_cache
     return {
         "request": request,
@@ -81,6 +83,7 @@ def _base(request: Request, admin: AdminUser, db: Session | None = None, **kwarg
         "settings": settings,
         "app_version": app_version,
         "wasabi_configured": wasabi_backup.is_configured(),
+        "show_call_builder_nav": admin_can_call_builder(admin),
         **kwargs,
     }
 

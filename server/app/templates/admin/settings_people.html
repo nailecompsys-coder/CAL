@@ -263,6 +263,15 @@
         </select>
       </div>
 
+      <div class="rounded-xl border border-teal-200 bg-teal-50/50 px-3 py-3 space-y-1.5">
+        <p class="text-[11px] font-semibold text-teal-900 uppercase tracking-wide">Call Builder</p>
+        <label class="flex items-center gap-2 text-sm text-slate-800 font-medium">
+          <input type="checkbox" name="can_call_builder" id="add-can-call-builder" value="1" class="rounded border-slate-300">
+          Allow Call Builder access
+        </label>
+        <p class="text-[11px] text-slate-500">View on the phone; edit drafts and Publish in the portal.</p>
+      </div>
+
       <div class="grid grid-cols-2 gap-3">
         <div>
           <label class="block text-xs font-medium text-slate-600 mb-1">First name *</label>
@@ -321,11 +330,6 @@
         </div>
       </div>
 
-      <div class="grid gap-2 text-xs text-slate-600">
-        <label class="flex items-center gap-2"><input type="checkbox" name="can_call_builder" id="add-can-call-builder" value="1"> Call Builder</label>
-        <p class="text-[11px] text-slate-400">Lets this person view Call Builder on the phone and edit drafts in the portal. Live Call Schedule changes only when they publish.</p>
-      </div>
-
       <div class="flex gap-2 pt-1">
         <button type="submit" class="flex-1 bg-blue-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700">Add user</button>
         <button type="button" onclick="document.getElementById('add-user-modal').classList.add('hidden')" class="flex-1 bg-slate-100 text-slate-700 py-2.5 rounded-lg text-sm font-medium">Cancel</button>
@@ -358,6 +362,15 @@
         <p id="edit-cross-type-hint" class="text-[11px] text-amber-700 mt-1.5 hidden">
           Changing between mobile (Surgeon/PA) and portal (Scheduler/Admin) deactivates the current account and creates a new one.
         </p>
+      </div>
+
+      <div class="rounded-xl border border-teal-200 bg-teal-50/50 px-3 py-3 space-y-1.5">
+        <p class="text-[11px] font-semibold text-teal-900 uppercase tracking-wide">Call Builder</p>
+        <label class="flex items-center gap-2 text-sm text-slate-800 font-medium">
+          <input type="checkbox" name="can_call_builder" id="edit-can-call-builder" value="1" class="rounded border-slate-300">
+          Allow Call Builder access
+        </label>
+        <p class="text-[11px] text-slate-500">View on the phone; edit drafts and Publish in the portal.</p>
       </div>
 
       <div class="grid grid-cols-2 gap-3">
@@ -416,11 +429,6 @@
           <label class="flex items-center gap-2"><input type="checkbox" name="notify_schedule_changes" id="edit-notify-schedule" value="1"> Schedule change alerts</label>
           <label class="flex items-center gap-2"><input type="checkbox" name="sms_fallback_enabled" id="edit-sms-fallback" value="1"> SMS fallback</label>
         </div>
-      </div>
-
-      <div class="grid gap-2 text-xs text-slate-600">
-        <label class="flex items-center gap-2"><input type="checkbox" name="can_call_builder" id="edit-can-call-builder" value="1"> Call Builder</label>
-        <p class="text-[11px] text-slate-400">Lets this person view Call Builder on the phone and edit drafts in the portal. Live Call Schedule changes only when they publish.</p>
       </div>
 
       <div class="flex gap-2 pt-1">

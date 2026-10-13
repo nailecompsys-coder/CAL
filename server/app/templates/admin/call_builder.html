@@ -190,6 +190,11 @@
   .cb-leave .lv-off { background: #e2e8f0; color: #334155; }
   .cb-leave .lv-nc { background: #fef3c7; color: #78350f; }
   .cb-leave .lv-vac { background: #e0f2fe; color: #0c4a6e; }
+  .roster-tile.is-pen {
+    border-color: #2563eb;
+    outline: 2px solid #2563eb;
+    outline-offset: -2px;
+  }
   #surgeon-flyover {
     border: 1px solid #bfdbfe;
     border-radius: 0.4rem;
@@ -482,7 +487,7 @@ async function togglePhoneAccess(input) {
 }
 function closeFlyover() {
   document.getElementById('surgeon-flyover').classList.add('hidden');
-  document.querySelectorAll('.roster-tile').forEach(t => t.classList.remove('ring-2', 'ring-blue-500'));
+  document.querySelectorAll('.roster-tile').forEach(t => t.classList.remove('is-pen'));
   penId = null;
   persistPen(null);
 }
@@ -526,14 +531,14 @@ function showFlyover(el) {
 function pickSurgeon(el, opts) {
   const keepToggle = !(opts && opts.forceOpen);
   blurActiveField();
-  document.querySelectorAll('.roster-tile').forEach(t => t.classList.remove('ring-2', 'ring-blue-500'));
+  document.querySelectorAll('.roster-tile').forEach(t => t.classList.remove('is-pen'));
   if (keepToggle && penId === el.dataset.surgeonId) {
     closeFlyover();
     return;
   }
   penId = el.dataset.surgeonId;
   persistPen(penId);
-  el.classList.add('ring-2', 'ring-blue-500');
+  el.classList.add('is-pen');
   el.scrollIntoView({ block: 'nearest' });
   showFlyover(el);
 }

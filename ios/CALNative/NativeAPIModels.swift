@@ -413,10 +413,12 @@ struct NativeCallAssignmentResponse: Decodable {
 
   func scheduleAssignment(dateKey: String) -> ScheduleAssignment {
     let displayedInitials = coveringInitials ?? initials ?? surgeonInitials(from: surgeon)
-    let chipId = rotationId.map(String.init) ?? "draft-\(group)-\(displayedInitials)"
+    // 0 = Call Builder draft (not published); treat as no cover target.
+    let liveRotationId = (rotationId ?? 0) > 0 ? rotationId : nil
+    let chipId = liveRotationId.map(String.init) ?? "draft-\(group)-\(displayedInitials)"
     return ScheduleAssignment(
       id: "\(dateKey)-\(chipId)",
-      rotationId: rotationId,
+      rotationId: liveRotationId,
       coverageId: coverageId,
       location: group,
       locationShort: shortGroupName(group),
@@ -444,10 +446,11 @@ struct NativeCallAssignmentResponse: Decodable {
 
   private func shortGroupName(_ group: String) -> String {
     let upper = group.uppercased()
-    if upper.contains("WINTER") || upper.contains("APOPKA") || upper.contains("MINNEOLA") {
+    if upper.contains("WINTER") || upper.contains("APOPKA") || upper.contains("MINNEOLA")
+      || upper == "WG" || upper.hasPrefix("WG ") {
       return "WG Group"
     }
-    if upper.contains("ALTAMONTE") {
+    if upper.contains("ALTAMONTE") || upper == "ALT" || upper.hasPrefix("ALT ") {
       return "ALT Group"
     }
     return group

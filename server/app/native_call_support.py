@@ -12,11 +12,15 @@ def active_coverage_for_rotation(rotation: CallRotation) -> CallCoverage | None:
 
 
 def serialize_draft_call_assignment(draft: CallDraftAssignment, viewer_id: int) -> dict:
-    """Calendar Call chip for a Call Builder draft cell (not yet published)."""
+    """Calendar Call chip for a Call Builder draft cell (not yet published).
+
+    rotationId is 0 (not null) so older iOS clients that require Int still decode the day.
+    Cover stays disabled client-side when rotationId is nil/0.
+    """
     group = draft.call_group
     surgeon = draft.surgeon if draft.surgeon_id and surgeon_is_visible(draft.surgeon) else None
     return {
-        "rotationId": None,
+        "rotationId": 0,
         "groupId": draft.call_group_id,
         "group": group.name if group else "Call",
         "surgeon": surgeon.full_name if surgeon else "No call",

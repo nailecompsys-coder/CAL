@@ -82,7 +82,8 @@ class NativeHomeDraftCallTest(unittest.TestCase):
             self.assertEqual(len(dec_15["callAssignments"]), 1)
             self.assertEqual(dec_15["callAssignments"][0]["initials"], "AS")
             self.assertEqual(dec_15["callAssignments"][0]["source"], "draft")
-            self.assertIsNone(dec_15["callAssignments"][0]["rotationId"])
+            # 0 keeps older Int-only iOS clients decoding; cover treats 0 as non-live.
+            self.assertEqual(dec_15["callAssignments"][0]["rotationId"], 0)
 
             far = build_native_home(db, viewer, date(2027, 10, 1), date(2027, 10, 31))
             oct_9 = next(day for day in far["days"] if day["date"] == "2027-10-09")

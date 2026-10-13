@@ -113,13 +113,19 @@ private struct MonthHeatmapCell: View {
   var body: some View {
     Button(action: selectAction) {
       VStack(spacing: 4) {
-        HStack(spacing: 1) {
+        // Equal side columns so two-digit dates (10–31) cannot crush WG/ALT Call initials.
+        HStack(spacing: 0) {
           MonthCallInitials(text: cell.callInitials(group: "WG"))
+            .frame(maxWidth: .infinity)
           Text(cell.date.formatted(.dateTime.day()))
             .font(.subheadline.weight(cell.isToday || isSelected ? .bold : .semibold))
             .foregroundStyle(dayNumberColor)
-            .layoutPriority(1)
+            .multilineTextAlignment(.center)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .frame(maxWidth: .infinity)
           MonthCallInitials(text: cell.callInitials(group: "ALT"))
+            .frame(maxWidth: .infinity)
         }
 
         HStack(spacing: 3) {
@@ -158,12 +164,12 @@ private struct MonthCallInitials: View {
   let text: String
 
   var body: some View {
-    Text(text)
+    Text(text.isEmpty ? " " : text)
       .font(.system(.caption2, design: .monospaced).weight(.medium))
       .foregroundStyle(.secondary)
       .lineLimit(1)
-      .minimumScaleFactor(0.6)
-      .frame(maxWidth: .infinity)
+      .minimumScaleFactor(0.5)
+      .multilineTextAlignment(.center)
   }
 }
 

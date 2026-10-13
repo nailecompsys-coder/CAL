@@ -55,6 +55,12 @@ struct ScheduleHomeView: View {
     store.month(containing: selectedDate)
   }
 
+  /// Civil month key so Month view refetches when the stepper changes months.
+  private var monthLoadKey: String {
+    let parts = Calendar.current.dateComponents([.year, .month], from: selectedDate)
+    return String(format: "%04d-%02d", parts.year ?? 0, parts.month ?? 0)
+  }
+
   private var stepperTitle: String {
     let calendar = Calendar.current
     switch scope {
@@ -206,6 +212,10 @@ struct ScheduleHomeView: View {
                     .padding(.horizontal, 8)
                     .padding(.vertical, 8)
                     .liquidGlassCard(cornerRadius: 16, tint: ClinicalPalette.cardStrong)
+                    // Week only holds ~7 days in memory; always refetch the on-screen month for Call.
+                    .task(id: monthLoadKey) {
+                      await store.load(containing: selectedDate, scope: .month)
+                    }
 
                     MonthSelectedDayAgenda(
                       day: selectedDay,

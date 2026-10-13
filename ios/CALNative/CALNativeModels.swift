@@ -525,9 +525,24 @@ struct MonthCell: Identifiable {
   /// On-call initials for one call group ("WG" / "ALT"); the covering surgeon when covered.
   func callInitials(group prefix: String) -> String {
     assignments
-      .filter { !$0.isBackup && $0.locationShort.uppercased().hasPrefix(prefix) }
+      .filter { !$0.isBackup && Self.matchesCallGroup($0, prefix: prefix) }
       .map { $0.isCovered ? ($0.coveringInitials ?? $0.surgeon) : $0.surgeon }
       .first ?? ""
+  }
+
+  private static func matchesCallGroup(_ assignment: ScheduleAssignment, prefix: String) -> Bool {
+    let short = assignment.locationShort.uppercased()
+    let full = assignment.location.uppercased()
+    if short.hasPrefix(prefix) { return true }
+    switch prefix.uppercased() {
+    case "WG":
+      return full.contains("WINTER") || full.contains("APOPKA") || full.contains("MINNEOLA")
+        || short.contains("WG")
+    case "ALT":
+      return full.contains("ALTAMONTE") || short.contains("ALT")
+    default:
+      return full.hasPrefix(prefix) || short.contains(prefix)
+    }
   }
 
   var callSummary: String {
@@ -584,9 +599,12 @@ struct DateRange {
       start = interval?.start ?? weekCalendar.startOfDay(for: date)
       end = weekCalendar.date(byAdding: .day, value: 6, to: start) ?? start
     case .month:
+      // Full 6-week month grid (leading/trailing days), not only the civil month.
       let interval = calendar.dateInterval(of: .month, for: date)
-      start = interval?.start ?? calendar.startOfDay(for: date)
-      end = calendar.date(byAdding: DateComponents(month: 1, day: -1), to: start) ?? start
+      let firstOfMonth = interval?.start ?? calendar.startOfDay(for: date)
+      let leading = calendar.component(.weekday, from: firstOfMonth) - 1
+      start = calendar.date(byAdding: .day, value: -leading, to: firstOfMonth) ?? firstOfMonth
+      end = calendar.date(byAdding: .day, value: 41, to: start) ?? firstOfMonth
     }
   }
 }

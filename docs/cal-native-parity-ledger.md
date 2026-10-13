@@ -2,9 +2,11 @@
 
 Last updated: 2026-10-13
 
+Month Call layout (2026-10-13, TestFlight 2.0 (27)): Month cells use three equal columns (WG · day · ALT) so two-digit dates no longer crush Call initials after the 9th. Month scope always refetches the on-screen month. Draft Call chips send `rotationId: 0` (cover disabled).
+
 Per-surgeon push sounds (2026-10-13, TestFlight 2.0 (26)): `surgeons.push_sound` holds an iOS bundle filename (`bagpipes.wav` for CJ only). Native APNs/Expo alerts use that sound when set; everyone else keeps `cal_alert.wav`. More docs can get their own sounds later by dropping a wav into the app bundle and setting the column. Joke one-shot: `server/scripts/send_cj_bagpipe_alert.py` (no SMS).
 
-Calendar Call range + draft overlay (2026-10-13, TestFlight 2.0 (26)): `GET /api/native/home` returns Call for the exact requested `start`/`end` (up to 3 years). Practice Call chips are live `call_rotations` with Call Builder `call_draft_assignments` overlaid — so months CJ has built but not Published (e.g. Dec 2026+) show on Calendar Month/Week/Day. Draft chips have `rotationId: null` (cover disabled until Publish). Week Call/ALT initials stay single-line and scale with width; Off drops under Call via `ViewThatFits` on narrow phones. Foreground refresh reloads the focused Week/Month, not a today→+30 cliff.
+Calendar Call range + draft overlay (2026-10-13, TestFlight 2.0 (27)): `GET /api/native/home` returns Call for the exact requested `start`/`end` (up to 3 years). Practice Call chips are live `call_rotations` with Call Builder `call_draft_assignments` overlaid — so months CJ has built but not Published (e.g. Dec 2026+) show on Calendar Month/Week/Day. Draft chips have `rotationId: null` (cover disabled until Publish). Week Call/ALT initials stay single-line and scale with width; Off drops under Call via `ViewThatFits` on narrow phones. Foreground refresh reloads the focused Week/Month, not a today→+30 cliff.
 
 Call Builder phone month grid (2026-10-13, TestFlight 2.0 (25)): title menu shows **Call Builder** only when portal Phone is checked for that surgeon (`canCallBuilder`). Phone UI is a read-only month calendar (WG/ALT site-colored initials, holiday Apple emoji including Halloween pumpkin). Edits and Publish stay on the portal; draft cells still use `call_draft_assignments` until Publish writes `call_rotations`. Roster Phone checkboxes are for Chris/Amy/admins. Selected roster tile uses an inset outline (no outer ring bleed).
 
@@ -30,7 +32,7 @@ iOS calendar chrome (2026-09-23): the surgeon-facing section is labeled `Calenda
 
 Native schedule review rows (2026-09-15): `GET /api/native/home` includes Aprima-derived patient schedule rows again, separate from CAL clinic and Block OR cards. Surgery One / CBO-style Aprima rows are read-only, flagged `needsReview=true`, and carry red styling so SwiftUI can show them as Shannon-review items instead of verified CAL schedule. CAL clinic cards still summarize location, first visit time, and visit count; Block OR cards still show location, start time, and total cases.
 
-iOS TestFlight build: `2.0 (26)` from the SwiftUI `ios/` lane (Calendar Call draft overlay client + Week Call scaling + CJ `bagpipes.wav`). Prior `2.0 (25)` is Call Builder month grid; `2.0 (24)` remains the October 2 Scheduler release.
+iOS TestFlight build: `2.0 (27)` from the SwiftUI `ios/` lane (Month Call initials through day 31 + month refetch). Prior `2.0 (26)` added bagpipes/CJ push sound; `2.0 (25)` Call Builder month grid; `2.0 (24)` Scheduler.
 
 Build 24 candidate: the Scheduler opens on a week list, then shows every surgeon's AM/PM schedule, NA and OFF status, approved leave, call, OR case times, and clinic visit times for a selected day. The iPhone calls the SQL-backed `GET /api/native/scheduler/schedule` feed, which must be live before the client is distributed. An assigned call Backup is labeled **Backup** for that surgeon; the iPhone has no Backup assignment control. The Calendar Meetings card shows bold **Today** and a dated **Next meeting** preview with title/time only; tapping reveals the full note.
 

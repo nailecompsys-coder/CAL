@@ -260,8 +260,13 @@ private struct CallBuilderMonthCell: Identifiable {
   let date: Date
   let isCurrentMonth: Bool
   let isToday: Bool
+  let holiday: String
   let wg: CallBuilderChip?
   let alt: CallBuilderChip?
+
+  var holidayEmoji: String {
+    CallBuilderHomeView.holidayEmoji(holiday)
+  }
 }
 
 struct CallBuilderHomeView: View {
@@ -304,6 +309,7 @@ struct CallBuilderHomeView: View {
         date: date,
         isCurrentMonth: inMonth,
         isToday: cal.isDateInToday(date),
+        holiday: inMonth ? holidayName(day: date) : "",
         wg: inMonth ? chip(day: date, group: wgGroup) : nil,
         alt: inMonth ? chip(day: date, group: altGroup) : nil
       )
@@ -340,12 +346,18 @@ struct CallBuilderHomeView: View {
                 .foregroundStyle(.red)
             }
 
-            Text("WG · date · ALT")
-              .font(.caption2)
-              .foregroundStyle(.secondary)
-              .frame(maxWidth: .infinity, alignment: .trailing)
+            HStack(spacing: 6) {
+              Text("WG")
+                .foregroundStyle(ClinicalPalette.site("WG"))
+              Text("·")
+                .foregroundStyle(.secondary)
+              Text("ALT")
+                .foregroundStyle(ClinicalPalette.site("AL"))
+            }
+            .font(.caption2.weight(.bold))
+            .frame(maxWidth: .infinity, alignment: .trailing)
 
-            LazyVGrid(columns: columns, spacing: 4) {
+            LazyVGrid(columns: columns, spacing: 5) {
               ForEach(Calendar.current.shortWeekdaySymbols, id: \.self) { day in
                 Text(String(day.prefix(1)))
                   .font(.caption2.weight(.bold))
@@ -415,6 +427,18 @@ struct CallBuilderHomeView: View {
     return CallBuilderChip(initials: initials, flagged: !cell.flag.isEmpty, source: cell.source)
   }
 
+  private func holidayName(day: Date) -> String {
+    if let group = wgGroup {
+      let key = Self.key(day: day, groupId: group.id)
+      if let name = cellsByKey[key]?.holiday, !name.isEmpty { return name }
+    }
+    if let group = altGroup {
+      let key = Self.key(day: day, groupId: group.id)
+      if let name = cellsByKey[key]?.holiday, !name.isEmpty { return name }
+    }
+    return ""
+  }
+
   private func shiftMonth(_ delta: Int) {
     if let next = Calendar.current.date(byAdding: .month, value: delta, to: month) {
       month = next
@@ -431,6 +455,22 @@ struct CallBuilderHomeView: View {
     let parts = cal.dateComponents([.year, .month], from: Date())
     return cal.date(from: DateComponents(year: parts.year, month: parts.month, day: 1)) ?? Date()
   }
+
+  /// Apple emoji for tracked Call Builder holidays (phone month grid).
+  static func holidayEmoji(_ name: String) -> String {
+    switch name {
+    case "Memorial Day": return "🇺🇸"
+    case "July 4th": return "🎆"
+    case "Labor Day": return "🛠️"
+    case "Halloween": return "🎃"
+    case "Thanksgiving": return "🦃"
+    case "Christmas Eve": return "🍬"
+    case "Christmas": return "🎄"
+    case "New Year's Eve": return "🥂"
+    case "New Year's Day", "New Year's": return "🎉"
+    default: return name.isEmpty ? "" : "📅"
+    }
+  }
 }
 
 private struct CallBuilderMonthDayCell: View {
@@ -440,19 +480,25 @@ private struct CallBuilderMonthDayCell: View {
 
   var body: some View {
     Button(action: selectAction) {
-      VStack(spacing: 2) {
+      VStack(spacing: 4) {
         Text(cell.date.formatted(.dateTime.day()))
           .font(.caption.weight(cell.isToday || isSelected ? .bold : .semibold))
           .foregroundStyle(cell.isToday ? ClinicalPalette.teal : ClinicalPalette.ink)
 
+        Text(cell.holidayEmoji.isEmpty ? " " : cell.holidayEmoji)
+          .font(.system(size: 14))
+          .foregroundStyle(cell.holidayEmoji.isEmpty ? .clear : ClinicalPalette.ink)
+          .lineLimit(1)
+
         HStack(spacing: 2) {
-          callText(cell.wg)
-          callText(cell.alt)
+          callText(cell.wg, site: "WG")
+          callText(cell.alt, site: "AL")
         }
+        Spacer(minLength: 0)
       }
-      .padding(.horizontal, 2)
-      .padding(.vertical, 5)
-      .frame(maxWidth: .infinity)
+      .padding(.horizontal, 3)
+      .padding(.vertical, 10)
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
       .opacity(cell.isCurrentMonth ? 1 : 0.35)
       .background(ClinicalPalette.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
       .overlay {
@@ -472,13 +518,14 @@ private struct CallBuilderMonthDayCell: View {
   }
 
   @ViewBuilder
-  private func callText(_ chip: CallBuilderChip?) -> some View {
+  private func callText(_ chip: CallBuilderChip?, site: String) -> some View {
+    let siteColor = ClinicalPalette.site(site)
     Text(chip?.initials ?? "·")
       .font(.system(.caption2, design: .monospaced).weight(chip == nil ? .regular : .bold))
       .foregroundStyle(
         chip == nil
-          ? ClinicalPalette.muted.opacity(0.55)
-          : (chip?.flagged == true ? ClinicalPalette.muted : ClinicalPalette.ink)
+          ? ClinicalPalette.muted.opacity(0.45)
+          : (chip?.flagged == true ? ClinicalPalette.muted : siteColor)
       )
       .lineLimit(1)
       .minimumScaleFactor(0.6)
@@ -490,19 +537,30 @@ private struct CallBuilderSelectedDay: View {
   let cell: CallBuilderMonthCell
 
   var body: some View {
-    HStack(spacing: 12) {
-      Text(cell.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
-        .font(.subheadline.weight(.semibold))
-        .foregroundStyle(ClinicalPalette.ink)
-      Spacer(minLength: 0)
-      Text("WG \(cell.wg?.initials ?? "—")")
-        .font(.system(.caption, design: .monospaced).weight(.bold))
-      Text("ALT \(cell.alt?.initials ?? "—")")
-        .font(.system(.caption, design: .monospaced).weight(.bold))
+    VStack(alignment: .leading, spacing: 6) {
+      HStack(spacing: 12) {
+        Text(cell.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+          .font(.subheadline.weight(.semibold))
+          .foregroundStyle(ClinicalPalette.ink)
+        if !cell.holiday.isEmpty {
+          Text("\(cell.holidayEmoji) \(cell.holiday)")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(ClinicalPalette.ink)
+        }
+        Spacer(minLength: 0)
+      }
+      HStack(spacing: 14) {
+        Text("WG \(cell.wg?.initials ?? "—")")
+          .font(.system(.caption, design: .monospaced).weight(.bold))
+          .foregroundStyle(ClinicalPalette.site("WG"))
+        Text("ALT \(cell.alt?.initials ?? "—")")
+          .font(.system(.caption, design: .monospaced).weight(.bold))
+          .foregroundStyle(ClinicalPalette.site("AL"))
+        Spacer(minLength: 0)
+      }
     }
-    .foregroundStyle(ClinicalPalette.ink)
     .padding(.horizontal, 12)
-    .padding(.vertical, 8)
+    .padding(.vertical, 10)
     .background(ClinicalPalette.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
   }
 }

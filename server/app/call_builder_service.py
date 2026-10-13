@@ -10,7 +10,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 from sqlalchemy import func, text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from .admin_call_schedule_action_service import assign_rotation
 from .admin_call_schedule_page_service import month_schedule_days
@@ -77,12 +77,28 @@ def require_surgeon_call_builder(surgeon: Surgeon) -> None:
 # Compact labels for the roster card third segment (count/abbr).
 _HOLIDAY_ABBREV = {
     "New Year's": "NY",
+    "New Year's Day": "NY",
+    "New Year's Eve": "NYE",
     "Memorial Day": "Mem",
     "July 4th": "Jul4",
     "Labor Day": "Lab",
     "Thanksgiving": "Thx",
+    "Christmas Eve": "XE",
     "Christmas": "Xmas",
 }
+
+# Flyover rows: (database holiday name, display label). Credit = on call that date only.
+HOLIDAY_FLYOVER_ROWS = (
+    ("Memorial Day", "Memorial Day"),
+    ("July 4th", "July 4th"),
+    ("Labor Day", "Labor Day"),
+    ("Thanksgiving", "Thanksgiving"),
+    ("Christmas Eve", "Christmas Eve"),
+    ("Christmas", "Christmas"),
+    ("New Year's Eve", "New Year's Eve"),
+    ("New Year's", "New Year's Day"),
+)
+HOLIDAY_FLYOVER_YEARS = (2025, 2026, 2027)
 
 
 def holiday_abbrev(name: str | None) -> str:
@@ -172,6 +188,63 @@ def attach_leave_to_history(history: list[dict], leave: dict[str, str]) -> list[
     return history
 
 
+def holiday_work_lookup(db: Session) -> dict[tuple[int, str, int], str]:
+    """Map (surgeon_id, holiday_name, year) → call-group short label for credited holiday call."""
+    start = date(HOLIDAY_FLYOVER_YEARS[0], 1, 1)
+    end = date(HOLIDAY_FLYOVER_YEARS[-1], 12, 31)
+    holidays = {
+        h.date: h.name
+        for h in db.query(Holiday)
+        .filter(Holiday.date >= start, Holiday.date <= end)
+        .all()
+    }
+    if not holidays:
+        return {}
+    groups = {g.id: short_group_label(g) for g in db.query(CallGroup).all()}
+    rotations = (
+        db.query(CallRotation)
+        .options(joinedload(CallRotation.coverages))
+        .filter(CallRotation.date.in_(list(holidays.keys())))
+        .all()
+    )
+    out: dict[tuple[int, str, int], str] = {}
+    for rotation in rotations:
+        covering = None
+        for coverage in rotation.coverages or []:
+            if coverage.status == "active":
+                covering = coverage.covering_surgeon_id
+                break
+        surgeon_id = covering if covering is not None else rotation.surgeon_id
+        if surgeon_id is None or rotation.call_group_id is None:
+            continue
+        name = holidays.get(rotation.date)
+        if not name:
+            continue
+        out[(surgeon_id, name, rotation.date.year)] = groups.get(rotation.call_group_id, "✓")
+    return out
+
+
+def attach_holiday_grids(history: list[dict], work: dict[tuple[int, str, int], str]) -> list[dict]:
+    """Attach 2025–2027 holiday grid + worked list for the closable flyover."""
+    years = list(HOLIDAY_FLYOVER_YEARS)
+    for row in history:
+        surgeon_id = int(row["surgeonId"])
+        grid = []
+        worked = []
+        for db_name, label in HOLIDAY_FLYOVER_ROWS:
+            cells = []
+            for year in years:
+                mark = work.get((surgeon_id, db_name, year), "—")
+                cells.append(mark)
+                if mark != "—":
+                    worked.append(f"{label} {year} ({mark})")
+            grid.append({"name": label, "cells": cells})
+        row["holidayYears"] = years
+        row["holidayGrid"] = grid
+        row["holidaysWorked"] = worked
+    return history
+
+
 def month_bounds(year: int, month: int) -> tuple[date, date, date]:
     """Return (month_start, month_end inclusive, month_end exclusive)."""
     start = date(year, month, 1)
@@ -205,6 +278,7 @@ def board_for_month(db: Session, year: int, month: int) -> dict:
     }
     leave = leave_flag_map(db, start, end)
     attach_leave_to_history(history, leave)
+    attach_holiday_grids(history, holiday_work_lookup(db))
     leave_by_date = leave_entries_by_date(db, start, end, surgeons=surgeons)
     leave_groups = leave_groups_by_date(leave_by_date)
     live = published_map(db, start, end)
@@ -614,6 +688,7 @@ def page_data(db: Session, month_offset: int) -> dict:
     }
     leave = leave_flag_map(db, start, end)
     attach_leave_to_history(history, leave)
+    attach_holiday_grids(history, holiday_work_lookup(db))
     leave_by_date = leave_entries_by_date(db, start, end, surgeons=surgeons)
     leave_groups = leave_groups_by_date(leave_by_date)
     live = published_map(db, start, end)

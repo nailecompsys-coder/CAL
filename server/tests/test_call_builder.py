@@ -12,9 +12,11 @@ from sqlalchemy.orm import sessionmaker
 
 from app.call_builder_service import (
     _history_statement,
+    attach_holiday_grids,
     attach_leave_to_history,
     call_history,
     clear_draft,
+    holiday_work_lookup,
     leave_flag_map,
     leave_groups_by_date,
     leave_label,
@@ -230,6 +232,38 @@ class CallBuilderTest(unittest.TestCase):
             by_group = {r.call_group_id: r.surgeon_id for r in live}
             self.assertEqual(by_group[wg.id], chris.id)
             self.assertEqual(by_group[alt.id], alex.id)
+        finally:
+            db.close()
+
+    def test_holiday_grid_credits_coverage_year(self):
+        db = self.Session()
+        try:
+            _, _, chris, alex, nelson, wg, alt = self._seed(db)
+            # _seed already has Memorial Day 2026-05-25 and July 4th 2026-07-04
+            db.add(Holiday(date=date(2025, 12, 24), name="Christmas Eve"))
+            db.add(CallRotation(date=date(2026, 5, 25), call_group_id=wg.id, surgeon_id=chris.id))
+            july = CallRotation(date=date(2026, 7, 4), call_group_id=alt.id, surgeon_id=alex.id)
+            db.add(july)
+            db.commit()
+            db.refresh(july)
+            db.add(CallCoverage(
+                call_rotation_id=july.id,
+                original_surgeon_id=alex.id,
+                covering_surgeon_id=nelson.id,
+                status="active",
+            ))
+            db.commit()
+            work = holiday_work_lookup(db)
+            self.assertEqual(work[(chris.id, "Memorial Day", 2026)], "WG")
+            self.assertEqual(work[(nelson.id, "July 4th", 2026)], "ALT")
+            self.assertNotIn((alex.id, "July 4th", 2026), work)
+            history = [{"surgeonId": chris.id}, {"surgeonId": alex.id}, {"surgeonId": nelson.id}]
+            attach_holiday_grids(history, work)
+            mem = next(r for r in history[0]["holidayGrid"] if r["name"] == "Memorial Day")
+            self.assertEqual(mem["cells"][1], "WG")  # 2026
+            self.assertIn("Memorial Day 2026 (WG)", history[0]["holidaysWorked"])
+            self.assertEqual(history[1]["holidaysWorked"], [])
+            self.assertIn("July 4th 2026 (ALT)", history[2]["holidaysWorked"])
         finally:
             db.close()
 

@@ -49,20 +49,47 @@
            data-hol-count="{{ h.holidayCount }}"
            data-last-hol="{{ h.lastHoliday or '—' }}"
            data-holidays="{{ h.holidayNames|join(', ') if h.holidayNames else 'none' }}"
+           data-holiday-grid='{{ h.holidayGrid|default([])|tojson }}'
+           data-holiday-years='{{ h.holidayYears|default([2025,2026,2027])|tojson }}'
+           data-holidays-worked='{{ h.holidaysWorked|default([])|tojson }}'
            onclick="pickSurgeon(this)" title="{{ h.firstName }} {{ h.lastName }}">
         <div class="flex items-baseline justify-between gap-1.5 leading-tight">
           <span class="text-[13px] font-semibold text-slate-800 truncate">{{ h.initials }} · {{ h.lastName }}</span>
         </div>
-        <p class="text-[10px] font-semibold tabular-nums text-slate-600 tracking-tight leading-tight">{{ h.loadLine }}</p>
+        <p class="text-[10px] font-semibold tabular-nums text-slate-600 tracking-tight leading-tight">
+          <span>{{ h.callCount }}/{{ h.weekendCount }}</span>
+          <span> · </span>
+          <span class="font-extrabold text-slate-900">{{ h.monthCallCount }}/{{ h.monthWeekendCount }}</span>
+          <span> · </span>
+          <span>{{ h.holidayCount }}/{{ h.lastHolidayAbbrev }}</span>
+        </p>
       </div>
       {% endfor %}
     </div>
-    <div id="surgeon-flyover" class="hidden rounded-lg border border-blue-200 bg-blue-50/80 px-2.5 py-2 text-xs text-slate-700 space-y-0.5">
-      <p id="fly-name" class="text-sm font-bold text-slate-800"></p>
-      <p><span class="text-slate-500">YTD</span> <span id="fly-ytd" class="font-semibold tabular-nums"></span></p>
-      <p><span class="text-slate-500">{{ month_short }}</span> <span id="fly-month" class="font-semibold tabular-nums"></span></p>
-      <p><span class="text-slate-500">Holidays</span> <span id="fly-hol" class="font-semibold"></span></p>
-      <p><span class="text-slate-500">Last holiday</span> <span id="fly-last" class="font-semibold"></span></p>
+    <div id="surgeon-flyover" class="hidden rounded-lg border border-blue-200 bg-white shadow-md px-2.5 py-2 text-xs text-slate-700">
+      <div class="flex items-start justify-between gap-2 mb-1.5">
+        <p id="fly-name" class="text-sm font-bold text-slate-800"></p>
+        <button type="button" onclick="closeFlyover()" class="text-slate-400 hover:text-slate-700 px-1" title="Close" aria-label="Close">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <p class="mb-0.5"><span class="text-slate-500">YTD</span> <span id="fly-ytd" class="font-semibold tabular-nums"></span></p>
+      <p class="mb-1.5"><span class="text-slate-500">{{ month_short }}</span> <span id="fly-month" class="font-extrabold tabular-nums text-slate-900"></span></p>
+      <p class="text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-1">Holidays worked</p>
+      <div class="overflow-x-auto">
+        <table class="w-full text-[10px] border-collapse mb-1.5">
+          <thead>
+            <tr class="text-slate-500">
+              <th class="text-left font-semibold py-0.5 pr-1"></th>
+              <th id="fly-y0" class="text-center font-semibold px-1">2025</th>
+              <th id="fly-y1" class="text-center font-semibold px-1">2026</th>
+              <th id="fly-y2" class="text-center font-semibold px-1">2027</th>
+            </tr>
+          </thead>
+          <tbody id="fly-holiday-body"></tbody>
+        </table>
+      </div>
+      <p id="fly-worked" class="text-[10px] text-slate-600 leading-snug"></p>
     </div>
     <div class="flex gap-1.5 pt-1">
       <button type="button" onclick="openPublish()" class="flex-1 bg-blue-600 text-white text-xs font-medium py-2 rounded-lg hover:bg-blue-700">
@@ -174,6 +201,11 @@ let editingSlot = null;
 let savingEdit = false;
 let skipBlurCommit = false;
 
+function closeFlyover() {
+  document.getElementById('surgeon-flyover').classList.add('hidden');
+  document.querySelectorAll('.roster-tile').forEach(t => t.classList.remove('ring-2', 'ring-blue-500'));
+  penId = null;
+}
 function showFlyover(el) {
   const box = document.getElementById('surgeon-flyover');
   if (!el) { box.classList.add('hidden'); return; }
@@ -182,10 +214,37 @@ function showFlyover(el) {
     (el.dataset.ytd || '0') + ' calls · ' + (el.dataset.ytdWknd || '0') + ' weekends';
   document.getElementById('fly-month').textContent =
     (el.dataset.month || '0') + ' calls · ' + (el.dataset.monthWknd || '0') + ' weekends';
-  document.getElementById('fly-hol').textContent =
-    (el.dataset.holCount || '0') + (el.dataset.holidays && el.dataset.holidays !== 'none'
-      ? ' · ' + el.dataset.holidays : '');
-  document.getElementById('fly-last').textContent = el.dataset.lastHol || '—';
+  let years = [2025, 2026, 2027];
+  let grid = [];
+  let worked = [];
+  try { years = JSON.parse(el.dataset.holidayYears || '[2025,2026,2027]'); } catch (_) {}
+  try { grid = JSON.parse(el.dataset.holidayGrid || '[]'); } catch (_) {}
+  try { worked = JSON.parse(el.dataset.holidaysWorked || '[]'); } catch (_) {}
+  years.forEach((y, i) => {
+    const th = document.getElementById('fly-y' + i);
+    if (th) th.textContent = String(y);
+  });
+  const body = document.getElementById('fly-holiday-body');
+  body.innerHTML = '';
+  grid.forEach(row => {
+    const tr = document.createElement('tr');
+    tr.className = 'border-t border-slate-100';
+    const nameTd = document.createElement('td');
+    nameTd.className = 'text-left py-0.5 pr-1 text-slate-700 whitespace-nowrap';
+    nameTd.textContent = row.name || '';
+    tr.appendChild(nameTd);
+    (row.cells || []).forEach(cell => {
+      const td = document.createElement('td');
+      td.className = 'text-center px-1 py-0.5 tabular-nums ' + (cell && cell !== '—' ? 'font-bold text-slate-900' : 'text-slate-400');
+      td.textContent = cell || '—';
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  });
+  const workedEl = document.getElementById('fly-worked');
+  workedEl.textContent = worked.length
+    ? worked.join(' · ')
+    : 'No tracked holidays credited in 2025–2027.';
   box.classList.remove('hidden');
 }
 function pickSurgeon(el) {
@@ -193,7 +252,7 @@ function pickSurgeon(el) {
   document.querySelectorAll('.roster-tile').forEach(t => t.classList.remove('ring-2', 'ring-blue-500'));
   if (penId === el.dataset.surgeonId) {
     penId = null;
-    showFlyover(null);
+    closeFlyover();
     return;
   }
   penId = el.dataset.surgeonId;
@@ -371,6 +430,11 @@ async function openPublish() {
 }
 document.getElementById('publish-modal').addEventListener('click', function(e) {
   if (e.target === this) this.classList.add('hidden');
+});
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape' && !document.getElementById('surgeon-flyover').classList.contains('hidden')) {
+    closeFlyover();
+  }
 });
 </script>
 {% endblock %}

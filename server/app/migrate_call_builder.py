@@ -4,26 +4,33 @@ from sqlalchemy import text
 
 from .database import engine
 
-# Fixed US dates for the six big national holidays (not observed-Monday shifts for NY/July4/Xmas).
+# Fixed calendar dates (not observed-Monday shifts for NY/July4/Xmas).
+# Credit is only when a surgeon is on call that holiday date.
 _HOLIDAYS = (
     ("2025-01-01", "New Year's"),
     ("2025-05-26", "Memorial Day"),
     ("2025-07-04", "July 4th"),
     ("2025-09-01", "Labor Day"),
     ("2025-11-27", "Thanksgiving"),
+    ("2025-12-24", "Christmas Eve"),
     ("2025-12-25", "Christmas"),
+    ("2025-12-31", "New Year's Eve"),
     ("2026-01-01", "New Year's"),
     ("2026-05-25", "Memorial Day"),
     ("2026-07-04", "July 4th"),
     ("2026-09-07", "Labor Day"),
     ("2026-11-26", "Thanksgiving"),
+    ("2026-12-24", "Christmas Eve"),
     ("2026-12-25", "Christmas"),
+    ("2026-12-31", "New Year's Eve"),
     ("2027-01-01", "New Year's"),
     ("2027-05-31", "Memorial Day"),
     ("2027-07-04", "July 4th"),
     ("2027-09-06", "Labor Day"),
     ("2027-11-25", "Thanksgiving"),
+    ("2027-12-24", "Christmas Eve"),
     ("2027-12-25", "Christmas"),
+    ("2027-12-31", "New Year's Eve"),
 )
 
 

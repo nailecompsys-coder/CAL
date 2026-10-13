@@ -57,6 +57,7 @@ def _format_bytes(value) -> str:
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.filters["from_json"] = _json.loads
+templates.env.filters["tojson"] = lambda value: _json.dumps(value, separators=(",", ":"), default=str)
 templates.env.filters["urlquote"] = lambda s: _url_quote(str(s or ""), safe="")
 templates.env.filters["eastern_time"] = _eastern_time
 templates.env.filters["us_datetime"] = format_us_datetime

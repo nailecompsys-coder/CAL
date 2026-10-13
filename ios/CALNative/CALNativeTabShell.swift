@@ -246,7 +246,7 @@ struct CALNativeTitleMenu: View {
   }
 }
 
-// MARK: - Call Builder (phone: view-only month board; edit + publish in portal)
+// MARK: - Call Builder (phone: view-only month grid; edit + publish in portal)
 
 private struct CallBuilderChip: Equatable {
   let initials: String
@@ -255,23 +255,25 @@ private struct CallBuilderChip: Equatable {
   var isDraft: Bool { source == "draft" }
 }
 
+private struct CallBuilderMonthCell: Identifiable {
+  let id: String
+  let date: Date
+  let isCurrentMonth: Bool
+  let isToday: Bool
+  let wg: CallBuilderChip?
+  let alt: CallBuilderChip?
+}
+
 struct CallBuilderHomeView: View {
   @ObservedObject var store: NativeScheduleStore
   @Binding var selectedSection: CALNativeSection
   @State private var month = CallBuilderHomeView.defaultMonth()
   @State private var cellsByKey: [String: NativeCallBuilderCell] = [:]
   @State private var groups: [NativeCallBuilderGroup] = []
-  @State private var draftCount = 0
-  @State private var loadLegend = "YTD calls/wknd · month calls/wknd · holidays/last"
+  @State private var selectedDate = Date()
   @State private var loadError: String?
 
-  private var daysInMonth: [Date] {
-    let cal = Calendar.current
-    guard let range = cal.range(of: .day, in: .month, for: month) else { return [] }
-    return range.compactMap { day in
-      cal.date(from: DateComponents(year: cal.component(.year, from: month), month: cal.component(.month, from: month), day: day))
-    }
-  }
+  private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
 
   private var wgGroup: NativeCallBuilderGroup? {
     groups.first { $0.short == "WG" } ?? groups.first
@@ -281,12 +283,43 @@ struct CallBuilderHomeView: View {
     groups.first { $0.short == "ALT" } ?? groups.dropFirst().first
   }
 
+  private var monthCells: [CallBuilderMonthCell] {
+    let cal = Calendar.current
+    guard
+      let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: month)),
+      let dayRange = cal.range(of: .day, in: .month, for: monthStart)
+    else { return [] }
+
+    let weekday = cal.component(.weekday, from: monthStart)
+    let padStart = (weekday - cal.firstWeekday + 7) % 7
+    let total = padStart + dayRange.count
+    let padEnd = (7 - (total % 7)) % 7
+    let gridStart = cal.date(byAdding: .day, value: -padStart, to: monthStart) ?? monthStart
+
+    return (0..<(total + padEnd)).compactMap { offset in
+      guard let date = cal.date(byAdding: .day, value: offset, to: gridStart) else { return nil }
+      let inMonth = cal.isDate(date, equalTo: monthStart, toGranularity: .month)
+      return CallBuilderMonthCell(
+        id: date.formatted(.iso8601.year().month().day()),
+        date: date,
+        isCurrentMonth: inMonth,
+        isToday: cal.isDateInToday(date),
+        wg: inMonth ? chip(day: date, group: wgGroup) : nil,
+        alt: inMonth ? chip(day: date, group: altGroup) : nil
+      )
+    }
+  }
+
+  private var selectedCell: CallBuilderMonthCell? {
+    monthCells.first { Calendar.current.isDate($0.date, inSameDayAs: selectedDate) && $0.isCurrentMonth }
+  }
+
   var body: some View {
     CalNavigation {
       ZStack {
         ScheduleWaterBackground()
         ScrollView {
-          VStack(alignment: .leading, spacing: 12) {
+          VStack(alignment: .leading, spacing: 10) {
             HStack {
               Button { shiftMonth(-1) } label: {
                 Image(systemName: "chevron.left")
@@ -301,35 +334,43 @@ struct CallBuilderHomeView: View {
             }
             .foregroundStyle(ClinicalPalette.teal)
 
-            Text("View only · edit and Publish in the portal")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-
-            if draftCount > 0 {
-              Text("\(draftCount) draft cell\(draftCount == 1 ? "" : "s") · publish from portal")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(ClinicalPalette.teal)
-            }
-
-            Text(loadLegend)
-              .font(.caption2)
-              .foregroundStyle(ClinicalPalette.muted)
-
             if let loadError {
               Text(loadError)
                 .font(.caption)
                 .foregroundStyle(.red)
             }
 
-            ForEach(daysInMonth, id: \.self) { day in
-              CallBuilderDayRow(
-                day: day,
-                wg: chip(day: day, group: wgGroup),
-                alt: chip(day: day, group: altGroup)
-              )
+            Text("WG · date · ALT")
+              .font(.caption2)
+              .foregroundStyle(.secondary)
+              .frame(maxWidth: .infinity, alignment: .trailing)
+
+            LazyVGrid(columns: columns, spacing: 4) {
+              ForEach(Calendar.current.shortWeekdaySymbols, id: \.self) { day in
+                Text(String(day.prefix(1)))
+                  .font(.caption2.weight(.bold))
+                  .foregroundStyle(.secondary)
+                  .frame(maxWidth: .infinity)
+              }
+
+              ForEach(monthCells) { cell in
+                CallBuilderMonthDayCell(
+                  cell: cell,
+                  isSelected: Calendar.current.isDate(cell.date, inSameDayAs: selectedDate)
+                ) {
+                  withAnimation(.easeInOut(duration: 0.15)) {
+                    selectedDate = cell.date
+                  }
+                }
+              }
+            }
+
+            if let selectedCell, selectedCell.isCurrentMonth {
+              CallBuilderSelectedDay(cell: selectedCell)
             }
           }
-          .padding(16)
+          .padding(.horizontal, 16)
+          .padding(.vertical, 10)
         }
       }
       .navigationBarTitleDisplayMode(.inline)
@@ -340,6 +381,12 @@ struct CallBuilderHomeView: View {
       }
       .task(id: monthKey) {
         await reloadBoard()
+      }
+      .onChange(of: monthKey) { _ in
+        let cal = Calendar.current
+        if !cal.isDate(selectedDate, equalTo: month, toGranularity: .month) {
+          selectedDate = month
+        }
       }
     }
   }
@@ -352,10 +399,8 @@ struct CallBuilderHomeView: View {
   private func reloadBoard() async {
     do {
       let response = try await store.fetchCallBuilderMonth(month: month)
-      loadLegend = response.legend
       groups = response.groups
       cellsByKey = Dictionary(uniqueKeysWithValues: response.cells.map { ($0.key, $0) })
-      draftCount = response.draftCount ?? response.cells.filter(\.isDraft).count
       loadError = nil
     } catch {
       loadError = "Could not load Call Builder board."
@@ -388,65 +433,76 @@ struct CallBuilderHomeView: View {
   }
 }
 
-private struct CallBuilderDayRow: View {
-  let day: Date
-  let wg: CallBuilderChip?
-  let alt: CallBuilderChip?
-
-  private var isWeekend: Bool {
-    let w = Calendar.current.component(.weekday, from: day)
-    return w == 1 || w == 7
-  }
+private struct CallBuilderMonthDayCell: View {
+  let cell: CallBuilderMonthCell
+  let isSelected: Bool
+  let selectAction: () -> Void
 
   var body: some View {
-    HStack(alignment: .center, spacing: 10) {
-      VStack(alignment: .leading, spacing: 2) {
-        Text(day.formatted(.dateTime.weekday(.abbreviated)))
-          .font(.caption2)
-          .foregroundStyle(.secondary)
-        Text(day.formatted(.dateTime.day()))
-          .font(.title3.weight(.semibold))
-          .foregroundStyle(isWeekend ? ClinicalPalette.teal : ClinicalPalette.ink)
-      }
-      .frame(width: 44, alignment: .leading)
+    Button(action: selectAction) {
+      VStack(spacing: 2) {
+        Text(cell.date.formatted(.dateTime.day()))
+          .font(.caption.weight(cell.isToday || isSelected ? .bold : .semibold))
+          .foregroundStyle(cell.isToday ? ClinicalPalette.teal : ClinicalPalette.ink)
 
-      CallBuilderSlot(label: "WG Group", chip: wg)
-      CallBuilderSlot(label: "ALT Group", chip: alt)
+        HStack(spacing: 2) {
+          callText(cell.wg)
+          callText(cell.alt)
+        }
+      }
+      .padding(.horizontal, 2)
+      .padding(.vertical, 5)
+      .frame(maxWidth: .infinity)
+      .opacity(cell.isCurrentMonth ? 1 : 0.35)
+      .background(ClinicalPalette.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+      .overlay {
+        RoundedRectangle(cornerRadius: 10, style: .continuous)
+          .stroke(
+            isSelected ? ClinicalPalette.teal : (hasDraft ? ClinicalPalette.teal.opacity(0.45) : Color.clear),
+            style: StrokeStyle(lineWidth: isSelected ? 1.5 : 1, dash: hasDraft && !isSelected ? [3, 2] : [])
+          )
+      }
     }
-    .padding(.vertical, 4)
+    .buttonStyle(.plain)
+    .disabled(!cell.isCurrentMonth)
+  }
+
+  private var hasDraft: Bool {
+    cell.wg?.isDraft == true || cell.alt?.isDraft == true
+  }
+
+  @ViewBuilder
+  private func callText(_ chip: CallBuilderChip?) -> some View {
+    Text(chip?.initials ?? "·")
+      .font(.system(.caption2, design: .monospaced).weight(chip == nil ? .regular : .bold))
+      .foregroundStyle(
+        chip == nil
+          ? ClinicalPalette.muted.opacity(0.55)
+          : (chip?.flagged == true ? ClinicalPalette.muted : ClinicalPalette.ink)
+      )
+      .lineLimit(1)
+      .minimumScaleFactor(0.6)
+      .frame(maxWidth: .infinity)
   }
 }
 
-private struct CallBuilderSlot: View {
-  let label: String
-  let chip: CallBuilderChip?
+private struct CallBuilderSelectedDay: View {
+  let cell: CallBuilderMonthCell
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 2) {
-      Text(label)
-        .font(.caption2)
-        .foregroundStyle(.secondary)
-      if let chip {
-        Text(chip.initials)
-          .font(.subheadline.weight(.bold))
-          .foregroundStyle(chip.flagged ? ClinicalPalette.muted : ClinicalPalette.ink)
-      } else {
-        Text("—")
-          .font(.caption)
-          .foregroundStyle(ClinicalPalette.muted)
-      }
+    HStack(spacing: 12) {
+      Text(cell.date.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(ClinicalPalette.ink)
+      Spacer(minLength: 0)
+      Text("WG \(cell.wg?.initials ?? "—")")
+        .font(.system(.caption, design: .monospaced).weight(.bold))
+      Text("ALT \(cell.alt?.initials ?? "—")")
+        .font(.system(.caption, design: .monospaced).weight(.bold))
     }
-    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-    .padding(.horizontal, 10)
-    .padding(.vertical, 6)
-    .background(ClinicalPalette.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-    .overlay {
-      let dashed = chip == nil || chip?.isDraft == true
-      RoundedRectangle(cornerRadius: 10, style: .continuous)
-        .stroke(
-          chip == nil ? ClinicalPalette.stroke.opacity(0.7) : ClinicalPalette.teal.opacity(0.55),
-          style: StrokeStyle(lineWidth: 1, dash: dashed ? [4, 3] : [])
-        )
-    }
+    .foregroundStyle(ClinicalPalette.ink)
+    .padding(.horizontal, 12)
+    .padding(.vertical, 8)
+    .background(ClinicalPalette.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
   }
 }

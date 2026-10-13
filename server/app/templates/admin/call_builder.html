@@ -2,8 +2,10 @@
 {% block title %}Call Builder{% endblock %}
 
 {% block content %}
+{% set total_cells = pad_start + schedule_days|length %}
+{% set pad_end = (7 - (total_cells % 7)) % 7 %}
+{% set week_count = ((total_cells + pad_end) / 7)|int %}
 <style>
-  /* One viewport: main does not scroll; roster / flyover / calendar scroll in their panes. */
   main.cb-viewport-lock {
     overflow: hidden !important;
     min-height: 0 !important;
@@ -19,38 +21,239 @@
     flex: 1 1 0;
     min-height: 0;
     display: grid;
-    grid-template-columns: minmax(0, 13.5rem) minmax(0, 1fr);
-    gap: 0.5rem;
-    padding: 0.5rem 0.75rem;
+    grid-template-columns: minmax(0, 11.75rem) minmax(0, 1fr);
+    gap: 0.4rem;
+    padding: 0.4rem 0.65rem;
     overflow: hidden;
   }
   @media (max-width: 1279px) {
     main.cb-viewport-lock .cb-body {
       grid-template-columns: 1fr;
-      grid-template-rows: minmax(0, 38%) minmax(0, 1fr);
+      grid-template-rows: minmax(0, 34%) minmax(0, 1fr);
     }
   }
   #surgeon-flyover:not(.hidden) {
-    display: flex;
-    flex-direction: column;
-    flex: 0 1 auto;
-    max-height: 46%;
-    min-height: 0;
+    display: block;
+    flex: 0 0 auto;
     overflow: hidden;
   }
-  #surgeon-flyover .fly-scroll {
+  .cb-cal-wrap {
     min-height: 0;
-    overflow-y: auto;
-    overscroll-behavior: contain;
+    min-width: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .cb-cal {
+    flex: 1 1 0;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    grid-template-rows: 1.15rem repeat({{ week_count }}, minmax(0, 1fr));
+    border-top: 1px solid #e2e8f0;
+    border-left: 1px solid #e2e8f0;
+  }
+  .cb-cal-hd {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #64748b;
+    background: #f8fafc;
+    border-right: 1px solid #e2e8f0;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  .cb-day {
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 2px 3px;
+    border-right: 1px solid #e2e8f0;
+    border-bottom: 1px solid #e2e8f0;
+    background: #fff;
+  }
+  .cb-day.is-pad { background: #f8fafc; }
+  .cb-day.is-today { background: rgba(239, 246, 255, 0.55); }
+  .cb-day.is-hol { background: rgba(255, 251, 235, 0.55); }
+  .cb-day-hd {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 2px;
+    flex-shrink: 0;
+    line-height: 1.1;
+  }
+  .cb-day-num {
+    font-size: 10px;
+    font-weight: 800;
+    color: #334155;
+  }
+  .cb-day.is-today .cb-day-num { color: #2563eb; }
+  .cb-day.is-wknd .cb-day-num { color: #94a3b8; }
+  .cb-day-hol {
+    font-size: 8px;
+    font-weight: 700;
+    color: #92400e;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .cb-slots {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    overflow: hidden;
+  }
+  .drop-slot {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    min-height: 0;
+    flex: 1 1 0;
+    padding: 0 1px;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  .drop-slot:hover { background: #f8fafc; }
+  .drop-slot .g-short {
+    width: 1.35rem;
+    flex-shrink: 0;
+    font-size: 8px;
+    font-weight: 800;
+    color: #94a3b8;
+    line-height: 1;
+  }
+  .slot-initials-field {
+    width: 2.15rem;
+    flex: 0 0 2.15rem;
+    min-width: 2.15rem;
+    max-width: 2.15rem;
+    box-sizing: border-box;
+    height: 1.15rem;
+    margin: 0;
+    padding: 0 2px;
+    border: 1px solid #cbd5e1;
+    border-radius: 3px;
+    background: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    text-align: center;
+    color: #334155;
+    outline: none;
+    line-height: 1.15rem;
+  }
+  .slot-initials-field.is-draft {
+    border-style: dashed;
+    border-color: #3b82f6;
+  }
+  .slot-initials-field.is-flag {
+    text-decoration: line-through;
+    color: #94a3b8;
+    border-color: #cbd5e1;
+  }
+  .slot-initials-field:focus {
+    border-color: #2563eb;
+    border-style: solid;
+    box-shadow: 0 0 0 1px #2563eb;
+  }
+  .cb-leave {
+    flex-shrink: 0;
+    max-height: 1.05rem;
+    overflow: hidden;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1px;
+  }
+  .cb-leave span {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 8px;
+    font-weight: 700;
+    line-height: 1.05rem;
+    padding: 0 3px;
+    border-radius: 2px;
+  }
+  .cb-leave .lv-off { background: #e2e8f0; color: #334155; }
+  .cb-leave .lv-nc { background: #fef3c7; color: #78350f; }
+  .cb-leave .lv-vac { background: #e0f2fe; color: #0c4a6e; }
+  #surgeon-flyover {
+    border: 1px solid #bfdbfe;
+    border-radius: 0.4rem;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+    padding: 0.3rem 0.4rem 0.35rem;
+    font-size: 9px;
+    color: #334155;
+    line-height: 1.15;
+  }
+  #surgeon-flyover .fly-name {
+    font-size: 11px;
+    font-weight: 500;
+    color: #1e293b;
+    line-height: 1.15;
+  }
+  #surgeon-flyover .fly-stat {
+    margin: 0;
+    line-height: 1.2;
+  }
+  #surgeon-flyover .fly-hol-label {
+    margin: 0.2rem 0 0.05rem;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #64748b;
+  }
+  #surgeon-flyover table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+    font-size: 8px;
+  }
+  #surgeon-flyover th,
+  #surgeon-flyover td {
+    padding: 0;
+    line-height: 1.2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #surgeon-flyover th:first-child,
+  #surgeon-flyover td:first-child { width: 42%; text-align: left; }
+  #surgeon-flyover th:not(:first-child),
+  #surgeon-flyover td:not(:first-child) { width: 19.333%; text-align: center; }
+  #fly-worked {
+    margin: 0.15rem 0 0;
+    font-size: 8px;
+    color: #64748b;
+    line-height: 1.2;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
   }
 </style>
 <script>document.querySelector('main')?.classList.add('cb-viewport-lock');</script>
 
 <div class="cb-shell">
-<header class="bg-white border-b border-slate-200 px-4 py-2 flex items-center justify-between z-20 flex-shrink-0 gap-3">
+<header class="bg-white border-b border-slate-200 px-4 py-1.5 flex items-center justify-between z-20 flex-shrink-0 gap-3">
   <div class="min-w-0">
-    <h1 class="text-lg font-bold text-slate-800 leading-tight">Call Builder</h1>
-    <p class="text-xs text-slate-500">{{ month_label }} · {{ draft_count }} draft · {{ change_count }} to publish</p>
+    <h1 class="text-base font-bold text-slate-800 leading-tight">Call Builder</h1>
+    <p class="text-[11px] text-slate-500">{{ month_label }} · {{ draft_count }} draft · {{ change_count }} to publish</p>
   </div>
   <div class="flex items-center gap-1.5 flex-shrink-0">
     <a href="/admin/call-schedule?month_offset={{ month_offset }}" class="bg-slate-100 text-slate-600 text-xs px-2.5 py-1.5 rounded-lg hover:bg-slate-200">Live Call</a>
@@ -68,20 +271,20 @@
 </header>
 
 {% if request.query_params.get('msg') == 'published' %}
-<div class="mx-3 mt-1 flex-shrink-0 bg-green-50 border border-green-200 rounded-lg px-3 py-1.5 text-green-700 text-sm">Published to the live Call Schedule. Draft cells for those days were cleared.</div>
+<div class="mx-3 mt-1 flex-shrink-0 bg-green-50 border border-green-200 rounded-lg px-3 py-1 text-green-700 text-xs">Published to the live Call Schedule. Draft cells for those days were cleared.</div>
 {% endif %}
 {% if request.query_params.get('warn') %}
-<div class="mx-3 mt-1 flex-shrink-0 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5 flex items-start gap-2 text-amber-800 text-sm">
+<div class="mx-3 mt-1 flex-shrink-0 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1 flex items-start gap-2 text-amber-800 text-xs">
   <i class="fa-solid fa-triangle-exclamation text-amber-500 mt-0.5 flex-shrink-0"></i>
   <div><strong>Note:</strong> {{ request.query_params.get('warn') }}</div>
 </div>
 {% endif %}
 
 <div class="cb-body">
-  <aside class="min-h-0 flex flex-col gap-1.5 overflow-hidden">
+  <aside class="min-h-0 flex flex-col gap-1 overflow-hidden">
     <div class="min-h-0 flex-1 overflow-y-auto space-y-0.5 pr-0.5 overscroll-contain">
       {% for h in history %}
-      <div class="roster-tile rounded-md border border-slate-200 bg-white px-2 py-0.5 cursor-grab select-none hover:border-blue-300"
+      <div class="roster-tile rounded-md border border-slate-200 bg-white px-1.5 py-0.5 cursor-grab select-none hover:border-blue-300"
            draggable="true"
            data-surgeon-id="{{ h.surgeonId }}"
            data-initials="{{ h.initials }}"
@@ -98,10 +301,10 @@
            data-holiday-years='{{ h.holidayYears|default([2025,2026,2027])|tojson }}'
            data-holidays-worked='{{ h.holidaysWorked|default([])|tojson }}'
            onclick="pickSurgeon(this)" title="{{ h.firstName }} {{ h.lastName }}">
-        <div class="flex items-baseline justify-between gap-1.5 leading-tight">
-          <span class="text-[13px] font-normal text-slate-800 truncate">{{ h.initials }} · {{ h.lastName }}</span>
+        <div class="flex items-baseline justify-between gap-1 leading-tight">
+          <span class="text-[12px] font-normal text-slate-800 truncate">{{ h.initials }} · {{ h.lastName }}</span>
         </div>
-        <p class="text-[10px] font-semibold tabular-nums text-slate-600 tracking-tight leading-tight">
+        <p class="text-[9px] font-semibold tabular-nums text-slate-600 tracking-tight leading-tight">
           <span>{{ h.callCount }}/{{ h.weekendCount }}</span>
           <span> · </span>
           <span class="font-extrabold text-slate-900">{{ h.monthCallCount }}/{{ h.monthWeekendCount }}</span>
@@ -111,113 +314,95 @@
       </div>
       {% endfor %}
     </div>
-    <div id="surgeon-flyover" class="hidden rounded-lg border border-blue-200 bg-white shadow-md text-xs text-slate-700">
-      <div class="flex items-start justify-between gap-2 px-2 pt-1.5 pb-0.5 flex-shrink-0">
-        <p id="fly-name" class="text-[13px] font-normal text-slate-800 leading-tight"></p>
-        <button type="button" onclick="closeFlyover()" class="text-slate-400 hover:text-slate-700 px-1" title="Close" aria-label="Close">
-          <i class="fa-solid fa-xmark"></i>
+    <div id="surgeon-flyover" class="hidden">
+      <div class="flex items-start justify-between gap-1 mb-0.5">
+        <p id="fly-name" class="fly-name truncate"></p>
+        <button type="button" onclick="closeFlyover()" class="text-slate-400 hover:text-slate-700 px-0.5 leading-none" title="Close" aria-label="Close">
+          <i class="fa-solid fa-xmark text-[10px]"></i>
         </button>
       </div>
-      <div class="fly-scroll px-2 pb-1.5">
-        <p class="mb-0.5 leading-tight"><span class="text-slate-500">YTD</span> <span id="fly-ytd" class="font-semibold tabular-nums"></span></p>
-        <p class="mb-1 leading-tight"><span class="text-slate-500">{{ month_short }}</span> <span id="fly-month" class="font-extrabold tabular-nums text-slate-900"></span></p>
-        <p class="text-[10px] font-semibold uppercase tracking-wide text-slate-500 mb-0.5">Holidays worked</p>
-        <table class="w-full text-[10px] border-collapse mb-1">
-          <thead>
-            <tr class="text-slate-500">
-              <th class="text-left font-semibold py-0 pr-1"></th>
-              <th id="fly-y0" class="text-center font-semibold px-0.5">2025</th>
-              <th id="fly-y1" class="text-center font-semibold px-0.5">2026</th>
-              <th id="fly-y2" class="text-center font-semibold px-0.5">2027</th>
-            </tr>
-          </thead>
-          <tbody id="fly-holiday-body"></tbody>
-        </table>
-        <p id="fly-worked" class="text-[10px] text-slate-600 leading-snug"></p>
-      </div>
+      <p class="fly-stat"><span class="text-slate-500">YTD</span> <span id="fly-ytd" class="font-semibold tabular-nums"></span></p>
+      <p class="fly-stat"><span class="text-slate-500">{{ month_short }}</span> <span id="fly-month" class="font-extrabold tabular-nums text-slate-900"></span></p>
+      <p class="fly-hol-label">Holidays</p>
+      <table>
+        <thead>
+          <tr class="text-slate-500">
+            <th></th>
+            <th id="fly-y0">25</th>
+            <th id="fly-y1">26</th>
+            <th id="fly-y2">27</th>
+          </tr>
+        </thead>
+        <tbody id="fly-holiday-body"></tbody>
+      </table>
+      <p id="fly-worked"></p>
     </div>
-    <div class="flex-shrink-0 flex gap-1.5">
-      <button type="button" onclick="openPublish()" class="flex-1 bg-blue-600 text-white text-xs font-medium py-2 rounded-lg hover:bg-blue-700">
+    <div class="flex-shrink-0 flex gap-1">
+      <button type="button" onclick="openPublish()" class="flex-1 bg-blue-600 text-white text-[11px] font-medium py-1.5 rounded-lg hover:bg-blue-700">
         Publish {{ change_count }}…
       </button>
       <form method="post" action="/admin/call-builder/clear-month" class="flex-1" onsubmit="return confirm('Clear every draft cell for {{ month_label }}? Live Call Schedule is not changed.')">
         <input type="hidden" name="month_offset" value="{{ month_offset }}" />
-        <button type="submit" class="w-full bg-slate-100 text-slate-700 text-xs font-medium py-2 rounded-lg hover:bg-slate-200">Clear</button>
+        <button type="submit" class="w-full bg-slate-100 text-slate-700 text-[11px] font-medium py-1.5 rounded-lg hover:bg-slate-200">Clear</button>
       </form>
     </div>
   </aside>
 
-  <div class="min-h-0 min-w-0 overflow-auto overscroll-contain">
-    {% set total_cells = pad_start + schedule_days|length %}
-    {% set pad_end = (7 - (total_cells % 7)) % 7 %}
-    <table class="w-full border-collapse min-w-[720px]">
-      <thead>
-        <tr>
-          {% for wd in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'] %}
-          <th class="px-2 py-1.5 bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wide">{{ wd }}</th>
+  <div class="cb-cal-wrap">
+    <div class="cb-cal" style="--cb-weeks: {{ week_count }}">
+      {% for wd in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'] %}
+      <div class="cb-cal-hd">{{ wd }}</div>
+      {% endfor %}
+      {% for _ in range(pad_start) %}
+      <div class="cb-day is-pad"></div>
+      {% endfor %}
+      {% for day in schedule_days %}
+      {% set iso = day.isoformat() %}
+      {% set is_today = day == today %}
+      {% set hol = holidays.get(iso, '') %}
+      <div class="cb-day {% if is_today %}is-today{% elif hol %}is-hol{% endif %} {% if day.weekday() >= 5 %}is-wknd{% endif %}">
+        <div class="cb-day-hd">
+          <span class="cb-day-num">{{ day.day }}</span>
+          {% if hol %}<span class="cb-day-hol" title="{{ hol }}">{{ hol }}</span>{% endif %}
+        </div>
+        <div class="cb-slots">
+          {% for g in groups %}
+          {% set cell = cells_by_key.get(iso ~ '|' ~ g.id) %}
+          <div class="drop-slot"
+               data-date="{{ iso }}" data-group-id="{{ g.id }}" data-group="{{ g.short }}"
+               data-source="{{ cell.source if cell else 'empty' }}"
+               data-surgeon-id="{{ cell.surgeonId if cell and cell.surgeonId else '' }}"
+               ondragover="event.preventDefault(); this.classList.add('ring-1','ring-blue-400')"
+               ondragleave="this.classList.remove('ring-1','ring-blue-400')"
+               ondrop="onDrop(event, this)"
+               onclick="onSlotClick(this, event)">
+            <span class="g-short">{{ g.short }}</span>
+            <input type="text"
+                   class="slot-initials-field {% if cell and cell.source == 'draft' %}is-draft{% endif %} {% if cell and cell.flag %}is-flag{% endif %}"
+                   maxlength="4" autocomplete="off" spellcheck="false"
+                   value="{{ cell.initials if cell and cell.initials else '' }}"
+                   data-saved="{{ cell.initials if cell and cell.initials else '' }}"
+                   title="{% if cell and cell.flag %}{{ cell.flag }} — kept, flagged{% elif cell and cell.source == 'live' %}Live assignment{% elif cell and cell.source == 'draft' %}Draft{% else %}Type initials{% endif %}"
+                   onclick="event.stopPropagation(); beginSlotEdit(this.closest('.drop-slot'))"
+                   onfocus="beginSlotEdit(this.closest('.drop-slot'))" />
+          </div>
           {% endfor %}
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-        {% for _ in range(pad_start) %}
-          <td class="px-1.5 py-1 border border-slate-200 bg-slate-50/60 align-top h-[5.75rem]"></td>
-        {% endfor %}
-        {% for day in schedule_days %}
-          {% if (pad_start + loop.index0) % 7 == 0 and not loop.first %}</tr><tr>{% endif %}
-          {% set iso = day.isoformat() %}
-          {% set is_today = day == today %}
-          {% set hol = holidays.get(iso, '') %}
-          <td class="px-1.5 py-1 border border-slate-200 align-top {% if is_today %}bg-blue-50/30{% elif hol %}bg-amber-50/40{% else %}bg-white{% endif %}">
-            <div class="min-h-[64px] space-y-0.5">
-              <div class="flex items-center justify-between gap-1">
-                <span class="text-[11px] font-extrabold {% if is_today %}text-blue-600{% elif day.weekday() >= 5 %}text-slate-400{% else %}text-slate-700{% endif %}">
-                  {{ day.day }}
-                </span>
-                {% if hol %}<span class="text-[10px] font-semibold text-amber-800 truncate">{{ hol }}</span>{% endif %}
-              </div>
-              {% for g in groups %}
-              {% set cell = cells_by_key.get(iso ~ '|' ~ g.id) %}
-              <div class="drop-slot flex items-center gap-1 rounded-md px-1 py-0.5 min-h-[1.25rem] cursor-pointer hover:bg-slate-50"
-                   data-date="{{ iso }}" data-group-id="{{ g.id }}" data-group="{{ g.short }}"
-                   data-source="{{ cell.source if cell else 'empty' }}"
-                   ondragover="event.preventDefault(); this.classList.add('ring-1','ring-blue-400')"
-                   ondragleave="this.classList.remove('ring-1','ring-blue-400')"
-                   ondrop="onDrop(event, this)"
-                   onclick="onSlotClick(this)">
-                <span class="text-[9px] font-extrabold text-slate-400 w-6">{{ g.short }}</span>
-                {% if cell and cell.initials %}
-                <span class="slot-chip text-[11px] font-bold px-1.5 rounded
-                  {% if cell.source == 'draft' %}border border-dashed border-blue-500 text-slate-800{% else %}border border-slate-300 text-slate-700{% endif %}
-                  {% if cell.flag %}line-through text-slate-400 border-slate-300{% endif %}"
-                  data-surgeon-id="{{ cell.surgeonId or '' }}"
-                  title="{% if cell.flag %}{{ cell.flag }} — kept, flagged{% elif cell.source == 'live' %}Live assignment{% else %}Draft{% endif %}">
-                  {{ cell.initials }}{% if cell.flag %} <span class="font-medium">{{ cell.flag }}</span>{% endif %}
-                </span>
-                {% else %}
-                <span class="slot-empty inline-block min-w-[1.5rem] min-h-[1rem]"></span>
-                {% endif %}
-              </div>
-              {% endfor %}
-              {% for leave_group in (leave_groups_by_date or {}).get(iso, []) %}
-              <span class="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded leading-tight shadow-sm truncate
-                {% if leave_group.label == 'No Call' %}bg-amber-100 text-amber-900
-                {% elif leave_group.label == 'Vacation' %}bg-sky-100 text-sky-900
-                {% else %}bg-slate-200 text-slate-700{% endif %}"
-                title="{{ leave_group.label }}">
-                <span class="font-extrabold">{{ leave_group.short }}:</span>
-                <span class="font-bold">{{ leave_group.initialsLine }}</span>
-              </span>
-              {% endfor %}
-            </div>
-          </td>
-        {% endfor %}
-        {% for _ in range(pad_end) %}
-          <td class="px-1.5 py-1 border border-slate-200 bg-slate-50/60 align-top"></td>
-        {% endfor %}
-        </tr>
-      </tbody>
-    </table>
+        </div>
+        {% set day_leave = (leave_groups_by_date or {}).get(iso, []) %}
+        {% if day_leave %}
+        <div class="cb-leave">
+          {% for leave_group in day_leave %}
+          <span class="{% if leave_group.label == 'No Call' %}lv-nc{% elif leave_group.label == 'Vacation' %}lv-vac{% else %}lv-off{% endif %}"
+                title="{{ leave_group.label }}: {{ leave_group.initialsLine }}">{{ leave_group.short }}:{{ leave_group.initialsLine }}</span>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+      {% for _ in range(pad_end) %}
+      <div class="cb-day is-pad"></div>
+      {% endfor %}
+    </div>
   </div>
 </div>
 </div>
@@ -242,6 +427,17 @@
 {% block scripts %}
 <script>
 const MONTH_OFFSET = {{ month_offset }};
+const HOL_SHORT = {
+  'Memorial Day': 'Mem',
+  'July 4th': 'Jul4',
+  'Labor Day': 'Lab',
+  'Thanksgiving': 'TG',
+  'Christmas Eve': 'XE',
+  'Christmas': 'Xmas',
+  "New Year's Eve": 'NYE',
+  "New Year's Day": 'NY',
+  "New Year's": 'NY',
+};
 let penId = null;
 let editingSlot = null;
 let savingEdit = false;
@@ -257,9 +453,9 @@ function showFlyover(el) {
   if (!el) { box.classList.add('hidden'); return; }
   document.getElementById('fly-name').textContent = el.dataset.name || '';
   document.getElementById('fly-ytd').textContent =
-    (el.dataset.ytd || '0') + ' calls · ' + (el.dataset.ytdWknd || '0') + ' weekends';
+    (el.dataset.ytd || '0') + '/' + (el.dataset.ytdWknd || '0');
   document.getElementById('fly-month').textContent =
-    (el.dataset.month || '0') + ' calls · ' + (el.dataset.monthWknd || '0') + ' weekends';
+    (el.dataset.month || '0') + '/' + (el.dataset.monthWknd || '0');
   let years = [2025, 2026, 2027];
   let grid = [];
   let worked = [];
@@ -268,7 +464,7 @@ function showFlyover(el) {
   try { worked = JSON.parse(el.dataset.holidaysWorked || '[]'); } catch (_) {}
   years.forEach((y, i) => {
     const th = document.getElementById('fly-y' + i);
-    if (th) th.textContent = String(y);
+    if (th) th.textContent = String(y).slice(-2);
   });
   const body = document.getElementById('fly-holiday-body');
   body.innerHTML = '';
@@ -276,27 +472,26 @@ function showFlyover(el) {
     const tr = document.createElement('tr');
     tr.className = 'border-t border-slate-100';
     const nameTd = document.createElement('td');
-    nameTd.className = 'text-left py-0 pr-1 text-slate-700 whitespace-nowrap leading-tight';
-    nameTd.textContent = row.name || '';
+    nameTd.className = 'text-slate-600';
+    const raw = row.name || '';
+    nameTd.textContent = HOL_SHORT[raw] || raw.slice(0, 4);
+    nameTd.title = raw;
     tr.appendChild(nameTd);
     (row.cells || []).forEach(cell => {
       const td = document.createElement('td');
-      td.className = 'text-center px-0.5 py-0 tabular-nums leading-tight ' + (cell && cell !== '—' ? 'font-bold text-slate-900' : 'text-slate-400');
+      td.className = 'tabular-nums ' + (cell && cell !== '—' ? 'font-bold text-slate-900' : 'text-slate-400');
       td.textContent = cell || '—';
       tr.appendChild(td);
     });
     body.appendChild(tr);
   });
   const workedEl = document.getElementById('fly-worked');
-  workedEl.textContent = worked.length
-    ? worked.join(' · ')
-    : 'No tracked holidays credited in 2025–2027.';
+  workedEl.textContent = worked.length ? worked.join(' · ') : 'None credited 25–27.';
+  workedEl.title = workedEl.textContent;
   box.classList.remove('hidden');
-  const sc = box.querySelector('.fly-scroll');
-  if (sc) sc.scrollTop = 0;
 }
 function pickSurgeon(el) {
-  cancelSlotEdit();
+  blurActiveField();
   document.querySelectorAll('.roster-tile').forEach(t => t.classList.remove('ring-2', 'ring-blue-500'));
   if (penId === el.dataset.surgeonId) {
     penId = null;
@@ -348,22 +543,27 @@ async function clearCell(date, groupId) {
 function onDrop(e, slot) {
   e.preventDefault();
   slot.classList.remove('ring-1', 'ring-blue-400');
-  cancelSlotEdit();
+  blurActiveField();
   const id = e.dataTransfer.getData('text/plain') || penId;
   if (!id) return;
   place(slot.dataset.date, parseInt(slot.dataset.groupId, 10), parseInt(id, 10));
 }
-function slotChipInitials(slot) {
-  const chip = slot.querySelector('.slot-chip');
-  if (!chip) return '';
-  return (chip.textContent || '').trim().split(/\s+/)[0] || '';
+function slotField(slot) {
+  return slot ? slot.querySelector('.slot-initials-field') : null;
 }
-function cancelSlotEdit() {
+function blurActiveField() {
+  if (!editingSlot) return;
+  const input = slotField(editingSlot);
+  if (input && document.activeElement === input) input.blur();
+  else resetSlotEdit();
+}
+function resetSlotEdit() {
   if (!editingSlot) return;
   const slot = editingSlot;
-  const input = slot.querySelector('.slot-initials-input');
-  if (input) input.remove();
-  slot.querySelectorAll('.slot-chip, .slot-empty').forEach(el => { el.style.display = ''; });
+  const input = slotField(slot);
+  if (input && !savingEdit) {
+    input.value = input.dataset.saved || '';
+  }
   slot.classList.remove('ring-1', 'ring-blue-500');
   editingSlot = null;
   savingEdit = false;
@@ -374,15 +574,21 @@ async function commitSlotEdit(slot, input) {
   savingEdit = true;
   skipBlurCommit = true;
   const typed = (input.value || '').trim().toUpperCase().replace(/[^A-Z]/g, '');
+  const saved = (input.dataset.saved || '').toUpperCase();
   const date = slot.dataset.date;
   const groupId = parseInt(slot.dataset.groupId, 10);
   try {
     if (!typed) {
-      if (slot.dataset.source === 'draft') {
+      if (slot.dataset.source === 'draft' && saved) {
         await clearCell(date, groupId);
       } else {
-        cancelSlotEdit();
+        input.value = saved;
+        resetSlotEdit();
       }
+      return;
+    }
+    if (typed === saved) {
+      resetSlotEdit();
       return;
     }
     input.disabled = true;
@@ -401,29 +607,35 @@ async function commitSlotEdit(slot, input) {
   }
 }
 function beginSlotEdit(slot) {
-  if (editingSlot === slot) return;
-  cancelSlotEdit();
-  const chip = slot.querySelector('.slot-chip');
-  const empty = slot.querySelector('.slot-empty');
-  if (chip) chip.style.display = 'none';
-  if (empty) empty.style.display = 'none';
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.maxLength = 4;
-  input.autocomplete = 'off';
-  input.spellcheck = false;
-  input.className = 'slot-initials-input w-10 text-[11px] font-bold uppercase tracking-wide px-1 py-0.5 rounded border border-blue-500 text-slate-800 bg-white outline-none';
-  input.value = slotChipInitials(slot);
-  slot.appendChild(input);
+  if (!slot) return;
+  if (editingSlot && editingSlot !== slot) {
+    const prev = slotField(editingSlot);
+    if (prev) {
+      skipBlurCommit = true;
+      prev.value = prev.dataset.saved || '';
+      editingSlot.classList.remove('ring-1', 'ring-blue-500');
+      editingSlot = null;
+      savingEdit = false;
+      skipBlurCommit = false;
+    }
+  }
+  const input = slotField(slot);
+  if (!input) return;
   editingSlot = slot;
   slot.classList.add('ring-1', 'ring-blue-500');
-  input.focus();
-  input.select();
+  if (input.dataset.bound === '1') {
+    input.focus();
+    input.select();
+    return;
+  }
+  input.dataset.bound = '1';
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       e.preventDefault();
       skipBlurCommit = true;
-      cancelSlotEdit();
+      input.value = input.dataset.saved || '';
+      input.blur();
+      resetSlotEdit();
       return;
     }
     if (e.key === 'Enter') {
@@ -442,15 +654,20 @@ function beginSlotEdit(slot) {
       if (editingSlot === slot) commitSlotEdit(slot, input);
     }, 0);
   });
+  input.focus();
+  input.select();
 }
-function onSlotClick(slot) {
-  const chip = slot.querySelector('.slot-chip');
+function onSlotClick(slot, event) {
+  if (event && event.target && event.target.classList.contains('slot-initials-field')) {
+    if (!penId) return;
+  }
   if (!penId) {
     beginSlotEdit(slot);
     return;
   }
-  cancelSlotEdit();
-  if (chip && String(chip.dataset.surgeonId) === String(penId) && slot.dataset.source === 'draft') {
+  blurActiveField();
+  const sid = slot.dataset.surgeonId || '';
+  if (sid && String(sid) === String(penId) && slot.dataset.source === 'draft') {
     clearCell(slot.dataset.date, parseInt(slot.dataset.groupId, 10));
     return;
   }

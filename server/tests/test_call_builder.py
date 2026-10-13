@@ -154,22 +154,22 @@ class CallBuilderTest(unittest.TestCase):
             rows = call_history(
                 db,
                 from_date=date(2026, 1, 1),
-                to_date=date(2026, 12, 1),
+                to_date=date(2027, 1, 1),
                 draft_from=date(2026, 12, 1),
                 draft_to=date(2027, 1, 1),
             )
             by_id = {r["surgeonId"]: r for r in rows}
-            self.assertEqual(by_id[chris.id]["callCount"], 2)
-            self.assertEqual(by_id[chris.id]["weekendCount"], 1)
+            # YTD board = published + drafts in range (May live + Dec drafts).
+            self.assertEqual(by_id[chris.id]["callCount"], 4)
+            self.assertEqual(by_id[chris.id]["weekendCount"], 2)
             self.assertEqual(by_id[chris.id]["holidayCount"], 1)
             self.assertEqual(by_id[chris.id]["lastHoliday"], "Memorial Day")
             self.assertEqual(by_id[chris.id]["lastHolidayAbbrev"], "Mem")
-            self.assertEqual(by_id[chris.id]["loadLine"], "2/1 · 0/0 · 1/Mem")
+            self.assertEqual(by_id[chris.id]["loadLine"], "4/2 · 2/1 · 1/Mem")
             self.assertIn("Memorial Day/1", by_id[chris.id]["holidays"])
             self.assertEqual(by_id[chris.id]["draftCount"], 2)
-            # Month window is December; Chris's published calls are in May — month count 0
-            self.assertEqual(by_id[chris.id]["monthCallCount"], 0)
-            self.assertEqual(by_id[chris.id]["monthWeekendCount"], 0)
+            self.assertEqual(by_id[chris.id]["monthCallCount"], 2)
+            self.assertEqual(by_id[chris.id]["monthWeekendCount"], 1)
             may = call_history(
                 db,
                 from_date=date(2026, 1, 1),
@@ -281,15 +281,20 @@ class CallBuilderTest(unittest.TestCase):
                 status="active",
             ))
             db.commit()
-            work = holiday_work_lookup(db)
+            db.add(CallDraftAssignment(date=date(2027, 11, 25), call_group_id=wg.id, surgeon_id=chris.id))
+            db.add(Holiday(date=date(2027, 11, 25), name="Thanksgiving"))
+            db.commit()
+            work = holiday_work_lookup(db, years=[2025, 2026, 2027])
             self.assertEqual(work[(chris.id, "Memorial Day", 2026)], "WG")
             self.assertEqual(work[(nelson.id, "July 4th", 2026)], "ALT")
             self.assertNotIn((alex.id, "July 4th", 2026), work)
+            self.assertEqual(work[(chris.id, "Thanksgiving", 2027)], "WG")
             history = [{"surgeonId": chris.id}, {"surgeonId": alex.id}, {"surgeonId": nelson.id}]
-            attach_holiday_grids(history, work)
+            attach_holiday_grids(history, work, years=[2025, 2026, 2027])
             mem = next(r for r in history[0]["holidayGrid"] if r["name"] == "Memorial Day")
             self.assertEqual(mem["cells"][1], "WG")  # 2026
             self.assertIn("Memorial Day 2026 (WG)", history[0]["holidaysWorked"])
+            self.assertIn("Thanksgiving 2027 (WG)", history[0]["holidaysWorked"])
             self.assertEqual(history[1]["holidaysWorked"], [])
             self.assertIn("July 4th 2026 (ALT)", history[2]["holidaysWorked"])
         finally:

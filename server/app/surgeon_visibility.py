@@ -4,8 +4,15 @@ from __future__ import annotations
 
 from .models import Surgeon
 
-HIDDEN_SURGEON_EMAILS = {"don@clermontitstore.com"}
-HIDDEN_SURGEON_NAMES = {("developer", "admin")}
+# Dual-login / practice-manager identities — never show on clinical rosters.
+HIDDEN_SURGEON_EMAILS = {
+    "don@clermontitstore.com",
+    "szeh1@cfl.rr.com",  # Shannon Zeh — practice manager (superadmin)
+}
+HIDDEN_SURGEON_NAMES = {
+    ("developer", "admin"),
+    ("shannon", "zeh"),
+}
 
 
 def surgeon_is_hidden(surgeon: Surgeon | None) -> bool:

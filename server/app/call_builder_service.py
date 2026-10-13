@@ -35,9 +35,10 @@ def _history_statement(dialect: str):
             "TO_DATE": "CAST(:to_date AS DATE)",
             "DRAFT_FROM": "CAST(:draft_from AS DATE)",
             "DRAFT_TO": "CAST(:draft_to AS DATE)",
-            "WEEKDAY_EXPR": "EXTRACT(DOW FROM e.call_date)",
+            "WEEKDAY_YEAR": "EXTRACT(DOW FROM y.call_date)",
+            "WEEKDAY_MONTH": "EXTRACT(DOW FROM m.call_date)",
             "WEEKDAY_DRAFT": "EXTRACT(DOW FROM d.call_date)",
-            "HOLIDAY_LIST": "string_agg(h.name || '/' || CAST(e.call_group_id AS TEXT), ',' ORDER BY h.date)",
+            "HOLIDAY_LIST": "string_agg(h.name || '/' || CAST(y.call_group_id AS TEXT), ',' ORDER BY h.date)",
         }
     elif dialect == "sqlite":
         tokens = {
@@ -45,9 +46,10 @@ def _history_statement(dialect: str):
             "TO_DATE": ":to_date",
             "DRAFT_FROM": ":draft_from",
             "DRAFT_TO": ":draft_to",
-            "WEEKDAY_EXPR": "CAST(strftime('%w', e.call_date) AS INTEGER)",
+            "WEEKDAY_YEAR": "CAST(strftime('%w', y.call_date) AS INTEGER)",
+            "WEEKDAY_MONTH": "CAST(strftime('%w', m.call_date) AS INTEGER)",
             "WEEKDAY_DRAFT": "CAST(strftime('%w', d.call_date) AS INTEGER)",
-            "HOLIDAY_LIST": "group_concat(h.name || '/' || e.call_group_id)",
+            "HOLIDAY_LIST": "group_concat(h.name || '/' || y.call_group_id)",
         }
     else:
         raise ValueError(f"Unsupported database: {dialect}")
@@ -244,10 +246,22 @@ def attach_leave_to_history(history: list[dict], leave: dict[str, str]) -> list[
     return history
 
 
-def holiday_work_lookup(db: Session) -> dict[tuple[int, str, int], str]:
-    """Map (surgeon_id, holiday_name, year) → call-group short label for credited holiday call."""
-    start = date(HOLIDAY_FLYOVER_YEARS[0], 1, 1)
-    end = date(HOLIDAY_FLYOVER_YEARS[-1], 12, 31)
+def holiday_flyover_years(*, anchor_year: int | None = None) -> list[int]:
+    """Flyover columns: fixed planning years, plus the on-screen year when further out."""
+    years = set(HOLIDAY_FLYOVER_YEARS)
+    if anchor_year:
+        years.add(int(anchor_year))
+    return sorted(years)
+
+
+def holiday_work_lookup(db: Session, *, years: list[int] | None = None) -> dict[tuple[int, str, int], str]:
+    """Map (surgeon_id, holiday_name, year) → call-group short label for credited holiday call.
+
+    Draft overlays live on the same date|group so Call Builder forward months count before Publish.
+    """
+    year_list = years or list(HOLIDAY_FLYOVER_YEARS)
+    start = date(year_list[0], 1, 1)
+    end = date(year_list[-1], 12, 31)
     holidays = {
         h.date: h.name
         for h in db.query(Holiday)
@@ -257,13 +271,15 @@ def holiday_work_lookup(db: Session) -> dict[tuple[int, str, int], str]:
     if not holidays:
         return {}
     groups = {g.id: short_group_label(g) for g in db.query(CallGroup).all()}
+    holiday_dates = list(holidays.keys())
+    # Live first, then draft overwrites the same date|group key.
+    credited: dict[tuple[date, int], tuple[int, str]] = {}
     rotations = (
         db.query(CallRotation)
         .options(joinedload(CallRotation.coverages))
-        .filter(CallRotation.date.in_(list(holidays.keys())))
+        .filter(CallRotation.date.in_(holiday_dates))
         .all()
     )
-    out: dict[tuple[int, str, int], str] = {}
     for rotation in rotations:
         covering = None
         for coverage in rotation.coverages or []:
@@ -273,29 +289,55 @@ def holiday_work_lookup(db: Session) -> dict[tuple[int, str, int], str]:
         surgeon_id = covering if covering is not None else rotation.surgeon_id
         if surgeon_id is None or rotation.call_group_id is None:
             continue
-        name = holidays.get(rotation.date)
+        credited[(rotation.date, rotation.call_group_id)] = (
+            surgeon_id,
+            groups.get(rotation.call_group_id, "✓"),
+        )
+    drafts = (
+        db.query(CallDraftAssignment)
+        .filter(
+            CallDraftAssignment.date.in_(holiday_dates),
+            CallDraftAssignment.surgeon_id.isnot(None),
+        )
+        .all()
+    )
+    for draft in drafts:
+        if draft.call_group_id is None or draft.surgeon_id is None:
+            continue
+        credited[(draft.date, draft.call_group_id)] = (
+            int(draft.surgeon_id),
+            groups.get(draft.call_group_id, "✓"),
+        )
+    out: dict[tuple[int, str, int], str] = {}
+    for (day, _group_id), (surgeon_id, mark) in credited.items():
+        name = holidays.get(day)
         if not name:
             continue
-        out[(surgeon_id, name, rotation.date.year)] = groups.get(rotation.call_group_id, "✓")
+        out[(surgeon_id, name, day.year)] = mark
     return out
 
 
-def attach_holiday_grids(history: list[dict], work: dict[tuple[int, str, int], str]) -> list[dict]:
-    """Attach 2025–2027 holiday grid + worked list for the closable flyover."""
-    years = list(HOLIDAY_FLYOVER_YEARS)
+def attach_holiday_grids(
+    history: list[dict],
+    work: dict[tuple[int, str, int], str],
+    *,
+    years: list[int] | None = None,
+) -> list[dict]:
+    """Attach holiday grid + worked list for the closable flyover (includes draft credit)."""
+    year_list = years or list(HOLIDAY_FLYOVER_YEARS)
     for row in history:
         surgeon_id = int(row["surgeonId"])
         grid = []
         worked = []
         for db_name, label in HOLIDAY_FLYOVER_ROWS:
             cells = []
-            for year in years:
+            for year in year_list:
                 mark = work.get((surgeon_id, db_name, year), "—")
                 cells.append(mark)
                 if mark != "—":
                     worked.append(f"{label} {year} ({mark})")
             grid.append({"name": label, "cells": cells})
-        row["holidayYears"] = years
+        row["holidayYears"] = year_list
         row["holidayGrid"] = grid
         row["holidaysWorked"] = worked
     return history
@@ -334,7 +376,8 @@ def board_for_month(db: Session, year: int, month: int) -> dict:
     }
     leave = leave_flag_map(db, start, end)
     attach_leave_to_history(history, leave)
-    attach_holiday_grids(history, holiday_work_lookup(db))
+    fly_years = holiday_flyover_years(anchor_year=year)
+    attach_holiday_grids(history, holiday_work_lookup(db, years=fly_years), years=fly_years)
     leave_by_date = leave_entries_by_date(db, start, end, surgeons=surgeons)
     leave_groups = leave_groups_by_date(leave_by_date)
     live = published_map(db, start, end)
@@ -753,7 +796,8 @@ def page_data(db: Session, month_offset: int) -> dict:
     }
     leave = leave_flag_map(db, start, end)
     attach_leave_to_history(history, leave)
-    attach_holiday_grids(history, holiday_work_lookup(db))
+    fly_years = holiday_flyover_years(anchor_year=start.year)
+    attach_holiday_grids(history, holiday_work_lookup(db, years=fly_years), years=fly_years)
     for row in history:
         surg = surgeons.get(int(row["surgeonId"]))
         row["canCallBuilder"] = bool(surg and getattr(surg, "can_call_builder", False))

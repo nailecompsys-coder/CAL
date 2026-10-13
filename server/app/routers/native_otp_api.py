@@ -20,6 +20,7 @@ from ..device_names import readable_device_name
 from ..email_service import send_email
 from ..models import AdminOtpChallenge, AdminUser, MagicLink, Surgeon, SurgeonDevice
 from ..sms_service import generate_sms_otp
+from ..surgeon_visibility import surgeon_is_hidden
 from ..surgeon_visibility import surgeon_is_visible
 
 router = APIRouter(prefix="/api/native")
@@ -309,8 +310,21 @@ def native_otp_verify(body: NativeOtpVerifyBody, request: Request, db: Session =
 
     db.commit()
 
-    # Prefer surgeon as the active shell when dual — schedule is the daily default.
-    if "surgeon" in roles and surgeon_token:
+    # Clinical dual (e.g. Don): Calendar first. Practice managers (hidden / non-physician
+    # dual login with admin/superadmin): Scheduler first — they manage the whole practice.
+    manager_dual = bool(
+        admin
+        and surgeon
+        and (admin.role or "").strip().lower() in {"admin", "superadmin"}
+        and (
+            surgeon_is_hidden(surgeon)
+            or (getattr(surgeon, "staff_type", None) or "physician") != "physician"
+        )
+    )
+    if "scheduler" in roles and scheduler_token and manager_dual:
+        primary_role = "scheduler"
+        primary_token = scheduler_token
+    elif "surgeon" in roles and surgeon_token:
         primary_role = "surgeon"
         primary_token = surgeon_token
     else:

@@ -54,7 +54,7 @@
            data-holidays-worked='{{ h.holidaysWorked|default([])|tojson }}'
            onclick="pickSurgeon(this)" title="{{ h.firstName }} {{ h.lastName }}">
         <div class="flex items-baseline justify-between gap-1.5 leading-tight">
-          <span class="text-[13px] font-semibold text-slate-800 truncate">{{ h.initials }} · {{ h.lastName }}</span>
+          <span class="text-[13px] font-normal text-slate-800 truncate">{{ h.initials }} · {{ h.lastName }}</span>
         </div>
         <p class="text-[10px] font-semibold tabular-nums text-slate-600 tracking-tight leading-tight">
           <span>{{ h.callCount }}/{{ h.weekendCount }}</span>
@@ -68,7 +68,7 @@
     </div>
     <div id="surgeon-flyover" class="hidden rounded-lg border border-blue-200 bg-white shadow-md px-2.5 py-2 text-xs text-slate-700">
       <div class="flex items-start justify-between gap-2 mb-1.5">
-        <p id="fly-name" class="text-sm font-bold text-slate-800"></p>
+        <p id="fly-name" class="text-sm font-normal text-slate-800"></p>
         <button type="button" onclick="closeFlyover()" class="text-slate-400 hover:text-slate-700 px-1" title="Close" aria-label="Close">
           <i class="fa-solid fa-xmark"></i>
         </button>

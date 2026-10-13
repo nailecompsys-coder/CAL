@@ -123,10 +123,18 @@ class NativeHomeContractTest(unittest.TestCase):
             db.close()
 
     def test_native_call_builder_month_board_contract(self):
-        """GET /api/native/call-builder/month returns cells + history for draft UI."""
+        """GET /api/native/call-builder/month returns cells + history for view-only phone UI."""
         from app.call_builder_service import board_for_month, upsert_draft
+        from app.models import AdminUser
         db = self.Session()
         try:
+            admin = AdminUser(
+                username="cjohnson",
+                email="admin@example.com",
+                password_hash="x",
+                role="admin",
+                can_call_builder=True,
+            )
             chris = Surgeon(
                 first_name="Chris",
                 last_name="Johnson",
@@ -137,10 +145,10 @@ class NativeHomeContractTest(unittest.TestCase):
                 can_call_builder=True,
             )
             wg = CallGroup(name="Winter Garden / Apopka / Minneola Hospital", sort_order=0)
-            db.add_all([chris, wg])
+            db.add_all([admin, chris, wg])
             db.commit()
             upsert_draft(
-                db, day=date(2026, 10, 10), call_group_id=wg.id, surgeon_id=chris.id, surgeon=chris
+                db, day=date(2026, 10, 10), call_group_id=wg.id, surgeon_id=chris.id, admin=admin
             )
             board = board_for_month(db, 2026, 10)
             self.assertEqual(board["month"], "2026-10")
@@ -245,6 +253,7 @@ class NativeHomeContractTest(unittest.TestCase):
                     "surgeons",
                     "callSchedule",
                     "alerts",
+                    "canCallBuilder",
                 },
                 set(payload.keys()),
             )

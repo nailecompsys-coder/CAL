@@ -192,12 +192,19 @@ class CallBuilderTest(unittest.TestCase):
             db.close()
 
 
-    def test_surgeon_draft_persists_on_board(self):
+    def test_surgeon_draft_rejected_phone_is_readonly(self):
         db = self.Session()
         try:
-            _, _, chris, alex, _, wg, alt = self._seed(db)
+            admin, _, chris, _, _, wg, _ = self._seed(db)
             day = date(2026, 12, 8)
-            upsert_draft(db, day=day, call_group_id=wg.id, surgeon_id=chris.id, surgeon=chris)
+            with self.assertRaises(HTTPException) as ctx:
+                upsert_draft(db, day=day, call_group_id=wg.id, surgeon_id=chris.id, surgeon=chris)
+            self.assertEqual(ctx.exception.status_code, 403)
+            with self.assertRaises(HTTPException) as ctx2:
+                clear_draft(db, day=day, call_group_id=wg.id, surgeon=chris)
+            self.assertEqual(ctx2.exception.status_code, 403)
+
+            upsert_draft(db, day=day, call_group_id=wg.id, surgeon_id=chris.id, admin=admin)
             from app.call_builder_service import board_for_month
             board = board_for_month(db, 2026, 12)
             self.assertEqual(board["draftCount"], 1)
@@ -207,9 +214,6 @@ class CallBuilderTest(unittest.TestCase):
             )
             self.assertEqual(cell["source"], "draft")
             self.assertEqual(cell["surgeonId"], chris.id)
-            clear_draft(db, day=day, call_group_id=wg.id, surgeon=chris)
-            board2 = board_for_month(db, 2026, 12)
-            self.assertEqual(board2["draftCount"], 0)
         finally:
             db.close()
 

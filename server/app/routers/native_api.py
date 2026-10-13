@@ -11,10 +11,8 @@ from ..database import get_db
 from ..native_availability_service import save_native_availability as save_native_availability_service
 from ..call_builder_service import (
     board_for_month,
-    clear_draft,
     history_for_month,
     require_surgeon_call_builder,
-    upsert_draft,
 )
 from ..native_call_coverage_service import assign_native_call_coverage, cancel_native_call_coverage
 from ..native_home_service import build_native_home
@@ -143,26 +141,13 @@ def native_call_builder_place(
     db: Session = Depends(get_db),
     auth=Depends(get_current_surgeon),
 ):
-    """Persist one draft cell. Does not touch live call_rotations until publish."""
+    """Phone Call Builder is view-only; drafts are edited and published in the portal."""
     surgeon, _ = auth
     require_surgeon_call_builder(surgeon)
-    try:
-        day = date.fromisoformat(body.date)
-    except ValueError:
-        raise HTTPException(400, "date must be YYYY-MM-DD")
-    row = upsert_draft(
-        db,
-        day=day,
-        call_group_id=body.callGroupId,
-        surgeon_id=body.surgeonId,
-        surgeon=surgeon,
+    raise HTTPException(
+        403,
+        "Call Builder edits are portal-only. View on the phone; publish from the portal.",
     )
-    return {
-        "ok": True,
-        "date": day.isoformat(),
-        "callGroupId": body.callGroupId,
-        "surgeonId": row.surgeon_id,
-    }
 
 
 @router.post("/call-builder/clear")
@@ -173,12 +158,10 @@ def native_call_builder_clear(
 ):
     surgeon, _ = auth
     require_surgeon_call_builder(surgeon)
-    try:
-        day = date.fromisoformat(body.date)
-    except ValueError:
-        raise HTTPException(400, "date must be YYYY-MM-DD")
-    clear_draft(db, day=day, call_group_id=body.callGroupId, surgeon=surgeon)
-    return {"ok": True, "date": day.isoformat(), "callGroupId": body.callGroupId}
+    raise HTTPException(
+        403,
+        "Call Builder edits are portal-only. View on the phone; publish from the portal.",
+    )
 
 
 @router.get("/patient-schedule")

@@ -370,10 +370,13 @@ def upsert_draft(
     """Place or clear one draft cell. Does not write call_rotations."""
     if admin is None and surgeon is None:
         raise HTTPException(400, "Draft update needs an actor")
+    if surgeon is not None:
+        raise HTTPException(
+            403,
+            "Call Builder edits are portal-only. View on the phone; publish from the portal.",
+        )
     if admin is not None:
         require_admin_call_builder(admin)
-    if surgeon is not None:
-        require_surgeon_call_builder(surgeon)
     if not db.get(CallGroup, call_group_id):
         raise HTTPException(404, "Call group not found")
     if surgeon_id is not None and not db.get(Surgeon, surgeon_id):
@@ -406,10 +409,13 @@ def clear_draft(
     admin: AdminUser | None = None,
     surgeon: Surgeon | None = None,
 ) -> None:
+    if surgeon is not None:
+        raise HTTPException(
+            403,
+            "Call Builder edits are portal-only. View on the phone; publish from the portal.",
+        )
     if admin is not None:
         require_admin_call_builder(admin)
-    if surgeon is not None:
-        require_surgeon_call_builder(surgeon)
     row = (
         db.query(CallDraftAssignment)
         .filter(
@@ -431,10 +437,13 @@ def clear_draft_month(
     admin: AdminUser | None = None,
     surgeon: Surgeon | None = None,
 ) -> int:
+    if surgeon is not None:
+        raise HTTPException(
+            403,
+            "Call Builder edits are portal-only. View on the phone; publish from the portal.",
+        )
     if admin is not None:
         require_admin_call_builder(admin)
-    if surgeon is not None:
-        require_surgeon_call_builder(surgeon)
     rows = draft_assignments(db, start, end)
     n = len(rows)
     for row in rows:

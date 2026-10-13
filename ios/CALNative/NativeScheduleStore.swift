@@ -228,35 +228,15 @@ final class NativeScheduleStore: ObservableObject {
   }
 
   func placeCallBuilderDraft(date: Date, callGroupId: Int, surgeonId: Int?) async throws {
-    guard !isSupportPreview else {
-      throw NativeCALError.requestRejected("Support preview is read-only.")
-    }
-    guard let token = activeToken else {
-      throw NativeCALError.missingSession
-    }
-    do {
-      _ = try await client.placeCallBuilderDraft(
-        token: token, date: date, callGroupId: callGroupId, surgeonId: surgeonId
-      )
-    } catch let error as NativeCALError where error.isAuthenticationFailure {
-      expireSession()
-      throw error
-    }
+    throw NativeCALError.requestRejected(
+      "Call Builder edits are portal-only. View on the phone; publish from the portal."
+    )
   }
 
   func clearCallBuilderDraft(date: Date, callGroupId: Int) async throws {
-    guard !isSupportPreview else {
-      throw NativeCALError.requestRejected("Support preview is read-only.")
-    }
-    guard let token = activeToken else {
-      throw NativeCALError.missingSession
-    }
-    do {
-      _ = try await client.clearCallBuilderDraft(token: token, date: date, callGroupId: callGroupId)
-    } catch let error as NativeCALError where error.isAuthenticationFailure {
-      expireSession()
-      throw error
-    }
+    throw NativeCALError.requestRejected(
+      "Call Builder edits are portal-only. View on the phone; publish from the portal."
+    )
   }
 
   func loadPatientSchedule(containing date: Date, daysAhead: Int = 6) async {

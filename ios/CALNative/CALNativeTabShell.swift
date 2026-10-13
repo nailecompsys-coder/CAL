@@ -232,7 +232,7 @@ struct CALNativeTitleMenu: View {
   }
 }
 
-// MARK: - Call Builder (phone: day list + tap sheet; draft saved server-side until publish)
+// MARK: - Call Builder (phone: view-only month board; edit + publish in portal)
 
 private struct CallBuilderChip: Equatable {
   let initials: String
@@ -248,19 +248,8 @@ struct CallBuilderHomeView: View {
   @State private var cellsByKey: [String: NativeCallBuilderCell] = [:]
   @State private var groups: [NativeCallBuilderGroup] = []
   @State private var draftCount = 0
-  @State private var picking: CallBuilderPick?
-  @State private var loadBySurgeon: [Int: NativeCallBuilderLoad] = [:]
   @State private var loadLegend = "YTD calls/wknd · month calls/wknd · holidays/last"
-  @State private var saveError: String?
-  @State private var isSaving = false
-
-  private var roster: [NativeSurgeon] {
-    store.surgeons
-      .filter { $0.staffType == "physician" }
-      .sorted {
-        ($0.sortOrder ?? Int.max, $0.name) < ($1.sortOrder ?? Int.max, $1.name)
-      }
-  }
+  @State private var loadError: String?
 
   private var daysInMonth: [Date] {
     let cal = Calendar.current
@@ -298,14 +287,12 @@ struct CallBuilderHomeView: View {
             }
             .foregroundStyle(ClinicalPalette.teal)
 
-            Text(store.isSupportPreview
-                 ? "Read-only preview. Sign in as Chris or Amy to save drafts."
-                 : "Tap a WG or ALT slot, then pick a surgeon. Drafts save to the server (same as portal) until Publish.")
+            Text("View only · edit and Publish in the portal")
               .font(.caption)
               .foregroundStyle(.secondary)
 
             if draftCount > 0 {
-              Text("\(draftCount) draft cell\(draftCount == 1 ? "" : "s") saved · publish from portal")
+              Text("\(draftCount) draft cell\(draftCount == 1 ? "" : "s") · publish from portal")
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(ClinicalPalette.teal)
             }
@@ -314,8 +301,8 @@ struct CallBuilderHomeView: View {
               .font(.caption2)
               .foregroundStyle(ClinicalPalette.muted)
 
-            if let saveError {
-              Text(saveError)
+            if let loadError {
+              Text(loadError)
                 .font(.caption)
                 .foregroundStyle(.red)
             }
@@ -324,12 +311,7 @@ struct CallBuilderHomeView: View {
               CallBuilderDayRow(
                 day: day,
                 wg: chip(day: day, group: wgGroup),
-                alt: chip(day: day, group: altGroup),
-                onTap: { short in
-                  guard let group = groups.first(where: { $0.short == short }) ?? (short == "WG" ? wgGroup : altGroup) else { return }
-                  if store.isSupportPreview { return }
-                  picking = CallBuilderPick(day: day, group: group)
-                }
+                alt: chip(day: day, group: altGroup)
               )
             }
           }
@@ -341,31 +323,9 @@ struct CallBuilderHomeView: View {
         ToolbarItem(placement: .principal) {
           CALNativeTitleMenu(selectedSection: $selectedSection, store: store)
         }
-        ToolbarItem(placement: .topBarTrailing) {
-          if isSaving {
-            ProgressView()
-          } else {
-            Text(draftCount > 0 ? "Saved" : "")
-              .font(.caption.weight(.semibold))
-              .foregroundStyle(ClinicalPalette.muted)
-          }
-        }
       }
       .task(id: monthKey) {
         await reloadBoard()
-      }
-      .sheet(item: $picking) { pick in
-        CallBuilderPickerSheet(
-          pick: pick,
-          roster: roster,
-          loadBySurgeon: loadBySurgeon,
-          legend: loadLegend,
-          monthLabel: month.formatted(.dateTime.month(.abbreviated)),
-          onPick: { surgeonId in
-            Task { await applyPick(pick: pick, surgeonId: surgeonId) }
-          },
-          onCancel: { picking = nil }
-        )
       }
     }
   }
@@ -379,31 +339,12 @@ struct CallBuilderHomeView: View {
     do {
       let response = try await store.fetchCallBuilderMonth(month: month)
       loadLegend = response.legend
-      loadBySurgeon = Dictionary(uniqueKeysWithValues: response.history.map { ($0.surgeonId, $0) })
       groups = response.groups
       cellsByKey = Dictionary(uniqueKeysWithValues: response.cells.map { ($0.key, $0) })
       draftCount = response.draftCount ?? response.cells.filter(\.isDraft).count
-      saveError = nil
+      loadError = nil
     } catch {
-      saveError = "Could not load Call Builder board."
-    }
-  }
-
-  private func applyPick(pick: CallBuilderPick, surgeonId: Int?) async {
-    picking = nil
-    isSaving = true
-    defer { isSaving = false }
-    do {
-      if let surgeonId {
-        try await store.placeCallBuilderDraft(
-          date: pick.day, callGroupId: pick.group.id, surgeonId: surgeonId
-        )
-      } else {
-        try await store.clearCallBuilderDraft(date: pick.day, callGroupId: pick.group.id)
-      }
-      await reloadBoard()
-    } catch {
-      saveError = (error as? LocalizedError)?.errorDescription ?? "Could not save draft."
+      loadError = "Could not load Call Builder board."
     }
   }
 
@@ -433,17 +374,10 @@ struct CallBuilderHomeView: View {
   }
 }
 
-private struct CallBuilderPick: Identifiable {
-  let day: Date
-  let group: NativeCallBuilderGroup
-  var id: String { "\(day.timeIntervalSince1970)-\(group.id)" }
-}
-
 private struct CallBuilderDayRow: View {
   let day: Date
   let wg: CallBuilderChip?
   let alt: CallBuilderChip?
-  let onTap: (String) -> Void
 
   private var isWeekend: Bool {
     let w = Calendar.current.component(.weekday, from: day)
@@ -462,8 +396,8 @@ private struct CallBuilderDayRow: View {
       }
       .frame(width: 44, alignment: .leading)
 
-      CallBuilderSlot(label: "WG Group", chip: wg) { onTap("WG") }
-      CallBuilderSlot(label: "ALT Group", chip: alt) { onTap("ALT") }
+      CallBuilderSlot(label: "WG Group", chip: wg)
+      CallBuilderSlot(label: "ALT Group", chip: alt)
     }
     .padding(.vertical, 4)
   }
@@ -472,133 +406,33 @@ private struct CallBuilderDayRow: View {
 private struct CallBuilderSlot: View {
   let label: String
   let chip: CallBuilderChip?
-  let action: () -> Void
 
   var body: some View {
-    Button(action: action) {
-      VStack(alignment: .leading, spacing: 2) {
-        Text(label)
-          .font(.caption2)
-          .foregroundStyle(.secondary)
-        if let chip {
-          Text(chip.initials)
-            .font(.subheadline.weight(.bold))
-            .foregroundStyle(chip.flagged ? ClinicalPalette.muted : ClinicalPalette.ink)
-        } else {
-          Text("Tap to assign")
-            .font(.caption)
-            .foregroundStyle(ClinicalPalette.muted)
-        }
-      }
-      .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-      .padding(.horizontal, 10)
-      .padding(.vertical, 6)
-      .background(ClinicalPalette.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-      .overlay {
-        let dashed = chip == nil || chip?.isDraft == true
-        RoundedRectangle(cornerRadius: 10, style: .continuous)
-          .stroke(
-            chip == nil ? ClinicalPalette.stroke.opacity(0.7) : ClinicalPalette.teal.opacity(0.55),
-            style: StrokeStyle(lineWidth: 1, dash: dashed ? [4, 3] : [])
-          )
-      }
-    }
-    .buttonStyle(.plain)
-  }
-}
-
-private struct CallBuilderPickerSheet: View {
-  let pick: CallBuilderPick
-  let roster: [NativeSurgeon]
-  let loadBySurgeon: [Int: NativeCallBuilderLoad]
-  let legend: String
-  let monthLabel: String
-  let onPick: (Int?) -> Void
-  let onCancel: () -> Void
-  @State private var detailLoad: NativeCallBuilderLoad?
-
-  var body: some View {
-    CalNavigation {
-      List {
-        Section {
-          Text(pick.day.formatted(.dateTime.weekday(.wide).month().day()) + " · " + pick.group.short + " Group")
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-          Text(legend)
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-        }
-        if let load = detailLoad {
-          Section("\(load.firstName) \(load.lastName)") {
-            CallBuilderDetailRow(label: "YTD", value: load.detailYTD)
-            CallBuilderDetailRow(label: monthLabel, value: load.detailMonth)
-            CallBuilderDetailRow(label: "Holidays", value: load.detailHolidays)
-            CallBuilderDetailRow(label: "Last holiday", value: load.lastHoliday.isEmpty ? "—" : load.lastHoliday)
-            Button("Hide detail") { detailLoad = nil }
-          }
-        }
-        Section("Surgeons · practice rank") {
-          ForEach(roster) { s in
-            HStack(spacing: 10) {
-              Button {
-                onPick(s.id)
-              } label: {
-                HStack {
-                  VStack(alignment: .leading, spacing: 2) {
-                    Text(s.name)
-                      .font(.body.weight(.semibold))
-                      .foregroundStyle(ClinicalPalette.ink)
-                    Text(loadBySurgeon[s.id]?.loadLine ?? "—/— · —/— · —/—")
-                      .font(.caption.monospacedDigit())
-                      .foregroundStyle(.secondary)
-                  }
-                  Spacer()
-                  Text(s.initials)
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(ClinicalPalette.teal)
-                }
-              }
-              .buttonStyle(.plain)
-              if let load = loadBySurgeon[s.id] {
-                Button {
-                  detailLoad = load
-                } label: {
-                  Image(systemName: "info.circle")
-                    .foregroundStyle(ClinicalPalette.teal)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Call load detail")
-              }
-            }
-          }
-          Button("Clear this day", role: .destructive) {
-            onPick(nil)
-          }
-        }
-      }
-      .navigationTitle("Assign call")
-      .navigationBarTitleDisplayMode(.inline)
-      .toolbar {
-        ToolbarItem(placement: .cancellationAction) {
-          Button("Cancel", action: onCancel)
-        }
-      }
-    }
-  }
-}
-
-private struct CallBuilderDetailRow: View {
-  let label: String
-  let value: String
-
-  var body: some View {
-    HStack(alignment: .top) {
+    VStack(alignment: .leading, spacing: 2) {
       Text(label)
+        .font(.caption2)
         .foregroundStyle(.secondary)
-      Spacer(minLength: 12)
-      Text(value)
-        .multilineTextAlignment(.trailing)
-        .font(.body.monospacedDigit())
+      if let chip {
+        Text(chip.initials)
+          .font(.subheadline.weight(.bold))
+          .foregroundStyle(chip.flagged ? ClinicalPalette.muted : ClinicalPalette.ink)
+      } else {
+        Text("—")
+          .font(.caption)
+          .foregroundStyle(ClinicalPalette.muted)
+      }
+    }
+    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+    .padding(.horizontal, 10)
+    .padding(.vertical, 6)
+    .background(ClinicalPalette.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    .overlay {
+      let dashed = chip == nil || chip?.isDraft == true
+      RoundedRectangle(cornerRadius: 10, style: .continuous)
+        .stroke(
+          chip == nil ? ClinicalPalette.stroke.opacity(0.7) : ClinicalPalette.teal.opacity(0.55),
+          style: StrokeStyle(lineWidth: 1, dash: dashed ? [4, 3] : [])
+        )
     }
   }
 }

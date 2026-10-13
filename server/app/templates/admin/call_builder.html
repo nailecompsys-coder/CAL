@@ -123,7 +123,7 @@
                   {{ cell.initials }}{% if cell.flag %} <span class="font-medium">{{ cell.flag }}</span>{% endif %}
                 </span>
                 {% else %}
-                <span class="slot-empty text-[10px] text-slate-300">type</span>
+                <span class="slot-empty inline-block min-w-[1.5rem] min-h-[1rem]"></span>
                 {% endif %}
               </div>
               {% endfor %}
@@ -171,6 +171,8 @@
 const MONTH_OFFSET = {{ month_offset }};
 let penId = null;
 let editingSlot = null;
+let savingEdit = false;
+let skipBlurCommit = false;
 
 function showFlyover(el) {
   const box = document.getElementById('surgeon-flyover');
@@ -246,15 +248,49 @@ function onDrop(e, slot) {
 function slotChipInitials(slot) {
   const chip = slot.querySelector('.slot-chip');
   if (!chip) return '';
-  return (chip.childNodes[0] && chip.childNodes[0].textContent || '').trim().split(/\s+/)[0] || '';
+  return (chip.textContent || '').trim().split(/\s+/)[0] || '';
 }
 function cancelSlotEdit() {
   if (!editingSlot) return;
-  const input = editingSlot.querySelector('.slot-initials-input');
+  const slot = editingSlot;
+  const input = slot.querySelector('.slot-initials-input');
   if (input) input.remove();
-  editingSlot.querySelectorAll('.slot-chip, .slot-empty').forEach(el => { el.style.display = ''; });
-  editingSlot.classList.remove('ring-1', 'ring-blue-500');
+  slot.querySelectorAll('.slot-chip, .slot-empty').forEach(el => { el.style.display = ''; });
+  slot.classList.remove('ring-1', 'ring-blue-500');
   editingSlot = null;
+  savingEdit = false;
+  skipBlurCommit = false;
+}
+async function commitSlotEdit(slot, input) {
+  if (!slot || !input || savingEdit) return;
+  savingEdit = true;
+  skipBlurCommit = true;
+  const typed = (input.value || '').trim().toUpperCase().replace(/[^A-Z]/g, '');
+  const date = slot.dataset.date;
+  const groupId = parseInt(slot.dataset.groupId, 10);
+  try {
+    if (!typed) {
+      if (slot.dataset.source === 'draft') {
+        await clearCell(date, groupId);
+      } else {
+        cancelSlotEdit();
+      }
+      return;
+    }
+    input.disabled = true;
+    const ok = await place(date, groupId, null, typed);
+    if (!ok) {
+      input.disabled = false;
+      savingEdit = false;
+      skipBlurCommit = false;
+      input.focus();
+      input.select();
+    }
+  } catch (_) {
+    savingEdit = false;
+    skipBlurCommit = false;
+    input.disabled = false;
+  }
 }
 function beginSlotEdit(slot) {
   if (editingSlot === slot) return;
@@ -270,40 +306,33 @@ function beginSlotEdit(slot) {
   input.spellcheck = false;
   input.className = 'slot-initials-input w-10 text-[11px] font-bold uppercase tracking-wide px-1 py-0.5 rounded border border-blue-500 text-slate-800 bg-white outline-none';
   input.value = slotChipInitials(slot);
-  input.title = 'Type initials (JB, CJ). Enter to save. Empty + Enter clears draft. Esc cancels.';
   slot.appendChild(input);
   editingSlot = slot;
   slot.classList.add('ring-1', 'ring-blue-500');
   input.focus();
   input.select();
-  input.addEventListener('keydown', async (e) => {
+  input.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       e.preventDefault();
+      skipBlurCommit = true;
       cancelSlotEdit();
       return;
     }
-    if (e.key !== 'Enter') return;
-    e.preventDefault();
-    const typed = (input.value || '').trim().toUpperCase();
-    const date = slot.dataset.date;
-    const groupId = parseInt(slot.dataset.groupId, 10);
-    if (!typed) {
-      if (slot.dataset.source === 'draft') await clearCell(date, groupId);
-      else cancelSlotEdit();
-      return;
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      commitSlotEdit(slot, input);
     }
-    input.disabled = true;
-    const ok = await place(date, groupId, null, typed);
-    if (!ok) {
-      input.disabled = false;
-      input.focus();
-      input.select();
-    }
+  });
+  input.addEventListener('input', () => {
+    const typed = (input.value || '').toUpperCase().replace(/[^A-Z]/g, '');
+    if (input.value !== typed) input.value = typed;
+    if (typed.length >= 2) commitSlotEdit(slot, input);
   });
   input.addEventListener('blur', () => {
     setTimeout(() => {
-      if (editingSlot === slot && document.activeElement !== input) cancelSlotEdit();
-    }, 120);
+      if (skipBlurCommit || savingEdit) return;
+      if (editingSlot === slot) commitSlotEdit(slot, input);
+    }, 0);
   });
 }
 function onSlotClick(slot) {

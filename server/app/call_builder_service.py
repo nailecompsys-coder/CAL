@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import calendar as calendar_lib
+from collections import defaultdict
 from datetime import date, timedelta
 from functools import lru_cache
 from pathlib import Path
@@ -155,8 +156,20 @@ def call_history(
             "holidayNames": _holiday_names(row["holidays"] or ""),
             "holidays": row["holidays"] or "",
             "loadLine": load_line,
+            "leaveLabels": [],
+            "leaveLine": "",
         })
     return out
+
+
+def attach_leave_to_history(history: list[dict], leave: dict[str, str]) -> list[dict]:
+    """Add month leave labels onto each surgeon history card (Vacation / No Call / Off)."""
+    summaries = leave_summary_by_surgeon(leave)
+    for row in history:
+        labels = summaries.get(int(row["surgeonId"]), [])
+        row["leaveLabels"] = labels
+        row["leaveLine"] = " · ".join(labels)
+    return history
 
 
 def month_bounds(year: int, month: int) -> tuple[date, date, date]:
@@ -191,6 +204,9 @@ def board_for_month(db: Session, year: int, month: int) -> dict:
         .all()
     }
     leave = leave_flag_map(db, start, end)
+    attach_leave_to_history(history, leave)
+    leave_by_date = leave_entries_by_date(db, start, end, surgeons=surgeons)
+    leave_groups = leave_groups_by_date(leave_by_date)
     live = published_map(db, start, end)
     draft = draft_map(db, start, end)
     holidays = {h.date.isoformat(): h.name for h in holidays_between(db, start, end)}
@@ -224,6 +240,8 @@ def board_for_month(db: Session, year: int, month: int) -> dict:
         "history": history,
         "groups": [{"id": g.id, "name": g.name, "short": short_group_label(g)} for g in groups],
         "cells": cells,
+        "leaveByDate": leave_by_date,
+        "leaveGroupsByDate": leave_groups,
         "draftCount": len(draft),
         "changeCount": len(publish_changes(db, start, end)),
     }
@@ -339,12 +357,39 @@ def short_group_label(group: CallGroup) -> str:
     return "WG"
 
 
+def _normalize_leave_reason(reason: str | None) -> str:
+    return " ".join((reason or "").strip().lower().replace("_", " ").split())
+
+
 def _is_no_call(reason: str | None) -> bool:
-    return " ".join((reason or "").strip().lower().split()) == "no call"
+    return _normalize_leave_reason(reason) == "no call"
+
+
+def leave_label(reason: str | None) -> str:
+    """Display label for an approved day-off reason (Vacation, No Call, Off, …)."""
+    norm = _normalize_leave_reason(reason)
+    if norm == "no call":
+        return "No Call"
+    if norm == "vacation":
+        return "Vacation"
+    if norm in ("", "day off", "off"):
+        return "Off"
+    return " ".join(part.capitalize() for part in norm.split())
+
+
+def _leave_priority(label: str) -> int:
+    """Higher wins when one surgeon has overlapping approved leave that day."""
+    if label == "No Call":
+        return 40
+    if label == "Vacation":
+        return 30
+    if label == "Off":
+        return 10
+    return 20
 
 
 def leave_flag_map(db: Session, start: date, end: date) -> dict[str, str]:
-    """Keys are 'YYYY-MM-DD|surgeon_id' → 'Off' or 'No Call' (approved only)."""
+    """Keys are 'YYYY-MM-DD|surgeon_id' → leave label (approved only)."""
     rows = (
         db.query(DayOff)
         .filter(
@@ -356,15 +401,102 @@ def leave_flag_map(db: Session, start: date, end: date) -> dict[str, str]:
     )
     out: dict[str, str] = {}
     for row in rows:
-        kind = "No Call" if _is_no_call(row.reason) else "Off"
+        kind = leave_label(row.reason)
         current = max(row.start_date, start)
         last = min(row.end_date, end)
         while current <= last:
             key = f"{current.isoformat()}|{row.surgeon_id}"
-            # No Call wins over Off if both somehow present
-            if key not in out or kind == "No Call":
+            prev = out.get(key)
+            if prev is None or _leave_priority(kind) > _leave_priority(prev):
                 out[key] = kind
             current += timedelta(days=1)
+    return out
+
+
+def leave_entries_by_date(
+    db: Session,
+    start: date,
+    end: date,
+    *,
+    surgeons: dict[int, Surgeon] | None = None,
+) -> dict[str, list[dict]]:
+    """Approved leave per day for Call Builder day cells (CALL-style Off list).
+
+    Returns ISO date → [{surgeonId, initials, label}, ...] sorted by label priority
+    then initials. Vacation, No Call, and other approved reasons are kept distinct.
+    """
+    leave = leave_flag_map(db, start, end)
+    if not leave:
+        return {}
+    if surgeons is None:
+        surgeons = {
+            s.id: s
+            for s in db.query(Surgeon)
+            .filter(Surgeon.is_active.is_(True), func.coalesce(Surgeon.staff_type, "physician") == "physician")
+            .all()
+        }
+    by_day: dict[str, list[dict]] = defaultdict(list)
+    for key, label in leave.items():
+        day_s, surgeon_s = key.split("|", 1)
+        surgeon_id = int(surgeon_s)
+        surg = surgeons.get(surgeon_id)
+        if not surg:
+            continue
+        by_day[day_s].append({
+            "surgeonId": surgeon_id,
+            "initials": surg.initials,
+            "label": label,
+        })
+    for day_s, entries in by_day.items():
+        entries.sort(key=lambda row: (-_leave_priority(row["label"]), row["initials"] or "", row["surgeonId"]))
+    return dict(by_day)
+
+
+def leave_summary_by_surgeon(leave: dict[str, str]) -> dict[int, list[str]]:
+    """Surgeon id → distinct leave labels in the window, highest priority first."""
+    by_surgeon: dict[int, set[str]] = defaultdict(set)
+    for key, label in leave.items():
+        _, surgeon_s = key.split("|", 1)
+        by_surgeon[int(surgeon_s)].add(label)
+    return {
+        surgeon_id: sorted(labels, key=lambda value: (-_leave_priority(value), value))
+        for surgeon_id, labels in by_surgeon.items()
+    }
+
+
+def _leave_short(label: str) -> str:
+    if label == "No Call":
+        return "NC"
+    if label == "Vacation":
+        return "VAC"
+    if label == "Off":
+        return "OFF"
+    return (label[:3] or "OFF").upper()
+
+
+def leave_groups_by_date(leave_by_date: dict[str, list[dict]]) -> dict[str, list[dict]]:
+    """Collapse per-day leave entries into CALL-style label groups for the template."""
+    out: dict[str, list[dict]] = {}
+    for day_s, entries in leave_by_date.items():
+        grouped: dict[str, list[str]] = {}
+        order: list[str] = []
+        for entry in entries:
+            label = entry["label"]
+            if label not in grouped:
+                grouped[label] = []
+                order.append(label)
+            initials = entry.get("initials") or ""
+            if initials and initials not in grouped[label]:
+                grouped[label].append(initials)
+        out[day_s] = [
+            {
+                "label": label,
+                "short": _leave_short(label),
+                "initials": grouped[label],
+                "initialsLine": " ".join(grouped[label]),
+            }
+            for label in order
+        ]
     return out
 
 
@@ -462,6 +594,9 @@ def page_data(db: Session, month_offset: int) -> dict:
         .all()
     }
     leave = leave_flag_map(db, start, end)
+    attach_leave_to_history(history, leave)
+    leave_by_date = leave_entries_by_date(db, start, end, surgeons=surgeons)
+    leave_groups = leave_groups_by_date(leave_by_date)
     live = published_map(db, start, end)
     draft = draft_map(db, start, end)
     holidays = {h.date.isoformat(): h.name for h in holidays_between(db, start, end)}
@@ -498,6 +633,8 @@ def page_data(db: Session, month_offset: int) -> dict:
         "cells": cells,
         "cells_by_key": cells_by_key,
         "leave": leave,
+        "leave_by_date": leave_by_date,
+        "leave_groups_by_date": leave_groups,
         "holidays": holidays,
         "draft_count": len(draft),
         "change_count": len(publish_changes(db, start, end)),

@@ -49,9 +49,13 @@
            data-hol-count="{{ h.holidayCount }}"
            data-last-hol="{{ h.lastHoliday or '—' }}"
            data-holidays="{{ h.holidayNames|join(', ') if h.holidayNames else 'none' }}"
+           data-leave-line="{{ h.leaveLine or '' }}"
            onclick="pickSurgeon(this)" title="{{ h.firstName }} {{ h.lastName }}">
         <div class="flex items-baseline justify-between gap-1.5 leading-tight">
           <span class="text-[13px] font-semibold text-slate-800 truncate">{{ h.initials }} · {{ h.lastName }}</span>
+          {% if h.leaveLine %}
+          <span class="text-[9px] font-bold text-amber-800 truncate flex-shrink-0">{{ h.leaveLine }}</span>
+          {% endif %}
         </div>
         <p class="text-[10px] font-semibold tabular-nums text-slate-600 tracking-tight leading-tight">{{ h.loadLine }}</p>
       </div>
@@ -126,6 +130,16 @@
                 <span class="text-[10px] text-slate-300">drop</span>
                 {% endif %}
               </div>
+              {% endfor %}
+              {% for group in leave_groups_by_date.get(iso, []) %}
+              <span class="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded leading-tight shadow-sm truncate
+                {% if group.label == 'No Call' %}bg-amber-100 text-amber-900
+                {% elif group.label == 'Vacation' %}bg-sky-100 text-sky-900
+                {% else %}bg-slate-200 text-slate-700{% endif %}"
+                title="{{ group.label }}">
+                <span class="font-extrabold">{{ group.short }}:</span>
+                <span class="font-bold">{{ group.initialsLine }}</span>
+              </span>
               {% endfor %}
             </div>
           </td>

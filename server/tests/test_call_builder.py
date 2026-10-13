@@ -12,8 +12,13 @@ from sqlalchemy.orm import sessionmaker
 
 from app.call_builder_service import (
     _history_statement,
+    attach_leave_to_history,
     call_history,
     clear_draft,
+    leave_flag_map,
+    leave_groups_by_date,
+    leave_label,
+    leave_entries_by_date,
     publish_changes,
     publish_draft,
     require_admin_call_builder,
@@ -26,6 +31,7 @@ from app.models import (
     CallDraftAssignment,
     CallGroup,
     CallRotation,
+    DayOff,
     Holiday,
     Surgeon,
 )
@@ -223,6 +229,66 @@ class CallBuilderTest(unittest.TestCase):
             by_group = {r.call_group_id: r.surgeon_id for r in live}
             self.assertEqual(by_group[wg.id], chris.id)
             self.assertEqual(by_group[alt.id], alex.id)
+        finally:
+            db.close()
+
+    def test_leave_labels_vacation_and_no_call(self):
+        self.assertEqual(leave_label("Vacation"), "Vacation")
+        self.assertEqual(leave_label("no_call"), "No Call")
+        self.assertEqual(leave_label("Day Off"), "Off")
+        self.assertEqual(leave_label("day_off"), "Off")
+        self.assertEqual(leave_label("Personal"), "Personal")
+
+        db = self.Session()
+        try:
+            _, _, chris, alex, nelson, _, _ = self._seed(db)
+            day = date(2026, 12, 15)
+            db.add_all([
+                DayOff(
+                    surgeon_id=chris.id, start_date=day, end_date=day,
+                    reason="Vacation", status="approved",
+                ),
+                DayOff(
+                    surgeon_id=alex.id, start_date=day, end_date=day,
+                    reason="Day Off", status="approved",
+                ),
+                DayOff(
+                    surgeon_id=nelson.id, start_date=day, end_date=day,
+                    reason="No Call", status="approved",
+                ),
+                # Pending must not appear
+                DayOff(
+                    surgeon_id=chris.id,
+                    start_date=date(2026, 12, 16),
+                    end_date=date(2026, 12, 16),
+                    reason="Vacation",
+                    status="pending",
+                ),
+            ])
+            db.commit()
+            leave = leave_flag_map(db, date(2026, 12, 1), date(2026, 12, 31))
+            self.assertEqual(leave[f"2026-12-15|{chris.id}"], "Vacation")
+            self.assertEqual(leave[f"2026-12-15|{alex.id}"], "Off")
+            self.assertEqual(leave[f"2026-12-15|{nelson.id}"], "No Call")
+            self.assertNotIn(f"2026-12-16|{chris.id}", leave)
+
+            surgeons = {chris.id: chris, alex.id: alex, nelson.id: nelson}
+            by_date = leave_entries_by_date(
+                db, date(2026, 12, 1), date(2026, 12, 31), surgeons=surgeons,
+            )
+            groups = leave_groups_by_date(by_date)["2026-12-15"]
+            by_short = {g["short"]: g["initialsLine"] for g in groups}
+            self.assertEqual(by_short["NC"], nelson.initials)
+            self.assertEqual(by_short["VAC"], chris.initials)
+            self.assertEqual(by_short["OFF"], alex.initials)
+
+            history = [
+                {"surgeonId": chris.id, "leaveLabels": [], "leaveLine": ""},
+                {"surgeonId": alex.id, "leaveLabels": [], "leaveLine": ""},
+            ]
+            attach_leave_to_history(history, leave)
+            self.assertEqual(history[0]["leaveLine"], "Vacation")
+            self.assertEqual(history[1]["leaveLine"], "Off")
         finally:
             db.close()
 

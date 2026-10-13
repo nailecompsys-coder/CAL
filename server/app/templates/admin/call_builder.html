@@ -131,14 +131,14 @@
                 {% endif %}
               </div>
               {% endfor %}
-              {% for group in leave_groups_by_date.get(iso, []) %}
+              {% for leave_group in (leave_groups_by_date or {}).get(iso, []) %}
               <span class="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded leading-tight shadow-sm truncate
-                {% if group.label == 'No Call' %}bg-amber-100 text-amber-900
-                {% elif group.label == 'Vacation' %}bg-sky-100 text-sky-900
+                {% if leave_group.label == 'No Call' %}bg-amber-100 text-amber-900
+                {% elif leave_group.label == 'Vacation' %}bg-sky-100 text-sky-900
                 {% else %}bg-slate-200 text-slate-700{% endif %}"
-                title="{{ group.label }}">
-                <span class="font-extrabold">{{ group.short }}:</span>
-                <span class="font-bold">{{ group.initialsLine }}</span>
+                title="{{ leave_group.label }}">
+                <span class="font-extrabold">{{ leave_group.short }}:</span>
+                <span class="font-bold">{{ leave_group.initialsLine }}</span>
               </span>
               {% endfor %}
             </div>

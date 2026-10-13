@@ -22,6 +22,7 @@ from app.call_builder_service import (
     publish_changes,
     publish_draft,
     require_admin_call_builder,
+    resolve_surgeon_id_by_initials,
     upsert_draft,
 )
 from app.models import (
@@ -229,6 +230,21 @@ class CallBuilderTest(unittest.TestCase):
             by_group = {r.call_group_id: r.surgeon_id for r in live}
             self.assertEqual(by_group[wg.id], chris.id)
             self.assertEqual(by_group[alt.id], alex.id)
+        finally:
+            db.close()
+
+    def test_resolve_surgeon_id_by_initials(self):
+        db = self.Session()
+        try:
+            _, _, chris, alex, _, _, _ = self._seed(db)
+            self.assertEqual(resolve_surgeon_id_by_initials(db, "cj"), chris.id)
+            self.assertEqual(resolve_surgeon_id_by_initials(db, " AS "), alex.id)
+            with self.assertRaises(HTTPException) as missing:
+                resolve_surgeon_id_by_initials(db, "ZZ")
+            self.assertEqual(missing.exception.status_code, 400)
+            with self.assertRaises(HTTPException) as short:
+                resolve_surgeon_id_by_initials(db, "C")
+            self.assertEqual(short.exception.status_code, 400)
         finally:
             db.close()
 

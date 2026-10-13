@@ -14,6 +14,7 @@ from ..call_builder_service import (
     publish_changes,
     publish_draft,
     require_admin_call_builder,
+    resolve_surgeon_id_by_initials,
     upsert_draft,
 )
 from ..database import get_db
@@ -55,7 +56,13 @@ async def call_builder_place(
     day = date.fromisoformat(body["date"])
     group_id = int(body["callGroupId"])
     raw = body.get("surgeonId")
-    surgeon_id = int(raw) if raw not in (None, "", "null") else None
+    initials = (body.get("initials") or "").strip()
+    if raw not in (None, "", "null"):
+        surgeon_id = int(raw)
+    elif initials:
+        surgeon_id = resolve_surgeon_id_by_initials(db, initials)
+    else:
+        surgeon_id = None
     row = upsert_draft(db, day=day, call_group_id=group_id, surgeon_id=surgeon_id, admin=admin)
     return JSONResponse({
         "ok": True,

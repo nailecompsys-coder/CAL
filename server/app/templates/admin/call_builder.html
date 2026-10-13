@@ -123,7 +123,7 @@
                   {{ cell.initials }}{% if cell.flag %} <span class="font-medium">{{ cell.flag }}</span>{% endif %}
                 </span>
                 {% else %}
-                <span class="text-[10px] text-slate-300">drop</span>
+                <span class="slot-empty text-[10px] text-slate-300">type</span>
                 {% endif %}
               </div>
               {% endfor %}
@@ -170,6 +170,7 @@
 <script>
 const MONTH_OFFSET = {{ month_offset }};
 let penId = null;
+let editingSlot = null;
 
 function showFlyover(el) {
   const box = document.getElementById('surgeon-flyover');
@@ -186,6 +187,7 @@ function showFlyover(el) {
   box.classList.remove('hidden');
 }
 function pickSurgeon(el) {
+  cancelSlotEdit();
   document.querySelectorAll('.roster-tile').forEach(t => t.classList.remove('ring-2', 'ring-blue-500'));
   if (penId === el.dataset.surgeonId) {
     penId = null;
@@ -203,14 +205,26 @@ document.querySelectorAll('.roster-tile').forEach(el => {
   });
 });
 
-async function place(date, groupId, surgeonId) {
+async function place(date, groupId, surgeonId, initials) {
+  const body = { date, callGroupId: groupId };
+  if (initials != null && initials !== '') body.initials = initials;
+  else body.surgeonId = surgeonId;
   const res = await fetch('/admin/call-builder/place', {
     method: 'POST', credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-    body: JSON.stringify({ date, callGroupId: groupId, surgeonId }),
+    body: JSON.stringify(body),
   });
-  if (!res.ok) { alert('Could not save draft cell'); return; }
+  if (!res.ok) {
+    let msg = 'Could not save draft cell';
+    try {
+      const err = await res.json();
+      if (err && err.detail) msg = typeof err.detail === 'string' ? err.detail : msg;
+    } catch (_) {}
+    alert(msg);
+    return false;
+  }
   location.reload();
+  return true;
 }
 async function clearCell(date, groupId) {
   const res = await fetch('/admin/call-builder/clear', {
@@ -224,16 +238,81 @@ async function clearCell(date, groupId) {
 function onDrop(e, slot) {
   e.preventDefault();
   slot.classList.remove('ring-1', 'ring-blue-400');
+  cancelSlotEdit();
   const id = e.dataTransfer.getData('text/plain') || penId;
   if (!id) return;
   place(slot.dataset.date, parseInt(slot.dataset.groupId, 10), parseInt(id, 10));
 }
+function slotChipInitials(slot) {
+  const chip = slot.querySelector('.slot-chip');
+  if (!chip) return '';
+  return (chip.childNodes[0] && chip.childNodes[0].textContent || '').trim().split(/\s+/)[0] || '';
+}
+function cancelSlotEdit() {
+  if (!editingSlot) return;
+  const input = editingSlot.querySelector('.slot-initials-input');
+  if (input) input.remove();
+  editingSlot.querySelectorAll('.slot-chip, .slot-empty').forEach(el => { el.style.display = ''; });
+  editingSlot.classList.remove('ring-1', 'ring-blue-500');
+  editingSlot = null;
+}
+function beginSlotEdit(slot) {
+  if (editingSlot === slot) return;
+  cancelSlotEdit();
+  const chip = slot.querySelector('.slot-chip');
+  const empty = slot.querySelector('.slot-empty');
+  if (chip) chip.style.display = 'none';
+  if (empty) empty.style.display = 'none';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.maxLength = 4;
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  input.className = 'slot-initials-input w-10 text-[11px] font-bold uppercase tracking-wide px-1 py-0.5 rounded border border-blue-500 text-slate-800 bg-white outline-none';
+  input.value = slotChipInitials(slot);
+  input.title = 'Type initials (JB, CJ). Enter to save. Empty + Enter clears draft. Esc cancels.';
+  slot.appendChild(input);
+  editingSlot = slot;
+  slot.classList.add('ring-1', 'ring-blue-500');
+  input.focus();
+  input.select();
+  input.addEventListener('keydown', async (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      cancelSlotEdit();
+      return;
+    }
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const typed = (input.value || '').trim().toUpperCase();
+    const date = slot.dataset.date;
+    const groupId = parseInt(slot.dataset.groupId, 10);
+    if (!typed) {
+      if (slot.dataset.source === 'draft') await clearCell(date, groupId);
+      else cancelSlotEdit();
+      return;
+    }
+    input.disabled = true;
+    const ok = await place(date, groupId, null, typed);
+    if (!ok) {
+      input.disabled = false;
+      input.focus();
+      input.select();
+    }
+  });
+  input.addEventListener('blur', () => {
+    setTimeout(() => {
+      if (editingSlot === slot && document.activeElement !== input) cancelSlotEdit();
+    }, 120);
+  });
+}
 function onSlotClick(slot) {
   const chip = slot.querySelector('.slot-chip');
   if (!penId) {
-    if (chip && slot.dataset.source === 'draft') clearCell(slot.dataset.date, parseInt(slot.dataset.groupId, 10));
+    beginSlotEdit(slot);
     return;
   }
+  cancelSlotEdit();
   if (chip && String(chip.dataset.surgeonId) === String(penId) && slot.dataset.source === 'draft') {
     clearCell(slot.dataset.date, parseInt(slot.dataset.groupId, 10));
     return;

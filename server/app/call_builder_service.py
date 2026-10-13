@@ -265,6 +265,25 @@ def draft_assignments(db: Session, start: date, end: date) -> list[CallDraftAssi
     )
 
 
+def resolve_surgeon_id_by_initials(db: Session, initials: str) -> int:
+    """Resolve typed initials (JB, CJ) to one active physician. Fail closed if ambiguous."""
+    key = "".join(ch for ch in (initials or "").upper() if ch.isalpha())
+    if len(key) < 2:
+        raise HTTPException(400, "Enter two-letter initials")
+    matches = [
+        s
+        for s in db.query(Surgeon)
+        .filter(Surgeon.is_active.is_(True), func.coalesce(Surgeon.staff_type, "physician") == "physician")
+        .all()
+        if (s.initials or "").upper() == key
+    ]
+    if len(matches) == 1:
+        return matches[0].id
+    if not matches:
+        raise HTTPException(400, f"No surgeon matches {key}")
+    raise HTTPException(400, f"Ambiguous initials {key}")
+
+
 def upsert_draft(
     db: Session,
     *,

@@ -486,7 +486,7 @@ private struct CallBuilderMonthDayCell: View {
           .foregroundStyle(cell.isToday ? ClinicalPalette.teal : ClinicalPalette.ink)
 
         Text(cell.holidayEmoji.isEmpty ? " " : cell.holidayEmoji)
-          .font(.system(size: 14))
+          .font(.body)
           .foregroundStyle(cell.holidayEmoji.isEmpty ? .clear : ClinicalPalette.ink)
           .lineLimit(1)
 

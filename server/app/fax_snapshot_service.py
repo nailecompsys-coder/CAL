@@ -167,9 +167,9 @@ def _choose_primary(
 ) -> tuple[int, int | None]:
     """Resolve one stored case for a fax line reprinted under two surgeons.
 
-    The block owner is primary. If neither half-day owns that facility, the
-    active co_surgeon_pairs row names the primary. Anything else refuses the
-    snapshot: do not guess the first surgeon, and do not write two cases.
+    The block owner is primary. A saved co_surgeon_pairs row names the primary
+    when the block does not. When both named half-days are NA, both are open:
+    keep one case and both names, and do not refuse for lack of a lead.
     """
     surgeon_ids = list(dict.fromkeys(row.surgeon_id for row in rows if row.surgeon_id))
     if not surgeon_ids:
@@ -193,12 +193,23 @@ def _choose_primary(
             primary = baseline_matches[0]
         else:
             paired = _co_surgeon_primary(db, surgeon_ids)
-            if paired is None:
+            both_na = all(
+                cards[(
+                    surgeon_id,
+                    next(row.case_date for row in rows if row.surgeon_id == surgeon_id),
+                    next(row.session for row in rows if row.surgeon_id == surgeon_id),
+                )].baseline_state == "na"
+                for surgeon_id in surgeon_ids
+            )
+            if paired is not None:
+                primary = paired
+            elif both_na:
+                primary = surgeon_ids[0]
+            else:
                 raise ValueError(
                     f"Shared case on {rows[0].case_date.isoformat()} at "
                     f"{rows[0].start_time} has no unique primary surgeon."
                 )
-            primary = paired
     assistant = next((value for value in surgeon_ids if value != primary), None)
     return primary, assistant
 

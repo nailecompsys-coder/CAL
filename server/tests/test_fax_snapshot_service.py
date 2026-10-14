@@ -522,15 +522,20 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.assertEqual(cases[0].assisting_surgeon_id, assistant.id)
         self.assertEqual(result["assistedCases"], 1)
 
-    def test_shared_fax_case_refuses_when_code_cannot_name_a_primary(self):
-        self._add_cj()
+    def test_shared_fax_case_applies_when_both_blocks_are_na(self):
+        assistant = self._add_cj()
         staged = self._stage_shared_case()
 
-        with self.assertRaisesRegex(ValueError, "no unique primary surgeon"):
-            apply_staged_snapshot(self.db, source_fax_id=193, run_id=staged["runId"])
+        result = apply_staged_snapshot(self.db, source_fax_id=193, run_id=staged["runId"])
 
-        self.db.rollback()
-        self.assertEqual(self.db.query(SurgicalCase).count(), 0)
+        cases = self.db.query(SurgicalCase).all()
+        self.assertEqual(len(cases), 1)
+        self.assertEqual(
+            {cases[0].surgeon_id, cases[0].assisting_surgeon_id},
+            {self.surgeon.id, assistant.id},
+        )
+        self.assertEqual(result["assistedCases"], 1)
+        self.assertEqual(result["surgicalCreated"], 1)
 
 
 if __name__ == "__main__":

@@ -49,6 +49,16 @@ def month_window(month_offset: int) -> dict:
     }
 
 
+def _dayoff_is_half(dayoff: DayOff) -> bool:
+    """True when any day in the request is partial (AM/PM or timed), not full-day OFF."""
+    from .native_dayoff_support import day_off_segments
+
+    segments = day_off_segments(dayoff)
+    if segments:
+        return any(not bool(segment.get("isFullDay", True)) for segment in segments)
+    return not bool(dayoff.is_full_day if dayoff.is_full_day is not None else True)
+
+
 def _bar_for_month(dayoff: DayOff, month_start: date, month_end: date, days_in_month: int) -> dict | None:
     start = max(dayoff.start_date, month_start)
     end = min(dayoff.end_date, month_end)
@@ -61,6 +71,7 @@ def _bar_for_month(dayoff: DayOff, month_start: date, month_end: date, days_in_m
         "status": dayoff.status or "approved",
         "reason": dayoff.reason or "",
         "notes": dayoff.notes or "",
+        "isHalfDay": _dayoff_is_half(dayoff),
         "startIso": dayoff.start_date.isoformat(),
         "endIso": dayoff.end_date.isoformat(),
         "labelStart": start.strftime("%-d"),

@@ -43,6 +43,7 @@ class AdminDayOffServiceTest(unittest.TestCase):
             notes="",
             start_date=date(2026, 6, 28),
             end_date=date(2026, 7, 5),
+            is_full_day=True,
         )
         bar = _bar_for_month(dayoff, month_start, month_end, 31)
         self.assertIsNotNone(bar)
@@ -51,6 +52,22 @@ class AdminDayOffServiceTest(unittest.TestCase):
         self.assertEqual(bar["spanDays"], 5)
         self.assertEqual(bar["leftPct"], 0.0)
         self.assertAlmostEqual(bar["widthPct"], 5 / 31 * 100, places=3)
+        self.assertFalse(bar["isHalfDay"])
+
+    def test_bar_marks_half_day_from_is_full_day(self):
+        month_start = date(2026, 7, 1)
+        month_end = date(2026, 7, 31)
+        dayoff = DayOff(
+            id=2,
+            status="approved",
+            reason="Personal",
+            notes="",
+            start_date=date(2026, 7, 10),
+            end_date=date(2026, 7, 10),
+            is_full_day=False,
+        )
+        bar = _bar_for_month(dayoff, month_start, month_end, 31)
+        self.assertTrue(bar["isHalfDay"])
 
     def test_gantt_rows_stacks_overlapping_and_skips_denied(self):
         surgeons = [

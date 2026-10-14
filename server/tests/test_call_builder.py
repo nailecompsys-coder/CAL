@@ -146,7 +146,7 @@ class CallBuilderTest(unittest.TestCase):
                 covering_surgeon_id=nelson.id,
                 status="active",
             ))
-            # Draft for Chris in December
+            # Draft for Chris in December: Fri Dec 4 + Sat Dec 5 (weekend starts Friday).
             db.add(CallDraftAssignment(date=date(2026, 12, 4), call_group_id=wg.id, surgeon_id=chris.id))
             db.add(CallDraftAssignment(date=date(2026, 12, 5), call_group_id=wg.id, surgeon_id=chris.id))
             db.commit()
@@ -160,16 +160,17 @@ class CallBuilderTest(unittest.TestCase):
             )
             by_id = {r["surgeonId"]: r for r in rows}
             # YTD board = published + drafts in range (May live + Dec drafts).
+            # Weekend days = Sat May 23 + Fri Dec 4 + Sat Dec 5.
             self.assertEqual(by_id[chris.id]["callCount"], 4)
-            self.assertEqual(by_id[chris.id]["weekendCount"], 2)
+            self.assertEqual(by_id[chris.id]["weekendCount"], 3)
             self.assertEqual(by_id[chris.id]["holidayCount"], 1)
             self.assertEqual(by_id[chris.id]["lastHoliday"], "Memorial Day")
             self.assertEqual(by_id[chris.id]["lastHolidayAbbrev"], "Mem")
-            self.assertEqual(by_id[chris.id]["loadLine"], "4/2 · 2/1 · 1/Mem")
+            self.assertEqual(by_id[chris.id]["loadLine"], "4/3 · 2/2 · 1/Mem")
             self.assertIn("Memorial Day/1", by_id[chris.id]["holidays"])
             self.assertEqual(by_id[chris.id]["draftCount"], 2)
             self.assertEqual(by_id[chris.id]["monthCallCount"], 2)
-            self.assertEqual(by_id[chris.id]["monthWeekendCount"], 1)
+            self.assertEqual(by_id[chris.id]["monthWeekendCount"], 2)
             may = call_history(
                 db,
                 from_date=date(2026, 1, 1),

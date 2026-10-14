@@ -2,6 +2,7 @@
 -- Coverage swaps credit the covering surgeon. Group only (no hospital per day).
 -- Board rules: draft overlays live for the same date|group.
 -- YTD + holiday totals use year_board; month segment uses month_board.
+-- Weekend call days are Friday, Saturday, and Sunday.
 WITH live AS (
     SELECT cr.date AS call_date,
            cr.call_group_id,
@@ -63,14 +64,15 @@ SELECT r.id AS surgeon_id,
        r.first_name,
        r.staff_type,
        (SELECT count(*) FROM year_board y WHERE y.surgeon_id = r.id) AS call_count,
+       -- Weekend call = Fri/Sat/Sun (practice weekend starts Friday).
        (SELECT count(*) FROM year_board y
-         WHERE y.surgeon_id = r.id AND WEEKDAY_YEAR IN (0, 6)) AS weekend_count,
+         WHERE y.surgeon_id = r.id AND WEEKDAY_YEAR IN (0, 5, 6)) AS weekend_count,
        (SELECT count(*) FROM month_board m WHERE m.surgeon_id = r.id) AS month_call_count,
        (SELECT count(*) FROM month_board m
-         WHERE m.surgeon_id = r.id AND WEEKDAY_MONTH IN (0, 6)) AS month_weekend_count,
+         WHERE m.surgeon_id = r.id AND WEEKDAY_MONTH IN (0, 5, 6)) AS month_weekend_count,
        (SELECT count(*) FROM draft d WHERE d.surgeon_id = r.id) AS draft_count,
        (SELECT count(*) FROM draft d
-         WHERE d.surgeon_id = r.id AND WEEKDAY_DRAFT IN (0, 6)) AS draft_weekend_count,
+         WHERE d.surgeon_id = r.id AND WEEKDAY_DRAFT IN (0, 5, 6)) AS draft_weekend_count,
        (SELECT count(*)
           FROM year_board y
           JOIN holidays h ON h.date = y.call_date

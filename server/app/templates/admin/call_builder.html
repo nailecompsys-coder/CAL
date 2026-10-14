@@ -625,24 +625,26 @@ function showFlyover(el) {
     body.appendChild(tr);
   });
   box.classList.remove('hidden');
-  setFlyoverMinimized(flyoverMinimized());
 }
 function pickSurgeon(el, opts) {
   const keepToggle = !(opts && opts.forceOpen);
   blurActiveField();
-  document.querySelectorAll('.roster-tile').forEach(t => t.classList.remove('is-pen'));
   if (keepToggle && penId === el.dataset.surgeonId) {
-    // Same doc again: toggle minimize — never dismiss the holiday panel.
-    toggleFlyoverMinimized();
-    el.classList.add('is-pen');
-    highlightPenSlots(penId);
+    // Same doc again: clear selection/highlight; keep flyover minimized (no X / no dismiss).
+    document.querySelectorAll('.roster-tile').forEach(t => t.classList.remove('is-pen'));
+    penId = null;
+    persistPen(null);
+    highlightPenSlots(null);
+    setFlyoverMinimized(true);
     return;
   }
+  document.querySelectorAll('.roster-tile').forEach(t => t.classList.remove('is-pen'));
   penId = el.dataset.surgeonId;
   persistPen(penId);
   el.classList.add('is-pen');
   el.scrollIntoView({ block: 'nearest' });
   showFlyover(el);
+  setFlyoverMinimized(false);
   highlightPenSlots(penId);
 }
 function restorePen() {

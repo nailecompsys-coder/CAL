@@ -16,6 +16,7 @@ from app.schedule_build_backup_service import revert_schedule_build_backup
 from app.migrate_fax_ingest import create_applicable_view
 from app.models import (
     Base,
+    CoSurgeonPair,
     FaxDocument,
     FaxIngestRow,
     Location,
@@ -427,6 +428,109 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.assertEqual(result["rowsSkipped"], 1)
         self.assertEqual(self.db.query(ScheduleCard).count(), 2)
         self.assertEqual([case.patient_name for case in self.db.query(SurgicalCase).all()], ["Clean, Patient"])
+
+    def _shared_line(self, initials, name):
+        return ReviewedFaxRow(
+            page=2,
+            surgeon_initials=initials,
+            surgeon_name=name,
+            case_date=date(2026, 9, 22),
+            start_time=time(13, 0),
+            row_type="surgical",
+            room="WGD S07",
+            patient_name="Shared, Case",
+            procedure="Shared procedure",
+        )
+
+    def _add_cj(self):
+        assistant = Surgeon(
+            first_name="Chris",
+            last_name="Johnson",
+            email="cj@example.com",
+            is_active=True,
+        )
+        self.db.add(assistant)
+        self.db.flush()
+        week = ScheduleCardWeek(
+            surgeon_id=assistant.id,
+            week_start=date(2026, 9, 21),
+            master_revision="test",
+        )
+        self.db.add(week)
+        self.db.flush()
+        self.db.add(ScheduleCard(
+            week_id=week.id,
+            surgeon_id=assistant.id,
+            date=date(2026, 9, 22),
+            session="pm",
+            baseline_state="na",
+            effective_state="na",
+            source="master",
+        ))
+        self.db.commit()
+        return assistant
+
+    def _stage_shared_case(self):
+        staged = stage_reviewed_rows(
+            self.db,
+            external_fax_id=193,
+            source_label="test",
+            surgeon_scope=["JF", "CJ"],
+            rows=[
+                self._shared_line("JF", "Jorge Florin"),
+                self._shared_line("CJ", "Chris Johnson"),
+            ],
+        )
+        self.db.commit()
+        return staged
+
+    def test_shared_fax_case_keeps_block_owner_as_the_only_case(self):
+        assistant = self._add_cj()
+        owner_pm = self.db.query(ScheduleCard).filter_by(surgeon_id=self.surgeon.id, session="pm").one()
+        owner_pm.baseline_location_id = self.wg_or.id
+        owner_pm.effective_location_id = self.wg_or.id
+        owner_pm.baseline_state = "assigned"
+        owner_pm.effective_state = "assigned"
+        self.db.commit()
+        staged = self._stage_shared_case()
+
+        result = apply_staged_snapshot(self.db, source_fax_id=193, run_id=staged["runId"])
+
+        cases = self.db.query(SurgicalCase).all()
+        self.assertEqual(len(cases), 1)
+        self.assertEqual(cases[0].surgeon_id, self.surgeon.id)
+        self.assertEqual(cases[0].assisting_surgeon_id, assistant.id)
+        self.assertEqual(cases[0].patient_name, "Shared, Case")
+        self.assertEqual(result["assistedCases"], 1)
+        self.assertEqual(result["surgicalCreated"], 1)
+
+    def test_shared_fax_case_uses_co_surgeon_pair_when_neither_owns_the_block(self):
+        assistant = self._add_cj()
+        self.db.add(CoSurgeonPair(
+            primary_surgeon_id=self.surgeon.id,
+            assisting_surgeon_id=assistant.id,
+            is_active=True,
+        ))
+        self.db.commit()
+        staged = self._stage_shared_case()
+
+        result = apply_staged_snapshot(self.db, source_fax_id=193, run_id=staged["runId"])
+
+        cases = self.db.query(SurgicalCase).all()
+        self.assertEqual(len(cases), 1)
+        self.assertEqual(cases[0].surgeon_id, self.surgeon.id)
+        self.assertEqual(cases[0].assisting_surgeon_id, assistant.id)
+        self.assertEqual(result["assistedCases"], 1)
+
+    def test_shared_fax_case_refuses_when_code_cannot_name_a_primary(self):
+        self._add_cj()
+        staged = self._stage_shared_case()
+
+        with self.assertRaisesRegex(ValueError, "no unique primary surgeon"):
+            apply_staged_snapshot(self.db, source_fax_id=193, run_id=staged["runId"])
+
+        self.db.rollback()
+        self.assertEqual(self.db.query(SurgicalCase).count(), 0)
 
 
 if __name__ == "__main__":

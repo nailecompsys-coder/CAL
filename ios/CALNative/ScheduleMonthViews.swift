@@ -44,7 +44,7 @@ private struct MonthDotLegend: View {
       legendItem("O", "OR")
       legendItem("M", "Meeting")
       Spacer(minLength: 0)
-      Text("Call: WG · date · ALT")
+      Text("Call WG · ALT under date")
         .foregroundStyle(.secondary)
     }
     .font(.caption2)
@@ -110,23 +110,16 @@ private struct MonthHeatmapCell: View {
   let isSelected: Bool
   let selectAction: () -> Void
 
+  private var wg: String { cell.callInitials(group: "WG") }
+  private var alt: String { cell.callInitials(group: "ALT") }
+
   var body: some View {
     Button(action: selectAction) {
-      VStack(spacing: 4) {
-        // Equal side columns so two-digit dates (10–31) cannot crush WG/ALT Call initials.
-        HStack(spacing: 0) {
-          MonthCallInitials(text: cell.callInitials(group: "WG"))
-            .frame(maxWidth: .infinity)
-          Text(cell.date.formatted(.dateTime.day()))
-            .font(.subheadline.weight(cell.isToday || isSelected ? .bold : .semibold))
-            .foregroundStyle(dayNumberColor)
-            .multilineTextAlignment(.center)
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
-            .frame(maxWidth: .infinity)
-          MonthCallInitials(text: cell.callInitials(group: "ALT"))
-            .frame(maxWidth: .infinity)
-        }
+      VStack(spacing: 3) {
+        Text(cell.date.formatted(.dateTime.day()))
+          .font(.subheadline.weight(cell.isToday || isSelected ? .bold : .semibold))
+          .foregroundStyle(dayNumberColor)
+          .frame(maxWidth: .infinity)
 
         HStack(spacing: 3) {
           if cell.amCodes.isEmpty && cell.pmCodes.isEmpty {
@@ -136,10 +129,20 @@ private struct MonthHeatmapCell: View {
             MonthPeriodCode(codes: cell.pmCodes)
           }
         }
+        .frame(maxWidth: .infinity)
+
+        HStack(spacing: 2) {
+          MonthCallInitials(text: wg)
+          Text("·")
+            .font(.system(.caption2, design: .monospaced))
+            .foregroundStyle(ClinicalPalette.muted.opacity(wg.isEmpty && alt.isEmpty ? 0 : 0.55))
+          MonthCallInitials(text: alt)
+        }
+        .frame(maxWidth: .infinity)
       }
       .padding(.horizontal, 2)
-      .padding(.vertical, 6)
-      .frame(maxWidth: .infinity, minHeight: 50)
+      .padding(.vertical, 5)
+      .frame(maxWidth: .infinity, minHeight: 56)
       .opacity(cell.isCurrentMonth ? 1 : 0.4)
       .background(cellBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
       .overlay {
@@ -165,10 +168,10 @@ private struct MonthCallInitials: View {
 
   var body: some View {
     Text(text.isEmpty ? " " : text)
-      .font(.system(.caption2, design: .monospaced).weight(.medium))
+      .font(.system(.caption2, design: .monospaced).weight(.semibold))
       .foregroundStyle(.secondary)
       .lineLimit(1)
-      .minimumScaleFactor(0.5)
+      .minimumScaleFactor(0.65)
       .multilineTextAlignment(.center)
   }
 }

@@ -17,6 +17,7 @@ from app.call_builder_service import (
     attach_leave_to_history,
     call_history,
     clear_draft,
+    holiday_roster_lookup,
     holiday_work_lookup,
     leave_flag_map,
     leave_groups_by_date,
@@ -286,14 +287,34 @@ class CallBuilderTest(unittest.TestCase):
             db.add(Holiday(date=date(2027, 11, 25), name="Thanksgiving"))
             db.commit()
             work = holiday_work_lookup(db, years=[2025, 2026, 2027])
+            roster = holiday_roster_lookup(db, years=[2025, 2026, 2027])
             self.assertEqual(work[(chris.id, "Memorial Day", 2026)], "WG")
             self.assertEqual(work[(nelson.id, "July 4th", 2026)], "ALT")
             self.assertNotIn((alex.id, "July 4th", 2026), work)
             self.assertEqual(work[(chris.id, "Thanksgiving", 2027)], "WG")
+            self.assertEqual(
+                roster[("Memorial Day", 2026)],
+                [{"surgeonId": chris.id, "initials": "CJ", "group": "WG"}],
+            )
+            self.assertEqual(
+                roster[("July 4th", 2026)],
+                [{"surgeonId": nelson.id, "initials": "LN", "group": "ALT"}],
+            )
+            # Both groups on same holiday → both initials, WG then ALT.
+            db.add(CallRotation(date=date(2026, 5, 25), call_group_id=alt.id, surgeon_id=nelson.id))
+            db.commit()
+            roster = holiday_roster_lookup(db, years=[2025, 2026, 2027])
+            self.assertEqual(
+                [p["initials"] for p in roster[("Memorial Day", 2026)]],
+                ["CJ", "LN"],
+            )
             history = [{"surgeonId": chris.id}, {"surgeonId": alex.id}, {"surgeonId": nelson.id}]
-            attach_holiday_grids(history, work, years=[2025, 2026, 2027])
+            attach_holiday_grids(history, work, years=[2025, 2026, 2027], roster=roster)
             mem = next(r for r in history[0]["holidayGrid"] if r["name"] == "Memorial Day")
-            self.assertEqual(mem["cells"][1], "WG")  # 2026
+            self.assertEqual([p["initials"] for p in mem["cells"][1]], ["CJ", "LN"])  # 2026
+            # Same full roster on every card; personal worked list stays per surgeon.
+            mem_alex = next(r for r in history[1]["holidayGrid"] if r["name"] == "Memorial Day")
+            self.assertEqual([p["initials"] for p in mem_alex["cells"][1]], ["CJ", "LN"])
             self.assertIn("Memorial Day 2026 (WG)", history[0]["holidaysWorked"])
             self.assertIn("Thanksgiving 2027 (WG)", history[0]["holidaysWorked"])
             self.assertEqual(history[1]["holidaysWorked"], [])

@@ -242,12 +242,28 @@
     line-height: 1.2;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
   }
   #surgeon-flyover th:first-child,
-  #surgeon-flyover td:first-child { width: 52%; text-align: left; }
+  #surgeon-flyover td:first-child {
+    width: 46%;
+    text-align: left;
+    white-space: nowrap;
+  }
   #surgeon-flyover th:not(:first-child),
-  #surgeon-flyover td:not(:first-child) { width: 16%; text-align: center; }
+  #surgeon-flyover td:not(:first-child) {
+    width: 18%;
+    text-align: center;
+    white-space: normal;
+    word-break: break-word;
+  }
+  #surgeon-flyover .fly-hol-me {
+    font-weight: 800;
+    color: #047857;
+  }
+  #surgeon-flyover .fly-hol-other {
+    font-weight: 600;
+    color: #1e293b;
+  }
 </style>
 <script>document.querySelector('main')?.classList.add('cb-viewport-lock');</script>
 
@@ -526,6 +542,7 @@ function showFlyover(el) {
   });
   const body = document.getElementById('fly-holiday-body');
   body.innerHTML = '';
+  const selectedId = String(el.dataset.surgeonId || '');
   grid.forEach(row => {
     const tr = document.createElement('tr');
     tr.className = 'border-t border-slate-100';
@@ -537,8 +554,20 @@ function showFlyover(el) {
     tr.appendChild(nameTd);
     (row.cells || []).forEach(cell => {
       const td = document.createElement('td');
-      td.className = 'tabular-nums ' + (cell && cell !== '—' ? 'font-bold text-slate-900' : 'text-slate-400');
-      td.textContent = cell || '—';
+      const people = Array.isArray(cell) ? cell : [];
+      if (!people.length) {
+        td.className = 'text-slate-400';
+        td.textContent = '—';
+      } else {
+        td.title = people.map(p => (p.initials || '?') + '·' + (p.group || '')).join(' ');
+        people.forEach((p, i) => {
+          if (i) td.appendChild(document.createTextNode(' '));
+          const span = document.createElement('span');
+          span.textContent = p.initials || '?';
+          span.className = String(p.surgeonId) === selectedId ? 'fly-hol-me' : 'fly-hol-other';
+          td.appendChild(span);
+        });
+      }
       tr.appendChild(td);
     });
     body.appendChild(tr);

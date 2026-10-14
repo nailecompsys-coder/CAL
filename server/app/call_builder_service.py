@@ -254,8 +254,10 @@ def holiday_flyover_years(*, anchor_year: int | None = None) -> list[int]:
     return sorted(years)
 
 
-def holiday_work_lookup(db: Session, *, years: list[int] | None = None) -> dict[tuple[int, str, int], str]:
-    """Map (surgeon_id, holiday_name, year) → call-group short label for credited holiday call.
+def _holiday_credited(
+    db: Session, *, years: list[int] | None = None
+) -> tuple[dict[date, str], dict[int, str], dict[tuple[date, int], tuple[int, str]]]:
+    """Holiday dates, group shorts, and credited (date, group) → (surgeon_id, group_short).
 
     Draft overlays live on the same date|group so Call Builder forward months count before Publish.
     """
@@ -268,11 +270,10 @@ def holiday_work_lookup(db: Session, *, years: list[int] | None = None) -> dict[
         .filter(Holiday.date >= start, Holiday.date <= end)
         .all()
     }
-    if not holidays:
-        return {}
     groups = {g.id: short_group_label(g) for g in db.query(CallGroup).all()}
+    if not holidays:
+        return holidays, groups, {}
     holiday_dates = list(holidays.keys())
-    # Live first, then draft overwrites the same date|group key.
     credited: dict[tuple[date, int], tuple[int, str]] = {}
     rotations = (
         db.query(CallRotation)
@@ -308,6 +309,12 @@ def holiday_work_lookup(db: Session, *, years: list[int] | None = None) -> dict[
             int(draft.surgeon_id),
             groups.get(draft.call_group_id, "✓"),
         )
+    return holidays, groups, credited
+
+
+def holiday_work_lookup(db: Session, *, years: list[int] | None = None) -> dict[tuple[int, str, int], str]:
+    """Map (surgeon_id, holiday_name, year) → call-group short label for credited holiday call."""
+    holidays, _groups, credited = _holiday_credited(db, years=years)
     out: dict[tuple[int, str, int], str] = {}
     for (day, _group_id), (surgeon_id, mark) in credited.items():
         name = holidays.get(day)
@@ -317,14 +324,63 @@ def holiday_work_lookup(db: Session, *, years: list[int] | None = None) -> dict[
     return out
 
 
+def holiday_roster_lookup(
+    db: Session, *, years: list[int] | None = None
+) -> dict[tuple[str, int], list[dict]]:
+    """Map (holiday_name, year) → everyone on call that day (WG then ALT), with initials."""
+    holidays, _groups, credited = _holiday_credited(db, years=years)
+    if not credited:
+        return {}
+    surgeon_ids = {sid for (_day, _gid), (sid, _mark) in credited.items()}
+    surgeons = {
+        s.id: s
+        for s in db.query(Surgeon).filter(Surgeon.id.in_(surgeon_ids)).all()
+    }
+    # Prefer WG before ALT via group short label sort (ALT, WG → WG first with key).
+    group_rank = {"WG": 0, "ALT": 1}
+    buckets: dict[tuple[str, int], list[tuple[int, int, str, int]]] = defaultdict(list)
+    for (day, group_id), (surgeon_id, mark) in credited.items():
+        name = holidays.get(day)
+        if not name:
+            continue
+        surg = surgeons.get(surgeon_id)
+        if not surg:
+            continue
+        rank = group_rank.get(mark, 9)
+        buckets[(name, day.year)].append((rank, group_id, mark, surgeon_id))
+    out: dict[tuple[str, int], list[dict]] = {}
+    for key, rows in buckets.items():
+        rows.sort(key=lambda r: (r[0], r[1], r[3]))
+        people: list[dict] = []
+        seen: set[int] = set()
+        for _rank, _gid, mark, surgeon_id in rows:
+            if surgeon_id in seen:
+                continue
+            seen.add(surgeon_id)
+            surg = surgeons[surgeon_id]
+            people.append({
+                "surgeonId": surgeon_id,
+                "initials": surg.initials,
+                "group": mark,
+            })
+        out[key] = people
+    return out
+
+
 def attach_holiday_grids(
     history: list[dict],
     work: dict[tuple[int, str, int], str],
     *,
     years: list[int] | None = None,
+    roster: dict[tuple[str, int], list[dict]] | None = None,
 ) -> list[dict]:
-    """Attach holiday grid + worked list for the closable flyover (includes draft credit)."""
+    """Attach holiday grid + worked list for the closable flyover (includes draft credit).
+
+    Each year cell lists every doctor on call that holiday (initials); personal
+    holidaysWorked still only counts the card's surgeon.
+    """
     year_list = years or list(HOLIDAY_FLYOVER_YEARS)
+    roster = roster or {}
     for row in history:
         surgeon_id = int(row["surgeonId"])
         grid = []
@@ -332,8 +388,9 @@ def attach_holiday_grids(
         for db_name, label in HOLIDAY_FLYOVER_ROWS:
             cells = []
             for year in year_list:
+                people = roster.get((db_name, year), [])
+                cells.append(people)
                 mark = work.get((surgeon_id, db_name, year), "—")
-                cells.append(mark)
                 if mark != "—":
                     worked.append(f"{label} {year} ({mark})")
             grid.append({"name": label, "cells": cells})
@@ -377,7 +434,12 @@ def board_for_month(db: Session, year: int, month: int) -> dict:
     leave = leave_flag_map(db, start, end)
     attach_leave_to_history(history, leave)
     fly_years = holiday_flyover_years(anchor_year=year)
-    attach_holiday_grids(history, holiday_work_lookup(db, years=fly_years), years=fly_years)
+    attach_holiday_grids(
+        history,
+        holiday_work_lookup(db, years=fly_years),
+        years=fly_years,
+        roster=holiday_roster_lookup(db, years=fly_years),
+    )
     leave_by_date = leave_entries_by_date(db, start, end, surgeons=surgeons)
     leave_groups = leave_groups_by_date(leave_by_date)
     live = published_map(db, start, end)
@@ -797,7 +859,12 @@ def page_data(db: Session, month_offset: int) -> dict:
     leave = leave_flag_map(db, start, end)
     attach_leave_to_history(history, leave)
     fly_years = holiday_flyover_years(anchor_year=start.year)
-    attach_holiday_grids(history, holiday_work_lookup(db, years=fly_years), years=fly_years)
+    attach_holiday_grids(
+        history,
+        holiday_work_lookup(db, years=fly_years),
+        years=fly_years,
+        roster=holiday_roster_lookup(db, years=fly_years),
+    )
     for row in history:
         surg = surgeons.get(int(row["surgeonId"]))
         row["canCallBuilder"] = bool(surg and getattr(surg, "can_call_builder", False))

@@ -1,96 +1,57 @@
 import os
 import unittest
+from datetime import time
 from types import SimpleNamespace
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SECRET_KEY", "test-secret")
 
-from app.native_home_serializers import (
-    is_clinic_day_meeting,
-    is_clinic_rotation_text,
-    meeting_item_payload,
-)
+from app.native_home_serializers import meeting_item_payload
 
 
-class ClinicDayMeetingClassificationTest(unittest.TestCase):
-    def test_surgery_one_clinic_cbo_is_clinic_not_meeting(self):
+class MeetingPayloadNoClassificationTest(unittest.TestCase):
+    """CAL meetings-table rows stay type=meeting — no Python title rewrite to clinic."""
+
+    def test_surgery_one_clinic_reminder_stays_meeting(self):
         meeting = SimpleNamespace(
             id=64,
             title="CJ Surgery 1 Clinic",
             location_text="CBO",
-            start_time=None,
-            end_time=None,
+            start_time=time(8, 30),
+            end_time=time(11, 0),
             notes="",
         )
-        # Avoid needing real time objects in fmt_time by patching via payload fields after
-        meeting.start_time = __import__("datetime").time(8, 30)
-        meeting.end_time = __import__("datetime").time(11, 0)
-
-        self.assertTrue(is_clinic_day_meeting(meeting))
-        payload = meeting_item_payload(meeting)
-        self.assertEqual(payload["type"], "clinic")
-        self.assertIn("Surgery 1 Clinic", payload["title"])
-        self.assertIn("CBO", payload["title"])
-        self.assertEqual(payload["subtitle"], "CLINIC")
-
-    def test_surgical_one_clinic_label_is_clinic_rotation(self):
-        self.assertTrue(
-            is_clinic_rotation_text(title="Surgical One Clinic", location="CBO")
-        )
-        self.assertTrue(
-            is_clinic_rotation_text(title="Surgical One", location="", reason="")
-        )
-
-    def test_meeting_at_wg_clinic_location_stays_meeting(self):
-        meeting = SimpleNamespace(
-            id=68,
-            title="JF-Dr. Hill Meeting",
-            location_text="WG Clinic",
-            start_time=__import__("datetime").time(10, 0),
-            end_time=__import__("datetime").time(10, 30),
-            notes="",
-        )
-        self.assertFalse(is_clinic_day_meeting(meeting))
-
-    def test_real_teams_meeting_stays_meeting(self):
-        meeting = SimpleNamespace(
-            id=70,
-            title="JF-Teams Meeting",
-            location_text="Teams",
-            start_time=__import__("datetime").time(10, 0),
-            end_time=__import__("datetime").time(10, 30),
-            notes="",
-        )
-        self.assertFalse(is_clinic_day_meeting(meeting))
         payload = meeting_item_payload(meeting)
         self.assertEqual(payload["type"], "meeting")
+        self.assertEqual(payload["title"], "CJ Surgery 1 Clinic")
+        self.assertEqual(payload["subtitle"], "CBO")
+        self.assertTrue(payload["id"].startswith("mtg-"))
 
     def test_surgery_one_board_meeting_stays_meeting(self):
-        """Surgery One in the title must not pull a board meeting onto the PM clinic line."""
         meeting = SimpleNamespace(
             id=72,
             title="Surgery One Board Meeting",
             location_text="1814 Lucerne Terrace Orlando, FL",
-            start_time=__import__("datetime").time(17, 0),
-            end_time=__import__("datetime").time(18, 0),
+            start_time=time(17, 0),
+            end_time=time(18, 0),
             notes="",
         )
-        self.assertFalse(is_clinic_day_meeting(meeting))
         payload = meeting_item_payload(meeting)
         self.assertEqual(payload["type"], "meeting")
         self.assertEqual(payload["title"], "Surgery One Board Meeting")
         self.assertIn("Lucerne", payload["subtitle"])
 
-    def test_cancelled_clinic_day_is_not_reclassified(self):
+    def test_teams_meeting_stays_meeting(self):
         meeting = SimpleNamespace(
-            id=66,
-            title="CANCEL-OUT OF TOWN Surgery 1 Clinic",
-            location_text="CBO",
-            start_time=None,
-            end_time=None,
+            id=70,
+            title="JF-Teams Meeting",
+            location_text="Teams",
+            start_time=time(10, 0),
+            end_time=time(10, 30),
             notes="",
         )
-        self.assertFalse(is_clinic_day_meeting(meeting))
+        payload = meeting_item_payload(meeting)
+        self.assertEqual(payload["type"], "meeting")
 
 
 if __name__ == "__main__":

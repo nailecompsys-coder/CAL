@@ -39,69 +39,8 @@ def day_off_item_payload(row, item_date: date, segment: dict, is_full: bool) -> 
     }
 
 
-_CLINIC_ROTATION_TITLE_MARKERS = (
-    "surgery 1",
-    "surgery one",
-    "surgical 1",
-    "surgical one",
-)
-_CLINIC_ROTATION_LOCATIONS = {
-    "cbo",
-    "surgery one",
-    "surgery 1",
-    "surgical one",
-    "surgical 1",
-}
-
-
-def is_clinic_rotation_text(*, title: str = "", location: str = "", reason: str = "") -> bool:
-    """True when labeling describes Surgery One / clinic rotation time, not a real meeting."""
-    title_l = (title or "").strip().lower()
-    location_l = (location or "").strip().lower()
-    reason_l = (reason or "").strip().lower()
-    blob = f"{title_l} {reason_l}".strip()
-    if not blob and not location_l:
-        return False
-    if "cancel" in title_l or "cancel" in reason_l:
-        return False
-    if "clinic" in title_l or "clinic" in reason_l:
-        return True
-    if location_l in _CLINIC_ROTATION_LOCATIONS:
-        return True
-    return any(marker in blob for marker in _CLINIC_ROTATION_TITLE_MARKERS)
-
-
-_REAL_MEETING_TITLE_MARKERS = (
-    "board meeting",
-    "board mtg",
-    "p2p",
-    "meeting",
-    "meetings",
-)
-
-
-def is_clinic_day_meeting(meeting) -> bool:
-    """True when a CAL Meeting row is really a clinic-day assignment (e.g. Surgery 1 / CBO).
-
-    Practice staff often enter recurring clinic days in the Meetings table. Those should
-    render under My Schedule / clinic schedule, not the Meetings list.
-    Real meetings that merely mention Surgery One (board meeting, P2P, …) stay meetings.
-    """
-    title_l = (getattr(meeting, "title", None) or "").strip().lower()
-    notes_l = (getattr(meeting, "notes", None) or "").strip().lower()
-    if any(marker in title_l for marker in _REAL_MEETING_TITLE_MARKERS):
-        if "clinic" not in title_l and "clinic" not in notes_l:
-            return False
-    return is_clinic_rotation_text(
-        title=getattr(meeting, "title", None) or "",
-        location=getattr(meeting, "location_text", None) or "",
-        reason=getattr(meeting, "notes", None) or "",
-    )
-
-
 def meeting_item_payload(meeting) -> dict:
-    if is_clinic_day_meeting(meeting):
-        return clinic_day_meeting_item_payload(meeting)
+    """Serialize a CAL meetings-table row as type=meeting. No title heuristics."""
     return {
         "id": f"mtg-{meeting.id}",
         "type": "meeting",
@@ -110,32 +49,6 @@ def meeting_item_payload(meeting) -> dict:
         "start": fmt_time(meeting.start_time),
         "end": fmt_time(meeting.end_time),
         "notes": meeting.notes or "",
-    }
-
-
-def clinic_day_meeting_item_payload(meeting) -> dict:
-    """Serialize a clinic-day Meeting as a clinic schedule item for My Schedule."""
-    import re
-
-    title = (meeting.title or "").strip() or "Clinic"
-    # Drop leading surgeon initials ("CJ Surgery 1 Clinic" -> "Surgery 1 Clinic")
-    title = re.sub(r"^[A-Z]{1,4}\s+", "", title).strip() or title
-    location = (meeting.location_text or "").strip()
-    if location and location.lower() not in title.lower():
-        display = f"{location} · {title}"
-    else:
-        display = title
-    return {
-        "id": f"clinic-mtg-{meeting.id}",
-        "rawId": meeting.id,
-        "type": "clinic",
-        "title": display,
-        "subtitle": "CLINIC",
-        "start": fmt_time(meeting.start_time),
-        "end": fmt_time(meeting.end_time),
-        "location": location,
-        "notes": meeting.notes or "",
-        "color": "#0ea5e9",
     }
 
 

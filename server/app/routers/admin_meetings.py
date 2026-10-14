@@ -21,7 +21,6 @@ from ..auth import get_current_admin
 from ..database import get_db
 from ..jinja_env import templates
 from ..models import Meeting, Surgeon
-from ..native_home_serializers import is_clinic_rotation_text
 from ..surgeon_visibility import surgeon_is_visible
 from .admin import _base, _sort_surgeons_physicians_first, _warn_redirect
 
@@ -45,15 +44,7 @@ def meetings_page(
     ]
     surgeons = _sort_surgeons_physicians_first(surgeons)
     aprima = meetings_for_admin(db, month["month_start"], month["month_end"])
-    aprima_meetings = [
-        row
-        for row in (aprima.get("meetings") or [])
-        if not is_clinic_rotation_text(
-            title=row.get("title") or "",
-            location=row.get("serviceSite") or row.get("room") or "",
-            reason=row.get("reason") or "",
-        )
-    ]
+    aprima_meetings = list(aprima.get("meetings") or [])
     events_by_day = calendar_events_by_day(
         schedule_days=schedule_days,
         cal_meetings=meetings,

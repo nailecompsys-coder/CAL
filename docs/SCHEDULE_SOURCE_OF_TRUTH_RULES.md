@@ -15,6 +15,7 @@ This is Don's current scheduling rule set for the master calendar, the surgeon a
 - Aprima sends meetings and Surgery One patients. It does not replace the Epic fax.
 - Shannon adds meetings, days off, and the call schedule. The office does not add clinic visits or surgical cases.
 - The iPhone is that person's schedule. It shows who is where, and when they need to be at a facility for a case or a clinic. Those facts are the saved card lines.
+- One card has many lines. Each line belongs to that one card. The phone reads the card and its lines.
 
 ## Source overlay
 

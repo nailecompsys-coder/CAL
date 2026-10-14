@@ -594,6 +594,11 @@ class ScheduleCard(Base):
 
     week = relationship("ScheduleCardWeek", back_populates="cards")
     surgeon = relationship("Surgeon")
+    activities = relationship(
+        "ScheduleCardActivity",
+        back_populates="schedule_card",
+        cascade="all, delete-orphan",
+    )
     baseline_location = relationship("Location", foreign_keys=[baseline_location_id])
     effective_location = relationship("Location", foreign_keys=[effective_location_id])
     master_template = relationship("SurgeonLocationSchedule")
@@ -647,7 +652,7 @@ class ScheduleCardActivity(Base):
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    schedule_card = relationship("ScheduleCard")
+    schedule_card = relationship("ScheduleCard", back_populates="activities")
     surgeon = relationship("Surgeon")
     location = relationship("Location")
 

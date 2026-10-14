@@ -262,6 +262,40 @@ class ScheduleCardProjectionServiceTest(unittest.TestCase):
         finally:
             db.close()
 
+    def test_one_card_owns_many_lines(self):
+        db = self.Session()
+        try:
+            surgeon = Surgeon(first_name="Alex", last_name="Smith", email="as@example.com", is_active=True, staff_type="physician")
+            location = Location(name="Minneola OR", abbreviation="MN-OR", location_type="hospital", is_active=True)
+            db.add_all([surgeon, location])
+            db.commit()
+            materialize_master_schedule_cards(db, start=date(2026, 9, 14), end=date(2026, 9, 14))
+            card = db.query(ScheduleCard).filter_by(surgeon_id=surgeon.id, date=date(2026, 9, 14), session="am").one()
+            other = db.query(ScheduleCard).filter_by(surgeon_id=surgeon.id, date=date(2026, 9, 14), session="pm").one()
+            db.add_all([
+                ScheduleCardActivity(
+                    schedule_card_id=card.id, surgeon_id=surgeon.id, location_id=location.id,
+                    activity_date=card.date, session="am", activity_type="surgical",
+                    start_time=time(7, 30), patient_name="First", procedure="Case",
+                    source_system="fax", source_record_key="line-1", identity_key="line-1",
+                ),
+                ScheduleCardActivity(
+                    schedule_card_id=card.id, surgeon_id=surgeon.id, location_id=location.id,
+                    activity_date=card.date, session="am", activity_type="clinic",
+                    start_time=time(9, 0), patient_name="Second", procedure="Visit",
+                    source_system="fax", source_record_key="line-2", identity_key="line-2",
+                ),
+            ])
+            db.commit()
+            db.expire_all()
+            card = db.get(ScheduleCard, card.id)
+            other = db.get(ScheduleCard, other.id)
+            self.assertEqual(len(card.activities), 2)
+            self.assertEqual({line.schedule_card.id for line in card.activities}, {card.id})
+            self.assertEqual(other.activities, [])
+        finally:
+            db.close()
+
 
 if __name__ == "__main__":
     unittest.main()

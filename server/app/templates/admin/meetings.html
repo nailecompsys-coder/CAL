@@ -37,7 +37,39 @@
 </div>
 {% endif %}
 
-<div class="p-6 overflow-x-auto">
+<style>
+  /* Seven equal day columns — never widen from long meeting titles. */
+  .mtg-month {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+  .mtg-month-table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+  }
+  .mtg-month-table th,
+  .mtg-month-table td {
+    width: 14.2857%;
+    max-width: 0; /* force equal cols under table-layout:fixed */
+    overflow: hidden;
+    vertical-align: top;
+  }
+  .mtg-month-table .mtg-day-inner {
+    min-width: 0;
+    max-width: 100%;
+  }
+  .mtg-month-table .mtg-pill {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow: hidden;
+  }
+</style>
+<div class="p-6 mtg-month">
   <div class="flex flex-wrap items-center gap-3 mb-3 text-[11px] font-semibold text-slate-500">
     <span class="inline-flex items-center gap-1.5">
       <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold shadow-sm block-gradient" style="--block-c: var(--meeting-cal); color:#1e293b">CAL</span>
@@ -52,44 +84,44 @@
   {% set total_cells = pad_start + schedule_days|length %}
   {% set pad_end = (7 - (total_cells % 7)) % 7 %}
 
-  <table class="w-full border-collapse min-w-[720px]">
+  <table class="mtg-month-table">
     <thead>
       <tr>
         {% for wd in ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'] %}
-        <th class="px-2 py-3 bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wide">{{ wd }}</th>
+        <th class="px-1.5 py-2 bg-slate-50 border border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wide">{{ wd }}</th>
         {% endfor %}
       </tr>
     </thead>
     <tbody>
       <tr>
       {% for _ in range(pad_start) %}
-        <td class="px-2 py-2 border border-slate-200 bg-slate-50/60 align-top h-[7.5rem]"></td>
+        <td class="px-1.5 py-1.5 border border-slate-200 bg-slate-50/60 h-[7.5rem]"></td>
       {% endfor %}
       {% for day in schedule_days %}
         {% if (pad_start + loop.index0) % 7 == 0 and not loop.first %}</tr><tr>{% endif %}
         {% set day_key = day.isoformat() %}
         {% set day_events = events_by_day.get(day_key, []) %}
         {% set is_today = day == today %}
-        <td class="px-2 py-2 border border-slate-200 align-top {% if is_today %}bg-blue-50/30{% else %}bg-white{% endif %}
+        <td class="px-1.5 py-1.5 border border-slate-200 {% if is_today %}bg-blue-50/30{% else %}bg-white{% endif %}
           cursor-pointer hover:bg-slate-50 group/cell"
           onclick="openCreateForDate('{{ day_key }}')">
-          <div class="min-h-[88px] space-y-1">
+          <div class="mtg-day-inner min-h-[88px] space-y-1">
             <div class="text-[11px] font-extrabold {% if is_today %}text-blue-600{% elif day.weekday() >= 5 %}text-slate-400{% else %}text-slate-700{% endif %}">
               {{ day.strftime('%-d') }}{% if is_today %} <span class="font-normal text-blue-500">·today</span>{% endif %}
             </div>
             {% for event in day_events[:4] %}
             {% set event_key = event.source ~ '-' ~ event.id ~ '-' ~ event.dateIso ~ '-' ~ loop.index0 %}
             <button type="button"
-              class="w-full text-left inline-flex flex-col gap-0 text-xs font-medium px-2 py-0.5 rounded-md leading-tight block-gradient shadow-sm hover:opacity-90"
+              class="mtg-pill text-left text-xs font-medium px-1.5 py-0.5 rounded-md leading-tight block-gradient shadow-sm hover:opacity-90"
               style="--block-c: {% if event.source == 'aprima' %}var(--meeting-aprima){% else %}var(--meeting-cal){% endif %}; color:#1e293b"
               data-event-key="{{ event_key }}"
               onclick="event.stopPropagation(); openMeetingDetailKey(this.dataset.eventKey)">
-              <span class="flex items-center gap-1 min-w-0">
+              <span class="flex items-center gap-1 min-w-0 overflow-hidden">
                 {% if event.startLabel %}<span class="text-[9px] font-bold tabular-nums opacity-80 flex-shrink-0">{{ event.startLabel }}</span>{% endif %}
-                <span class="truncate font-bold">{{ event.title }}</span>
+                <span class="truncate font-bold min-w-0">{{ event.title }}</span>
               </span>
               {% if event.attendees %}
-              <span class="text-[9px] opacity-70 truncate">{{ event.attendees|join(' · ') }}</span>
+              <span class="text-[9px] opacity-70 truncate min-w-0">{{ event.attendees|join(' · ') }}</span>
               {% endif %}
             </button>
             {% endfor %}
@@ -114,7 +146,7 @@
         </td>
       {% endfor %}
       {% for _ in range(pad_end) %}
-        <td class="px-2 py-2 border border-slate-200 bg-slate-50/60 align-top"></td>
+        <td class="px-1.5 py-1.5 border border-slate-200 bg-slate-50/60"></td>
       {% endfor %}
       </tr>
     </tbody>

@@ -319,6 +319,12 @@ class CallBuilderTest(unittest.TestCase):
             self.assertIn("Thanksgiving 2027 (WG)", history[0]["holidaysWorked"])
             self.assertEqual(history[1]["holidaysWorked"], [])
             self.assertIn("July 4th 2026 (ALT)", history[2]["holidaysWorked"])
+            # Halloween is display-only — not a work-holiday credit row.
+            self.assertFalse(any(r["name"] == "Halloween" for r in history[0]["holidayGrid"]))
+            self.assertTrue(any(r["name"] == "Presidents Day" for r in history[0]["holidayGrid"]))
+            self.assertTrue(any(r["name"] == "Easter" for r in history[0]["holidayGrid"]))
+            self.assertTrue(any(r["name"] == "Mother's Day" for r in history[0]["holidayGrid"]))
+            self.assertTrue(any(r["name"] == "Father's Day" for r in history[0]["holidayGrid"]))
         finally:
             db.close()
 

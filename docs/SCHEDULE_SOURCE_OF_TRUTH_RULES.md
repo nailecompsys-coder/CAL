@@ -14,7 +14,7 @@ This is Don's current scheduling rule set for the master calendar, the surgeon a
 - A newly **applied** Epic/Desk fax supersedes older applied faxes for the surgeon/dates in its snapshot. Old fax rows remain history, not a second layer of current cases. The live app reads saved database facts, not all fax files.
 - Fax data may create, update, or cancel surgical-case and clinic-visit **details**. It may update an effective assignment on a dated card but must not rewrite that card's immutable master baseline. A failed stage/apply check leaves the live schedule unchanged.
 - Aprima is read-only and is the source for Surgery One/CBO activity. Manual changes by Shannon/admin have their own provenance. Never invent CBO from generic Epic/Advent room codes such as `AHMGGENSRG`.
-- A surgical case with an assisting surgeon occupies that surgeon's time at the same location and room as the primary surgeon. It is one case, not two patients or two rooms.
+- CAL does not choose a lead surgeon. Epic already made the schedule. Each fax detail line is written, then one SQL fill attaches that line to the named surgeon's existing AM/PM card. A case that already names an assisting surgeon still occupies that surgeon's time. Fax apply does not invent an assistant, and it does not collapse two printed lines into one case.
 
 ## Conflicts and visibility
 
@@ -33,6 +33,7 @@ This is Don's current scheduling rule set for the master calendar, the surgeon a
 ## Ownership and acceptance checks
 
 - SQL determines which facts belong to a surgeon/day, deduplicates them, calculates counts and conflicts, and orders the result. Python only maps those database results into the API response. The existing iPhone views consume that response.
+- The phone, the office calendar, and the scheduler day counts read `schedule_card_activities`. A surgery shows for a surgeon only when that surgeon has an active line on a card. The older `surgical_cases` rows are not a second schedule.
 - Before saying a fax/display issue is fixed, trace representative **latest applied** fax rows through the saved case or clinic activity, permanent AM/PM card, and native API. Check a fixed block, NA, OFF, approved partial leave, assistance, group capacity, and weekend call. Compare current versus archived fax data separately.
 - Never claim all phone screens are correct solely because rows exist in PostgreSQL. Verify the API response and, for visual claims, the actual client view.
 

@@ -93,9 +93,15 @@ class MasterCalendarTest(unittest.TestCase):
         self.db.add(hospital);self.db.commit()
         self.db.add(SurgeonLocationSchedule(surgeon_id=self.fid,day_of_week=3,session='am',location_id=hospital.id,assignment_type='assigned'));self.db.commit()
         materialize_master_schedule_cards(self.db,start=date(2026,9,28),end=date(2026,10,2))
+        from app.models import ScheduleCard
+        am_card=self.db.query(ScheduleCard).filter_by(surgeon_id=self.fid,date=self.day,session='am').one()
         self.db.add_all([
             SurgicalCase(surgeon_id=self.fid,date=self.day,start_time=time(8),location_id=hospital.id,patient_name='First test',procedure='First',status='scheduled'),
-            SurgicalCase(surgeon_id=self.oid,assisting_surgeon_id=self.fid,date=self.day,start_time=time(10),location_id=hospital.id,patient_name='Assisted test',procedure='Second',status='scheduled'),
+            SurgicalCase(surgeon_id=self.oid,assisting_surgeon_id=self.fid,date=self.day,start_time=time(10),location_id=hospital.id,patient_name='Other list',procedure='Second',status='scheduled'),
+            ScheduleCardActivity(schedule_card_id=am_card.id,surgeon_id=self.fid,location_id=hospital.id,
+                activity_date=self.day,session='am',activity_type='surgical',start_time=time(10),
+                patient_name='Assisted test',procedure='Second',source_system='fax',
+                source_record_key='assisted-line',identity_key='assisted',is_active=True),
             DayOff(surgeon_id=self.fid,start_date=self.day,end_date=self.day,status='approved',is_full_day=False,start_time=time(7),end_time=time(12)),
         ]);self.db.commit()
         backfill_normalized_schedule_activity(self.db)
@@ -107,7 +113,8 @@ class MasterCalendarTest(unittest.TestCase):
         self.assertEqual(am['title'],'AM · OFF');self.assertEqual(pm['title'],'PM · NA')
         self.assertTrue(am['extendedProps']['has_conflict'])
         self.assertEqual({r['patient'] for r in am['extendedProps']['roster']},{'First test','Assisted test'})
-        self.assertEqual([r['role'] for r in am['extendedProps']['roster']],['','Assisting'])
+        self.assertEqual([r['role'] for r in am['extendedProps']['roster']],['',''])
+        self.assertNotIn('Other list',json.dumps(result))
         self.assertFalse(any(e['id'].startswith('surg-') for e in result))
         self.assertTrue(all(e['extendedProps']['surgeon_id']==self.fid for e in result))
         self.assertFalse(any(date.fromisoformat(e['start']).weekday()>=5 for e in cards))
@@ -144,9 +151,13 @@ class MasterCalendarTest(unittest.TestCase):
         result=self.feed(self.fid)
         by_id={e['id']:e for e in result}
         self.assertEqual([r['patient'] for r in by_id[f'card-{am.id}']['extendedProps']['roster']],['Reviewed'])
-        self.assertEqual([r['patient'] for r in by_id[f'card-{pm.id}']['extendedProps']['roster']],['Afternoon'])
-        self.assertEqual({e['extendedProps']['patient_name'] for e in result if e['id'].startswith('surg-')},{'Untimed','Weekend'})
-        self.assertNotIn('Cancelled',json.dumps(result))
+        self.assertEqual(by_id[f'card-{pm.id}']['extendedProps']['roster'],[])
+        self.assertFalse(any(e['id'].startswith('surg-') for e in result))
+        dumped=json.dumps(result)
+        self.assertNotIn('Afternoon',dumped)
+        self.assertNotIn('Untimed',dumped)
+        self.assertNotIn('Weekend',dumped)
+        self.assertNotIn('Cancelled',dumped)
 
     def test_normalized_aprima_is_not_repeated_as_a_cached_appointment(self):
         materialize_master_schedule_cards(self.db,start=date(2026,9,28),end=date(2026,10,2))
@@ -175,7 +186,8 @@ class MasterCalendarTest(unittest.TestCase):
         self.cached('meeting','other',self.oid,'Other Aprima meeting')
         self.db.add(SurgeonDayItem(surgeon_id=self.fid,date=self.day,title='Florin reminder'));self.db.commit()
         result=self.feed(self.fid)
-        self.assertTrue(any(e['id'].startswith('surg-') for e in result))
+        self.assertFalse(any(e['id'].startswith('surg-') for e in result))
+        self.assertNotIn('Unattached',json.dumps(result))
         self.assertTrue(any(e['id']=='aprima-visit' for e in result))
         self.assertIn('Florin Aprima meeting',{e['title'] for e in result})
         self.assertNotIn('Other Aprima meeting',{e['title'] for e in result})

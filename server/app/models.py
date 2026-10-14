@@ -782,12 +782,10 @@ class SurgicalCase(Base):
 
 
 class CoSurgeonPair(Base):
-    """Directional co-surgeon rule.
+    """Saved co-surgeon preference.
 
-    Advent daily faxes reprint a shared case under BOTH surgeons' sections. When
-    the two surgeons on such a case match a pair here, the case is attached to
-    `primary_surgeon` and `assisting_surgeon` is recorded as the assist — instead
-    of creating a duplicate row / double-booking the room.
+    Fax apply does not read this table. Epic already printed each surgeon's line,
+    and SQL places that line on that surgeon's existing card.
     """
     __tablename__ = "co_surgeon_pairs"
     __table_args__ = (UniqueConstraint("primary_surgeon_id", "assisting_surgeon_id"),)

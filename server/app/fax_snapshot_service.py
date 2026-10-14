@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from collections import defaultdict
 from datetime import date
 from typing import Any
@@ -13,7 +12,6 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .models import (
-    CoSurgeonPair,
     FaxDocument,
     FaxIngestRow,
     FaxIngestRun,
@@ -21,49 +19,13 @@ from .models import (
     ScheduleCard,
     ScheduleChangeEvent,
     Surgeon,
-    SurgicalCase,
 )
+from .fax_card_fill import fill_cards_from_fax_lines
 from .fax_ingest_engine import mark_fax_ingest_transaction
 from .fax_pdf_intake import cleanup_fax_derivatives, prune_immutable_fax_sources
 from .schedule_build_backup_service import create_fax_snapshot_backup
 
-FAX_NOTE_RE = re.compile(r"\bFax\s+\d+\b", re.IGNORECASE)
 logger = logging.getLogger(__name__)
-
-
-def _normal(value: str | None) -> str:
-    return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
-
-
-def _patient_name_tokens(value: str | None) -> list[str]:
-    return re.findall(r"[a-z0-9]+", (value or "").lower())
-
-
-def _same_patient_identity(left: str | None, right: str | None) -> bool:
-    """Match expanded/corrected fax names without guessing across patients."""
-    left_tokens = _patient_name_tokens(left)
-    right_tokens = _patient_name_tokens(right)
-    return len(left_tokens) >= 2 and left_tokens[:2] == right_tokens[:2]
-
-
-def _existing_case_for_row(
-    row: FaxIngestRow,
-    *,
-    exact: dict[tuple[date, str], list[SurgicalCase]],
-    by_date: dict[date, list[SurgicalCase]],
-) -> SurgicalCase | None:
-    matches = exact.get((row.case_date, _normal(row.patient_name)), [])
-    if matches:
-        return matches[0]
-    if row.start_time is None:
-        return None
-    identity_matches = [
-        case
-        for case in by_date.get(row.case_date, [])
-        if case.start_time == row.start_time
-        and _same_patient_identity(case.patient_name, row.patient_name)
-    ]
-    return identity_matches[0] if len(identity_matches) == 1 else None
 
 
 def _surgeon_initials(surgeon: Surgeon) -> str:
@@ -75,14 +37,6 @@ def _is_hospital(location: Location) -> bool:
         (location.location_type or "").lower() in {"hospital", "or"}
         or (location.abbreviation or "").upper().endswith("-OR")
     )
-
-
-def _fax_note(notes: str | None, fax_id: int) -> str:
-    marker = f"Fax {fax_id} daily snapshot. No surgeon notification sent."
-    current = (notes or "").strip()
-    if marker.lower() in current.lower():
-        return current
-    return f"{current}\n{marker}".strip()
 
 
 def _applicable_row_ids(db: Session, run_id: int) -> set[int]:
@@ -133,87 +87,6 @@ def _card_location(card: ScheduleCard, rows: list[FaxIngestRow]) -> int | None:
     return card.effective_location_id or card.baseline_location_id
 
 
-def _case_group_key(row: FaxIngestRow) -> tuple[date, str, str, str]:
-    clock = row.start_time.strftime("%H:%M") if row.start_time else ""
-    return row.case_date, clock, (row.room_text or "").upper(), _normal(row.patient_name)
-
-
-def _co_surgeon_primary(db: Session, surgeon_ids: list[int]) -> int | None:
-    """Return the configured primary when two surgeons match an active pair."""
-    if len(surgeon_ids) != 2:
-        return None
-    left, right = surgeon_ids
-    pair = (
-        db.query(CoSurgeonPair)
-        .filter(
-            CoSurgeonPair.is_active == True,  # noqa: E712
-            (
-                ((CoSurgeonPair.primary_surgeon_id == left) & (CoSurgeonPair.assisting_surgeon_id == right))
-                | ((CoSurgeonPair.primary_surgeon_id == right) & (CoSurgeonPair.assisting_surgeon_id == left))
-            ),
-        )
-        .one_or_none()
-    )
-    return pair.primary_surgeon_id if pair else None
-
-
-def _choose_primary(
-    rows: list[FaxIngestRow],
-    *,
-    db: Session,
-    existing: SurgicalCase | None,
-    cards: dict[tuple[int, date, str], ScheduleCard],
-    location_id: int,
-) -> tuple[int, int | None]:
-    """Resolve one stored case for a fax line reprinted under two surgeons.
-
-    The block owner is primary. A saved co_surgeon_pairs row names the primary
-    when the block does not. When both named half-days are NA, both are open:
-    keep one case and both names, and do not refuse for lack of a lead.
-    """
-    surgeon_ids = list(dict.fromkeys(row.surgeon_id for row in rows if row.surgeon_id))
-    if not surgeon_ids:
-        raise ValueError("Surgical fax row has no surgeon.")
-    if len(surgeon_ids) > 2:
-        raise ValueError("A fax case matched more than two surgeons.")
-    if existing and existing.surgeon_id in surgeon_ids:
-        primary = existing.surgeon_id
-    elif len(surgeon_ids) == 1:
-        primary = surgeon_ids[0]
-    else:
-        baseline_matches = []
-        for row in rows:
-            if not row.surgeon_id:
-                continue
-            card = cards[(row.surgeon_id, row.case_date, row.session)]
-            if card.baseline_state == "assigned" and card.baseline_location_id == location_id:
-                baseline_matches.append(row.surgeon_id)
-        baseline_matches = list(dict.fromkeys(baseline_matches))
-        if len(baseline_matches) == 1:
-            primary = baseline_matches[0]
-        else:
-            paired = _co_surgeon_primary(db, surgeon_ids)
-            both_na = all(
-                cards[(
-                    surgeon_id,
-                    next(row.case_date for row in rows if row.surgeon_id == surgeon_id),
-                    next(row.session for row in rows if row.surgeon_id == surgeon_id),
-                )].baseline_state == "na"
-                for surgeon_id in surgeon_ids
-            )
-            if paired is not None:
-                primary = paired
-            elif both_na:
-                primary = surgeon_ids[0]
-            else:
-                raise ValueError(
-                    f"Shared case on {rows[0].case_date.isoformat()} at "
-                    f"{rows[0].start_time} has no unique primary surgeon."
-                )
-    assistant = next((value for value in surgeon_ids if value != primary), None)
-    return primary, assistant
-
-
 def apply_staged_snapshot(
     db: Session,
     *,
@@ -221,7 +94,7 @@ def apply_staged_snapshot(
     run_id: int,
     admin_id: int | None = None,
 ) -> dict[str, Any]:
-    """Backup then reconcile one staged fax without creating schedule cards."""
+    """Backup, then one SQL fill places every staged detail line on its existing card."""
     run = db.get(FaxIngestRun, run_id)
     if not run:
         raise ValueError("Fax ingest run not found.")
@@ -322,89 +195,14 @@ def apply_staged_snapshot(
         (row.surgeon_id, row.case_date, row.session) for row in rows if row.row_type == "clinic"
     })
 
-    surgical_groups: dict[tuple[date, str, str, str], list[FaxIngestRow]] = defaultdict(list)
-    for row in rows:
-        if row.row_type == "surgical":
-            surgical_groups[_case_group_key(row)].append(row)
-    existing_cases = db.query(SurgicalCase).filter(
-        SurgicalCase.date >= start,
-        SurgicalCase.date <= end,
-        SurgicalCase.status != "cancelled",
-    ).all()
-    existing_by_patient: dict[tuple[date, str], list[SurgicalCase]] = defaultdict(list)
-    existing_by_date: dict[date, list[SurgicalCase]] = defaultdict(list)
-    for case in existing_cases:
-        existing_by_patient[(case.date, _normal(case.patient_name))].append(case)
-        existing_by_date[case.date].append(case)
-
-    kept_case_ids: set[int] = set()
-    created = updated = assisted = 0
-    for group in surgical_groups.values():
-        first = group[0]
-        existing = _existing_case_for_row(
-            first,
-            exact=existing_by_patient,
-            by_date=existing_by_date,
-        )
-        location_id = first.source_location_id or effective_locations[(first.surgeon_id, first.case_date, first.session)]
-        primary_id, assistant_id = _choose_primary(
-            group,
-            db=db,
-            existing=existing,
-            cards=cards,
-            location_id=location_id,
-        )
-        if existing:
-            case = existing
-            updated += 1
-        else:
-            case = SurgicalCase(
-                surgeon_id=primary_id,
-                date=first.case_date,
-                patient_name=first.patient_name,
-                procedure=first.procedure or "TBD",
-            )
-            db.add(case)
-            db.flush()
-            created += 1
-        case.surgeon_id = primary_id
-        case.assisting_surgeon_id = assistant_id
-        case.patient_name = first.patient_name
-        case.start_time = first.start_time
-        case.location_id = location_id
-        case.schedule_card_id = cards[(primary_id, first.case_date, first.session)].id
-        case.room_text = (first.room_text or "").upper()
-        case.procedure = max((row.procedure or "" for row in group), key=len, default="") or case.procedure or "TBD"
-        case.status = "scheduled"
-        case.or_block_instance_id = None
-        case.notes = _fax_note(case.notes, source_fax_id)
-        from .schedule_activity_normalization import normalize_surgical_case_card
-        normalize_surgical_case_card(db, case)
-        kept_case_ids.add(case.id)
-        if assistant_id:
-            assisted += 1
-
-    cancelled = kept_by_database = 0
-    for case in existing_cases:
-        if case.id in kept_case_ids or case.surgeon_id not in scope_ids:
-            continue
-        if not FAX_NOTE_RE.search(case.notes or ""):
-            continue
-        case.status = "cancelled"
-        case.notes = _fax_note(case.notes, source_fax_id)
-        db.flush()
-        db.refresh(case)
-        if case.status == "cancelled":
-            cancelled += 1
-        else:
-            kept_by_database += 1
-        from .schedule_activity_normalization import normalize_surgical_case_card
-        normalize_surgical_case_card(db, case)
+    filled = fill_cards_from_fax_lines(db, run_id=run.id)
+    created = filled["surgicalCreated"]
+    updated = filled["surgicalUpdated"]
+    cancelled = filled["surgicalCancelled"]
+    kept_by_database = filled["surgicalKeptOnUnappliedDays"]
 
     run.status = "applied"
     document.status = "applied"
-    from .schedule_activity_normalization import sync_applied_fax_clinic_activities
-    sync_applied_fax_clinic_activities(db, run)
     db.add(ScheduleChangeEvent(
         event_type="fax_daily_snapshot_applied",
         surgeon_id=None,
@@ -458,7 +256,7 @@ def apply_staged_snapshot(
         "surgicalCancelled": cancelled,
         "surgicalKeptOnUnappliedDays": kept_by_database,
         "rowsSkipped": skipped_rows,
-        "assistedCases": assisted,
+        "assistedCases": 0,
         "clinicSessions": clinic_sessions,
         "baselineConflicts": conflicts,
         "cardsCreated": 0,

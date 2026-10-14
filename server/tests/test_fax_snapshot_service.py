@@ -12,6 +12,8 @@ from sqlalchemy.orm import sessionmaker
 
 from app.fax_ingest_engine import ReviewedFaxRow, stage_reviewed_rows
 from app.fax_snapshot_service import apply_staged_snapshot
+from app.native_home_items import empty_days
+from app.native_schedule_feed import append_native_schedule
 from app.schedule_build_backup_service import revert_schedule_build_backup
 from app.migrate_fax_ingest import create_applicable_view
 from app.models import (
@@ -22,6 +24,7 @@ from app.models import (
     Location,
     ScheduleBuildBackup,
     ScheduleCard,
+    ScheduleCardActivity,
     ScheduleCardWeek,
     Surgeon,
     SurgicalCase,
@@ -161,10 +164,20 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.assertIsNone(pm.effective_location_id)
         self.assertEqual(pm.source, "master")
         self.assertEqual(pm.version, 1)
-        cases = self.db.query(SurgicalCase).order_by(SurgicalCase.patient_name).all()
-        self.assertEqual(len(cases), 2)
-        self.assertEqual(next(row for row in cases if row.patient_name == "Old, Patient").status, "cancelled")
-        self.assertEqual(next(row for row in cases if row.patient_name == "Case, Patient").status, "scheduled")
+        am = self.db.query(ScheduleCard).filter_by(session="am").one()
+        activities = {
+            row.activity_type: row
+            for row in self.db.query(ScheduleCardActivity).filter_by(is_active=True)
+        }
+        self.assertEqual(activities["clinic"].schedule_card_id, am.id)
+        self.assertEqual(activities["clinic"].patient_name, "Clinic, Patient")
+        self.assertEqual(activities["surgical"].schedule_card_id, pm.id)
+        self.assertEqual(activities["surgical"].patient_name, "Case, Patient")
+        self.assertEqual(activities["surgical"].fax_ingest_row_id is not None, True)
+        stored_cases = self.db.query(SurgicalCase).all()
+        self.assertEqual(len(stored_cases), 1)
+        self.assertEqual(stored_cases[0].patient_name, "Old, Patient")
+        self.assertEqual(stored_cases[0].status, "scheduled")
         backup = self.db.query(ScheduleBuildBackup).one()
         payload = json.loads(backup.payload_json)
         self.assertEqual(payload["kind"], "fax_snapshot")
@@ -224,13 +237,14 @@ class FaxSnapshotServiceTest(unittest.TestCase):
             run_id=staged["runId"],
         )
 
-        self.assertEqual(result["surgicalCreated"], 0)
-        self.assertEqual(result["surgicalUpdated"], 1)
+        self.assertEqual(result["surgicalCreated"], 1)
         self.assertEqual(result["surgicalCancelled"], 0)
-        cases = self.db.query(SurgicalCase).all()
-        self.assertEqual(len(cases), 1)
-        self.assertEqual(cases[0].patient_name, "Williams, Robert Alexander")
-        self.assertEqual(cases[0].procedure, "Current procedure")
+        am = self.db.query(ScheduleCard).filter_by(session="am").one()
+        line = self.db.query(ScheduleCardActivity).filter_by(is_active=True).one()
+        self.assertEqual(line.schedule_card_id, am.id)
+        self.assertEqual(line.patient_name, "Williams, Robert Alexander")
+        self.assertEqual(line.procedure, "Current procedure")
+        self.assertEqual(self.db.query(ScheduleCardActivity).count(), 1)
 
     def test_daily_snapshot_keeps_mixed_facilities_on_one_session_card(self):
         staged = stage_reviewed_rows(
@@ -267,9 +281,11 @@ class FaxSnapshotServiceTest(unittest.TestCase):
 
         result = apply_staged_snapshot(self.db, source_fax_id=191, run_id=staged["runId"])
 
-        cases = self.db.query(SurgicalCase).order_by(SurgicalCase.start_time).all()
+        lines = self.db.query(ScheduleCardActivity).order_by(ScheduleCardActivity.start_time).all()
+        pm = self.db.query(ScheduleCard).filter_by(session="pm").one()
         self.assertEqual(self.db.query(ScheduleCard).count(), 2)
-        self.assertEqual([case.location_id for case in cases], [self.wg_or.id, self.alt_or.id])
+        self.assertEqual([line.schedule_card_id for line in lines], [pm.id, pm.id])
+        self.assertEqual([line.location_id for line in lines], [self.wg_or.id, self.alt_or.id])
         self.assertTrue(any(item["code"] == "mixed_facilities_in_session" for item in result["baselineConflicts"]))
 
     def test_validated_session_wins_when_case_location_matches_other_card(self):
@@ -314,10 +330,10 @@ class FaxSnapshotServiceTest(unittest.TestCase):
 
         apply_staged_snapshot(self.db, source_fax_id=191, run_id=staged["runId"])
 
-        cases = self.db.query(SurgicalCase).order_by(SurgicalCase.start_time).all()
+        lines = self.db.query(ScheduleCardActivity).order_by(ScheduleCardActivity.start_time).all()
         am_card = self.db.query(ScheduleCard).filter_by(session="am").one()
-        self.assertEqual([case.schedule_card_id for case in cases], [am_card.id, am_card.id])
-        self.assertEqual([case.location_id for case in cases], [self.alt_or.id, self.wg_or.id])
+        self.assertEqual([line.schedule_card_id for line in lines], [am_card.id, am_card.id])
+        self.assertEqual([line.location_id for line in lines], [self.alt_or.id, self.wg_or.id])
 
     def test_post_commit_cleanup_failure_does_not_report_apply_failure(self):
         staged = stage_reviewed_rows(
@@ -351,7 +367,7 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.assertEqual(result["cardsCreated"], 0)
         self.assertEqual(len(result["cleanupErrors"]), 1)
         self.assertIn("read-only source", result["cleanupErrors"][0])
-        self.assertEqual(self.db.query(SurgicalCase).filter_by(status="scheduled").count(), 1)
+        self.assertEqual(self.db.query(ScheduleCardActivity).filter_by(is_active=True).count(), 1)
 
     def _row(self, patient, day=date(2026, 9, 22), flags=None):
         return ReviewedFaxRow(
@@ -380,7 +396,10 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         result = apply_staged_snapshot(self.db, source_fax_id=191, run_id=staged["runId"])
 
         self.assertEqual(result["rowsSkipped"], 1)
-        self.assertEqual([case.patient_name for case in self.db.query(SurgicalCase).all()], ["Clean, Patient"])
+        self.assertEqual(
+            [line.patient_name for line in self.db.query(ScheduleCardActivity).all()],
+            ["Clean, Patient"],
+        )
 
     def test_corrected_rerun_of_the_latest_applied_fax_moves_and_cancels_its_cases(self):
         first = stage_reviewed_rows(
@@ -397,8 +416,11 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.db.commit()
         apply_staged_snapshot(self.db, source_fax_id=191, run_id=second["runId"])
 
-        statuses = {case.patient_name: case.status for case in self.db.query(SurgicalCase).all()}
-        self.assertEqual(statuses, {"Kept, Patient": "scheduled", "Misread, Patient": "cancelled"})
+        active = {
+            row.patient_name: row.is_active
+            for row in self.db.query(ScheduleCardActivity).filter_by(activity_type="surgical")
+        }
+        self.assertEqual(active, {"Kept, Patient": True, "Misread, Patient": False})
 
     def test_older_fax_cannot_be_applied_after_a_newer_one(self):
         newer = stage_reviewed_rows(
@@ -427,7 +449,10 @@ class FaxSnapshotServiceTest(unittest.TestCase):
 
         self.assertEqual(result["rowsSkipped"], 1)
         self.assertEqual(self.db.query(ScheduleCard).count(), 2)
-        self.assertEqual([case.patient_name for case in self.db.query(SurgicalCase).all()], ["Clean, Patient"])
+        self.assertEqual(
+            [line.patient_name for line in self.db.query(ScheduleCardActivity).all()],
+            ["Clean, Patient"],
+        )
 
     def _shared_line(self, initials, name):
         return ReviewedFaxRow(
@@ -484,7 +509,21 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.db.commit()
         return staged
 
-    def test_shared_fax_case_keeps_block_owner_as_the_only_case(self):
+    def _assert_each_named_line_fills_its_card(self, result, assistant):
+        self.assertEqual(result["assistedCases"], 0)
+        self.assertEqual(result["surgicalCreated"], 2)
+        self.assertEqual(result["cardsCreated"], 0)
+        self.assertEqual(self.db.query(SurgicalCase).count(), 0)
+        self.assertEqual(self.db.query(ScheduleCard).count(), 3)
+        activities = self.db.query(ScheduleCardActivity).filter_by(activity_type="surgical", is_active=True).all()
+        self.assertEqual({row.surgeon_id for row in activities}, {self.surgeon.id, assistant.id})
+        cards = {card.id: card for card in self.db.query(ScheduleCard)}
+        for activity in activities:
+            card = cards[activity.schedule_card_id]
+            self.assertEqual((card.surgeon_id, card.date, card.session), (activity.surgeon_id, date(2026, 9, 22), "pm"))
+            self.assertEqual(activity.patient_name, "Shared, Case")
+
+    def test_shared_fax_lines_fill_both_cards_when_one_surgeon_owns_the_block(self):
         assistant = self._add_cj()
         owner_pm = self.db.query(ScheduleCard).filter_by(surgeon_id=self.surgeon.id, session="pm").one()
         owner_pm.baseline_location_id = self.wg_or.id
@@ -496,15 +535,12 @@ class FaxSnapshotServiceTest(unittest.TestCase):
 
         result = apply_staged_snapshot(self.db, source_fax_id=193, run_id=staged["runId"])
 
-        cases = self.db.query(SurgicalCase).all()
-        self.assertEqual(len(cases), 1)
-        self.assertEqual(cases[0].surgeon_id, self.surgeon.id)
-        self.assertEqual(cases[0].assisting_surgeon_id, assistant.id)
-        self.assertEqual(cases[0].patient_name, "Shared, Case")
-        self.assertEqual(result["assistedCases"], 1)
-        self.assertEqual(result["surgicalCreated"], 1)
+        self._assert_each_named_line_fills_its_card(result, assistant)
+        owner_pm = self.db.query(ScheduleCard).filter_by(surgeon_id=self.surgeon.id, session="pm").one()
+        self.assertEqual(owner_pm.baseline_state, "assigned")
+        self.assertEqual(owner_pm.effective_location_id, self.wg_or.id)
 
-    def test_shared_fax_case_uses_co_surgeon_pair_when_neither_owns_the_block(self):
+    def test_co_surgeon_pair_does_not_collapse_two_fax_lines(self):
         assistant = self._add_cj()
         self.db.add(CoSurgeonPair(
             primary_surgeon_id=self.surgeon.id,
@@ -516,26 +552,40 @@ class FaxSnapshotServiceTest(unittest.TestCase):
 
         result = apply_staged_snapshot(self.db, source_fax_id=193, run_id=staged["runId"])
 
-        cases = self.db.query(SurgicalCase).all()
-        self.assertEqual(len(cases), 1)
-        self.assertEqual(cases[0].surgeon_id, self.surgeon.id)
-        self.assertEqual(cases[0].assisting_surgeon_id, assistant.id)
-        self.assertEqual(result["assistedCases"], 1)
+        self._assert_each_named_line_fills_its_card(result, assistant)
+        self.assertEqual(self.db.query(CoSurgeonPair).count(), 1)
 
-    def test_shared_fax_case_applies_when_both_blocks_are_na(self):
+    def test_phone_reads_the_same_card_line_as_the_portal(self):
+        staged = stage_reviewed_rows(
+            self.db,
+            external_fax_id=191,
+            source_label="test",
+            surgeon_scope=["JF"],
+            rows=[self._row("Case, Patient")],
+        )
+        self.db.commit()
+        apply_staged_snapshot(self.db, source_fax_id=191, run_id=staged["runId"])
+
+        days = empty_days(date(2026, 9, 22), date(2026, 9, 22))
+        by_date = {day["date"]: day for day in days}
+        append_native_schedule(self.db, self.surgeon.id, date(2026, 9, 22), date(2026, 9, 22), by_date)
+        items = by_date["2026-09-22"]["items"]
+        pm = self.db.query(ScheduleCard).filter_by(session="pm").one()
+        surgery = next(item for item in items if item["type"] == "surgery")
+        card = next(item for item in items if item["id"] == f"card-{pm.id}")
+        self.assertEqual(surgery["title"], "Case, Patient")
+        self.assertEqual(surgery["cardId"], pm.id)
+        self.assertEqual(card["caseCount"], 1)
+
+    def test_both_na_blocks_each_receive_their_fax_line(self):
         assistant = self._add_cj()
         staged = self._stage_shared_case()
 
         result = apply_staged_snapshot(self.db, source_fax_id=193, run_id=staged["runId"])
 
-        cases = self.db.query(SurgicalCase).all()
-        self.assertEqual(len(cases), 1)
-        self.assertEqual(
-            {cases[0].surgeon_id, cases[0].assisting_surgeon_id},
-            {self.surgeon.id, assistant.id},
-        )
-        self.assertEqual(result["assistedCases"], 1)
-        self.assertEqual(result["surgicalCreated"], 1)
+        self._assert_each_named_line_fills_its_card(result, assistant)
+        na_cards = self.db.query(ScheduleCard).filter_by(session="pm").all()
+        self.assertEqual({card.baseline_state for card in na_cards}, {"na"})
 
 
 if __name__ == "__main__":

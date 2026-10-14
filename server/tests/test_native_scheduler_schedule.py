@@ -61,10 +61,17 @@ class NativeSchedulerScheduleTest(unittest.TestCase):
         self.db.add_all([am, pm, assistant_off])
         self.db.flush()
         self.db.add_all([
+            ScheduleCardActivity(
+                schedule_card_id=am.id, surgeon_id=primary.id, location_id=hospital.id,
+                activity_date=monday, session="am", activity_type="surgical",
+                start_time=time(9), end_time=time(10), patient_name="Case Patient",
+                procedure="Procedure", source_system="fax", source_record_key="case-1",
+                identity_key="case-patient-0900", is_active=True,
+            ),
             SurgicalCase(
                 surgeon_id=primary.id, assisting_surgeon_id=assistant.id, date=monday,
-                start_time=time(9), end_time=time(10), patient_name="Case Patient",
-                procedure="Procedure", location_id=hospital.id, schedule_card_id=am.id,
+                start_time=time(9), end_time=time(10), patient_name="Old List Patient",
+                procedure="Old procedure", location_id=hospital.id, schedule_card_id=am.id,
                 status="scheduled", or_block_instance_id=None,
             ),
             ScheduleCardActivity(
@@ -91,16 +98,17 @@ class NativeSchedulerScheduleTest(unittest.TestCase):
         primary_rows = [row for row in rows if row["surgeonId"] == primary.id]
         assistant_rows = [row for row in rows if row["surgeonId"] == assistant.id]
         self.assertEqual(["AL-OR", "NA"], [row["title"] for row in primary_rows if row["type"] == "card"])
+        self.assertEqual(1, sum(1 for row in primary_rows if row["type"] == "surgery"))
         self.assertTrue(any(row["type"] == "surgery" and row["needsReview"] for row in primary_rows))
         self.assertTrue(any(row["type"] == "clinic_visit" for row in primary_rows))
         self.assertTrue(any(row["type"] == "surgery" and row["start"] == "09:00" and row["end"] == "10:00"
                             and row["subtitle"] == "Procedure" for row in primary_rows))
+        self.assertNotIn("Old List Patient", str(primary_rows))
         self.assertTrue(any(row["type"] == "clinic_visit" and row["start"] == "13:00" and row["end"] == "13:30"
                             and row["subtitle"] == "Visit" for row in primary_rows))
         self.assertTrue(any(row["type"] == "approved_off" and row["start"] == "08:00" for row in primary_rows))
-        self.assertTrue(any(row["type"] == "surgery" and row["subtitle"].startswith("Assisting") for row in assistant_rows))
+        self.assertFalse(any(row["type"] == "surgery" for row in assistant_rows))
         self.assertTrue(any(row["type"] == "card" and row["title"] == "OFF" for row in assistant_rows))
-        self.assertTrue(any(row["type"] == "surgery" and row["needsReview"] for row in assistant_rows))
         self.assertTrue(any(row["type"] == "no_call" for row in assistant_rows))
         self.assertTrue(any(row["type"] == "clinic_block" for row in assistant_rows))
         self.assertEqual(1, rows[0]["dayCaseCount"])

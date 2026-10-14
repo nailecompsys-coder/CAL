@@ -351,11 +351,18 @@ class NativeHomeContractTest(unittest.TestCase):
                               session="pm", baseline_state="na", effective_state="na")
             db.add_all([am, pm])
             db.flush()
-            case = SurgicalCase(surgeon_id=surgeon.id, assisting_surgeon_id=assistant.id,
+            line = ScheduleCardActivity(
+                schedule_card_id=am.id, surgeon_id=surgeon.id, location_id=hospital.id,
+                activity_date=date(2026, 10, 5), session="am", activity_type="surgical",
+                start_time=time(8, 30), end_time=time(9, 30), patient_name="Test Patient",
+                procedure="Test procedure", source_system="fax", source_record_key="line-1",
+                identity_key="test-patient-0830", is_active=True,
+            )
+            db.add(line)
+            db.add(SurgicalCase(surgeon_id=surgeon.id, assisting_surgeon_id=assistant.id,
                                 date=date(2026, 10, 5), start_time=time(8, 30), end_time=time(9, 30),
-                                patient_name="Test Patient", procedure="Test procedure", location_id=hospital.id,
-                                schedule_card_id=am.id, status="scheduled")
-            db.add(case)
+                                patient_name="Old List Patient", procedure="Old procedure", location_id=hospital.id,
+                                schedule_card_id=am.id, status="scheduled"))
             db.add(DayOff(surgeon_id=surgeon.id, start_date=date(2026, 10, 5),
                           end_date=date(2026, 10, 5), reason="Vacation", status="approved", is_full_day=True))
             db.commit()
@@ -364,16 +371,16 @@ class NativeHomeContractTest(unittest.TestCase):
             items = payload["days"][0]["items"]
             self.assertEqual(["OFF", "OFF"], [item["title"] for item in items if item["id"].startswith("card-")])
             self.assertTrue(next(item for item in items if item["id"] == f"card-{am.id}")["needsReview"])
-            surgery = next(item for item in items if item["id"] == f"surg-{case.id}")
+            surgery = next(item for item in items if item["type"] == "surgery")
+            self.assertEqual(surgery["id"], f"act-{line.id}")
             self.assertEqual(surgery["title"], "Test Patient")
             self.assertTrue(surgery["needsReview"])
-            self.assertEqual(surgery["rawId"], case.id)
+            self.assertEqual(surgery["cardId"], am.id)
             self.assertEqual(len([item for item in items if item["type"] == "surgery"]), 1)
+            self.assertNotIn("Old List Patient", str(items))
 
             assist_items = build_native_home(db, assistant, date(2026, 10, 5), date(2026, 10, 5))["days"][0]["items"]
-            assist = next(item for item in assist_items if item["type"] == "surgery")
-            self.assertIn("Assisting", assist["subtitle"])
-            self.assertTrue(assist["readOnly"])
+            self.assertFalse(any(item["type"] == "surgery" for item in assist_items))
         finally:
             db.close()
 
@@ -392,10 +399,18 @@ class NativeHomeContractTest(unittest.TestCase):
             card = ScheduleCard(week_id=week.id, surgeon_id=surgeon.id, date=date(2026, 10, 6),
                                 session="am", baseline_state="assigned", effective_state="assigned",
                                 baseline_location_id=hospital.id, effective_location_id=hospital.id)
+            db.add(card)
+            db.flush()
             db.add_all([
-                card,
+                ScheduleCardActivity(
+                    schedule_card_id=card.id, surgeon_id=surgeon.id, location_id=hospital.id,
+                    activity_date=date(2026, 10, 6), session="am", activity_type="surgical",
+                    start_time=time(9), end_time=time(10), patient_name="Test Patient",
+                    procedure="Test procedure", source_system="fax", source_record_key="line-nocall",
+                    identity_key="test-patient-0900", is_active=True,
+                ),
                 SurgicalCase(surgeon_id=surgeon.id, date=date(2026, 10, 6), start_time=time(9),
-                             end_time=time(10), patient_name="Test Patient", procedure="Test procedure",
+                             end_time=time(10), patient_name="Old List Patient", procedure="Old procedure",
                              location_id=hospital.id, status="scheduled"),
                 DayOff(surgeon_id=surgeon.id, start_date=date(2026, 10, 6), end_date=date(2026, 10, 6),
                        reason="No Call", status="approved", is_full_day=True),
@@ -404,7 +419,10 @@ class NativeHomeContractTest(unittest.TestCase):
 
             items = build_native_home(db, surgeon, date(2026, 10, 6), date(2026, 10, 6))["days"][0]["items"]
             self.assertEqual("ALT", next(item for item in items if item["id"] == f"card-{card.id}")["title"])
-            self.assertFalse(next(item for item in items if item["type"] == "surgery")["needsReview"])
+            surgery = next(item for item in items if item["type"] == "surgery")
+            self.assertEqual(surgery["title"], "Test Patient")
+            self.assertFalse(surgery["needsReview"])
+            self.assertNotIn("Old List Patient", str(items))
             self.assertEqual("No Call", next(item for item in items if item["type"] == "dayoff")["title"])
         finally:
             db.close()
@@ -430,9 +448,13 @@ class NativeHomeContractTest(unittest.TestCase):
                               baseline_location_id=clinic.id, effective_location_id=clinic.id)
             db.add_all([am, pm])
             db.flush()
-            db.add(SurgicalCase(surgeon_id=surgeon.id, date=date(2026, 10, 6), start_time=time(8),
-                                end_time=time(9), patient_name="Test Patient", procedure="Test procedure",
-                                location_id=hospital.id, schedule_card_id=am.id, status="scheduled"))
+            db.add(ScheduleCardActivity(
+                schedule_card_id=am.id, surgeon_id=surgeon.id, location_id=hospital.id,
+                activity_date=date(2026, 10, 6), session="am", activity_type="surgical",
+                start_time=time(8), end_time=time(9), patient_name="Test Patient",
+                procedure="Test procedure", source_system="fax", source_record_key="am-case",
+                identity_key="test-patient-0800", is_active=True,
+            ))
             for index, key in enumerate(["a", "b", "b"]):
                 db.add(ScheduleCardActivity(
                     schedule_card_id=pm.id, surgeon_id=surgeon.id, location_id=clinic.id,
@@ -451,13 +473,17 @@ class NativeHomeContractTest(unittest.TestCase):
             surgery = next(item for item in items if item["type"] == "surgery")
             self.assertEqual(am.id, surgery["cardId"])
 
-            stored_on_pm = SurgicalCase(surgeon_id=surgeon.id, date=date(2026, 10, 6), start_time=time(11),
-                                        end_time=time(12), patient_name="Late Patient", procedure="Test",
-                                        location_id=clinic.id, schedule_card_id=pm.id, status="scheduled")
+            stored_on_pm = ScheduleCardActivity(
+                schedule_card_id=pm.id, surgeon_id=surgeon.id, location_id=clinic.id,
+                activity_date=date(2026, 10, 6), session="pm", activity_type="surgical",
+                start_time=time(11), end_time=time(12), patient_name="Late Patient", procedure="Test",
+                source_system="fax", source_record_key="pm-case", identity_key="late-patient-1100",
+                is_active=True,
+            )
             db.add(stored_on_pm)
             db.commit()
             items = build_native_home(db, surgeon, date(2026, 10, 6), date(2026, 10, 6))["days"][0]["items"]
-            self.assertEqual(pm.id, next(item for item in items if item["id"] == f"surg-{stored_on_pm.id}")["cardId"])
+            self.assertEqual(pm.id, next(item for item in items if item["id"] == f"act-{stored_on_pm.id}")["cardId"])
             self.assertEqual(1, next(item for item in items if item["id"] == f"card-{pm.id}")["caseCount"])
         finally:
             db.close()

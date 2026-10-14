@@ -1,5 +1,5 @@
--- Reuse native_schedule.sql for master cards, cases, and legacy clinic blocks.
--- Only Scheduler-wide overlays are added here.
+-- Reuse native_schedule.sql for master cards and card lines.
+-- Only Scheduler-wide overlays are added here. Day case counts are card lines.
 WITH RECURSIVE
 calendar_days(day) AS (
     SELECT CAST(:start_date AS DATE_SQL)
@@ -35,6 +35,14 @@ clinic_activity AS (
     ) AS duplicate_rank
     FROM schedule_card_activities a
     WHERE a.is_active = TRUE AND a.activity_type = 'clinic'
+      AND a.activity_date BETWEEN :start_date AND :end_date
+),
+surgical_activity AS (
+    SELECT a.*, row_number() OVER (
+        PARTITION BY a.surgeon_id, a.activity_date, a.identity_key ORDER BY a.id
+    ) AS duplicate_rank
+    FROM schedule_card_activities a
+    WHERE a.is_active = TRUE AND a.activity_type = 'surgical'
       AND a.activity_date BETWEEN :start_date AND :end_date
 ),
 call_activity AS (
@@ -139,8 +147,8 @@ visible_facts AS (
 ),
 daily_counts AS (
     SELECT cal.day,
-           (SELECT count(*) FROM surgical_cases sc JOIN roster r ON r.id = sc.surgeon_id
-            WHERE sc.date = cal.day AND coalesce(sc.status, 'scheduled') <> 'cancelled') AS case_count,
+           (SELECT count(*) FROM surgical_activity a JOIN roster r ON r.id = a.surgeon_id
+            WHERE a.activity_date = cal.day AND a.duplicate_rank = 1) AS case_count,
            (SELECT count(*) FROM clinic_activity a JOIN roster r ON r.id = a.surgeon_id
             WHERE a.activity_date = cal.day AND a.duplicate_rank = 1) AS visit_count,
            (SELECT count(DISTINCT d.surgeon_id) FROM leave_segments d JOIN roster r ON r.id = d.surgeon_id

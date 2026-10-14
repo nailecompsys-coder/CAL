@@ -49,39 +49,108 @@ def month_window(month_offset: int) -> dict:
     }
 
 
-def _dayoff_is_half(dayoff: DayOff) -> bool:
-    """True when any day in the request is partial (AM/PM or timed), not full-day OFF."""
-    from .native_dayoff_support import day_off_segments
-
-    segments = day_off_segments(dayoff)
-    if segments:
-        return any(not bool(segment.get("isFullDay", True)) for segment in segments)
-    return not bool(dayoff.is_full_day if dayoff.is_full_day is not None else True)
+def _reason_says_partial(reason: str | None) -> bool:
+    """Shannon often stores half-day OFF as reason 'Partial Day' with is_full_day still true."""
+    normalized = " ".join((reason or "").strip().lower().replace("-", " ").split())
+    return normalized in {"partial day", "partial", "half day", "half"}
 
 
-def _bar_for_month(dayoff: DayOff, month_start: date, month_end: date, days_in_month: int) -> dict | None:
-    start = max(dayoff.start_date, month_start)
-    end = min(dayoff.end_date, month_end)
-    if start > end:
-        return None
-    col0 = start.day - 1
-    span = (end - start).days + 1
+def _day_is_half(dayoff: DayOff, day: date) -> bool:
+    """Half-day for one calendar day: segment flag, request flag, or Partial Day reason."""
+    from .native_dayoff_support import segment_for_date
+
+    segment = segment_for_date(dayoff, day)
+    if segment is not None:
+        if not bool(segment.get("isFullDay", True)):
+            return True
+    elif dayoff.is_full_day is False:
+        return True
+    return _reason_says_partial(dayoff.reason)
+
+
+def _bar_slice(
+    dayoff: DayOff,
+    *,
+    clip_start: date,
+    clip_end: date,
+    is_half: bool,
+    days_in_month: int,
+) -> dict:
+    col0 = clip_start.day - 1
+    span = (clip_end - clip_start).days + 1
     return {
         "id": dayoff.id,
+        "domId": f"{dayoff.id}-{clip_start.isoformat()}",
         "status": dayoff.status or "approved",
         "reason": dayoff.reason or "",
         "notes": dayoff.notes or "",
-        "isHalfDay": _dayoff_is_half(dayoff),
+        "isHalfDay": is_half,
         "startIso": dayoff.start_date.isoformat(),
         "endIso": dayoff.end_date.isoformat(),
-        "labelStart": start.strftime("%-d"),
-        "labelEnd": end.strftime("%-d"),
+        "labelStart": clip_start.strftime("%-d"),
+        "labelEnd": clip_end.strftime("%-d"),
         "leftPct": round(col0 / days_in_month * 100, 4),
         "widthPct": round(span / days_in_month * 100, 4),
         "spanDays": span,
-        "clipStart": start,
-        "clipEnd": end,
+        "clipStart": clip_start,
+        "clipEnd": clip_end,
     }
+
+
+def _bars_for_month(
+    dayoff: DayOff,
+    month_start: date,
+    month_end: date,
+    days_in_month: int,
+) -> list[dict]:
+    """One or more bars for a request, split when half-day and full-day days are mixed."""
+    from datetime import timedelta
+
+    start = max(dayoff.start_date, month_start)
+    end = min(dayoff.end_date, month_end)
+    if start > end:
+        return []
+
+    days: list[tuple[date, bool]] = []
+    cursor = start
+    while cursor <= end:
+        days.append((cursor, _day_is_half(dayoff, cursor)))
+        cursor += timedelta(days=1)
+
+    bars: list[dict] = []
+    run_start, run_half = days[0]
+    prev = run_start
+    for day, is_half in days[1:]:
+        if is_half == run_half and day == prev + timedelta(days=1):
+            prev = day
+            continue
+        bars.append(
+            _bar_slice(
+                dayoff,
+                clip_start=run_start,
+                clip_end=prev,
+                is_half=run_half,
+                days_in_month=days_in_month,
+            )
+        )
+        run_start, run_half = day, is_half
+        prev = day
+    bars.append(
+        _bar_slice(
+            dayoff,
+            clip_start=run_start,
+            clip_end=prev,
+            is_half=run_half,
+            days_in_month=days_in_month,
+        )
+    )
+    return bars
+
+
+def _bar_for_month(dayoff: DayOff, month_start: date, month_end: date, days_in_month: int) -> dict | None:
+    """Back-compat single-bar helper (first slice). Prefer _bars_for_month for Gantt."""
+    bars = _bars_for_month(dayoff, month_start, month_end, days_in_month)
+    return bars[0] if bars else None
 
 
 def _assign_lanes(bars: list[dict]) -> tuple[list[dict], int]:
@@ -124,9 +193,7 @@ def gantt_rows(
     for surgeon in surgeons:
         bars = []
         for dayoff in sorted(by_surgeon.get(surgeon.id, []), key=lambda d: (d.start_date, d.id or 0)):
-            bar = _bar_for_month(dayoff, month_start, month_end, days_in_month)
-            if bar:
-                bars.append(bar)
+            bars.extend(_bars_for_month(dayoff, month_start, month_end, days_in_month))
         bars, lane_count = _assign_lanes(bars)
         for bar in bars:
             bar.pop("clipStart", None)

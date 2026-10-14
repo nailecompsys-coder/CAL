@@ -230,7 +230,7 @@
               </div>
               {% for bar in row.bars %}
               <button type="button"
-                id="gantt-bar-{{ bar.id }}"
+                id="gantt-bar-{{ bar.domId|default(bar.id) }}"
                 class="gantt-bar js-edit-dayoff absolute left-0 rounded-md shadow-sm block-gradient border border-black/5 text-left px-1.5 overflow-hidden hover:opacity-90 z-[1]"
                 data-bar-id="{{ bar.id }}"
                 data-id="{{ bar.id }}"
@@ -490,7 +490,10 @@ function focusDayoffGantt(startIso, endIso, dayOffId, surgeonId) {
   const startEl = document.getElementById('gantt-day-' + startDay);
   const rowEl = surgeonId ? document.getElementById('gantt-row-' + surgeonId) : null;
   const nameEl = surgeonId ? document.getElementById('gantt-name-' + surgeonId) : null;
-  const barEl = dayOffId ? document.getElementById('gantt-bar-' + dayOffId) : null;
+  const barEl = dayOffId
+    ? (document.querySelector('.gantt-bar[data-bar-id="' + dayOffId + '"]')
+      || document.getElementById('gantt-bar-' + dayOffId))
+    : null;
 
   // Clear previous highlights
   document.querySelectorAll('.gantt-day-header').forEach(el => {

@@ -7,6 +7,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
 from app.admin_dayoff_service import (
     _bar_for_month,
+    _bars_for_month,
     dayoff_is_current_or_future,
     gantt_rows,
     month_window,
@@ -68,6 +69,48 @@ class AdminDayOffServiceTest(unittest.TestCase):
         )
         bar = _bar_for_month(dayoff, month_start, month_end, 31)
         self.assertTrue(bar["isHalfDay"])
+
+    def test_bar_marks_half_day_from_partial_day_reason(self):
+        """Portal often saves reason=Partial Day while leaving is_full_day true."""
+        month_start = date(2026, 10, 1)
+        month_end = date(2026, 10, 31)
+        dayoff = DayOff(
+            id=312,
+            status="approved",
+            reason="Partial Day",
+            notes="",
+            start_date=date(2026, 10, 14),
+            end_date=date(2026, 10, 14),
+            is_full_day=True,
+        )
+        bar = _bar_for_month(dayoff, month_start, month_end, 31)
+        self.assertTrue(bar["isHalfDay"])
+
+    def test_mixed_half_and_full_days_split_bars(self):
+        """LW Oct 22 timed PM + Oct 23 full must not paint both days blue."""
+        month_start = date(2026, 10, 1)
+        month_end = date(2026, 10, 31)
+        dayoff = DayOff(
+            id=218,
+            status="approved",
+            reason="Vacation",
+            notes="",
+            start_date=date(2026, 10, 22),
+            end_date=date(2026, 10, 23),
+            is_full_day=False,
+            segments=(
+                '[{"date": "2026-10-22", "isFullDay": false, "start": "12:00", "end": "17:00"},'
+                ' {"date": "2026-10-23", "isFullDay": true, "start": null, "end": null}]'
+            ),
+        )
+        bars = _bars_for_month(dayoff, month_start, month_end, 31)
+        self.assertEqual(len(bars), 2)
+        self.assertTrue(bars[0]["isHalfDay"])
+        self.assertEqual(bars[0]["labelStart"], "22")
+        self.assertEqual(bars[0]["spanDays"], 1)
+        self.assertFalse(bars[1]["isHalfDay"])
+        self.assertEqual(bars[1]["labelStart"], "23")
+        self.assertEqual(bars[1]["spanDays"], 1)
 
     def test_gantt_rows_stacks_overlapping_and_skips_denied(self):
         surgeons = [

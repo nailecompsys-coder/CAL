@@ -23,17 +23,18 @@ def surgery_rows_for_surgeon(
     end_date,
     exclude_entity: Optional[tuple[str, int]] = None,
 ):
-    from ..models import SurgicalCase
+    from ..schedule_activity_normalization import active_surgical_lines
 
-    surgeries = db.query(SurgicalCase).filter(
-        SurgicalCase.surgeon_id == surgeon_id,
-        SurgicalCase.date >= start_date,
-        SurgicalCase.date <= end_date,
-        SurgicalCase.status != "cancelled",
+    exclude_case_id = exclude_entity[1] if exclude_entity and exclude_entity[0] == "surgical_case" else None
+    exclude_activity_id = exclude_entity[1] if exclude_entity and exclude_entity[0] == "schedule_card_activity" else None
+    return active_surgical_lines(
+        db,
+        surgeon_id=surgeon_id,
+        start=start_date,
+        end=end_date,
+        exclude_activity_id=exclude_activity_id,
+        exclude_surgical_case_id=exclude_case_id,
     )
-    if exclude_entity and exclude_entity[0] == "surgical_case":
-        surgeries = surgeries.filter(SurgicalCase.id != exclude_entity[1])
-    return surgeries.all()
 
 
 def clinic_and_surgery_rows(

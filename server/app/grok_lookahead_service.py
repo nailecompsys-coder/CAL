@@ -98,7 +98,7 @@ def _drop_past_dated_notices(db: Session, *, today: date | None = None) -> int:
 def _drop_missing_time_notices(db: Session) -> int:
     """Drop missing-time nags only when that patient is already on the day."""
     from .ingest_date_rules import parse_iso_date
-    from .models import SurgicalCase
+    from .models import ScheduleCardActivity
 
     removed = 0
     rows = db.query(AdminNotification).filter(AdminNotification.kind == "ingest_correction").all()
@@ -111,10 +111,11 @@ def _drop_missing_time_notices(db: Session) -> int:
         patient = (payload.get("patientName") or "").strip().lower()
         if not surgeon_id or day is None:
             continue
-        q = db.query(SurgicalCase).filter(
-            SurgicalCase.surgeon_id == surgeon_id,
-            SurgicalCase.date == day,
-            SurgicalCase.status != "cancelled",
+        q = db.query(ScheduleCardActivity).filter(
+            ScheduleCardActivity.surgeon_id == surgeon_id,
+            ScheduleCardActivity.activity_date == day,
+            ScheduleCardActivity.activity_type == "surgical",
+            ScheduleCardActivity.is_active == True,  # noqa: E712
         )
         placed = False
         for case in q.all():

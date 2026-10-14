@@ -32,7 +32,6 @@ from .models import (
     Surgeon,
     SurgeonDayItem,
     ScheduleCardActivity,
-    SurgicalCase,
 )
 from .practice_time import practice_now
 from .surgeon_visibility import surgeon_is_visible
@@ -106,18 +105,7 @@ def _answer_freeform(text: str, today: date) -> dict:
 def collect_surgeon_facts(db: Session, surgeon: Surgeon, start: date, end: date) -> dict:
     off_days = _off_days(db, surgeon.id, start, end, "approved")
     pending_days = _off_days(db, surgeon.id, start, end, "pending")
-    cases = (
-        db.query(SurgicalCase)
-        .options(joinedload(SurgicalCase.location))
-        .filter(
-            SurgicalCase.surgeon_id == surgeon.id,
-            SurgicalCase.date >= start,
-            SurgicalCase.date <= end,
-            SurgicalCase.status != "cancelled",
-        )
-        .order_by(SurgicalCase.date, SurgicalCase.start_time)
-        .all()
-    )
+    cases = []
     clinics = (
         db.query(ClinicSchedule)
         .options(joinedload(ClinicSchedule.location))
@@ -356,17 +344,30 @@ def _answer_meetings_board(db: Session, window: dict) -> dict:
 
 
 def _answer_cases_board(db: Session, window: dict) -> dict:
-    rows = (
-        db.query(SurgicalCase)
-        .options(joinedload(SurgicalCase.surgeon), joinedload(SurgicalCase.location))
+    loaded = (
+        db.query(ScheduleCardActivity)
+        .options(joinedload(ScheduleCardActivity.surgeon), joinedload(ScheduleCardActivity.location))
         .filter(
-            SurgicalCase.date >= window["start"],
-            SurgicalCase.date <= window["end"],
-            SurgicalCase.status != "cancelled",
+            ScheduleCardActivity.activity_type == "surgical",
+            ScheduleCardActivity.is_active == True,  # noqa: E712
+            ScheduleCardActivity.activity_date >= window["start"],
+            ScheduleCardActivity.activity_date <= window["end"],
         )
-        .order_by(SurgicalCase.date, SurgicalCase.start_time)
+        .order_by(
+            ScheduleCardActivity.activity_date,
+            ScheduleCardActivity.start_time,
+            ScheduleCardActivity.id,
+        )
         .all()
     )
+    seen = set()
+    rows = []
+    for row in loaded:
+        key = (row.surgeon_id, row.activity_date, row.identity_key)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append(row)
     if not rows:
         return _talk(
             "Surgical cases",
@@ -382,7 +383,7 @@ def _answer_cases_board(db: Session, window: dict) -> dict:
         if row.location:
             loc = f" · {row.location.abbreviation or row.location.name}"
         lines.append(
-            f"{row.date.strftime('%a %b %-d')} · {clock} · {who}{loc}"
+            f"{row.activity_date.strftime('%a %b %-d')} · {clock} · {who}{loc}"
             + (f" · {row.procedure}" if row.procedure else "")
         )
     heading = (

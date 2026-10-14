@@ -16,6 +16,19 @@ from .overlap_helpers import overlap_target, should_skip_time_overlap
 from .registry import Conflict
 
 
+class _LineClock:
+    """Give a card line the date/time shape case_range already understands."""
+
+    def __init__(self, row):
+        self.date = row.activity_date
+        self.start_time = row.start_time
+        self.end_time = row.end_time
+
+
+def _line_clock(row) -> _LineClock:
+    return _LineClock(row)
+
+
 def check_overlap_day_off(
     surgeon_id: int,
     start_date: date,
@@ -275,42 +288,44 @@ def check_overlap_surgery(
     exclude_entity: Optional[tuple[str, int]] = None,
     target_entity: Optional[dict] = None,
 ) -> Iterator[Conflict]:
-    from ..models import SurgicalCase
+    from ..schedule_activity_normalization import active_surgical_lines
     target = overlap_target(target_entity, start_date, end_date)
-    q = db.query(SurgicalCase).filter(
-        SurgicalCase.surgeon_id == surgeon_id,
-        SurgicalCase.date >= target.start,
-        SurgicalCase.date <= target.end,
-        SurgicalCase.status != "cancelled",
+    exclude_case_id = exclude_entity[1] if exclude_entity and exclude_entity[0] == "surgical_case" else None
+    exclude_activity_id = exclude_entity[1] if exclude_entity and exclude_entity[0] == "schedule_card_activity" else None
+    rows = active_surgical_lines(
+        db,
+        surgeon_id=surgeon_id,
+        start=target.start,
+        end=target.end,
+        exclude_activity_id=exclude_activity_id,
+        exclude_surgical_case_id=exclude_case_id,
     )
-    if exclude_entity and exclude_entity[0] == "surgical_case":
-        q = q.filter(SurgicalCase.id != exclude_entity[1])
-    for sc in q.all():
+    for row in rows:
+        if row.start_time is None:
+            continue
         # On-call + operating is expected at any hospital — not a scheduling flag.
         if _on_call_target(target_entity):
             continue
-        # Cases under this Block OR are inventory under the block — not a conflict.
+        # Lines at this Block OR hospital are inventory under the block — not a conflict.
         if target.kind == "or_block":
-            block_id = (target.entity or {}).get("or_block_instance_id") or (target.entity or {}).get("block_id")
-            if block_id and sc.or_block_instance_id and int(block_id) == int(sc.or_block_instance_id):
-                continue
             loc_id = (target.entity or {}).get("location_id")
-            if loc_id and sc.location_id and int(loc_id) == int(sc.location_id):
+            if loc_id and row.location_id and int(loc_id) == int(row.location_id):
                 continue
+        clock = _line_clock(row)
         if should_skip_time_overlap(
             target,
-            sc.date,
-            case_range(sc),
+            row.activity_date,
+            case_range(clock),
             {"surgical_case", "clinic_schedule", "meeting", "day_off", "or_block", "call_rotation"},
         ):
             continue
         yield Conflict(
             rule_id="OVERLAP_SURGERY",
             surgeon_id=surgeon_id,
-            date=sc.date,
-            message=f"Surgery on {sc.date.strftime('%b %-d')} ({sc.start_time.strftime('%-I:%M %p')} — {sc.patient_name or 'case'})",
+            date=row.activity_date,
+            message=f"Surgery on {row.activity_date.strftime('%b %-d')} ({row.start_time.strftime('%-I:%M %p')} — {row.patient_name or 'case'})",
             conflicting_entity_type="surgical_case",
-            conflicting_entity_id=sc.id,
+            conflicting_entity_id=row.id,
         )
 
 

@@ -40,6 +40,61 @@ def _identity(patient_name: str | None, start_time: time | None, activity_type: 
     return "|".join((_key(patient_name), start_time.isoformat() if start_time else "", activity_type))
 
 
+def active_surgical_lines(
+    db: Session,
+    *,
+    surgeon_id: int | None = None,
+    surgeon_ids: list[int] | None = None,
+    start: date | None = None,
+    end: date | None = None,
+    day: date | None = None,
+    session: str | None = None,
+    exclude_activity_id: int | None = None,
+    exclude_surgical_case_id: int | None = None,
+) -> list[ScheduleCardActivity]:
+    """One row per surgeon, day, and identity. Phones and the website read this list."""
+    if surgeon_ids is not None and not surgeon_ids:
+        return []
+    query = db.query(ScheduleCardActivity).filter(
+        ScheduleCardActivity.is_active == True,  # noqa: E712
+        ScheduleCardActivity.activity_type == "surgical",
+    )
+    if surgeon_id is not None:
+        query = query.filter(ScheduleCardActivity.surgeon_id == surgeon_id)
+    if surgeon_ids is not None:
+        query = query.filter(ScheduleCardActivity.surgeon_id.in_(surgeon_ids))
+    if day is not None:
+        query = query.filter(ScheduleCardActivity.activity_date == day)
+    else:
+        if start is not None:
+            query = query.filter(ScheduleCardActivity.activity_date >= start)
+        if end is not None:
+            query = query.filter(ScheduleCardActivity.activity_date <= end)
+    if session in {"am", "pm"}:
+        query = query.filter(ScheduleCardActivity.session == session)
+    if exclude_activity_id is not None:
+        query = query.filter(ScheduleCardActivity.id != exclude_activity_id)
+    if exclude_surgical_case_id is not None:
+        query = query.filter(
+            ScheduleCardActivity.surgical_case_id.is_(None)
+            | (ScheduleCardActivity.surgical_case_id != exclude_surgical_case_id)
+        )
+    rows = query.order_by(
+        ScheduleCardActivity.activity_date,
+        ScheduleCardActivity.start_time,
+        ScheduleCardActivity.id,
+    ).all()
+    seen: set[tuple] = set()
+    kept: list[ScheduleCardActivity] = []
+    for row in rows:
+        key = (row.surgeon_id, row.activity_date, row.identity_key)
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(row)
+    return kept
+
+
 def _upsert_activity(
     db: Session,
     *,

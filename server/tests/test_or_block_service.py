@@ -20,6 +20,9 @@ from app.models import (
     ORBlockAuditEvent,
     ORBlockAssignment,
     ORBlockInstance,
+    ScheduleCard,
+    ScheduleCardActivity,
+    ScheduleCardWeek,
     ScheduleChangeEvent,
     Surgeon,
     SurgicalCase,
@@ -525,6 +528,133 @@ class ORBlockServiceTest(unittest.TestCase):
         finally:
             db.close()
 
+    def test_conflict_check_reads_card_line_not_old_case_list(self):
+        db = self.Session()
+        try:
+            from app.rules_engine.overlap_checkers import check_overlap_surgery
+
+            surgeon = self._surgeon(db, "Chris", "Johnson")
+            hospital = self._location(db, "Advent Winter Garden", "WG")
+            clinic = self._location(db, "Winter Garden Clinic", "WGC", "clinic")
+            day = date.today() + timedelta(days=14)
+            while day.weekday() != 2:
+                day += timedelta(days=1)
+            db.add(SurgicalCase(
+                surgeon_id=surgeon.id,
+                date=day,
+                start_time=time(8, 0),
+                end_time=time(9, 0),
+                patient_name="Old List Patient",
+                procedure="Old",
+                location_id=clinic.id,
+                status="scheduled",
+            ))
+            db.commit()
+            target = {
+                "type": "meeting",
+                "date": day,
+                "start_time": time(8, 0),
+                "end_time": time(9, 0),
+                "location_id": hospital.id,
+            }
+            ignored = list(check_overlap_surgery(surgeon.id, day, day, db, {}, target_entity=target))
+            self.assertEqual(ignored, [])
+
+            week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=day)
+            db.add(week)
+            db.flush()
+            card = ScheduleCard(
+                week_id=week.id,
+                surgeon_id=surgeon.id,
+                date=day,
+                session="am",
+                baseline_state="assigned",
+                effective_state="assigned",
+                baseline_location_id=clinic.id,
+                effective_location_id=clinic.id,
+            )
+            db.add(card)
+            db.flush()
+            db.add(ScheduleCardActivity(
+                schedule_card_id=card.id,
+                surgeon_id=surgeon.id,
+                location_id=clinic.id,
+                activity_date=day,
+                session="am",
+                activity_type="surgical",
+                start_time=time(8, 0),
+                end_time=time(9, 0),
+                patient_name="Card Patient",
+                procedure="Real",
+                source_system="fax",
+                source_record_key="conflict-line",
+                identity_key="conflict-line",
+            ))
+            db.commit()
+            found = list(check_overlap_surgery(surgeon.id, day, day, db, {}, target_entity=target))
+            self.assertEqual(len(found), 1)
+            self.assertIn("Card Patient", found[0].message)
+            self.assertNotIn("Old List Patient", found[0].message)
+        finally:
+            db.close()
+
+    def test_patient_lookup_reads_card_line_not_old_case_list(self):
+        db = self.Session()
+        try:
+            from app.grok_ask_intent import patient_from_question
+
+            surgeon = self._surgeon(db, "Lucy", "Woodley")
+            hospital = self._location(db, "Advent Winter Garden", "WG")
+            day = date.today() + timedelta(days=3)
+            db.add(SurgicalCase(
+                surgeon_id=surgeon.id,
+                date=day,
+                start_time=time(9, 0),
+                patient_name="Oldlist, Pat",
+                procedure="Old",
+                location_id=hospital.id,
+                status="scheduled",
+            ))
+            db.commit()
+            self.assertIsNone(patient_from_question(db, "where is Oldlist"))
+
+            week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=day)
+            db.add(week)
+            db.flush()
+            card = ScheduleCard(
+                week_id=week.id,
+                surgeon_id=surgeon.id,
+                date=day,
+                session="am",
+                baseline_state="assigned",
+                effective_state="assigned",
+                baseline_location_id=hospital.id,
+                effective_location_id=hospital.id,
+            )
+            db.add(card)
+            db.flush()
+            db.add(ScheduleCardActivity(
+                schedule_card_id=card.id,
+                surgeon_id=surgeon.id,
+                location_id=hospital.id,
+                activity_date=day,
+                session="am",
+                activity_type="surgical",
+                start_time=time(9, 30),
+                patient_name="Cardline, Pat",
+                procedure="Real",
+                source_system="fax",
+                source_record_key="lookup-line",
+                identity_key="lookup-line",
+            ))
+            db.commit()
+            found = patient_from_question(db, "where is Cardline")
+            self.assertIsNotNone(found)
+            self.assertEqual(found["title"], "Cardline, Pat")
+            self.assertIsNone(patient_from_question(db, "where is Oldlist"))
+        finally:
+            db.close()
+
     def test_am_block_then_pm_clinic_is_not_a_warning(self):
         """Block until noon + 1pm clinic is the scheduled day, not an overlap."""
         db = self.Session()
@@ -642,6 +772,20 @@ class ORBlockServiceTest(unittest.TestCase):
                 )
             with patch("app.or_block_service.send_push_to_surgeon"):
                 assign_block(db, block_id, surgeon.id, case_count=0, notify=False)
+            week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=block_day)
+            db.add(week)
+            db.flush()
+            db.add(ScheduleCard(
+                week_id=week.id,
+                surgeon_id=surgeon.id,
+                date=block_day,
+                session="am",
+                baseline_state="assigned",
+                effective_state="assigned",
+                baseline_location_id=hospital.id,
+                effective_location_id=hospital.id,
+            ))
+            db.commit()
             block, warnings = add_case_to_block(
                 db,
                 block_id,

@@ -265,6 +265,7 @@ def surgical_case_warning_messages(
     end_time: time | None,
     location_id: int | None = None,
     exclude_case_id: int | None = None,
+    exclude_activity_id: int | None = None,
     or_block_instance_id: int | None = None,
 ) -> list[str]:
     warnings: list[str] = []
@@ -314,7 +315,13 @@ def surgical_case_warning_messages(
         case_date,
         case_date,
         db,
-        exclude_entity=("surgical_case", exclude_case_id) if exclude_case_id else None,
+        exclude_entity=(
+            ("schedule_card_activity", exclude_activity_id)
+            if exclude_activity_id
+            else ("surgical_case", exclude_case_id)
+            if exclude_case_id
+            else None
+        ),
         target_entity={
             "type": "surgical_case",
             "date": case_date,

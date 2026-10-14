@@ -33,7 +33,7 @@ This is Don's current scheduling rule set for the master calendar, the surgeon a
 ## Ownership and acceptance checks
 
 - SQL determines which facts belong to a surgeon/day, deduplicates them, calculates counts and conflicts, and orders the result. Python only maps those database results into the API response. The existing iPhone views consume that response.
-- The phone, the office calendar, and the scheduler day counts read `schedule_card_activities`. A surgery shows for a surgeon only when that surgeon has an active line on a card. The older `surgical_cases` rows are not a second schedule.
+- The phone, the office calendar, the scheduler day counts, Block OR case lists, block warnings, and the website patient lookup read `schedule_card_activities`. A surgery shows for a surgeon only when that surgeon has an active line on a card. The older `surgical_cases` rows are not a second schedule.
 - Before saying a fax/display issue is fixed, trace representative **latest applied** fax rows through the saved case or clinic activity, permanent AM/PM card, and native API. Check a fixed block, NA, OFF, approved partial leave, assistance, group capacity, and weekend call. Compare current versus archived fax data separately.
 - Never claim all phone screens are correct solely because rows exist in PostgreSQL. Verify the API response and, for visual claims, the actual client view.
 

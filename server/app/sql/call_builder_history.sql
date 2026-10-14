@@ -73,19 +73,23 @@ SELECT r.id AS surgeon_id,
        (SELECT count(*) FROM draft d WHERE d.surgeon_id = r.id) AS draft_count,
        (SELECT count(*) FROM draft d
          WHERE d.surgeon_id = r.id AND WEEKDAY_DRAFT IN (0, 5, 6)) AS draft_weekend_count,
+       -- Work-holiday credit only (Halloween is display/emoji, not counted).
        (SELECT count(*)
           FROM year_board y
           JOIN holidays h ON h.date = y.call_date
-         WHERE y.surgeon_id = r.id) AS holiday_count,
+         WHERE y.surgeon_id = r.id
+           AND h.name <> 'Halloween') AS holiday_count,
        (SELECT h.name
           FROM year_board y
           JOIN holidays h ON h.date = y.call_date
          WHERE y.surgeon_id = r.id
+           AND h.name <> 'Halloween'
          ORDER BY h.date DESC
          LIMIT 1) AS last_holiday,
        (SELECT HOLIDAY_LIST
           FROM year_board y
           JOIN holidays h ON h.date = y.call_date
-         WHERE y.surgeon_id = r.id) AS holidays
+         WHERE y.surgeon_id = r.id
+           AND h.name <> 'Halloween') AS holidays
 FROM roster r
 ORDER BY r.practice_rank ASC, r.last_name ASC, r.first_name ASC, r.id ASC

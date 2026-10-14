@@ -474,10 +474,16 @@ struct CallBuilderHomeView: View {
     return cal.date(from: DateComponents(year: parts.year, month: parts.month, day: 1)) ?? Date()
   }
 
-  /// Apple emoji for tracked Call Builder holidays (phone month grid).
+  /// Apple emoji for calendar holiday markers (phone month grid).
+  /// Includes Halloween for display even though it is not a work-holiday credit.
   static func holidayEmoji(_ name: String) -> String {
     switch name {
+    case "New Year's Day", "New Year's": return "🎉"
+    case "Presidents Day": return "🏛️"
+    case "Easter": return "🐰"
+    case "Mother's Day": return "💐"
     case "Memorial Day": return "🇺🇸"
+    case "Father's Day": return "👔"
     case "July 4th": return "🎆"
     case "Labor Day": return "🛠️"
     case "Halloween": return "🎃"
@@ -485,7 +491,6 @@ struct CallBuilderHomeView: View {
     case "Christmas Eve": return "🍬"
     case "Christmas": return "🎄"
     case "New Year's Eve": return "🥂"
-    case "New Year's Day", "New Year's": return "🎉"
     default: return name.isEmpty ? "" : "📅"
     }
   }

@@ -135,26 +135,36 @@ _HOLIDAY_ABBREV = {
     "New Year's": "NY",
     "New Year's Day": "NY",
     "New Year's Eve": "NYE",
+    "Presidents Day": "Pres",
+    "Easter": "East",
+    "Mother's Day": "Mom",
     "Memorial Day": "Mem",
+    "Father's Day": "Dad",
     "July 4th": "Jul4",
     "Labor Day": "Lab",
-    "Halloween": "Hal",
     "Thanksgiving": "Thx",
     "Christmas Eve": "XE",
     "Christmas": "Xmas",
 }
 
+# Display-only calendar markers (emoji on phone/portal). Not work-holiday credit.
+DISPLAY_ONLY_HOLIDAYS = frozenset({"Halloween"})
+
 # Flyover rows: (database holiday name, display label). Credit = on call that date only.
+# Chronological; Halloween is intentionally omitted (not a work holiday).
 HOLIDAY_FLYOVER_ROWS = (
+    ("New Year's", "New Year's Day"),
+    ("Presidents Day", "Presidents Day"),
+    ("Easter", "Easter"),
+    ("Mother's Day", "Mother's Day"),
     ("Memorial Day", "Memorial Day"),
+    ("Father's Day", "Father's Day"),
     ("July 4th", "July 4th"),
     ("Labor Day", "Labor Day"),
-    ("Halloween", "Halloween"),
     ("Thanksgiving", "Thanksgiving"),
     ("Christmas Eve", "Christmas Eve"),
     ("Christmas", "Christmas"),
     ("New Year's Eve", "New Year's Eve"),
-    ("New Year's", "New Year's Day"),
 )
 HOLIDAY_FLYOVER_YEARS = (2025, 2026, 2027)
 
@@ -318,7 +328,7 @@ def holiday_work_lookup(db: Session, *, years: list[int] | None = None) -> dict[
     out: dict[tuple[int, str, int], str] = {}
     for (day, _group_id), (surgeon_id, mark) in credited.items():
         name = holidays.get(day)
-        if not name:
+        if not name or name in DISPLAY_ONLY_HOLIDAYS:
             continue
         out[(surgeon_id, name, day.year)] = mark
     return out
@@ -341,7 +351,7 @@ def holiday_roster_lookup(
     buckets: dict[tuple[str, int], list[tuple[int, int, str, int]]] = defaultdict(list)
     for (day, group_id), (surgeon_id, mark) in credited.items():
         name = holidays.get(day)
-        if not name:
+        if not name or name in DISPLAY_ONLY_HOLIDAYS:
             continue
         surg = surgeons.get(surgeon_id)
         if not surg:

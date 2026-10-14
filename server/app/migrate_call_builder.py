@@ -6,9 +6,14 @@ from .database import engine
 
 # Fixed calendar dates (not observed-Monday shifts for NY/July4/Xmas).
 # Credit is only when a surgeon is on call that holiday date.
+# Halloween stays for phone/portal calendar emoji only — not a work-holiday credit.
 _HOLIDAYS = (
     ("2025-01-01", "New Year's"),
+    ("2025-02-17", "Presidents Day"),
+    ("2025-04-20", "Easter"),
+    ("2025-05-11", "Mother's Day"),
     ("2025-05-26", "Memorial Day"),
+    ("2025-06-15", "Father's Day"),
     ("2025-07-04", "July 4th"),
     ("2025-09-01", "Labor Day"),
     ("2025-10-31", "Halloween"),
@@ -17,7 +22,11 @@ _HOLIDAYS = (
     ("2025-12-25", "Christmas"),
     ("2025-12-31", "New Year's Eve"),
     ("2026-01-01", "New Year's"),
+    ("2026-02-16", "Presidents Day"),
+    ("2026-04-05", "Easter"),
+    ("2026-05-10", "Mother's Day"),
     ("2026-05-25", "Memorial Day"),
+    ("2026-06-21", "Father's Day"),
     ("2026-07-04", "July 4th"),
     ("2026-09-07", "Labor Day"),
     ("2026-10-31", "Halloween"),
@@ -26,7 +35,11 @@ _HOLIDAYS = (
     ("2026-12-25", "Christmas"),
     ("2026-12-31", "New Year's Eve"),
     ("2027-01-01", "New Year's"),
+    ("2027-02-15", "Presidents Day"),
+    ("2027-03-28", "Easter"),
+    ("2027-05-09", "Mother's Day"),
     ("2027-05-31", "Memorial Day"),
+    ("2027-06-20", "Father's Day"),
     ("2027-07-04", "July 4th"),
     ("2027-09-06", "Labor Day"),
     ("2027-10-31", "Halloween"),

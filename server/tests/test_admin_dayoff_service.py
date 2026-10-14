@@ -105,12 +105,36 @@ class AdminDayOffServiceTest(unittest.TestCase):
         )
         bars = _bars_for_month(dayoff, month_start, month_end, 31)
         self.assertEqual(len(bars), 2)
-        self.assertTrue(bars[0]["isHalfDay"])
+        self.assertEqual(bars[0]["session"], "pm")
         self.assertEqual(bars[0]["labelStart"], "22")
         self.assertEqual(bars[0]["spanDays"], 1)
-        self.assertFalse(bars[1]["isHalfDay"])
+        # PM sits in the right half of day 22 (0-based col 21).
+        day_width = 100 / 31
+        self.assertAlmostEqual(bars[0]["leftPct"], 21 * day_width + day_width / 2, places=3)
+        self.assertAlmostEqual(bars[0]["widthPct"], day_width / 2, places=3)
+        self.assertEqual(bars[1]["session"], "full")
         self.assertEqual(bars[1]["labelStart"], "23")
         self.assertEqual(bars[1]["spanDays"], 1)
+
+    def test_am_half_day_sits_on_left(self):
+        month_start = date(2026, 10, 1)
+        month_end = date(2026, 10, 31)
+        dayoff = DayOff(
+            id=308,
+            status="approved",
+            reason="",
+            notes="",
+            start_date=date(2026, 10, 29),
+            end_date=date(2026, 10, 29),
+            is_full_day=False,
+            segments='[{"date": "2026-10-29", "isFullDay": false, "start": "07:00", "end": "12:00"}]',
+        )
+        bars = _bars_for_month(dayoff, month_start, month_end, 31)
+        self.assertEqual(len(bars), 1)
+        self.assertEqual(bars[0]["session"], "am")
+        day_width = 100 / 31
+        self.assertAlmostEqual(bars[0]["leftPct"], 28 * day_width, places=3)
+        self.assertAlmostEqual(bars[0]["widthPct"], day_width / 2, places=3)
 
     def test_gantt_rows_stacks_overlapping_and_skips_denied(self):
         surgeons = [

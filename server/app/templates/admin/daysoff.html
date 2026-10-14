@@ -143,7 +143,14 @@
       <div class="flex-1 h-px bg-slate-200 min-w-[40px]"></div>
       <span class="inline-flex items-center gap-1.5 text-[10px] font-semibold text-slate-500 flex-wrap">
         <span class="inline-flex px-1.5 py-0 rounded-md shadow-sm block-gradient leading-4" style="--block-c: var(--dayoff-approved); color:#1e293b">Full day</span>
-        <span class="inline-flex px-1.5 py-0 rounded-md shadow-sm block-gradient leading-4" style="--block-c: var(--dayoff-half); color:#1e293b">Half day</span>
+        <span class="inline-flex items-center gap-0.5">
+          <span class="inline-flex w-4 justify-center px-0.5 py-0 rounded-l-md shadow-sm block-gradient leading-4 text-[9px]" style="--block-c: var(--dayoff-half); color:#1e293b">AM</span>
+          <span class="inline-flex w-4 justify-center px-0.5 py-0 rounded-r-md shadow-sm block-gradient leading-4 text-[9px] opacity-40" style="--block-c: var(--dayoff-half); color:#1e293b">PM</span>
+        </span>
+        <span class="inline-flex items-center gap-0.5">
+          <span class="inline-flex w-4 justify-center px-0.5 py-0 rounded-l-md shadow-sm block-gradient leading-4 text-[9px] opacity-40" style="--block-c: var(--dayoff-half); color:#1e293b">AM</span>
+          <span class="inline-flex w-4 justify-center px-0.5 py-0 rounded-r-md shadow-sm block-gradient leading-4 text-[9px]" style="--block-c: var(--dayoff-half); color:#1e293b">PM</span>
+        </span>
         <span class="inline-flex px-1.5 py-0 rounded-md shadow-sm block-gradient leading-4" style="--block-c: var(--dayoff-pending); color:#1e293b">Pending</span>
         <span class="inline-flex px-1.5 py-0 rounded-md shadow-sm block-gradient leading-4" style="--block-c: var(--dayoff-nocall); color:#1e293b">No Call</span>
       </span>
@@ -240,11 +247,11 @@
                 data-reason="{{ (bar.reason or '')|e }}"
                 data-notes="{{ (bar.notes or '')|e }}"
                 style="top: {{ 0.25 + (bar.lane|default(0)) * 1.65 }}rem; height: 1.4rem; left: calc({{ bar.leftPct }}% + 1px); width: calc({{ bar.widthPct }}% - 2px); --block-c: {% if bar.status == 'pending' %}var(--dayoff-pending){% elif (bar.reason or '')|lower|replace(' ', '') == 'nocall' %}var(--dayoff-nocall){% elif bar.isHalfDay %}var(--dayoff-half){% else %}var(--dayoff-approved){% endif %}; color:#1e293b;"
-                title="{{ row.surgeon.full_name }} · {{ bar.startIso }} → {{ bar.endIso }}{% if bar.isHalfDay %} · Half day{% endif %}{% if bar.reason %} · {{ bar.reason }}{% endif %}">
+                title="{{ row.surgeon.full_name }} · {{ bar.startIso }} → {{ bar.endIso }}{% if bar.session == 'am' %} · AM{% elif bar.session == 'pm' %} · PM{% elif bar.isHalfDay %} · Half day{% endif %}{% if bar.reason %} · {{ bar.reason }}{% endif %}">
                 <span class="text-[10px] font-bold truncate block leading-[1.4rem]">
-                  {% if bar.spanDays > 1 %}{{ bar.labelStart }}–{{ bar.labelEnd }}{% else %}{{ bar.labelStart }}{% endif %}
-                  {% if bar.isHalfDay %} · Half{% endif %}
-                  {% if bar.reason %} · {{ bar.reason }}{% endif %}
+                  {% if bar.session == 'am' %}AM{% elif bar.session == 'pm' %}PM{% elif bar.spanDays > 1 %}{{ bar.labelStart }}–{{ bar.labelEnd }}{% else %}{{ bar.labelStart }}{% endif %}
+                  {% if bar.session not in ('am', 'pm') and bar.isHalfDay %} · Half{% endif %}
+                  {% if bar.reason and bar.session not in ('am', 'pm') %} · {{ bar.reason }}{% elif bar.reason and bar.session in ('am', 'pm') and (bar.reason or '')|lower not in ('partial day', 'partial', 'half day', 'half') %} · {{ bar.reason }}{% endif %}
                 </span>
               </button>
               {% endfor %}
@@ -255,7 +262,7 @@
       </div>
       {% endif %}
     </div>
-    <p class="text-[11px] text-slate-400 mt-2">Tap a bar to edit or delete. Pending stays amber until approved above. Teal vertical line marks today.</p>
+    <p class="text-[11px] text-slate-400 mt-2">Tap a bar to edit or delete. Half-day OFF sits on the left (AM) or right (PM) of the day. Pending stays amber until approved above. Teal vertical line marks today.</p>
   </div>
 
 </div>

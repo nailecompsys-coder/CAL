@@ -57,15 +57,67 @@ def _reason_says_partial(reason: str | None) -> bool:
 
 def _day_is_half(dayoff: DayOff, day: date) -> bool:
     """Half-day for one calendar day: segment flag, request flag, or Partial Day reason."""
+    return _day_session(dayoff, day) != "full"
+
+
+def _parse_hhmm(value):
+    from datetime import time as time_cls
+
+    if value is None:
+        return None
+    if hasattr(value, "hour"):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        parts = text.split(":")
+        return time_cls(int(parts[0]), int(parts[1]) if len(parts) > 1 else 0)
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+def _day_session(dayoff: DayOff, day: date) -> str:
+    """Gantt session for one day: full | am | pm.
+
+    Timed half-days sit in the left (AM) or right (PM) half of the day cell.
+    Partial Day with no times stays full-width light blue (session still half via color).
+    """
+    from datetime import time as time_cls
+
     from .native_dayoff_support import segment_for_date
 
     segment = segment_for_date(dayoff, day)
+    is_full = True
+    start_t = None
+    end_t = None
     if segment is not None:
-        if not bool(segment.get("isFullDay", True)):
-            return True
-    elif dayoff.is_full_day is False:
-        return True
-    return _reason_says_partial(dayoff.reason)
+        is_full = bool(segment.get("isFullDay", True))
+        start_t = _parse_hhmm(segment.get("start"))
+        end_t = _parse_hhmm(segment.get("end"))
+    else:
+        is_full = bool(dayoff.is_full_day if dayoff.is_full_day is not None else True)
+        start_t = dayoff.start_time
+        end_t = dayoff.end_time
+
+    if is_full and not _reason_says_partial(dayoff.reason):
+        return "full"
+    if not is_full or _reason_says_partial(dayoff.reason):
+        noon = time_cls(12, 0)
+        if start_t is None and end_t is None:
+            # Reason-only Partial Day — blue, but no AM/PM side known.
+            return "half"
+        if start_t is not None and start_t >= noon:
+            return "pm"
+        if end_t is not None and end_t <= noon:
+            return "am"
+        if start_t is not None and start_t < noon and (end_t is None or end_t <= noon):
+            return "am"
+        if start_t is not None and start_t < noon and end_t is not None and end_t > noon:
+            # Spans noon — treat as full-width half-day marker.
+            return "half"
+        return "pm" if start_t is not None and start_t >= noon else "am"
+    return "full"
 
 
 def _bar_slice(
@@ -73,27 +125,43 @@ def _bar_slice(
     *,
     clip_start: date,
     clip_end: date,
-    is_half: bool,
+    session: str,
     days_in_month: int,
 ) -> dict:
     col0 = clip_start.day - 1
     span = (clip_end - clip_start).days + 1
+    day_width = 100.0 / days_in_month
+    is_half = session in {"am", "pm", "half"}
+    if session == "am":
+        # Left half of a single day cell.
+        left_pct = col0 * day_width
+        width_pct = day_width / 2.0
+        span = 1
+    elif session == "pm":
+        # Right half of a single day cell.
+        left_pct = col0 * day_width + day_width / 2.0
+        width_pct = day_width / 2.0
+        span = 1
+    else:
+        left_pct = col0 * day_width
+        width_pct = span * day_width
     return {
         "id": dayoff.id,
-        "domId": f"{dayoff.id}-{clip_start.isoformat()}",
+        "domId": f"{dayoff.id}-{clip_start.isoformat()}-{session}",
         "status": dayoff.status or "approved",
         "reason": dayoff.reason or "",
         "notes": dayoff.notes or "",
         "isHalfDay": is_half,
+        "session": session,
         "startIso": dayoff.start_date.isoformat(),
         "endIso": dayoff.end_date.isoformat(),
         "labelStart": clip_start.strftime("%-d"),
-        "labelEnd": clip_end.strftime("%-d"),
-        "leftPct": round(col0 / days_in_month * 100, 4),
-        "widthPct": round(span / days_in_month * 100, 4),
+        "labelEnd": clip_end.strftime("%-d") if span > 1 else clip_start.strftime("%-d"),
+        "leftPct": round(left_pct, 4),
+        "widthPct": round(width_pct, 4),
         "spanDays": span,
         "clipStart": clip_start,
-        "clipEnd": clip_end,
+        "clipEnd": clip_end if session == "full" else clip_start,
     }
 
 
@@ -103,7 +171,7 @@ def _bars_for_month(
     month_end: date,
     days_in_month: int,
 ) -> list[dict]:
-    """One or more bars for a request, split when half-day and full-day days are mixed."""
+    """Bars for a request. Full days merge; AM/PM half-days are one pill per day half."""
     from datetime import timedelta
 
     start = max(dayoff.start_date, month_start)
@@ -111,17 +179,35 @@ def _bars_for_month(
     if start > end:
         return []
 
-    days: list[tuple[date, bool]] = []
+    days: list[tuple[date, str]] = []
     cursor = start
     while cursor <= end:
-        days.append((cursor, _day_is_half(dayoff, cursor)))
+        days.append((cursor, _day_session(dayoff, cursor)))
         cursor += timedelta(days=1)
 
     bars: list[dict] = []
-    run_start, run_half = days[0]
+    # AM/PM half-days never merge across days — each cell gets its own left/right pill.
+    for day, session in days:
+        if session in {"am", "pm"}:
+            bars.append(
+                _bar_slice(
+                    dayoff,
+                    clip_start=day,
+                    clip_end=day,
+                    session=session,
+                    days_in_month=days_in_month,
+                )
+            )
+
+    # Merge contiguous full / unknown-half runs.
+    other = [(d, s) for d, s in days if s in {"full", "half"}]
+    if not other:
+        return bars
+
+    run_start, run_session = other[0]
     prev = run_start
-    for day, is_half in days[1:]:
-        if is_half == run_half and day == prev + timedelta(days=1):
+    for day, session in other[1:]:
+        if session == run_session and day == prev + timedelta(days=1):
             prev = day
             continue
         bars.append(
@@ -129,21 +215,22 @@ def _bars_for_month(
                 dayoff,
                 clip_start=run_start,
                 clip_end=prev,
-                is_half=run_half,
+                session=run_session,
                 days_in_month=days_in_month,
             )
         )
-        run_start, run_half = day, is_half
+        run_start, run_session = day, session
         prev = day
     bars.append(
         _bar_slice(
             dayoff,
             clip_start=run_start,
             clip_end=prev,
-            is_half=run_half,
+            session=run_session,
             days_in_month=days_in_month,
         )
     )
+    bars.sort(key=lambda b: (b["clipStart"], 0 if b["session"] == "am" else 1))
     return bars
 
 
@@ -153,23 +240,37 @@ def _bar_for_month(dayoff: DayOff, month_start: date, month_end: date, days_in_m
     return bars[0] if bars else None
 
 
+def _bars_conflict(a: dict, b: dict) -> bool:
+    """True when two bars need different vertical lanes."""
+    if a["clipStart"] > b["clipEnd"] or b["clipStart"] > a["clipEnd"]:
+        return False
+    # Same single day: AM left and PM right can share a lane.
+    if (
+        a["clipStart"] == a["clipEnd"] == b["clipStart"] == b["clipEnd"]
+        and {a.get("session"), b.get("session")} == {"am", "pm"}
+    ):
+        return False
+    return True
+
+
 def _assign_lanes(bars: list[dict]) -> tuple[list[dict], int]:
     """Stack overlapping bars into lanes (0-based). Returns (bars_with_lane, lane_count)."""
     if not bars:
         return [], 0
-    lane_ends: list[date] = []
+    lanes: list[list[dict]] = []
     for bar in bars:
         placed = False
-        for idx, lane_end in enumerate(lane_ends):
-            if bar["clipStart"] > lane_end:
-                lane_ends[idx] = bar["clipEnd"]
-                bar["lane"] = idx
-                placed = True
-                break
+        for idx, lane_bars in enumerate(lanes):
+            if any(_bars_conflict(bar, existing) for existing in lane_bars):
+                continue
+            lane_bars.append(bar)
+            bar["lane"] = idx
+            placed = True
+            break
         if not placed:
-            bar["lane"] = len(lane_ends)
-            lane_ends.append(bar["clipEnd"])
-    return bars, len(lane_ends)
+            bar["lane"] = len(lanes)
+            lanes.append([bar])
+    return bars, len(lanes)
 
 
 def gantt_rows(

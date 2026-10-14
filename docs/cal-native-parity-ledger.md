@@ -2,6 +2,8 @@
 
 Last updated: 2026-10-13
 
+Week meeting rows (2026-10-14, TestFlight 2.0 (29)): Week cards keep AM/PM master titles alone; meetings and extra places are separate rows (never `PM MN-OR · address`). Backend meetings-table rows always serialize as `type=meeting`.
+
 Month Call layout (2026-10-14, TestFlight 2.0 (28)): Month chip stacks date (centered) → C/O/M → Call WG · ALT on the bottom. Month scope always refetches the on-screen month. Draft Call chips send `rotationId: 0` (cover disabled).
 
 Month Call layout (2026-10-13, TestFlight 2.0 (27)): equal columns WG · day · ALT (superseded by 28).
@@ -34,7 +36,7 @@ iOS calendar chrome (2026-09-23): the surgeon-facing section is labeled `Calenda
 
 Native schedule review rows (2026-09-15): `GET /api/native/home` includes Aprima-derived patient schedule rows again, separate from CAL clinic and Block OR cards. Surgery One / CBO-style Aprima rows are read-only, flagged `needsReview=true`, and carry red styling so SwiftUI can show them as Shannon-review items instead of verified CAL schedule. CAL clinic cards still summarize location, first visit time, and visit count; Block OR cards still show location, start time, and total cases.
 
-iOS TestFlight build: `2.0 (28)` — Month date centered, Call WG·ALT under C/O/M. Prior: `2.0 (27)` month Call after day 9; `2.0 (26)` bagpipes; `2.0 (25)` Call Builder; `2.0 (24)` Scheduler.
+iOS TestFlight build: `2.0 (29)` — Week meetings off PM line. Prior: `2.0 (28)` — Month date centered, Call WG·ALT under C/O/M. Prior: `2.0 (27)` month Call after day 9; `2.0 (26)` bagpipes; `2.0 (25)` Call Builder; `2.0 (24)` Scheduler.
 
 Build 24 candidate: the Scheduler opens on a week list, then shows every surgeon's AM/PM schedule, NA and OFF status, approved leave, call, OR case times, and clinic visit times for a selected day. The iPhone calls the SQL-backed `GET /api/native/scheduler/schedule` feed, which must be live before the client is distributed. An assigned call Backup is labeled **Backup** for that surgeon; the iPhone has no Backup assignment control. The Calendar Meetings card shows bold **Today** and a dated **Next meeting** preview with title/time only; tapping reveals the full note.
 

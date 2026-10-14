@@ -45,15 +45,21 @@ struct CompactWeekDayCard: View {
         WeekCallOffRow(
           assignments: Array(day.assignments.prefix(3)),
           offInitials: Array(day.off.prefix(4)),
-          showsMeeting: !day.meetings.isEmpty,
           coverAction: coverAction
         )
 
         ForEach(["AM", "PM"], id: \.self) { period in
           let periodGroups = groups.filter { $0.period == period }
-          if !periodGroups.isEmpty {
-            WeekPeriodLine(period: period, groups: periodGroups)
+          if let primary = Self.primaryScheduleGroup(from: periodGroups) {
+            WeekPeriodLine(period: period, groups: [primary])
+            ForEach(periodGroups.filter { $0.id != primary.id }) { extra in
+              WeekSecondaryLine(title: extra.title)
+            }
           }
+        }
+
+        ForEach(day.meetings) { meeting in
+          WeekMeetingLine(item: meeting)
         }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
@@ -73,13 +79,17 @@ struct CompactWeekDayCard: View {
       scope = .day
     }
   }
+
+  /// Master / clinic card first (NA/OFF preferred when present); extras stay on their own lines.
+  private static func primaryScheduleGroup(from groups: [ClinicOrFacilityGroup]) -> ClinicOrFacilityGroup? {
+    groups.first(where: \.isEmptyCard) ?? groups.first
+  }
 }
 
 /// Call + Off share one row when width allows; Off drops under Call on narrow phones.
 private struct WeekCallOffRow: View {
   let assignments: [ScheduleAssignment]
   let offInitials: [String]
-  let showsMeeting: Bool
   let coverAction: (ScheduleAssignment) -> Void
 
   var body: some View {
@@ -97,9 +107,6 @@ private struct WeekCallOffRow: View {
   private var sideBySideRow: some View {
     HStack(alignment: .firstTextBaseline, spacing: 8) {
       WeekCallLine(assignments: assignments, action: coverAction)
-      if showsMeeting {
-        meetingMark
-      }
       Spacer(minLength: 8)
       if !offInitials.isEmpty {
         WeekOffLine(initials: offInitials)
@@ -111,21 +118,12 @@ private struct WeekCallOffRow: View {
     VStack(alignment: .leading, spacing: 4) {
       HStack(alignment: .firstTextBaseline, spacing: 8) {
         WeekCallLine(assignments: assignments, action: coverAction)
-        if showsMeeting {
-          meetingMark
-        }
         Spacer(minLength: 0)
       }
       if !offInitials.isEmpty {
         WeekOffLine(initials: offInitials)
       }
     }
-  }
-
-  private var meetingMark: some View {
-    Image(systemName: "person.2.fill")
-      .font(.caption)
-      .foregroundStyle(ClinicalPalette.meetingStrong)
   }
 }
 
@@ -187,12 +185,14 @@ private struct WeekCallLine: View {
 private struct WeekPeriodLine: View {
   let period: String
   let groups: [ClinicOrFacilityGroup]
+  @ScaledMetric(relativeTo: .footnote) private var labelColumn: CGFloat = 36
 
   var body: some View {
     HStack(alignment: .firstTextBaseline, spacing: 8) {
       Text(period)
         .font(.caption.weight(.bold))
         .foregroundStyle(.secondary)
+        .frame(width: labelColumn, alignment: .leading)
       Text(groups.map(\.title).joined(separator: " · "))
         .font(.subheadline)
         .foregroundStyle(ClinicalPalette.ink)
@@ -202,6 +202,66 @@ private struct WeekPeriodLine: View {
         Text(group.countLabel)
           .font(.caption.weight(.semibold))
           .foregroundStyle(Color.red)
+      }
+    }
+  }
+}
+
+/// Extra facility / address under AM or PM — never mashed onto the period title.
+private struct WeekSecondaryLine: View {
+  let title: String
+  @ScaledMetric(relativeTo: .footnote) private var labelColumn: CGFloat = 36
+
+  var body: some View {
+    HStack(alignment: .firstTextBaseline, spacing: 8) {
+      Color.clear
+        .frame(width: labelColumn, height: 1)
+      Text(title)
+        .font(.subheadline)
+        .foregroundStyle(ClinicalPalette.ink)
+        .lineLimit(2)
+        .minimumScaleFactor(0.85)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+  }
+}
+
+/// Meeting on its own row — title + place, never appended to PM.
+private struct WeekMeetingLine: View {
+  let item: DoctorScheduleItem
+  @ScaledMetric(relativeTo: .footnote) private var labelColumn: CGFloat = 36
+
+  private var place: String {
+    [item.location, item.room, item.procedure]
+      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+      .filter { !$0.isEmpty }
+      .joined(separator: " · ")
+  }
+
+  var body: some View {
+    HStack(alignment: .firstTextBaseline, spacing: 8) {
+      Text("Mtg")
+        .font(.caption.weight(.bold))
+        .foregroundStyle(ClinicalPalette.meetingStrong)
+        .frame(width: labelColumn, alignment: .leading)
+      VStack(alignment: .leading, spacing: 2) {
+        Text(item.title)
+          .font(.subheadline.weight(.semibold))
+          .foregroundStyle(ClinicalPalette.meetingStrong)
+          .lineLimit(2)
+        if !place.isEmpty, place.caseInsensitiveCompare(item.title) != .orderedSame {
+          Text(place)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      if !item.timeRange.isEmpty {
+        Text(item.timeRange)
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
       }
     }
   }

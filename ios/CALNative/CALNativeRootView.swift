@@ -38,10 +38,26 @@ struct ScheduleHomeView: View {
   @ObservedObject var store: NativeScheduleStore
   @Binding var selectedSection: CALNativeSection
   @Binding var selectedDate: Date
-  @State private var scope: ScheduleScope = .day
+  @State private var scope: ScheduleScope = Self.launchScope
   @State private var showingDatePicker = false
   @State private var coveringAssignment: ScheduleAssignment?
   @State private var showingWhosWhere = false
+
+  /// Simulator-only: `--cal-scope=week|day|month` for support preview navigation.
+  private static var launchScope: ScheduleScope {
+    #if targetEnvironment(simulator)
+    guard let arg = CommandLine.arguments.first(where: { $0.hasPrefix("--cal-scope=") }) else {
+      return .day
+    }
+    switch String(arg.dropFirst("--cal-scope=".count)).lowercased() {
+    case "week": return .week
+    case "month": return .month
+    default: return .day
+    }
+    #else
+    return .day
+    #endif
+  }
 
   private var selectedDay: ScheduleDay {
     store.day(for: selectedDate) ?? ScheduleDay.empty(for: selectedDate)

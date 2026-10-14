@@ -3,7 +3,7 @@ import SwiftUI
 struct CALNativeTabShell: View {
   @ObservedObject var store: NativeScheduleStore
   @State private var selectedSection: CALNativeSection = Self.launchSection()
-  @State private var sharedFocusDate = Date()
+  @State private var sharedFocusDate = Self.launchDate()
 
   var body: some View {
     Group {
@@ -35,6 +35,24 @@ struct CALNativeTabShell: View {
     }
     #endif
     return .schedule
+  }
+
+  /// Simulator-only: `--cal-date=yyyy-MM-dd` focuses the home calendar on that day.
+  private static func launchDate() -> Date {
+    #if targetEnvironment(simulator)
+    guard let arg = CommandLine.arguments.first(where: { $0.hasPrefix("--cal-date=") }) else {
+      return Date()
+    }
+    let raw = String(arg.dropFirst("--cal-date=".count))
+    let formatter = DateFormatter()
+    formatter.calendar = Calendar(identifier: .gregorian)
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = Calendar.current.timeZone
+    formatter.dateFormat = "yyyy-MM-dd"
+    return formatter.date(from: raw) ?? Date()
+    #else
+    return Date()
+    #endif
   }
 }
 

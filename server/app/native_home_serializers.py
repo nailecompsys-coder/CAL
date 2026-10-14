@@ -71,12 +71,27 @@ def is_clinic_rotation_text(*, title: str = "", location: str = "", reason: str 
     return any(marker in blob for marker in _CLINIC_ROTATION_TITLE_MARKERS)
 
 
+_REAL_MEETING_TITLE_MARKERS = (
+    "board meeting",
+    "board mtg",
+    "p2p",
+    "meeting",
+    "meetings",
+)
+
+
 def is_clinic_day_meeting(meeting) -> bool:
     """True when a CAL Meeting row is really a clinic-day assignment (e.g. Surgery 1 / CBO).
 
     Practice staff often enter recurring clinic days in the Meetings table. Those should
     render under My Schedule / clinic schedule, not the Meetings list.
+    Real meetings that merely mention Surgery One (board meeting, P2P, …) stay meetings.
     """
+    title_l = (getattr(meeting, "title", None) or "").strip().lower()
+    notes_l = (getattr(meeting, "notes", None) or "").strip().lower()
+    if any(marker in title_l for marker in _REAL_MEETING_TITLE_MARKERS):
+        if "clinic" not in title_l and "clinic" not in notes_l:
+            return False
     return is_clinic_rotation_text(
         title=getattr(meeting, "title", None) or "",
         location=getattr(meeting, "location_text", None) or "",

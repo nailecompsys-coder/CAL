@@ -65,6 +65,22 @@ class ClinicDayMeetingClassificationTest(unittest.TestCase):
         payload = meeting_item_payload(meeting)
         self.assertEqual(payload["type"], "meeting")
 
+    def test_surgery_one_board_meeting_stays_meeting(self):
+        """Surgery One in the title must not pull a board meeting onto the PM clinic line."""
+        meeting = SimpleNamespace(
+            id=72,
+            title="Surgery One Board Meeting",
+            location_text="1814 Lucerne Terrace Orlando, FL",
+            start_time=__import__("datetime").time(17, 0),
+            end_time=__import__("datetime").time(18, 0),
+            notes="",
+        )
+        self.assertFalse(is_clinic_day_meeting(meeting))
+        payload = meeting_item_payload(meeting)
+        self.assertEqual(payload["type"], "meeting")
+        self.assertEqual(payload["title"], "Surgery One Board Meeting")
+        self.assertIn("Lucerne", payload["subtitle"])
+
     def test_cancelled_clinic_day_is_not_reclassified(self):
         meeting = SimpleNamespace(
             id=66,

@@ -81,18 +81,10 @@
   .cb-day.is-pad { background: #f8fafc; }
   .cb-day.is-today { background: rgba(239, 246, 255, 0.55); }
   .cb-day.is-hol { background: rgba(255, 251, 235, 0.55); }
-  /* Selected roster pen: every day that surgeon is on call (WG and/or ALT). */
-  .cb-day.is-pen-day {
-    background: #d1fae5;
-    box-shadow: inset 0 0 0 2px #34d399;
-  }
-  .cb-day.is-pen-day.is-today,
-  .cb-day.is-pen-day.is-hol {
-    background: #a7f3d0;
-  }
+  /* Selected roster pen: only that surgeon’s WG/ALT slots (not the day cell). */
   .drop-slot.is-pen-slot {
-    background: rgba(16, 185, 129, 0.28);
-    outline: 1px solid #059669;
+    background: rgba(16, 185, 129, 0.32);
+    outline: 1.5px solid #059669;
     outline-offset: -1px;
     border-radius: 3px;
   }
@@ -500,16 +492,13 @@ async function togglePhoneAccess(input) {
     input.disabled = false;
   }
 }
-function highlightPenDays(surgeonId) {
+function highlightPenSlots(surgeonId) {
   const id = surgeonId != null && surgeonId !== '' ? String(surgeonId) : '';
-  document.querySelectorAll('.cb-day.is-pen-day').forEach(d => d.classList.remove('is-pen-day'));
   document.querySelectorAll('.drop-slot.is-pen-slot').forEach(s => s.classList.remove('is-pen-slot'));
   if (!id) return;
   document.querySelectorAll('.drop-slot[data-surgeon-id]').forEach(slot => {
     if (String(slot.dataset.surgeonId || '') !== id) return;
     slot.classList.add('is-pen-slot');
-    const day = slot.closest('.cb-day');
-    if (day) day.classList.add('is-pen-day');
   });
 }
 function closeFlyover() {
@@ -517,7 +506,7 @@ function closeFlyover() {
   document.querySelectorAll('.roster-tile').forEach(t => t.classList.remove('is-pen'));
   penId = null;
   persistPen(null);
-  highlightPenDays(null);
+  highlightPenSlots(null);
 }
 function showFlyover(el) {
   const box = document.getElementById('surgeon-flyover');
@@ -569,7 +558,7 @@ function pickSurgeon(el, opts) {
   el.classList.add('is-pen');
   el.scrollIntoView({ block: 'nearest' });
   showFlyover(el);
-  highlightPenDays(penId);
+  highlightPenSlots(penId);
 }
 function restorePen() {
   let saved = null;

@@ -1312,32 +1312,39 @@ def add_case_to_block(
         raise ValueError("Case start must fall inside the block window")
     if end_time is not None and end_time <= start_time:
         raise ValueError("Case end must be after start")
-    from .schedule_activity_normalization import active_surgical_lines
+    from .schedule_activity_normalization import _upsert_activity, active_surgical_lines, resolve_schedule_card
 
     if any(row.start_time == start_time for row in active_surgical_lines(db, surgeon_id=surgeon_id, day=block.date)):
         raise ValueError("Schedule collision: this surgeon already has a case at that time.")
 
-    case = SurgicalCase(
+    bucket = _session_bucket(block)
+    preferred = bucket if bucket in {"am", "pm"} else None
+    card = resolve_schedule_card(
+        db,
         surgeon_id=surgeon_id,
-        date=block.date,
+        day=block.date,
+        location_id=block.location_id,
+        start_time=start_time,
+        preferred_session=preferred,
+    )
+    if card is None:
+        raise ValueError("This surgeon has no card for that half-day.")
+    saved_name = (patient_name or "").strip() or "TBD"
+    saved_procedure = (procedure or "").strip() or "Scheduled case"
+    activity = _upsert_activity(
+        db,
+        source_system="block_or",
+        source_record_key=f"{block.id}:{surgeon_id}:{start_time.strftime('%H%M')}:{saved_name}",
+        card=card,
+        activity_type="surgical",
         start_time=start_time,
         end_time=end_time,
-        patient_name=(patient_name or "").strip() or "TBD",
-        procedure=(procedure or "").strip() or "Scheduled case",
-        location_id=block.location_id,
-        or_block_instance_id=block.id,
+        patient_name=saved_name,
+        procedure=saved_procedure,
         room_text=(block.room_text or "").strip() or None,
-        status="scheduled",
+        location_id=block.location_id,
     )
-    db.add(case)
-    from .schedule_activity_normalization import normalize_surgical_case_card
-    normalize_surgical_case_card(db, case)
     db.flush()
-    db.expire(block, ["cases", "assignments"])
-    block = _block_with_case_relations(db, block_id)
-    if not block:
-        raise ValueError("Block not found")
-    _sync_assignment_case_counts_from_cases(db, block)
     warnings = []
     try:
         from .scheduling_guardrails_service import surgical_case_warning_messages
@@ -1349,7 +1356,8 @@ def add_case_to_block(
             start_time,
             end_time,
             block.location_id,
-            exclude_case_id=case.id,
+            exclude_activity_id=activity.id,
+            or_block_instance_id=block.id,
         ) or []
     except Exception:
         warnings = []
@@ -1360,8 +1368,8 @@ def add_case_to_block(
         admin_user_id=admin_id,
         event_date=block.date,
         title="Case added to Block OR",
-        body=f"{start_time.strftime('%H:%M')} · {(procedure or 'Scheduled case').strip() or 'Scheduled case'}",
-        payload={"blockId": block.id, "caseId": case.id},
+        body=f"{start_time.strftime('%H:%M')} · {saved_procedure}",
+        payload={"blockId": block.id, "caseId": activity.id},
     )
     db.commit()
     block = _block_with_case_relations(db, block_id)

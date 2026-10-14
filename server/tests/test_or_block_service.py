@@ -794,7 +794,9 @@ class ORBlockServiceTest(unittest.TestCase):
                 procedure="Hernia",
                 patient_name="Test Patient",
             )
-            self.assertEqual(len([c for c in (block.cases or []) if (c.status or "") != "cancelled"]), 1)
+            from app.schedule_activity_normalization import active_surgical_lines
+            self.assertEqual(len(active_surgical_lines(db, surgeon_id=surgeon.id, day=block_day)), 1)
+            self.assertEqual(db.query(SurgicalCase).count(), 0)
             self.assertFalse(any("on call" in row.lower() for row in warnings))
             with self.assertRaisesRegex(ValueError, "already has a case"):
                 add_case_to_block(
@@ -826,9 +828,11 @@ class ORBlockServiceTest(unittest.TestCase):
                 recurrence="once",
             ))["instance_ids"][0]
             assign_block(db, block_id, surgeon.id, case_count=0, notify=False)
+            self._am_card(db, surgeon, hospital, block_day)
             add_case_to_block(db, block_id, surgeon.id, time(7, 15), patient_name="First")
-            block, _warnings = add_case_to_block(db, block_id, surgeon.id, time(9, 15), patient_name="Second")
-            second = next(case for case in block.cases if case.patient_name == "Second")
+            add_case_to_block(db, block_id, surgeon.id, time(9, 15), patient_name="Second")
+            from app.schedule_activity_normalization import active_surgical_lines
+            second = next(row for row in active_surgical_lines(db, surgeon_id=surgeon.id, day=block_day) if row.patient_name == "Second")
             with self.assertRaisesRegex(ValueError, "already has a case"):
                 update_block_case(
                     db,
@@ -866,6 +870,7 @@ class ORBlockServiceTest(unittest.TestCase):
                 recurrence="once",
             ))["instance_ids"][0]
             assign_block(db, block_id, surgeon.id, case_count=0, notify=False)
+            self._am_card(db, surgeon, hospital, block_day)
             _, warnings = add_case_to_block(
                 db,
                 block_id,
@@ -1409,6 +1414,24 @@ class ORBlockServiceTest(unittest.TestCase):
             self.assertEqual(case.or_block_instance_id, host.id)
         finally:
             db.close()
+
+    def _am_card(self, db, surgeon, hospital, day):
+        week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=day)
+        db.add(week)
+        db.flush()
+        card = ScheduleCard(
+            week_id=week.id,
+            surgeon_id=surgeon.id,
+            date=day,
+            session="am",
+            baseline_state="assigned",
+            effective_state="assigned",
+            baseline_location_id=hospital.id,
+            effective_location_id=hospital.id,
+        )
+        db.add(card)
+        db.commit()
+        return card
 
     def _surgeon(self, db, first_name, last_name):
         row = Surgeon(

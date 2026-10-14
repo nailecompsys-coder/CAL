@@ -21,7 +21,7 @@
     flex: 1 1 0;
     min-height: 0;
     display: grid;
-    grid-template-columns: minmax(0, 13rem) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 15rem) minmax(0, 1fr);
     gap: 0.3rem;
     padding: 0.25rem 0.5rem 0.35rem;
     overflow: hidden;
@@ -86,7 +86,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 700;
     letter-spacing: 0.04em;
     text-transform: uppercase;
@@ -126,14 +126,14 @@
     line-height: 1.1;
   }
   .cb-day-num {
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 800;
     color: #334155;
   }
   .cb-day.is-today .cb-day-num { color: #2563eb; }
   .cb-day.is-wknd .cb-day-num { color: #94a3b8; }
   .cb-day-hol {
-    font-size: 8px;
+    font-size: 10px;
     font-weight: 700;
     color: #92400e;
     overflow: hidden;
@@ -161,26 +161,26 @@
   }
   .drop-slot:hover { background: #f8fafc; }
   .drop-slot .g-short {
-    width: 1.35rem;
+    width: 1.7rem;
     flex-shrink: 0;
-    font-size: 8px;
+    font-size: 11px;
     font-weight: 800;
     color: #94a3b8;
     line-height: 1;
   }
   .slot-initials-field {
-    width: 2.15rem;
-    flex: 0 0 2.15rem;
-    min-width: 2.15rem;
-    max-width: 2.15rem;
+    width: 2.5rem;
+    flex: 0 0 2.5rem;
+    min-width: 2.5rem;
+    max-width: 2.5rem;
     box-sizing: border-box;
-    height: 1.15rem;
+    height: 1.35rem;
     margin: 0;
     padding: 0 2px;
     border: 1px solid #cbd5e1;
     border-radius: 3px;
     background: #fff;
-    font-size: 10px;
+    font-size: 13px;
     font-weight: 700;
     letter-spacing: 0.02em;
     text-transform: uppercase;
@@ -293,6 +293,51 @@
     font-weight: 600;
     color: #1e293b;
   }
+  .roster-tile .cb-doc-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1e293b;
+  }
+  .roster-tile .cb-doc-load {
+    font-size: 11px;
+  }
+  @media print {
+    @page { size: landscape; margin: 0.35in; }
+    html, body { background: #fff !important; }
+    #sidebar, #sidebar-overlay, #menu-btn,
+    .cb-no-print, #surgeon-flyover, #publish-modal,
+    .cb-phone-access {
+      display: none !important;
+    }
+    body > div.flex { display: block !important; }
+    main.cb-viewport-lock,
+    main.cb-viewport-lock .cb-shell,
+    main.cb-viewport-lock .cb-body {
+      overflow: visible !important;
+      height: auto !important;
+      max-height: none !important;
+      min-height: 0 !important;
+    }
+    main { margin: 0 !important; padding: 0 !important; width: 100% !important; }
+    .cb-shell { border: none !important; }
+    .cb-body {
+      display: grid !important;
+      grid-template-columns: 12rem 1fr !important;
+      gap: 0.4rem !important;
+      padding: 0 !important;
+    }
+    .cb-roster { overflow: visible !important; max-height: none !important; }
+    .cb-cal-wrap, .cb-cal {
+      overflow: visible !important;
+      height: auto !important;
+      min-height: 6.5in !important;
+    }
+    .cb-cal {
+      grid-template-rows: 1.2rem repeat({{ week_count }}, minmax(0.9in, 1fr)) !important;
+    }
+    .roster-tile { break-inside: avoid; }
+    a[href]::after { content: none !important; }
+  }
 </style>
 <script>document.querySelector('main')?.classList.add('cb-viewport-lock');</script>
 
@@ -302,7 +347,12 @@
   <p class="text-base font-bold text-slate-800 leading-none text-center whitespace-nowrap">
     {{ month_label }} · {{ draft_count }} draft · {{ change_count }} to publish
   </p>
-  <div class="flex items-center justify-end gap-1 flex-shrink-0">
+  <div class="flex items-center justify-end gap-1 flex-shrink-0 cb-no-print">
+    <button type="button" onclick="window.print()"
+            class="bg-slate-100 text-slate-700 text-xs px-2 py-1 rounded-lg hover:bg-slate-200"
+            title="Print or Save as PDF">
+      <i class="fa-solid fa-file-pdf mr-1"></i>PDF
+    </button>
     <a href="/admin/call-builder?month_offset={{ month_offset - 1 }}"
        class="w-7 h-7 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 flex items-center justify-center">
       <i class="fa-solid fa-chevron-left text-xs"></i>
@@ -349,7 +399,7 @@
            data-holidays-worked='{{ h.holidaysWorked|default([])|tojson }}'
            onclick="pickSurgeon(this)" title="{{ h.firstName }} {{ h.lastName }}">
         <div class="flex items-center justify-between gap-1 leading-tight">
-          <span class="text-[12px] font-normal text-slate-800 truncate">{{ h.initials }} · {{ h.lastName }}</span>
+          <span class="cb-doc-name truncate">{{ h.initials }} · {{ h.lastName }}</span>
           {% if show_phone_access %}
           <label class="cb-phone-access flex items-center gap-0.5 flex-shrink-0 cursor-pointer"
                  title="Show Call Builder on this surgeon's iPhone"
@@ -365,7 +415,7 @@
           </label>
           {% endif %}
         </div>
-        <p class="text-[9px] font-semibold tabular-nums text-slate-600 tracking-tight leading-tight">
+        <p class="cb-doc-load font-semibold tabular-nums text-slate-600 tracking-tight leading-tight">
           <span>{{ h.callCount }}/{{ h.weekendCount }}</span>
           <span> · </span>
           <span class="font-extrabold text-slate-900">{{ h.monthCallCount }}/{{ h.monthWeekendCount }}</span>
@@ -399,7 +449,7 @@
         </table>
       </div>
     </div>
-    <div class="flex-shrink-0 flex gap-1">
+    <div class="flex-shrink-0 flex gap-1 cb-no-print">
       <button type="button" onclick="openPublish()" class="flex-1 bg-blue-600 text-white text-[11px] font-medium py-1.5 rounded-lg hover:bg-blue-700">
         Publish
       </button>

@@ -1,22 +1,32 @@
 # Cursor Handoff: Fax Schedule Ingest
 
-Updated October 5, 2026.
+Updated October 14, 2026.
 
 ## Current decision
 
-There is one supported schedule-extraction path:
+There is one supported Desk→CAL handoff. Schedule extraction stays in Desk as
+PDF → markdown tables → structured rows:
 
 ```text
 Kno2 native fax PDF
   -> Desk
-  -> LlamaParse agentic layout extraction
+  -> MD table parser (LlamaParse default; OpenDocRouter optional behind flag)
+  -> existing Desk MD→row builder
   -> surgeon-grouped surgical and clinic rows
-  -> CAL SQL Stage 1 staging
+  -> CAL SQL Stage 1 staging (/api/ingest/visual-schedule)
   -> separate reviewed AM/PM card matching step
 ```
 
+- **Default:** `DESK_SCHEDULE_PARSER=llamaparse` (production until explicit cutover).
+- **Optional:** `DESK_SCHEDULE_PARSER=opendocrouter` uses OpenDocRouter
+  (`OPEN_DOC_ROUTER_API_KEY`, `layout: true`) and the **same** MD→row path.
+  Falls back to LlamaParse when OpenDocRouter is thin/failed.
+- Side-by-side: `node src/scripts/compare-opendoc-llamaparse.js <faxId>`
+  (row counts / surgeon initials only — no PHI in logs).
+
 Do not restore a second CAL OCR, OpenAI vision, Claude, or Python extraction
-pipeline. CAL consumes structured Desk rows; it does not reinterpret the fax.
+pipeline. Do not add an OpenDocRouter client inside CAL. CAL consumes structured
+Desk rows; it does not reinterpret the fax.
 
 ## Repositories and commits
 
@@ -55,7 +65,9 @@ Desk extraction:
 
 ```text
 /Users/donnaile/dev/Fax Injest/Kno2 intake/src/services/visionSchedule.js
+/Users/donnaile/dev/Fax Injest/Kno2 intake/src/services/openDocRouterParse.js
 /Users/donnaile/dev/Fax Injest/Kno2 intake/src/services/processFax.js
+/Users/donnaile/dev/Fax Injest/Kno2 intake/src/scripts/compare-opendoc-llamaparse.js
 ```
 
 Desk-to-CAL staging handoff:
@@ -84,6 +96,23 @@ Operating procedure:
 ```text
 /Users/donnaile/dev/CAL/docs/FAX_VISUAL_INGEST_PROCEDURE.md
 ```
+
+## OpenDocRouter spike (Desk, October 14, 2026)
+
+Implemented in Desk (no CAL extract client):
+
+- `src/services/openDocRouterParse.js` — upload/inline PDF → `POST /v1/parse` with
+  `layout: true`; writes `opendocrouter.md` + optional layout JSON.
+- `DESK_SCHEDULE_PARSER=opendocrouter|llamaparse` (default **llamaparse**) with
+  LlamaParse fallback when OpenDocRouter is thin/failed.
+- `src/scripts/compare-opendoc-llamaparse.js` — counts-only side-by-side.
+- Synthetic OpenDocRouter-style MD fixtures pass `test-vision-rows.js`.
+
+Local LlamaParse baseline on saved fax **151** MD (no PHI): **358** rows
+(53 OR / 305 clinic); surgeon initials present for AS, JF, LN, NF, JB, LW, OK,
+CJ, GY, JP. Live OpenDocRouter parse requires `OPEN_DOC_ROUTER_API_KEY` on the
+Desk host; do not cut production over until compare on a known problem fax is
+equal-or-better, then set `DESK_SCHEDULE_PARSER=opendocrouter` explicitly.
 
 ## Fax 245 artifact
 

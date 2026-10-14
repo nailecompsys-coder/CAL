@@ -25,7 +25,6 @@ from app.fax_candidate_reconciler import reconcile_desk_extract
 from app.fax_ingest_engine import stage_reviewed_rows
 from app.fax_pdf_intake import prepare_fax_pdf
 from app.fax_snapshot_service import apply_staged_snapshot
-from app.fax_source_validation import validate_page_ownership
 from app.models import FaxDocument, FaxIngestRow, FaxRowDecision
 
 
@@ -50,7 +49,6 @@ def ingest(fax_id: int, pdf: Path | None, extract_path: Path, *, apply: bool) ->
         if source_id is not None and int(source_id) != fax_id:
             raise ValueError("Desk extract belongs to a different fax.")
         rows, reconciliation = reconcile_desk_extract(db, document, extract)
-        validate_page_ownership(db, document, rows)
         scope = sorted({row.surgeon_initials for row in rows})
         staged = stage_reviewed_rows(
             db, external_fax_id=fax_id, source_label="Desk PDF→PNG→OCR section verified",

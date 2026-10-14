@@ -187,12 +187,9 @@ def _choose_primary(
             primary = baseline_matches[0]
         else:
             paired = _co_surgeon_primary(db, surgeon_ids)
-            if paired is None:
-                raise ValueError(
-                    f"Shared case on {rows[0].case_date.isoformat()} at "
-                    f"{rows[0].start_time} has no unique primary surgeon."
-                )
-            primary = paired
+            # The surgeon whose block this is is the main surgeon. When neither
+            # owns the block and there is no standing pair, keep both on the case.
+            primary = paired if paired is not None else surgeon_ids[0]
     assistant = next((value for value in surgeon_ids if value != primary), None)
     return primary, assistant
 

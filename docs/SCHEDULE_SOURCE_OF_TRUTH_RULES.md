@@ -11,9 +11,10 @@ This is Don's current scheduling rule set for the master calendar, the surgeon a
 
 ## Who puts the day on the schedule
 
-- Epic sends the fax. CAL ingests it. That fax is the only schedule that arrives every day. Surgeons see the saved card lines on their phones.
+- Epic sends the fax. CAL ingests it. That fax is the only schedule that arrives every day.
 - Aprima sends meetings and Surgery One patients. It does not replace the Epic fax.
 - Shannon adds meetings, days off, and the call schedule. The office does not add clinic visits or surgical cases.
+- The iPhone is that person's schedule. It shows who is where, and when they need to be at a facility for a case or a clinic. Those facts are the saved card lines.
 
 ## Source overlay
 

@@ -630,12 +630,11 @@ function pickSurgeon(el, opts) {
   const keepToggle = !(opts && opts.forceOpen);
   blurActiveField();
   if (keepToggle && penId === el.dataset.surgeonId) {
-    // Same doc again: clear selection/highlight; keep flyover minimized (no X / no dismiss).
+    // Same doc again: clear selection/highlight only — leave flyover expanded/minimized as-is.
     document.querySelectorAll('.roster-tile').forEach(t => t.classList.remove('is-pen'));
     penId = null;
     persistPen(null);
     highlightPenSlots(null);
-    setFlyoverMinimized(true);
     return;
   }
   document.querySelectorAll('.roster-tile').forEach(t => t.classList.remove('is-pen'));

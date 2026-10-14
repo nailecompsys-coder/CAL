@@ -9,6 +9,12 @@ This is Don's current scheduling rule set for the master calendar, the surgeon a
 - Do not generate baseline OR or clinic blocks on weekends. On weekends a surgeon is only on call, covering for someone, or OFF; Epic assigns no OR or clinic cases. A weekend OR or clinic line on a fax is a misread and must never be placed on the schedule.
 - A source may fill NA when its surgeon, time, and location are credible. Surgeons can roam to familiar facilities and assist others. An unused NA remains visible as NA; do not invent scheduled work or turn it into formal leave. An NA assignment is not automatically an error.
 
+## Who puts the day on the schedule
+
+- Epic sends the fax. CAL ingests it. That fax is the only schedule that arrives every day. Surgeons see the saved card lines on their phones.
+- Aprima sends meetings and Surgery One patients. It does not replace the Epic fax.
+- Shannon adds meetings, days off, and the call schedule. The office does not add clinic visits or surgical cases.
+
 ## Source overlay
 
 - A newly **applied** Epic/Desk fax supersedes older applied faxes for the surgeon/dates in its snapshot. Old fax rows remain history, not a second layer of current cases. The live app reads saved database facts, not all fax files.
@@ -33,7 +39,7 @@ This is Don's current scheduling rule set for the master calendar, the surgeon a
 ## Ownership and acceptance checks
 
 - SQL determines which facts belong to a surgeon/day, deduplicates them, calculates counts and conflicts, and orders the result. Python only maps those database results into the API response. The existing iPhone views consume that response.
-- The phone, the office calendar, the scheduler day counts, Block OR case lists, block warnings, and the website patient lookup read `schedule_card_activities`. A surgery shows for a surgeon only when that surgeon has an active line on a card. Typing a case onto a block writes that same table. The older `surgical_cases` rows are not a second schedule.
+- The phone, the office calendar, the scheduler day counts, Block OR case lists, block warnings, and the website patient lookup read `schedule_card_activities`. A surgery shows for a surgeon only when that surgeon has an active line on a card. The older `surgical_cases` rows are not a second schedule.
 - Before saying a fax/display issue is fixed, trace representative **latest applied** fax rows through the saved case or clinic activity, permanent AM/PM card, and native API. Check a fixed block, NA, OFF, approved partial leave, assistance, group capacity, and weekend call. Compare current versus archived fax data separately.
 - Never claim all phone screens are correct solely because rows exist in PostgreSQL. Verify the API response and, for visual claims, the actual client view.
 

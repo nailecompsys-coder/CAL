@@ -5,7 +5,7 @@ This tracked file records verified production facts and unfinished work. Update 
 ## Production
 
 - October 14: TestFlight **2.0 (29)** uploaded (delivery UUID `230ea9b1-ac6a-42ef-8c22-9df382f02c4a`) — Week cards keep meetings/extra places off the AM/PM schedule line.
-- October 14: production `/opt/cal` runs `7e3c05f`; `/health` ok, version 2.0. Call Builder — roster legend restored; weekend counts Fri–Sun; selecting a roster card mint-highlights that surgeon’s on-call days. Live Dec check: CJ 2/1 (Friday counted), OK 6/3, LW 7/2.
+- October 14: production Call Builder — roster legend restored; weekend counts Fri–Sun; selecting a roster card mint-highlights only that surgeon’s WG/ALT slots (day cells stay plain; click again clears).
 - October 14: Who’s Out Gantt — half-day OFF light blue; timed AM left / PM right half-cell; reason-only Partial Day full-width blue. Meetings-table rows serialize as `type=meeting`.
 - October 14: TestFlight **2.0 (28)** uploaded (delivery UUID `1ff07a59-e0d4-4795-aabf-7434fed72a9c`) — Month chip: centered date, C/O/M, Call WG · ALT on the bottom.
 - October 13 (late): TestFlight **2.0 (27)** uploaded (delivery UUID `2f24914e-7eca-41d9-82f0-2a4f5a79928c`) — Month Call initials no longer vanish after day 9 (equal WG/day/ALT columns). Prod API at `e013c2b`.

@@ -21,7 +21,6 @@ from .models import (
     ScheduleCard,
     ScheduleCardActivity,
     Surgeon,
-    SurgicalCase,
 )
 
 
@@ -50,7 +49,6 @@ def active_surgical_lines(
     day: date | None = None,
     session: str | None = None,
     exclude_activity_id: int | None = None,
-    exclude_surgical_case_id: int | None = None,
 ) -> list[ScheduleCardActivity]:
     """One row per surgeon, day, and identity. Phones and the website read this list."""
     if surgeon_ids is not None and not surgeon_ids:
@@ -74,11 +72,6 @@ def active_surgical_lines(
         query = query.filter(ScheduleCardActivity.session == session)
     if exclude_activity_id is not None:
         query = query.filter(ScheduleCardActivity.id != exclude_activity_id)
-    if exclude_surgical_case_id is not None:
-        query = query.filter(
-            ScheduleCardActivity.surgical_case_id.is_(None)
-            | (ScheduleCardActivity.surgical_case_id != exclude_surgical_case_id)
-        )
     rows = query.order_by(
         ScheduleCardActivity.activity_date,
         ScheduleCardActivity.start_time,
@@ -112,7 +105,6 @@ def _upsert_activity(
     room_text: str | None = None,
     location_id: int | None = None,
     is_active: bool = True,
-    surgical_case_id: int | None = None,
     fax_ingest_row_id: int | None = None,
     aprima_appointment_id: str | None = None,
     or_block_instance_id: int | None | object = _LEAVE_BLOCK,
@@ -137,7 +129,6 @@ def _upsert_activity(
     row.room_text = (room_text or "").strip() or None
     row.identity_key = _identity(row.patient_name, start_time, activity_type)
     row.is_active = is_active
-    row.surgical_case_id = surgical_case_id
     row.fax_ingest_row_id = fax_ingest_row_id
     row.aprima_appointment_id = aprima_appointment_id
     if or_block_instance_id is not _LEAVE_BLOCK:
@@ -170,50 +161,6 @@ def resolve_schedule_card(
     if session not in {"am", "pm"}:
         session = "pm" if start_time and start_time >= time(12, 0) else "am"
     return next((row for row in candidates if row.session == session), None)
-
-
-def normalize_surgical_case_card(db: Session, case: SurgicalCase) -> ScheduleCard | None:
-    if case.id is None:
-        db.flush()
-    card = db.get(ScheduleCard, case.schedule_card_id) if case.schedule_card_id else None
-    if card and (card.surgeon_id != case.surgeon_id or card.date != case.date):
-        card = None
-    if card is None:
-        card = resolve_schedule_card(
-            db,
-            surgeon_id=case.surgeon_id,
-            day=case.date,
-            location_id=case.location_id,
-            start_time=case.start_time,
-        )
-    case.schedule_card_id = card.id if card else None
-    if card:
-        _upsert_activity(
-            db,
-            source_system="surgical_case",
-            source_record_key=str(case.id),
-            card=card,
-            activity_type="surgical",
-            start_time=case.start_time,
-            end_time=case.end_time,
-            patient_name=case.patient_name,
-            procedure=case.procedure,
-            room_text=case.room_text,
-            location_id=case.location_id,
-            is_active=(case.status or "scheduled") != "cancelled",
-            surgical_case_id=case.id,
-            or_block_instance_id=case.or_block_instance_id,
-        )
-    else:
-        deactivate_surgical_case_activity(db, case.id)
-    return card
-
-
-def deactivate_surgical_case_activity(db: Session, case_id: int) -> None:
-    db.query(ScheduleCardActivity).filter(
-        ScheduleCardActivity.source_system == "surgical_case",
-        ScheduleCardActivity.source_record_key == str(case_id),
-    ).update({ScheduleCardActivity.is_active: False}, synchronize_session=False)
 
 
 def normalize_aprima_payload(
@@ -371,9 +318,6 @@ def reconcile_applied_fax_versions(db: Session) -> int:
 
 def backfill_normalized_schedule_activity(db: Session) -> dict[str, int]:
     surgical = aprima = 0
-    for case in db.query(SurgicalCase).all():
-        if normalize_surgical_case_card(db, case):
-            surgical += 1
     for cached in db.query(AprimaCachedAppointment).filter(
         AprimaCachedAppointment.activity_type.is_(None),
     ).all():

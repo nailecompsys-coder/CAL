@@ -11,7 +11,16 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.admin_surgical_schedule_service import add_surgical_case
-from app.models import Base, Location, ORBlockAssignment, ORBlockInstance, Surgeon, SurgicalCase
+from app.models import (
+    Base,
+    Location,
+    ORBlockAssignment,
+    ORBlockInstance,
+    ScheduleCard,
+    ScheduleCardActivity,
+    ScheduleCardWeek,
+    Surgeon,
+)
 
 
 class SurgicalCaseWriteGuardrailsTest(unittest.TestCase):
@@ -60,6 +69,23 @@ class SurgicalCaseWriteGuardrailsTest(unittest.TestCase):
             start_time=time(7, 15),
             case_count=1,
         ))
+        week = ScheduleCardWeek(
+            surgeon_id=self.surgeon.id,
+            week_start=date(2026, 9, 14),
+            master_revision="test",
+        )
+        self.db.add(week)
+        self.db.flush()
+        self.db.add(ScheduleCard(
+            week_id=week.id,
+            surgeon_id=self.surgeon.id,
+            date=date(2026, 9, 16),
+            session="am",
+            baseline_state="assigned",
+            effective_state="assigned",
+            baseline_location_id=self.mn_or.id,
+            effective_location_id=self.mn_or.id,
+        ))
         self.db.commit()
 
     def tearDown(self):
@@ -95,7 +121,7 @@ class SurgicalCaseWriteGuardrailsTest(unittest.TestCase):
                 self._fields(location_id=self.cbo.id, room_text="CBO"),
                 notify=False,
             )
-        self.assertEqual(self.db.query(SurgicalCase).count(), 0)
+        self.assertEqual(self.db.query(ScheduleCardActivity).count(), 0)
 
     def test_case_without_matching_static_block_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "assigned static Block OR"):
@@ -104,7 +130,7 @@ class SurgicalCaseWriteGuardrailsTest(unittest.TestCase):
                 self._fields(start_time=time(13, 0)),
                 notify=False,
             )
-        self.assertEqual(self.db.query(SurgicalCase).count(), 0)
+        self.assertEqual(self.db.query(ScheduleCardActivity).count(), 0)
 
     def test_same_time_collision_is_rejected(self):
         add_surgical_case(self.db, self._fields(), notify=False)
@@ -114,7 +140,7 @@ class SurgicalCaseWriteGuardrailsTest(unittest.TestCase):
                 self._fields(patient_name="Second, Patient"),
                 notify=False,
             )
-        self.assertEqual(self.db.query(SurgicalCase).count(), 1)
+        self.assertEqual(self.db.query(ScheduleCardActivity).count(), 1)
 
 
 if __name__ == "__main__":

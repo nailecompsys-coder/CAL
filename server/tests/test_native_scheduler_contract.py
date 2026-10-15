@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.auth_tokens import ALGORITHM, SECRET_KEY
 from app.models import (
-    AdminUser, Base, Location, ScheduleCard, ScheduleCardActivity, ScheduleCardWeek, Surgeon, SurgicalCase,
+    AdminUser, Base, Location, ScheduleCard, ScheduleCardActivity, ScheduleCardWeek, Surgeon,
 )
 from app.or_block_service import BlockORCreateInput, assign_block, create_or_blocks
 from app.routers.native_scheduler_api import (
@@ -136,18 +136,6 @@ class NativeSchedulerContractTest(unittest.TestCase):
                 start_time=time(7, 30), end_time=time(8, 30), patient_name="Card Patient",
                 procedure="Card procedure", source_system="fax", source_record_key="home-line",
                 identity_key="card-patient-0730", is_active=True,
-            ))
-            db.add(SurgicalCase(
-                surgeon_id=surgeon.id,
-                or_block_instance_id=block_id,
-                date=block_day,
-                start_time=time(7, 30),
-                end_time=time(8, 30),
-                patient_name="Private Patient",
-                patient_dob="1/1/1950",
-                patient_phone="4075550100",
-                procedure="Private procedure",
-                location_id=hospital.id,
             ))
             db.commit()
 
@@ -287,16 +275,6 @@ class NativeSchedulerContractTest(unittest.TestCase):
                 start_time=time(7, 15), patient_name="Card Patient", procedure="Hernia",
                 source_system="fax", source_record_key="clear-line", identity_key="clear-line",
             ))
-            db.add(SurgicalCase(
-                surgeon_id=surgeon.id,
-                or_block_instance_id=block_id,
-                date=block_day,
-                start_time=time(8, 15),
-                patient_name="Old List Only",
-                procedure="Ignored",
-                location_id=hospital.id,
-                status="scheduled",
-            ))
             db.commit()
 
             with self.assertRaises(HTTPException) as raised:
@@ -327,16 +305,6 @@ class NativeSchedulerContractTest(unittest.TestCase):
                 recurrence="once",
             ), admin_id=admin.id)["instance_ids"][0]
             assign_block(db, block_id, surgeon.id, admin.id, assigned_start_time=time(7, 15), case_count=1)
-            db.add(SurgicalCase(
-                surgeon_id=surgeon.id,
-                or_block_instance_id=block_id,
-                date=block_day,
-                start_time=time(7, 15),
-                patient_name="Old List Only",
-                procedure="Ignored",
-                location_id=hospital.id,
-                status="scheduled",
-            ))
             db.commit()
 
             payload = scheduler_clear_block_assignment(block_id, db=db, admin=admin)

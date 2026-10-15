@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy.orm import Session, joinedload
 
 from .admin_schedule_template_clinic_service import week_pattern_matches
-from .models import AdminNotification, ClinicSchedule, ORBlockInstance, Surgeon, SurgicalCase, SurgeonLocationSchedule
+from .models import AdminNotification, ClinicSchedule, ORBlockInstance, ScheduleCardActivity, Surgeon, SurgeonLocationSchedule
 from .or_block_service import (
     ACTIVE_BLOCK_STATUSES,
     block_instances_for_range,
@@ -42,11 +42,11 @@ def _session_for_time(value: time | None) -> str | None:
     return "am" if value < time(12, 0) else "pm"
 
 
-def _classify_parked_case(db: Session, case: SurgicalCase) -> dict[str, str]:
+def _classify_parked_case(db: Session, case: ScheduleCardActivity) -> dict[str, str]:
     surgeon = case.surgeon
     loc = case.location
     initials = (surgeon.initials or "").strip().upper() if surgeon else ""
-    day = case.date
+    day = case.activity_date
     session = _session_for_time(case.start_time)
     location_abbrev = (loc.abbreviation or loc.name or "").strip().upper() if loc else ""
     if not initials or day is None or session is None:
@@ -111,46 +111,45 @@ def parked_ingest_cases(
     start = start or (today - timedelta(days=3))
     end = end or (today + timedelta(days=45))
     q = (
-        db.query(SurgicalCase)
+        db.query(ScheduleCardActivity)
         .options(
-            joinedload(SurgicalCase.surgeon),
-            joinedload(SurgicalCase.location),
+            joinedload(ScheduleCardActivity.surgeon),
+            joinedload(ScheduleCardActivity.location),
         )
         .filter(
-            SurgicalCase.or_block_instance_id.is_(None),
-            SurgicalCase.status != "cancelled",
-            SurgicalCase.date >= start,
-            SurgicalCase.date <= end,
+            ScheduleCardActivity.or_block_instance_id.is_(None),
+            ScheduleCardActivity.is_active == True,  # noqa: E712
+            ScheduleCardActivity.activity_type == "surgical",
+            ScheduleCardActivity.activity_date >= start,
+            ScheduleCardActivity.activity_date <= end,
         )
-        .order_by(SurgicalCase.date, SurgicalCase.start_time, SurgicalCase.id)
+        .order_by(ScheduleCardActivity.activity_date, ScheduleCardActivity.start_time, ScheduleCardActivity.id)
     )
     if case_id is not None:
         q = (
-            db.query(SurgicalCase)
+            db.query(ScheduleCardActivity)
             .options(
-                joinedload(SurgicalCase.surgeon),
-                joinedload(SurgicalCase.location),
+                joinedload(ScheduleCardActivity.surgeon),
+                joinedload(ScheduleCardActivity.location),
             )
-            .filter(SurgicalCase.id == case_id, SurgicalCase.status != "cancelled")
+            .filter(
+                ScheduleCardActivity.id == case_id,
+                ScheduleCardActivity.is_active == True,  # noqa: E712
+                ScheduleCardActivity.activity_type == "surgical",
+            )
         )
     rows = []
     for case in q.all():
-        if case_id is None and case.or_block_instance_id:
-            continue
         if case_id is None and case.or_block_instance_id is not None:
             continue
-        # Prefer desk-sourced; also include any orphan without a block in range.
-        notes = case.notes or ""
-        if case_id is None and "Desk fax" not in notes and case.or_block_instance_id is None:
-            # Still show orphans — Shannon may have cleared the note.
-            pass
+        notes = ""
         loc = case.location
         surgeon = case.surgeon
         reason = _classify_parked_case(db, case)
         rows.append({
             "id": case.id,
-            "date": case.date.isoformat() if case.date else None,
-            "dateLabel": _us_date_label(case.date),
+            "date": case.activity_date.isoformat() if case.activity_date else None,
+            "dateLabel": _us_date_label(case.activity_date),
             "startTime": case.start_time.strftime("%H:%M") if case.start_time else "",
             "patientName": case.patient_name,
             "procedure": (case.procedure or "")[:80],
@@ -245,14 +244,14 @@ def save_ingest_placements(
         except (TypeError, ValueError):
             errors.append("Invalid case/block id")
             continue
-        case = db.get(SurgicalCase, case_id)
+        case = db.get(ScheduleCardActivity, case_id)
         block = (
             db.query(ORBlockInstance)
             .options(joinedload(ORBlockInstance.location))
             .filter(ORBlockInstance.id == block_id)
             .first()
         )
-        if case is None or (case.status or "") == "cancelled":
+        if case is None or not case.is_active or case.activity_type != "surgical":
             errors.append(f"Case {case_id} missing")
             continue
         if block is None or (block.status or "") not in ACTIVE_BLOCK_STATUSES:
@@ -291,8 +290,26 @@ def save_ingest_placements(
             )
             continue
 
-        case.surgeon_id = surgeon_id
-        case.date = block.date
+        from .schedule_activity_normalization import resolve_schedule_card
+
+        session = (block.session or "").lower()
+        if session not in {"am", "pm"}:
+            session = "pm" if start >= time(12, 0) else "am"
+        card = resolve_schedule_card(
+            db,
+            surgeon_id=surgeon_id,
+            day=block.date,
+            location_id=block.location_id,
+            start_time=start,
+            preferred_session=session,
+        )
+        if card is None:
+            errors.append(f"Case {case_id}: no morning or afternoon card for that day")
+            continue
+        case.schedule_card_id = card.id
+        case.surgeon_id = card.surgeon_id
+        case.activity_date = card.date
+        case.session = card.session
         case.start_time = start
         case.or_block_instance_id = block.id
         case.location_id = block.location_id
@@ -323,12 +340,10 @@ def _clear_case_ingest_notifications(db: Session, *, case_id: int) -> None:
 
 
 def dismiss_parked_case(db: Session, *, case_id: int) -> bool:
-    case = db.get(SurgicalCase, case_id)
-    if case is None:
+    case = db.get(ScheduleCardActivity, case_id)
+    if case is None or case.activity_type != "surgical":
         return False
-    case.status = "cancelled"
-    from .schedule_activity_normalization import normalize_surgical_case_card
-    normalize_surgical_case_card(db, case)
+    case.is_active = False
     _clear_case_ingest_notifications(db, case_id=case_id)
     db.commit()
     return True
@@ -336,30 +351,30 @@ def dismiss_parked_case(db: Session, *, case_id: int) -> bool:
 
 def confirm_blank_slot_card(db: Session, *, case_id: int, session: str) -> dict[str, Any]:
     """Explicit scheduler exception: create one dated OR card from a blank slot."""
-    case = db.get(SurgicalCase, case_id)
+    case = db.get(ScheduleCardActivity, case_id)
     session = (session or "").lower()
-    if case is None or case.status == "cancelled" or session not in {"am", "pm"}:
+    if case is None or not case.is_active or case.activity_type != "surgical" or session not in {"am", "pm"}:
         return {"ok": False, "reason": "Case or time slot is invalid."}
     if case.location is None or case.location.location_type != "hospital":
         return {"ok": False, "reason": "A blank-slot confirmation requires a hospital OR case."}
     existing = db.query(ClinicSchedule).filter(
         ClinicSchedule.surgeon_id == case.surgeon_id,
-        ClinicSchedule.date == case.date,
+        ClinicSchedule.date == case.activity_date,
         ClinicSchedule.session == session,
     ).first()
     if existing is not None:
         return {"ok": False, "reason": "That time slot already has a card."}
     db.add(ClinicSchedule(
-        surgeon_id=case.surgeon_id, location_id=case.location_id, date=case.date,
+        surgeon_id=case.surgeon_id, location_id=case.location_id, date=case.activity_date,
         session=session, assignment_type="assigned", notes="Confirmed blank-slot OR exception",
     ))
-    placed = _place_or_block(db, case.surgeon, case.date, session, case.location)
+    placed = _place_or_block(db, case.surgeon, case.activity_date, session, case.location)
     if placed not in {"assigned", "already"}:
         db.rollback()
         return {"ok": False, "reason": "No OR block could be created for this confirmed slot."}
     result = save_ingest_placements(db, placements=[{"caseId": case.id, "blockId": next(
         row.id for row in db.query(ORBlockInstance).filter(
-            ORBlockInstance.date == case.date, ORBlockInstance.location_id == case.location_id
+            ORBlockInstance.date == case.activity_date, ORBlockInstance.location_id == case.location_id
         ).all() if (row.session or "").lower() == session and any(a.surgeon_id == case.surgeon_id for a in row.assignments)
     )}])
     return {"ok": result.get("placed") == 1, "reason": "; ".join(result.get("errors") or [])}

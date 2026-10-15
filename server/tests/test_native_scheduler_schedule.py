@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.models import (
     Base, CallBackup, CallCoverage, CallGroup, CallRotation, ClinicSchedule, DayOff, Location, ScheduleCard, ScheduleCardActivity,
-    ScheduleCardWeek, Surgeon, SurgicalCase,
+    ScheduleCardWeek, Surgeon,
 )
 from app.native_scheduler_schedule import scheduler_schedule
 
@@ -67,12 +67,6 @@ class NativeSchedulerScheduleTest(unittest.TestCase):
                 start_time=time(9), end_time=time(10), patient_name="Case Patient",
                 procedure="Procedure", source_system="fax", source_record_key="case-1",
                 identity_key="case-patient-0900", is_active=True,
-            ),
-            SurgicalCase(
-                surgeon_id=primary.id, assisting_surgeon_id=assistant.id, date=monday,
-                start_time=time(9), end_time=time(10), patient_name="Old List Patient",
-                procedure="Old procedure", location_id=hospital.id, schedule_card_id=am.id,
-                status="scheduled", or_block_instance_id=None,
             ),
             ScheduleCardActivity(
                 schedule_card_id=pm.id, surgeon_id=primary.id, location_id=clinic.id,

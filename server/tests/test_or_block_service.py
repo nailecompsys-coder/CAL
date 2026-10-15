@@ -25,7 +25,6 @@ from app.models import (
     ScheduleCardWeek,
     ScheduleChangeEvent,
     Surgeon,
-    SurgicalCase,
 )
 from app.or_block_service import (
     BlockORCreateInput,
@@ -505,15 +504,6 @@ class ORBlockServiceTest(unittest.TestCase):
             db.add_all([
                 ClinicSchedule(surgeon_id=surgeon.id, location_id=clinic.id, date=block_day, session="am"),
                 DayOff(surgeon_id=surgeon.id, start_date=block_day, end_date=block_day, status="approved"),
-                SurgicalCase(
-                    surgeon_id=surgeon.id,
-                    date=block_day,
-                    start_time=time(8, 0),
-                    end_time=time(9, 0),
-                    patient_name="Hidden Patient",
-                    procedure="Hidden procedure",
-                    location_id=hospital.id,
-                ),
             ])
             db.commit()
 
@@ -539,16 +529,6 @@ class ORBlockServiceTest(unittest.TestCase):
             day = date.today() + timedelta(days=14)
             while day.weekday() != 2:
                 day += timedelta(days=1)
-            db.add(SurgicalCase(
-                surgeon_id=surgeon.id,
-                date=day,
-                start_time=time(8, 0),
-                end_time=time(9, 0),
-                patient_name="Old List Patient",
-                procedure="Old",
-                location_id=clinic.id,
-                status="scheduled",
-            ))
             db.commit()
             target = {
                 "type": "meeting",
@@ -606,15 +586,6 @@ class ORBlockServiceTest(unittest.TestCase):
             surgeon = self._surgeon(db, "Lucy", "Woodley")
             hospital = self._location(db, "Advent Winter Garden", "WG")
             day = date.today() + timedelta(days=3)
-            db.add(SurgicalCase(
-                surgeon_id=surgeon.id,
-                date=day,
-                start_time=time(9, 0),
-                patient_name="Oldlist, Pat",
-                procedure="Old",
-                location_id=hospital.id,
-                status="scheduled",
-            ))
             db.commit()
             self.assertIsNone(patient_from_question(db, "where is Oldlist"))
 
@@ -681,16 +652,6 @@ class ORBlockServiceTest(unittest.TestCase):
                 location_id=clinic.id,
                 date=block_day,
                 session="pm",
-            ))
-            db.add(SurgicalCase(
-                surgeon_id=surgeon.id,
-                date=block_day,
-                start_time=time(11, 30),
-                end_time=time(12, 30),
-                patient_name="Late AM case",
-                procedure="Hernia",
-                location_id=hospital.id,
-                or_block_instance_id=block_id,
             ))
             db.commit()
 
@@ -798,7 +759,10 @@ class ORBlockServiceTest(unittest.TestCase):
             lines = active_surgical_lines(db, surgeon_id=surgeon.id, day=block_day)
             self.assertEqual(len(lines), 1)
             self.assertEqual(lines[0].or_block_instance_id, block_id)
-            self.assertEqual(db.query(SurgicalCase).count(), 0)
+            self.assertEqual(
+                db.query(ScheduleCardActivity).filter_by(source_system="block_or").count(),
+                1,
+            )
             self.assertFalse(any("on call" in row.lower() for row in warnings))
             with self.assertRaisesRegex(ValueError, "already has a case"):
                 add_case_to_block(
@@ -1187,18 +1151,6 @@ class ORBlockServiceTest(unittest.TestCase):
                 recurrence="once",
             ))["instance_ids"][0]
             assign_block(db, block_id, surgeon.id)
-            db.add(SurgicalCase(
-                surgeon_id=surgeon.id,
-                or_block_instance_id=block_id,
-                date=block_day,
-                start_time=time(7, 30),
-                end_time=time(8, 30),
-                patient_name="Do Not Show",
-                patient_dob="1/1/1960",
-                patient_phone="4075550100",
-                procedure="Private procedure",
-                location_id=hospital.id,
-            ))
             db.commit()
 
             payload = scheduler_native_home(db, block_day, block_day)
@@ -1319,28 +1271,8 @@ class ORBlockServiceTest(unittest.TestCase):
                 start_time=time(12, 30),
                 case_count=2,
             ))
-            db.add(SurgicalCase(
-                surgeon_id=cj.id,
-                date=day,
-                start_time=time(7, 15),
-                patient_name="AM Patient",
-                procedure="AM case",
-                location_id=hospital.id,
-                or_block_instance_id=block.id,
-                room_text="APK S05",
-                status="scheduled",
-            ))
-            db.add(SurgicalCase(
-                surgeon_id=lw.id,
-                date=day,
-                start_time=time(12, 30),
-                patient_name="PM Patient",
-                procedure="PM case",
-                location_id=hospital.id,
-                or_block_instance_id=block.id,
-                room_text="APK S03",
-                status="scheduled",
-            ))
+            self._room_line(db, cj, hospital, day, time(7, 15), block.id, "AM Patient", "APK S05")
+            self._room_line(db, lw, hospital, day, time(12, 30), block.id, "PM Patient", "APK S03")
             db.commit()
 
             ensure_am_pm_split_for_range(db, day, day)
@@ -1389,16 +1321,7 @@ class ORBlockServiceTest(unittest.TestCase):
                 start_time=time(12, 30),
                 case_count=1,
             ))
-            db.add(SurgicalCase(
-                surgeon_id=nadia.id,
-                date=day,
-                start_time=time(12, 30),
-                patient_name="Fax Patient",
-                procedure="Hernia",
-                location_id=hospital.id,
-                or_block_instance_id=sliver.id,
-                status="scheduled",
-            ))
+            self._room_line(db, nadia, hospital, day, time(12, 30), sliver.id, "Fax Patient", "")
             db.commit()
 
             result = collapse_extra_am_pm_cards(db, start=day, end=day)
@@ -1412,10 +1335,52 @@ class ORBlockServiceTest(unittest.TestCase):
             assignment = db.query(ORBlockAssignment).one()
             self.assertEqual(assignment.block_instance_id, host.id)
             self.assertEqual(assignment.surgeon_id, nadia.id)
-            case = db.query(SurgicalCase).one()
+            case = db.query(ScheduleCardActivity).one()
             self.assertEqual(case.or_block_instance_id, host.id)
         finally:
             db.close()
+
+    def _room_line(self, db, surgeon, hospital, day, start, block_id, patient, room):
+        session = "pm" if start >= time(12, 0) else "am"
+        monday = day - timedelta(days=day.weekday())
+        week = db.query(ScheduleCardWeek).filter_by(surgeon_id=surgeon.id, week_start=monday).one_or_none()
+        if week is None:
+            week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=monday, master_revision="test")
+            db.add(week)
+            db.flush()
+        card = db.query(ScheduleCard).filter_by(surgeon_id=surgeon.id, date=day, session=session).one_or_none()
+        if card is None:
+            card = ScheduleCard(
+                week_id=week.id,
+                surgeon_id=surgeon.id,
+                date=day,
+                session=session,
+                baseline_state="assigned",
+                effective_state="assigned",
+                baseline_location_id=hospital.id,
+                effective_location_id=hospital.id,
+            )
+            db.add(card)
+            db.flush()
+        line = ScheduleCardActivity(
+            schedule_card_id=card.id,
+            surgeon_id=surgeon.id,
+            location_id=hospital.id,
+            activity_date=day,
+            session=session,
+            activity_type="surgical",
+            start_time=start,
+            patient_name=patient,
+            procedure="Case",
+            room_text=room or None,
+            source_system="fax",
+            source_record_key=f"{surgeon.id}-{start.strftime('%H%M')}-{patient}",
+            identity_key=f"{patient}-{start.strftime('%H%M')}",
+            or_block_instance_id=block_id,
+            is_active=True,
+        )
+        db.add(line)
+        return line
 
     def _am_card(self, db, surgeon, hospital, day):
         week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=day)

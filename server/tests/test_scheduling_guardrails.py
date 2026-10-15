@@ -24,7 +24,6 @@ from app.models import (
     ScheduleCardWeek,
     Surgeon,
     SurgicalBlock,
-    SurgicalCase,
 )
 from app.scheduling_guardrails_service import (
     clinic_group_day_off_findings,
@@ -144,15 +143,6 @@ class SchedulingGuardrailsTest(unittest.TestCase):
                 patient="Overlap Patient", procedure="Second demo procedure",
                 location_id=hospital.id, key="overlap",
             )
-            db.add(SurgicalCase(
-                surgeon_id=surgeon.id,
-                date=case_day,
-                start_time=time(16, 0),
-                patient_name="Old List Only",
-                procedure="Old list procedure",
-                location_id=hospital.id,
-                status="scheduled",
-            ))
             db.commit()
 
             warnings = surgical_case_warning_messages(
@@ -231,16 +221,6 @@ class SchedulingGuardrailsTest(unittest.TestCase):
                 db, card, start=time(9, 45), patient="Cruz Mejia, Cristina",
                 procedure="Incisional", location_id=ap_or.id, block_id=block.id, key="incisional",
             )
-            db.add(SurgicalCase(
-                surgeon_id=surgeon.id,
-                date=case_day,
-                start_time=time(10, 0),
-                patient_name="Old List Only",
-                procedure="Old list procedure",
-                location_id=ap_or.id,
-                or_block_instance_id=block.id,
-                status="scheduled",
-            ))
             db.commit()
 
             for start in (time(8, 30), time(9, 45)):
@@ -347,17 +327,6 @@ class SchedulingGuardrailsTest(unittest.TestCase):
                 location_id=clinic.id,
                 date=case_day,
                 session="pm",
-            ))
-            db.add(SurgicalCase(
-                surgeon_id=surgeon.id,
-                date=case_day,
-                start_time=time(11, 30),
-                end_time=time(12, 30),
-                patient_name="Last AM case",
-                procedure="Hernia",
-                location_id=hospital.id,
-                or_block_instance_id=block.id,
-                status="scheduled",
             ))
             db.commit()
 

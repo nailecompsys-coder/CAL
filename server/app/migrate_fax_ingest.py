@@ -254,5 +254,8 @@ def run_migration() -> None:
         conn.execute(text("ALTER TABLE fax_documents ADD COLUMN IF NOT EXISTS source_path TEXT"))
         conn.execute(text("ALTER TABLE fax_documents ADD COLUMN IF NOT EXISTS page_count INTEGER"))
         conn.execute(text("ALTER TABLE fax_ingest_runs ADD COLUMN IF NOT EXISTS surgeon_scope_json TEXT NOT NULL DEFAULT '[]'"))
+        old_list = conn.execute(text("SELECT to_regclass('public.surgical_cases')")).scalar()
         for statement in POSTGRES_RULES:
+            if not old_list and "ON surgical_cases" in statement:
+                continue
             conn.execute(text(statement))

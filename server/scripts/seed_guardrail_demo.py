@@ -32,9 +32,11 @@ from app.models import (  # noqa: E402
     MeetingAttendee,
     MagicLink,
     NativeScheduleAlert,
+    ScheduleCard,
+    ScheduleCardActivity,
+    ScheduleCardWeek,
     Surgeon,
     SurgicalBlock,
-    SurgicalCase,
 )
 from app.routers.surgeon_otp import _hash_otp  # noqa: E402
 from app.scheduling_guardrails_service import store_dayoff_findings  # noqa: E402
@@ -118,6 +120,51 @@ def clinic_group(db, name, abbreviation, max_off) -> ClinicGroup:
     return row
 
 
+def demo_surgery_line(db, doc, place, day, start, end, procedure, key):
+    session = "pm" if start >= time(12, 0) else "am"
+    week_start = day - timedelta(days=day.weekday())
+    week = db.query(ScheduleCardWeek).filter_by(
+        surgeon_id=doc.id, week_start=week_start,
+    ).first()
+    if not week:
+        week = ScheduleCardWeek(
+            surgeon_id=doc.id, week_start=week_start, master_revision="demo",
+        )
+        db.add(week)
+        db.flush()
+    card = db.query(ScheduleCard).filter_by(
+        surgeon_id=doc.id, date=day, session=session,
+    ).first()
+    if not card:
+        card = ScheduleCard(
+            week_id=week.id,
+            surgeon_id=doc.id,
+            date=day,
+            session=session,
+            baseline_state="assigned",
+            effective_state="assigned",
+            baseline_location_id=place.id,
+            effective_location_id=place.id,
+        )
+        db.add(card)
+        db.flush()
+    db.add(ScheduleCardActivity(
+        schedule_card_id=card.id,
+        surgeon_id=doc.id,
+        location_id=place.id,
+        activity_date=day,
+        session=session,
+        activity_type="surgical",
+        start_time=start,
+        end_time=end,
+        patient_name="DEMO HIDDEN",
+        procedure=procedure,
+        source_system="portal",
+        source_record_key=key,
+        identity_key=f"demohidden|{start.strftime('%H:%M:%S')}|{key}",
+    ))
+
+
 def assign_group(db, group, surgeons):
     for s in surgeons:
         exists = db.query(ClinicGroupMember).filter(
@@ -195,28 +242,14 @@ def seed():
             recurrence="weekly",
             notes="Demo block clear in AM",
         ))
-        db.add_all([
-            SurgicalCase(
-                surgeon_id=block_doc.id,
-                date=block_day,
-                start_time=time(8, 0),
-                end_time=time(8, 45),
-                patient_name="DEMO HIDDEN",
-                procedure="Demo clear in-block case",
-                location_id=wg_or.id,
-                status="scheduled",
-            ),
-            SurgicalCase(
-                surgeon_id=block_doc.id,
-                date=block_day,
-                start_time=time(15, 0),
-                end_time=time(15, 45),
-                patient_name="DEMO HIDDEN",
-                procedure="Demo outside block warning",
-                location_id=wg_or.id,
-                status="scheduled",
-            ),
-        ])
+        demo_surgery_line(
+            db, block_doc, wg_or, block_day, time(8, 0), time(8, 45),
+            "Demo clear in-block case", "demo-in-block",
+        )
+        demo_surgery_line(
+            db, block_doc, wg_or, block_day, time(15, 0), time(15, 45),
+            "Demo outside block warning", "demo-outside-block",
+        )
         db.add(ClinicSchedule(
             surgeon_id=block_doc.id,
             location_id=main_office.id,
@@ -232,16 +265,11 @@ def seed():
             reason="Demo approved off for case warning",
             status="approved",
         ))
-        db.add(SurgicalCase(
-            surgeon_id=block_doc.id,
-            date=block_day + timedelta(days=1),
-            start_time=time(9, 0),
-            end_time=time(9, 45),
-            patient_name="DEMO HIDDEN",
-            procedure="Demo day-off overlap warning",
-            location_id=lm_or.id,
-            status="scheduled",
-        ))
+        demo_surgery_line(
+            db, block_doc, lm_or, block_day + timedelta(days=1),
+            time(9, 0), time(9, 45),
+            "Demo day-off overlap warning", "demo-day-off",
+        )
         meeting = Meeting(
             title="Demo assigned meeting",
             date=block_day + timedelta(days=2),
@@ -252,16 +280,11 @@ def seed():
         db.add(meeting)
         db.flush()
         db.add(MeetingAttendee(meeting_id=meeting.id, surgeon_id=block_doc.id))
-        db.add(SurgicalCase(
-            surgeon_id=block_doc.id,
-            date=block_day + timedelta(days=2),
-            start_time=time(10, 15),
-            end_time=time(10, 45),
-            patient_name="DEMO HIDDEN",
-            procedure="Demo meeting overlap warning",
-            location_id=wg_or.id,
-            status="scheduled",
-        ))
+        demo_surgery_line(
+            db, block_doc, wg_or, block_day + timedelta(days=2),
+            time(10, 15), time(10, 45),
+            "Demo meeting overlap warning", "demo-meeting",
+        )
         db.add(AdminUser(
             username="demo.admin",
             email=f"admin@{DEMO_DOMAIN}",

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, joinedload
 from .admin_schedule_template_clinic_service import week_pattern_matches
 from .admin_schedule_template_common import approved_off_dates
 from .ingest_fix_service import save_ingest_placements
-from .models import ClinicSchedule, ORBlockAssignment, ORBlockInstance, SurgicalCase, Surgeon, SurgeonLocationSchedule
+from .models import ClinicSchedule, ORBlockAssignment, ORBlockInstance, ScheduleCardActivity, Surgeon, SurgeonLocationSchedule
 from .or_block_service import ACTIVE_BLOCK_STATUSES, _session_bucket
 from .paper_block_schedule import _place_or_block
 from .surgeon_visibility import surgeon_is_visible
@@ -31,7 +31,7 @@ def _session_rows(db: Session, surgeon_id: int, day: date) -> dict[str, ClinicSc
     return result
 
 
-def _case_session(case: SurgicalCase) -> str | None:
+def _case_session(case: ScheduleCardActivity) -> str | None:
     if case.start_time is None:
         return None
     return "am" if case.start_time.hour < 12 else "pm"
@@ -41,14 +41,14 @@ def _campus(location) -> str:
     return ((getattr(location, "abbreviation", "") or "").split("-", 1)[0]).upper()
 
 
-def _handoff_sessions(db: Session, case: SurgicalCase) -> list[str]:
+def _handoff_sessions(db: Session, case: ScheduleCardActivity) -> list[str]:
     session = _case_session(case)
     if session != "am" or case.start_time is None or case.start_time < time(11, 30):
         return [session] if session else []
     campus = _campus(case.location)
     cards = db.query(ClinicSchedule).filter(
         ClinicSchedule.surgeon_id == case.surgeon_id,
-        ClinicSchedule.date == case.date,
+        ClinicSchedule.date == case.activity_date,
         ClinicSchedule.session == "am",
     ).all()
     for card in cards:
@@ -63,14 +63,15 @@ def _handoff_sessions(db: Session, case: SurgicalCase) -> list[str]:
 def reconcile_parked_cases_after_master_build(db: Session, *, start: date, end: date) -> dict:
     """Attach parked cases only when one existing master OR card is an exact match."""
     cases = (
-        db.query(SurgicalCase)
+        db.query(ScheduleCardActivity)
         .filter(
-            SurgicalCase.date >= start,
-            SurgicalCase.date <= end,
-            SurgicalCase.or_block_instance_id.is_(None),
-            SurgicalCase.status != "cancelled",
+            ScheduleCardActivity.activity_date >= start,
+            ScheduleCardActivity.activity_date <= end,
+            ScheduleCardActivity.or_block_instance_id.is_(None),
+            ScheduleCardActivity.is_active == True,  # noqa: E712
+            ScheduleCardActivity.activity_type == "surgical",
         )
-        .order_by(SurgicalCase.date, SurgicalCase.start_time, SurgicalCase.id)
+        .order_by(ScheduleCardActivity.activity_date, ScheduleCardActivity.start_time, ScheduleCardActivity.id)
         .all()
     )
     placements: list[dict] = []
@@ -86,7 +87,7 @@ def reconcile_parked_cases_after_master_build(db: Session, *, start: date, end: 
             db.query(ORBlockInstance)
             .join(ORBlockAssignment, ORBlockAssignment.block_instance_id == ORBlockInstance.id)
             .filter(
-                ORBlockInstance.date == case.date,
+                ORBlockInstance.date == case.activity_date,
                 ORBlockInstance.location_id == case.location_id,
                 ORBlockInstance.status.in_(tuple(ACTIVE_BLOCK_STATUSES)),
                 ORBlockAssignment.surgeon_id == case.surgeon_id,

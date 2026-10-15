@@ -201,10 +201,11 @@ def run_migration():
                   AND oba.start_time = COALESCE(obi.assigned_start_time, obi.start_time)
               )
         """))
-        conn.execute(text("""
-            ALTER TABLE surgical_cases
-            ADD COLUMN IF NOT EXISTS or_block_instance_id INTEGER REFERENCES or_block_instances(id)
-        """))
+        if conn.execute(text("SELECT to_regclass('public.surgical_cases')")).scalar():
+            conn.execute(text("""
+                ALTER TABLE surgical_cases
+                ADD COLUMN IF NOT EXISTS or_block_instance_id INTEGER REFERENCES or_block_instances(id)
+            """))
         conn.execute(text("""
             CREATE INDEX IF NOT EXISTS ix_or_block_instances_date_location
             ON or_block_instances(date, location_id)
@@ -217,10 +218,11 @@ def run_migration():
             CREATE INDEX IF NOT EXISTS ix_or_block_instances_assigned_surgeon
             ON or_block_instances(assigned_surgeon_id, date)
         """))
-        conn.execute(text("""
-            CREATE INDEX IF NOT EXISTS ix_surgical_cases_or_block_instance
-            ON surgical_cases(or_block_instance_id)
-        """))
+        if conn.execute(text("SELECT to_regclass('public.surgical_cases')")).scalar():
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS ix_surgical_cases_or_block_instance
+                ON surgical_cases(or_block_instance_id)
+            """))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS admin_otp_challenges (
                 id SERIAL PRIMARY KEY,

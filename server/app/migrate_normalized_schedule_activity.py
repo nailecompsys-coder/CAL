@@ -25,8 +25,9 @@ def run_migration() -> None:
                 END IF;
             END $$
         """))
-        conn.execute(text("ALTER TABLE surgical_cases ADD COLUMN IF NOT EXISTS schedule_card_id INTEGER REFERENCES schedule_cards(id)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_surgical_cases_schedule_card_id ON surgical_cases(schedule_card_id)"))
+        if conn.execute(text("SELECT to_regclass('public.surgical_cases')")).scalar():
+            conn.execute(text("ALTER TABLE surgical_cases ADD COLUMN IF NOT EXISTS schedule_card_id INTEGER REFERENCES schedule_cards(id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_surgical_cases_schedule_card_id ON surgical_cases(schedule_card_id)"))
         for ddl in (
             "ALTER TABLE aprima_cached_appointments ADD COLUMN IF NOT EXISTS surgeon_id INTEGER REFERENCES surgeons(id)",
             "ALTER TABLE aprima_cached_appointments ADD COLUMN IF NOT EXISTS location_id INTEGER REFERENCES locations(id)",
@@ -96,7 +97,6 @@ def run_migration() -> None:
                 room_text VARCHAR(128),
                 source_system VARCHAR(32) NOT NULL,
                 source_record_key VARCHAR(128) NOT NULL,
-                surgical_case_id INTEGER REFERENCES surgical_cases(id) ON DELETE SET NULL,
                 fax_ingest_row_id INTEGER REFERENCES fax_ingest_rows(id) ON DELETE SET NULL,
                 aprima_appointment_id VARCHAR(36) REFERENCES aprima_cached_appointments(appointment_id) ON DELETE SET NULL,
                 identity_key VARCHAR(512) NOT NULL,
@@ -108,7 +108,6 @@ def run_migration() -> None:
         """))
         for ddl in (
             "ALTER TABLE schedule_card_activities ADD COLUMN IF NOT EXISTS end_time TIME",
-            "ALTER TABLE schedule_card_activities ADD COLUMN IF NOT EXISTS surgical_case_id INTEGER REFERENCES surgical_cases(id) ON DELETE SET NULL",
             "ALTER TABLE schedule_card_activities ADD COLUMN IF NOT EXISTS fax_ingest_row_id INTEGER REFERENCES fax_ingest_rows(id) ON DELETE SET NULL",
             "ALTER TABLE schedule_card_activities ADD COLUMN IF NOT EXISTS aprima_appointment_id VARCHAR(36) REFERENCES aprima_cached_appointments(appointment_id) ON DELETE SET NULL",
             "ALTER TABLE schedule_card_activities ADD COLUMN IF NOT EXISTS or_block_instance_id INTEGER REFERENCES or_block_instances(id) ON DELETE SET NULL",
@@ -118,7 +117,6 @@ def run_migration() -> None:
             "CREATE INDEX IF NOT EXISTS ix_schedule_card_activities_activity_date ON schedule_card_activities(activity_date)",
             "CREATE INDEX IF NOT EXISTS ix_schedule_card_activities_identity_key ON schedule_card_activities(identity_key)",
             "CREATE INDEX IF NOT EXISTS ix_schedule_card_activities_is_active ON schedule_card_activities(is_active)",
-            "CREATE INDEX IF NOT EXISTS ix_schedule_card_activities_surgical_case_id ON schedule_card_activities(surgical_case_id)",
             "CREATE INDEX IF NOT EXISTS ix_schedule_card_activities_fax_ingest_row_id ON schedule_card_activities(fax_ingest_row_id)",
             "CREATE INDEX IF NOT EXISTS ix_schedule_card_activities_aprima_appointment_id ON schedule_card_activities(aprima_appointment_id)",
             "CREATE INDEX IF NOT EXISTS ix_schedule_card_activities_or_block_instance_id ON schedule_card_activities(or_block_instance_id)",
@@ -131,11 +129,6 @@ def run_migration() -> None:
 def _keep_card_as_only_deleting_parent(conn) -> None:
     """A source row may disappear. That must not delete the card line."""
     parents = (
-        (
-            "surgical_case_id",
-            "schedule_card_activities_surgical_case_id_fkey",
-            "FOREIGN KEY (surgical_case_id) REFERENCES surgical_cases(id) ON DELETE SET NULL",
-        ),
         (
             "fax_ingest_row_id",
             "schedule_card_activities_fax_ingest_row_id_fkey",

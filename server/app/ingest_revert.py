@@ -12,8 +12,8 @@ from .models import (
     AdminNotification,
     ClinicSchedule,
     ORBlockAssignment,
+    ScheduleCardActivity,
     ScheduleChangeEvent,
-    SurgicalCase,
 )
 
 _FAX_RE = re.compile(r"Desk fax\s*#\s*(\d+)", re.IGNORECASE)
@@ -42,18 +42,6 @@ def revert_desk_faxes(db: Session, fax_ids: list[int] | set[int]) -> dict[str, A
     notifs_deleted = 0
     flags_deleted = 0
 
-    for case in db.query(SurgicalCase).filter(SurgicalCase.notes.isnot(None)).all():
-        ids = desk_fax_ids_in_text(case.notes)
-        if not ids.intersection(wanted):
-            continue
-        if (case.status or "") != "cancelled":
-            case.status = "cancelled"
-            cases_cancelled += 1
-        from .schedule_activity_normalization import normalize_surgical_case_card
-        normalize_surgical_case_card(db, case)
-        # Drop block link so cancelled fax cases do not keep pills alive.
-        case.or_block_instance_id = None
-
     for row in db.query(ClinicSchedule).filter(ClinicSchedule.notes.isnot(None)).all():
         ids = desk_fax_ids_in_text(row.notes)
         if not ids.intersection(wanted):
@@ -76,28 +64,18 @@ def revert_desk_faxes(db: Session, fax_ids: list[int] | set[int]) -> dict[str, A
     )
     for assign in orphans:
         active = (
-            db.query(SurgicalCase)
+            db.query(ScheduleCardActivity)
             .filter(
-                SurgicalCase.or_block_instance_id == assign.block_instance_id,
-                SurgicalCase.surgeon_id == assign.surgeon_id,
-                SurgicalCase.status != "cancelled",
+                ScheduleCardActivity.or_block_instance_id == assign.block_instance_id,
+                ScheduleCardActivity.surgeon_id == assign.surgeon_id,
+                ScheduleCardActivity.is_active == True,  # noqa: E712
+                ScheduleCardActivity.activity_type == "surgical",
             )
             .count()
         )
         if active:
             continue
-        # Only remove if this surgeon/block had a cancelled fax case from wanted set.
-        had_fax = (
-            db.query(SurgicalCase)
-            .filter(
-                SurgicalCase.or_block_instance_id == assign.block_instance_id,
-                SurgicalCase.surgeon_id == assign.surgeon_id,
-                SurgicalCase.status == "cancelled",
-                SurgicalCase.notes.isnot(None),
-            )
-            .all()
-        )
-        if not any(desk_fax_ids_in_text(c.notes).intersection(wanted) for c in had_fax):
+        if not desk_fax_ids_in_text(assign.note).intersection(wanted):
             continue
         db.delete(assign)
         assigns_deleted += 1

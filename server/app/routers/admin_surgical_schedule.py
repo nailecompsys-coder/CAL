@@ -18,7 +18,7 @@ from ..admin_surgical_schedule_service import (
 )
 from ..auth import get_current_admin
 from ..database import get_db
-from ..models import SurgicalCase
+from ..models import ScheduleCardActivity
 
 router = APIRouter(prefix="/admin")
 
@@ -83,7 +83,7 @@ def surgical_case_add(
             f"/admin/clinic-schedule?week_offset={offset}&warn={urllib.parse.quote(str(exc))}",
             status_code=303,
         )
-    offset = week_offset if week_offset is not None else week_offset_for_date(surgical_case.date)
+    offset = week_offset if week_offset is not None else week_offset_for_date(surgical_case.activity_date)
     redirect = f"/admin/clinic-schedule?week_offset={offset}&msg=added"
     redirect += warn_query
     return RedirectResponse(redirect, status_code=303)
@@ -108,8 +108,8 @@ def surgical_case_edit(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    surgical_case = db.get(SurgicalCase, case_id)
-    if not surgical_case:
+    surgical_case = db.get(ScheduleCardActivity, case_id)
+    if not surgical_case or surgical_case.activity_type != "surgical":
         raise HTTPException(404, "Case not found")
     fields = surgery_fields(
         surgeon_id,
@@ -133,7 +133,7 @@ def surgical_case_edit(
             f"/admin/clinic-schedule?week_offset={offset}&warn={urllib.parse.quote(str(exc))}",
             status_code=303,
         )
-    offset = week_offset if week_offset is not None else week_offset_for_date(surgical_case.date)
+    offset = week_offset if week_offset is not None else week_offset_for_date(surgical_case.activity_date)
     redirect = f"/admin/clinic-schedule?week_offset={offset}&msg=updated"
     redirect += warn_query
     return RedirectResponse(redirect, status_code=303)
@@ -147,10 +147,10 @@ def surgical_case_delete(
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
-    surgical_case = db.get(SurgicalCase, case_id)
-    if not surgical_case:
+    surgical_case = db.get(ScheduleCardActivity, case_id)
+    if not surgical_case or surgical_case.activity_type != "surgical":
         raise HTTPException(404, "Case not found")
-    parsed_date = surgical_case.date
+    parsed_date = surgical_case.activity_date
     try:
         delete_surgical_case(db, surgical_case)
         msg = "deleted"

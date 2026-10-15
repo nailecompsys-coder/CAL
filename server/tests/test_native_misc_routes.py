@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models import Availability, Base, NativePushToken, Surgeon, SurgicalCase
+from app.models import Availability, Base, NativePushToken, Surgeon
 from app.routers.native_api import (
     NativeAvailabilityBody,
     NativeAvailabilityRow,
@@ -132,48 +132,18 @@ class NativeMiscRoutesTest(unittest.TestCase):
         finally:
             db.close()
 
-    def test_surgery_notes_save_and_reject_other_surgeon_case(self):
+    def test_surgery_notes_are_not_kept(self):
         db = self.Session()
         try:
             surgeon = self._seed_surgeon(db, "Chris", "Johnson", "chris@example.com")
-            other = self._seed_surgeon(db, "Alex", "Smith", "alex@example.com")
-            own_case = SurgicalCase(
-                surgeon_id=surgeon.id,
-                date=date.today() + timedelta(days=1),
-                start_time=time(8, 0),
-                patient_name="Test Patient",
-                procedure="Procedure",
-            )
-            other_case = SurgicalCase(
-                surgeon_id=other.id,
-                date=date.today() + timedelta(days=1),
-                start_time=time(9, 0),
-                patient_name="Other Patient",
-                procedure="Other Procedure",
-            )
-            db.add_all([own_case, other_case])
-            db.commit()
-
-            with patch("app.routers.native_api.send_native_push_to_surgeon"):
-                response = native_save_surgery_notes(
-                    own_case.id,
-                    NativeSurgeryNotesBody(notes=" Needs follow up "),
-                    db=db,
-                    auth=(surgeon, "token"),
-                )
-
-            self.assertTrue(response["ok"])
-            db.refresh(own_case)
-            self.assertEqual(own_case.surgeon_notes, "Needs follow up")
-
             with self.assertRaises(HTTPException) as ctx:
                 native_save_surgery_notes(
-                    other_case.id,
-                    NativeSurgeryNotesBody(notes="Nope"),
+                    1,
+                    NativeSurgeryNotesBody(notes="Needs follow up"),
                     db=db,
                     auth=(surgeon, "token"),
                 )
-            self.assertEqual(ctx.exception.status_code, 404)
+            self.assertEqual(ctx.exception.status_code, 410)
         finally:
             db.close()
 

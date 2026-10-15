@@ -25,15 +25,17 @@ def surgery_rows_for_surgeon(
 ):
     from ..schedule_activity_normalization import active_surgical_lines
 
-    exclude_case_id = exclude_entity[1] if exclude_entity and exclude_entity[0] == "surgical_case" else None
-    exclude_activity_id = exclude_entity[1] if exclude_entity and exclude_entity[0] == "schedule_card_activity" else None
+    exclude_activity_id = (
+        exclude_entity[1]
+        if exclude_entity and exclude_entity[0] in {"surgical_case", "schedule_card_activity"}
+        else None
+    )
     return active_surgical_lines(
         db,
         surgeon_id=surgeon_id,
         start=start_date,
         end=end_date,
         exclude_activity_id=exclude_activity_id,
-        exclude_surgical_case_id=exclude_case_id,
     )
 
 

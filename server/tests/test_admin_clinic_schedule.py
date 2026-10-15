@@ -24,7 +24,7 @@ from app.admin_clinic_schedule_page_service import (
 from app.clinic_schedule_card_guard import normalize_clinic_day_cards
 from app.migrate_location_admin_fields import normalize_office_location_name
 from app.models import (
-    Base, ClinicSchedule, Location, ScheduleCard, ScheduleCardActivity, ScheduleCardWeek, Surgeon, SurgicalCase,
+    Base, ClinicSchedule, Location, ScheduleCard, ScheduleCardActivity, ScheduleCardWeek, Surgeon,
 )
 from app.or_block_service import BlockORCreateInput, assign_block, create_or_blocks
 
@@ -278,15 +278,6 @@ class AdminClinicScheduleTest(unittest.TestCase):
             surgeon = self._surgeon(db, "Chris", "Johnson")
             db.flush()
             monday = date.today() - timedelta(days=date.today().weekday())
-            db.add(SurgicalCase(
-                surgeon_id=surgeon.id,
-                date=monday,
-                start_time=time(7, 15),
-                patient_name="Old List",
-                procedure="Old",
-                location_id=hospital.id,
-                status="scheduled",
-            ))
             _save_card_line(db, surgeon, monday, hospital, time(8, 0), "Card Line", "New", "WG S01")
             db.commit()
             data = page_data(db, week_offset=0)
@@ -309,38 +300,6 @@ class AdminClinicScheduleTest(unittest.TestCase):
             surgeon = self._surgeon(db, "Alex", "Schroeder")
             db.flush()
             monday = date.today() - timedelta(days=date.today().weekday())
-            db.add_all([
-                SurgicalCase(
-                    surgeon_id=surgeon.id,
-                    date=monday,
-                    start_time=time(7, 15),
-                    patient_name="Bishop, David",
-                    procedure="Case 1",
-                    location_id=hospital.id,
-                    room_text="MIN S05",
-                    status="scheduled",
-                ),
-                SurgicalCase(
-                    surgeon_id=surgeon.id,
-                    date=monday,
-                    start_time=time(8, 55),
-                    patient_name="Vercamen, Donald",
-                    procedure="Case 2",
-                    location_id=hospital.id,
-                    room_text="MIN S05",
-                    status="scheduled",
-                ),
-                SurgicalCase(
-                    surgeon_id=surgeon.id,
-                    date=monday,
-                    start_time=time(13, 30),
-                    patient_name="Torres, Carla",
-                    procedure="Case 3",
-                    location_id=hospital.id,
-                    room_text="MIN S05",
-                    status="scheduled",
-                ),
-            ])
             db.commit()
 
             data = page_data(db, week_offset=0)
@@ -381,16 +340,6 @@ class AdminClinicScheduleTest(unittest.TestCase):
                 ),
             )["instance_ids"][0]
             assign_block(db, block_id, surgeon.id, assigned_start_time=time(7, 0), case_count=0, notify=False)
-            db.add(SurgicalCase(
-                surgeon_id=surgeon.id,
-                date=monday,
-                start_time=time(12, 30),
-                patient_name="Colon, Nancy",
-                procedure="Case 1",
-                location_id=hospital.id,
-                room_text="ALT S04",
-                status="scheduled",
-            ))
             db.commit()
 
             data = page_data(db, week_offset=0)
@@ -430,18 +379,9 @@ class AdminClinicScheduleTest(unittest.TestCase):
                     recurrence="once",
                 ),
             )["instance_ids"][0]
-            case = SurgicalCase(
-                surgeon_id=surgeon.id,
-                date=monday,
-                start_time=time(7, 15),
-                patient_name="Case, Parked",
-                procedure="Procedure",
-                location_id=hospital.id,
-                room_text="MIN S05",
-                status="scheduled",
-            )
-            db.add(case)
+            _save_card_line(db, surgeon, monday, hospital, time(7, 15), "Case, Parked")
             db.commit()
+            case = db.query(ScheduleCardActivity).filter_by(patient_name="Case, Parked").one()
 
             result = save_ingest_placements(
                 db,
@@ -490,18 +430,9 @@ class AdminClinicScheduleTest(unittest.TestCase):
                 ),
             )["instance_ids"][0]
             assign_block(db, block_id, surgeon.id, assigned_start_time=time(7, 0), case_count=0, notify=False)
-            case = SurgicalCase(
-                surgeon_id=surgeon.id,
-                date=monday,
-                start_time=time(7, 15),
-                patient_name="Case, Parked",
-                procedure="Procedure",
-                location_id=hospital.id,
-                room_text="MIN S05",
-                status="scheduled",
-            )
-            db.add(case)
+            _save_card_line(db, surgeon, monday, hospital, time(7, 15), "Case, Parked")
             db.commit()
+            case = db.query(ScheduleCardActivity).filter_by(patient_name="Case, Parked").one()
 
             result = save_ingest_placements(
                 db,
@@ -1010,33 +941,50 @@ class AdminClinicScheduleTest(unittest.TestCase):
         surgical_map = {
             16: {
                 day: [
-                    SurgicalCase(
+                    ScheduleCardActivity(
                         surgeon_id=16,
-                        date=day,
+                        activity_date=day,
+                        session="am",
+                        activity_type="surgical",
                         start_time=time(7, 15),
                         patient_name="Philome, Natasha",
+                        procedure="",
                         location_id=8,
                         location=location,
-                        status="scheduled",
+                        source_system="test",
+                        source_record_key="philome",
+                        identity_key="philome",
+                        is_active=True,
                     ),
-                    SurgicalCase(
+                    ScheduleCardActivity(
                         surgeon_id=16,
-                        date=day,
+                        activity_date=day,
+                        session="am",
+                        activity_type="surgical",
                         start_time=time(8, 15),
                         patient_name="Arent, Tadeusz",
+                        procedure="",
                         location_id=8,
                         location=location,
-                        status="scheduled",
+                        source_system="test",
+                        source_record_key="arent",
+                        identity_key="arent",
+                        is_active=True,
                     ),
-                    SurgicalCase(
+                    ScheduleCardActivity(
                         surgeon_id=16,
-                        date=day,
+                        activity_date=day,
+                        session="am",
+                        activity_type="surgical",
                         start_time=time(9, 15),
                         patient_name="Linked case",
+                        procedure="",
                         location_id=8,
                         location=location,
-                        or_block_instance_id=1450,
-                        status="scheduled",
+                        source_system="test",
+                        source_record_key="linked",
+                        identity_key="linked",
+                        is_active=True,
                     ),
                 ]
             }
@@ -1076,25 +1024,35 @@ class AdminClinicScheduleTest(unittest.TestCase):
         }
         surgical_map = {
             16: {day: [
-                SurgicalCase(
+                ScheduleCardActivity(
                     surgeon_id=16,
-                    date=day,
+                    activity_date=day,
+                    session="am",
+                    activity_type="surgical",
                     start_time=time(7, 15),
                     patient_name="OR patient",
                     procedure="Procedure",
                     location_id=8,
                     location=hospital,
-                    status="scheduled",
+                    source_system="test",
+                    source_record_key="or-patient",
+                    identity_key="or-patient",
+                    is_active=True,
                 ),
-                SurgicalCase(
+                ScheduleCardActivity(
                     surgeon_id=16,
-                    date=day,
+                    activity_date=day,
+                    session="am",
+                    activity_type="surgical",
                     start_time=time(8, 30),
                     patient_name="Clinic patient",
                     procedure="Office visit",
                     location_id=4,
                     location=clinic,
-                    status="scheduled",
+                    source_system="test",
+                    source_record_key="clinic-patient",
+                    identity_key="clinic-patient",
+                    is_active=True,
                 ),
             ]}
         }

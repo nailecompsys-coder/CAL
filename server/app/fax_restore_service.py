@@ -40,7 +40,6 @@ _COPIED_FIELDS = (
     "source_record_key",
     "identity_key",
     "fax_ingest_row_id",
-    "surgical_case_id",
     "aprima_appointment_id",
     "is_active",
 )

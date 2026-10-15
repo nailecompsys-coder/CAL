@@ -11,7 +11,7 @@ os.environ.setdefault('DATABASE_URL', 'sqlite:///:memory:')
 os.environ.setdefault('SECRET_KEY', 'test-only')
 from app.api_calendar_admin_service import build_admin_calendar_events
 from app.models import (Base, Surgeon, Meeting, MeetingAttendee, DayOff, CallGroup, CallRotation,
-                        CallCoverage, Location, SurgeonLocationSchedule, SurgicalCase,
+                        CallCoverage, Location, SurgeonLocationSchedule,
                         AprimaCachedAppointment, SurgeonDayItem, ScheduleCardActivity)
 from app.schedule_card_service import materialize_master_schedule_cards
 from app.schedule_activity_normalization import backfill_normalized_schedule_activity
@@ -96,8 +96,10 @@ class MasterCalendarTest(unittest.TestCase):
         from app.models import ScheduleCard
         am_card=self.db.query(ScheduleCard).filter_by(surgeon_id=self.fid,date=self.day,session='am').one()
         self.db.add_all([
-            SurgicalCase(surgeon_id=self.fid,date=self.day,start_time=time(8),location_id=hospital.id,patient_name='First test',procedure='First',status='scheduled'),
-            SurgicalCase(surgeon_id=self.oid,assisting_surgeon_id=self.fid,date=self.day,start_time=time(10),location_id=hospital.id,patient_name='Other list',procedure='Second',status='scheduled'),
+            ScheduleCardActivity(schedule_card_id=am_card.id,surgeon_id=self.fid,location_id=hospital.id,
+                activity_date=self.day,session='am',activity_type='surgical',start_time=time(8),
+                patient_name='First test',procedure='First',source_system='fax',
+                source_record_key='first-line',identity_key='first',is_active=True),
             ScheduleCardActivity(schedule_card_id=am_card.id,surgeon_id=self.fid,location_id=hospital.id,
                 activity_date=self.day,session='am',activity_type='surgical',start_time=time(10),
                 patient_name='Assisted test',procedure='Second',source_system='fax',
@@ -137,16 +139,9 @@ class MasterCalendarTest(unittest.TestCase):
         materialize_master_schedule_cards(self.db,start=date(2026,9,28),end=date(2026,10,4))
         am=self.db.query(ScheduleCard).filter_by(surgeon_id=self.fid,date=self.day,session='am').one()
         pm=self.db.query(ScheduleCard).filter_by(surgeon_id=self.fid,date=self.day,session='pm').one()
-        afternoon=SurgicalCase(surgeon_id=self.oid,assisting_surgeon_id=self.fid,date=self.day,start_time=time(14),patient_name='Afternoon',procedure='Case',status='scheduled')
-        reviewed=SurgicalCase(surgeon_id=self.oid,assisting_surgeon_id=self.fid,date=self.day,start_time=time(13),patient_name='Reviewed',procedure='Case',status='scheduled')
-        untimed=SurgicalCase(surgeon_id=self.oid,assisting_surgeon_id=self.fid,date=self.day,patient_name='Untimed',procedure='Case',status='scheduled')
-        weekend=SurgicalCase(surgeon_id=self.oid,assisting_surgeon_id=self.fid,date=date(2026,10,4),start_time=time(8),patient_name='Weekend',procedure='Case',status='scheduled')
-        cancelled=SurgicalCase(surgeon_id=self.oid,assisting_surgeon_id=self.fid,date=self.day,start_time=time(14),patient_name='Cancelled',procedure='Case',status='cancelled')
-        self.db.add_all([afternoon,reviewed,untimed,weekend,cancelled]);self.db.flush()
         self.db.add(ScheduleCardActivity(schedule_card_id=am.id,surgeon_id=self.fid,activity_date=self.day,
             session='am',activity_type='surgical',patient_name='Reviewed',procedure='Case',start_time=time(13),
-            source_system='surgical_case_assist',source_record_key=str(reviewed.id),identity_key='reviewed',
-            surgical_case_id=reviewed.id,is_active=True))
+            source_system='fax',source_record_key='reviewed',identity_key='reviewed',is_active=True))
         self.db.commit()
         result=self.feed(self.fid)
         by_id={e['id']:e for e in result}
@@ -180,7 +175,6 @@ class MasterCalendarTest(unittest.TestCase):
 
     def test_unattached_cases_cached_appointments_and_personal_items_do_not_vanish(self):
         materialize_master_schedule_cards(self.db,start=date(2026,9,28),end=date(2026,10,2))
-        self.db.add(SurgicalCase(surgeon_id=self.fid,date=self.day,start_time=time(9),patient_name='Unattached',procedure='Case',status='scheduled'))
         self.cached('patient','visit',self.fid,'Visit',activity_type='clinic')
         self.cached('meeting','mine',self.fid,'Florin Aprima meeting')
         self.cached('meeting','other',self.oid,'Other Aprima meeting')

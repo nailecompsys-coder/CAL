@@ -143,7 +143,6 @@ class Surgeon(Base):
     location_schedules = relationship("SurgeonLocationSchedule", back_populates="surgeon", cascade="all, delete-orphan")
     location_overrides = relationship("LocationOverride", back_populates="surgeon", cascade="all, delete-orphan")
     clinic_schedules = relationship("ClinicSchedule", back_populates="surgeon", cascade="all, delete-orphan")
-    surgical_cases = relationship("SurgicalCase", foreign_keys="SurgicalCase.surgeon_id", back_populates="surgeon", cascade="all, delete-orphan")
     day_items = relationship("SurgeonDayItem", back_populates="surgeon", cascade="all, delete-orphan")
     clinic_group_memberships = relationship("ClinicGroupMember", back_populates="surgeon", cascade="all, delete-orphan")
     surgical_blocks = relationship("SurgicalBlock", back_populates="surgeon", cascade="all, delete-orphan")
@@ -655,7 +654,6 @@ class ScheduleCardActivity(Base):
     source_system = Column(String(32), nullable=False)
     source_record_key = Column(String(128), nullable=False)
     # Pointers back to a source row. The card is the only parent that deletes the line.
-    surgical_case_id = Column(Integer, ForeignKey("surgical_cases.id", ondelete="SET NULL"), nullable=True, index=True)
     fax_ingest_row_id = Column(Integer, ForeignKey("fax_ingest_rows.id", ondelete="SET NULL"), nullable=True, index=True)
     aprima_appointment_id = Column(String(36), ForeignKey("aprima_cached_appointments.appointment_id", ondelete="SET NULL"), nullable=True, index=True)
     or_block_instance_id = Column(Integer, ForeignKey("or_block_instances.id", ondelete="SET NULL"), nullable=True, index=True)
@@ -825,44 +823,11 @@ class FaxRestoreLine(Base):
     source_record_key = Column(String(128), nullable=False)
     identity_key = Column(String(512), nullable=False)
     fax_ingest_row_id = Column(Integer)
-    surgical_case_id = Column(Integer)
     aprima_appointment_id = Column(String(36))
     is_active = Column(Boolean, nullable=False)
 
     restore_set = relationship("FaxRestoreSet", back_populates="lines")
     activity = relationship("ScheduleCardActivity")
-
-
-class SurgicalCase(Base):
-    """One row per surgery (hospital schedule). Scheduler adds; surgeon sees on schedule and can add notes."""
-    __tablename__ = "surgical_cases"
-    id = Column(Integer, primary_key=True)
-    surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=False)
-    date = Column(Date, nullable=False)
-    start_time = Column(Time)
-    end_time = Column(Time)
-    patient_name = Column(String(255), nullable=False)
-    patient_dob = Column(String(32))
-    patient_phone = Column(String(32))
-    procedure = Column(Text, nullable=False)
-    location_id = Column(Integer, ForeignKey("locations.id"))
-    schedule_card_id = Column(Integer, ForeignKey("schedule_cards.id"), index=True)
-    or_block_instance_id = Column(Integer, ForeignKey("or_block_instances.id"))
-    room_text = Column(String(64))
-    # Co-surgeon: when a case is shared (e.g. one surgeon assisting another),
-    # `surgeon_id` is the primary and this is the assisting surgeon.
-    assisting_surgeon_id = Column(Integer, ForeignKey("surgeons.id"))
-    status = Column(String(16), default="scheduled", server_default="scheduled")  # scheduled | confirmed | completed | cancelled
-    notes = Column(Text)  # scheduler notes
-    surgeon_notes = Column(Text)  # surgeon's own notes (add from mobile)
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, onupdate=func.now())
-
-    surgeon = relationship("Surgeon", foreign_keys=[surgeon_id], back_populates="surgical_cases")
-    assisting_surgeon = relationship("Surgeon", foreign_keys=[assisting_surgeon_id])
-    location = relationship("Location")
-    schedule_card = relationship("ScheduleCard")
-    or_block_instance = relationship("ORBlockInstance", back_populates="cases")
 
 
 class CoSurgeonPair(Base):
@@ -1004,7 +969,6 @@ class ORBlockInstance(Base):
     location = relationship("Location")
     assigned_surgeon = relationship("Surgeon", foreign_keys=[assigned_surgeon_id], back_populates="or_block_instances")
     assignments = relationship("ORBlockAssignment", back_populates="block_instance", cascade="all, delete-orphan")
-    cases = relationship("SurgicalCase", back_populates="or_block_instance")
     audit_events = relationship("ORBlockAuditEvent", back_populates="block_instance", cascade="all, delete-orphan")
 
 

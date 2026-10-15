@@ -53,8 +53,11 @@ def check_buffer_between_cases(
         return
     minutes = config.get("minutes", 15)
     delta = timedelta(minutes=minutes)
-    exclude_case_id = exclude_entity[1] if exclude_entity and exclude_entity[0] == "surgical_case" else None
-    exclude_activity_id = exclude_entity[1] if exclude_entity and exclude_entity[0] == "schedule_card_activity" else None
+    exclude_activity_id = (
+        exclude_entity[1]
+        if exclude_entity and exclude_entity[0] in {"surgical_case", "schedule_card_activity"}
+        else None
+    )
     cases = [
         row for row in active_surgical_lines(
             db,
@@ -62,7 +65,6 @@ def check_buffer_between_cases(
             start=start_date,
             end=end_date,
             exclude_activity_id=exclude_activity_id,
-            exclude_surgical_case_id=exclude_case_id,
         )
         if row.start_time is not None
     ]

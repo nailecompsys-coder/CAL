@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.day_off_card_normalization import backfill_day_off_card_links
 from app.migrate_fax_ingest import create_applicable_view
-from app.models import Base, ClinicSchedule, DayOff, Location, ScheduleCard, ScheduleCardActivity, Surgeon, SurgicalCase
+from app.models import Base, ClinicSchedule, DayOff, Location, ScheduleCard, ScheduleCardActivity, Surgeon
 from app.off_conflict_service import (
     detect_off_conflicts,
     should_show_as_off,
@@ -46,6 +46,12 @@ class OffConflictServiceTest(unittest.TestCase):
         db.flush()
         return row
 
+    def _soon(self, days_ahead):
+        day = date.today() + timedelta(days=days_ahead)
+        while day.weekday() >= 5:
+            day += timedelta(days=1)
+        return day
+
     def _normalize(self, db, day):
         materialize_master_schedule_cards(db, start=day, end=day)
         backfill_day_off_card_links(db)
@@ -58,7 +64,7 @@ class OffConflictServiceTest(unittest.TestCase):
             clinic = Location(name="WG Clinic", abbreviation="WG", location_type="clinic", is_active=True)
             db.add(clinic)
             db.flush()
-            day = date.today() + timedelta(days=1)
+            day = self._soon(1)
             db.add(DayOff(
                 surgeon_id=chris.id,
                 start_date=day,
@@ -96,7 +102,7 @@ class OffConflictServiceTest(unittest.TestCase):
             hospital = Location(name="Minneola OR", abbreviation="MN-OR", location_type="hospital", is_active=True)
             db.add_all([clinic, hospital])
             db.flush()
-            day = date.today() + timedelta(days=1)
+            day = self._soon(1)
             db.add(DayOff(
                 surgeon_id=chris.id,
                 start_date=day,
@@ -146,7 +152,7 @@ class OffConflictServiceTest(unittest.TestCase):
             hospital = Location(name="WG OR", abbreviation="WG-OR", location_type="hospital", is_active=True)
             db.add(hospital)
             db.flush()
-            day = date.today() + timedelta(days=2)
+            day = self._soon(2)
             db.add(DayOff(
                 surgeon_id=chris.id,
                 start_date=day,
@@ -154,18 +160,27 @@ class OffConflictServiceTest(unittest.TestCase):
                 status="pending",
                 reason="Personal",
             ))
-            db.add(SurgicalCase(
+            db.commit()
+            self._normalize(db, day)
+            am = db.query(ScheduleCard).filter_by(
+                surgeon_id=chris.id, date=day, session="am",
+            ).one()
+            db.add(ScheduleCardActivity(
+                schedule_card_id=am.id,
                 surgeon_id=chris.id,
-                date=day,
+                location_id=hospital.id,
+                activity_date=day,
+                session="am",
+                activity_type="surgical",
                 start_time=time(8, 0),
                 end_time=time(9, 0),
                 patient_name="Test Patient",
                 procedure="Lap chole",
-                location_id=hospital.id,
-                status="scheduled",
+                source_system="fax",
+                source_record_key="pending-off-case",
+                identity_key="testpatient|08:00:00|surgical",
             ))
             db.commit()
-            self._normalize(db, day)
 
             conflicts = detect_off_conflicts(db, day, day)
             self.assertEqual(len(conflicts), 1)
@@ -182,7 +197,7 @@ class OffConflictServiceTest(unittest.TestCase):
             clinic = Location(name="Clermont Office", abbreviation="CL", location_type="clinic", is_active=True)
             db.add(clinic)
             db.flush()
-            day = date.today() + timedelta(days=3)
+            day = self._soon(3)
             db.add(DayOff(
                 surgeon_id=chris.id,
                 start_date=day,
@@ -233,7 +248,7 @@ class OffConflictServiceTest(unittest.TestCase):
         db = self.Session()
         try:
             chris = self._surgeon(db, "Chris", "Johnson")
-            day = date.today() + timedelta(days=3)
+            day = self._soon(3)
             db.add(DayOff(
                 surgeon_id=chris.id,
                 start_date=day,

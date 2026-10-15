@@ -24,7 +24,6 @@ from app.models import (
     ScheduleCardWeek,
     Surgeon,
     SurgeonDayItem,
-    SurgicalCase,
 )
 from app.native_home_service import build_native_home
 from app.native_home_items import surgeons as native_surgeons
@@ -359,10 +358,6 @@ class NativeHomeContractTest(unittest.TestCase):
                 identity_key="test-patient-0830", is_active=True,
             )
             db.add(line)
-            db.add(SurgicalCase(surgeon_id=surgeon.id, assisting_surgeon_id=assistant.id,
-                                date=date(2026, 10, 5), start_time=time(8, 30), end_time=time(9, 30),
-                                patient_name="Old List Patient", procedure="Old procedure", location_id=hospital.id,
-                                schedule_card_id=am.id, status="scheduled"))
             db.add(DayOff(surgeon_id=surgeon.id, start_date=date(2026, 10, 5),
                           end_date=date(2026, 10, 5), reason="Vacation", status="approved", is_full_day=True))
             db.commit()
@@ -409,9 +404,6 @@ class NativeHomeContractTest(unittest.TestCase):
                     procedure="Test procedure", source_system="fax", source_record_key="line-nocall",
                     identity_key="test-patient-0900", is_active=True,
                 ),
-                SurgicalCase(surgeon_id=surgeon.id, date=date(2026, 10, 6), start_time=time(9),
-                             end_time=time(10), patient_name="Old List Patient", procedure="Old procedure",
-                             location_id=hospital.id, status="scheduled"),
                 DayOff(surgeon_id=surgeon.id, start_date=date(2026, 10, 6), end_date=date(2026, 10, 6),
                        reason="No Call", status="approved", is_full_day=True),
             ])

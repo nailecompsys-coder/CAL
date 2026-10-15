@@ -34,7 +34,6 @@ from app.models import (
     ScheduleCardWeek,
     ScheduleWarning,
     Surgeon,
-    SurgicalCase,
 )
 
 
@@ -109,18 +108,6 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.engine.dispose()
 
     def test_daily_snapshot_fills_existing_cards_and_never_creates_cards(self):
-        self.db.add(SurgicalCase(
-            surgeon_id=self.surgeon.id,
-            date=date(2026, 9, 22),
-            start_time=time(9, 0),
-            patient_name="Old, Patient",
-            procedure="Old fax case",
-            location_id=self.wg_or.id,
-            room_text="WGD S07",
-            status="scheduled",
-            notes="Fax 190 daily snapshot.",
-        ))
-        self.db.commit()
         staged = stage_reviewed_rows(
             self.db,
             external_fax_id=191,
@@ -181,10 +168,6 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.assertEqual(activities["surgical"].schedule_card_id, pm.id)
         self.assertEqual(activities["surgical"].patient_name, "Case, Patient")
         self.assertEqual(activities["surgical"].fax_ingest_row_id is not None, True)
-        stored_cases = self.db.query(SurgicalCase).all()
-        self.assertEqual(len(stored_cases), 1)
-        self.assertEqual(stored_cases[0].patient_name, "Old, Patient")
-        self.assertEqual(stored_cases[0].status, "scheduled")
         backup = self.db.query(ScheduleBuildBackup).one()
         payload = json.loads(backup.payload_json)
         self.assertEqual(payload["kind"], "fax_snapshot")
@@ -199,24 +182,8 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.assertTrue(reverted["ok"])
         restored_pm = self.db.query(ScheduleCard).filter_by(session="pm").one()
         self.assertEqual(restored_pm.effective_state, "na")
-        restored_cases = self.db.query(SurgicalCase).all()
-        self.assertEqual(len(restored_cases), 1)
-        self.assertEqual(restored_cases[0].patient_name, "Old, Patient")
-        self.assertEqual(restored_cases[0].status, "scheduled")
 
     def test_daily_snapshot_updates_expanded_patient_name_without_duplicate(self):
-        self.db.add(SurgicalCase(
-            surgeon_id=self.surgeon.id,
-            date=date(2026, 9, 22),
-            start_time=time(9, 0),
-            patient_name="Williams, Robert",
-            procedure="Prior procedure",
-            location_id=self.wg_or.id,
-            room_text="WGD S07",
-            status="scheduled",
-            notes="Fax 190 daily snapshot.",
-        ))
-        self.db.commit()
         staged = stage_reviewed_rows(
             self.db,
             external_fax_id=191,
@@ -525,7 +492,6 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.assertEqual(result["assistedCases"], 0)
         self.assertEqual(result["surgicalCreated"], 2)
         self.assertEqual(result["cardsCreated"], 0)
-        self.assertEqual(self.db.query(SurgicalCase).count(), 0)
         self.assertEqual(self.db.query(ScheduleCard).count(), 3)
         activities = self.db.query(ScheduleCardActivity).filter_by(activity_type="surgical", is_active=True).all()
         self.assertEqual({row.surgeon_id for row in activities}, {self.surgeon.id, assistant.id})

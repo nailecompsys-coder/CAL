@@ -29,7 +29,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models import (
-    AdminUser, Base, ClinicSchedule, DayOff, Location, Surgeon, SurgicalCase,
+    AdminUser, Base, ClinicSchedule, DayOff, DayOffScheduleCard, Location,
+    ScheduleCard, ScheduleCardActivity, ScheduleCardWeek, Surgeon,
 )
 from app.routers.api_cal_assistant import _week_bounds, _conflict_actions
 from app.off_conflict_service import OffConflict, detect_off_conflicts
@@ -170,14 +171,32 @@ class CalAssistantEndpointTest(unittest.TestCase):
             db.flush()
 
             day = date.today() + timedelta(days=2)
-            db.add(DayOff(
+            week = ScheduleCardWeek(
+                surgeon_id=jf.id,
+                week_start=day - timedelta(days=day.weekday()),
+                master_revision="test",
+            )
+            db.add(week)
+            db.flush()
+            card = ScheduleCard(
+                week_id=week.id, surgeon_id=jf.id, date=day, session="am",
+                baseline_state="na", effective_state="na",
+            )
+            db.add(card)
+            db.flush()
+            off = DayOff(
                 surgeon_id=jf.id, start_date=day, end_date=day, status="pending",
-            ))
-            db.add(SurgicalCase(
-                surgeon_id=jf.id, date=day,
+            )
+            db.add(off)
+            db.flush()
+            db.add(DayOffScheduleCard(day_off_id=off.id, schedule_card_id=card.id))
+            db.add(ScheduleCardActivity(
+                schedule_card_id=card.id, surgeon_id=jf.id, location_id=hosp.id,
+                activity_date=day, session="am", activity_type="surgical",
                 start_time=time(8, 0), end_time=time(9, 30),
                 patient_name="Test Patient", procedure="Lap chole",
-                location_id=hosp.id, status="scheduled",
+                source_system="fax", source_record_key="pending-off-case",
+                identity_key="testpatient|08:00:00|surgical",
             ))
             db.commit()
 

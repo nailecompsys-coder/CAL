@@ -5,7 +5,7 @@ from datetime import date, time, timedelta
 
 from sqlalchemy.orm import Session, joinedload
 
-from .models import ClinicSchedule, Location, ScheduleCardActivity, SurgicalCase
+from .models import ClinicSchedule, Location, ScheduleCardActivity
 from .practice_time import practice_today
 from .or_block_service import (
     block_instances_for_range,
@@ -503,8 +503,8 @@ def _sessions_compatible(schedule_session: str | None, block_session: str | None
     return sched == block
 
 
-def _enrich_or_block_with_live_cases(block: dict, cases: list[SurgicalCase]) -> dict:
-    """Replace assignment caseCount/segments with real SurgicalCase rows for the pill."""
+def _enrich_or_block_with_live_cases(block: dict, cases: list[ScheduleCardActivity]) -> dict:
+    """Replace assignment caseCount/segments with the card lines for the pill."""
     loc_id = block.get("locationId")
     session = _block_display_session(block)
     matching = [
@@ -648,7 +648,7 @@ def build_hospital_case_overlays(
     return out
 
 
-def _case_display_session(case: SurgicalCase) -> str:
+def _case_display_session(case: ScheduleCardActivity) -> str:
     start = case.start_time or time(7, 0)
     return "am" if start < time(12, 0) else "pm"
 

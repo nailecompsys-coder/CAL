@@ -20,7 +20,6 @@ from app.models import (
     ScheduleCardActivity,
     ScheduleCardWeek,
     Surgeon,
-    SurgicalCase,
 )
 
 
@@ -62,17 +61,8 @@ class CardLineParentTest(unittest.TestCase):
                 effective_location_id=location.id,
             )
             db.add(card)
-            case = SurgicalCase(
-                surgeon_id=surgeon.id,
-                date=date(2026, 9, 14),
-                start_time=time(7, 30),
-                patient_name="Case Patient",
-                procedure="Case",
-                location_id=location.id,
-                status="scheduled",
-            )
             fax = FaxDocument(external_fax_id=41, source_label="test")
-            db.add_all([card, case, fax])
+            db.add_all([card, fax])
             db.commit()
             run = FaxIngestRun(fax_document_id=fax.id, engine_version="test", status="staged")
             db.add(run)
@@ -106,20 +96,6 @@ class CardLineParentTest(unittest.TestCase):
                     activity_date=card.date,
                     session="am",
                     activity_type="surgical",
-                    patient_name="Case Patient",
-                    procedure="Case",
-                    source_system="old",
-                    source_record_key="case",
-                    identity_key="case",
-                    surgical_case_id=case.id,
-                ),
-                ScheduleCardActivity(
-                    schedule_card_id=card.id,
-                    surgeon_id=surgeon.id,
-                    location_id=location.id,
-                    activity_date=card.date,
-                    session="am",
-                    activity_type="surgical",
                     patient_name="Fax Patient",
                     procedure="Case",
                     source_system="fax",
@@ -144,17 +120,15 @@ class CardLineParentTest(unittest.TestCase):
             ])
             db.commit()
 
-            db.delete(case)
             db.delete(fax_row)
             db.delete(visit)
             db.commit()
             db.expire_all()
 
             kept = db.query(ScheduleCardActivity).order_by(ScheduleCardActivity.id).all()
-            self.assertEqual(len(kept), 3)
-            self.assertEqual([line.surgical_case_id for line in kept], [None, None, None])
-            self.assertEqual([line.fax_ingest_row_id for line in kept], [None, None, None])
-            self.assertEqual([line.aprima_appointment_id for line in kept], [None, None, None])
+            self.assertEqual(len(kept), 2)
+            self.assertEqual([line.fax_ingest_row_id for line in kept], [None, None])
+            self.assertEqual([line.aprima_appointment_id for line in kept], [None, None])
             self.assertEqual({line.schedule_card_id for line in kept}, {card.id})
 
             db.delete(card)
@@ -208,7 +182,8 @@ class CardLineParentTest(unittest.TestCase):
         self.assertIn("REFERENCES schedule_cards", ddl)
         self.assertIn("fk_schedule_card_activities_card_identity", ddl)
         self.assertIn("or_block_instances", ddl)
-        self.assertEqual(ddl.upper().count("ON DELETE SET NULL"), 4)
+        self.assertEqual(ddl.upper().count("ON DELETE SET NULL"), 3)
+        self.assertNotIn("surgical_cases", ddl)
 
 
 if __name__ == "__main__":

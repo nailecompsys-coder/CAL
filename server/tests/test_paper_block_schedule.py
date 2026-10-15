@@ -21,9 +21,11 @@ from app.models import (
     Location,
     ORBlockAssignment,
     ORBlockInstance,
+    ScheduleCard,
+    ScheduleCardActivity,
+    ScheduleCardWeek,
     Surgeon,
     SurgeonLocationSchedule,
-    SurgicalCase,
 )
 from app.master_schedule_build_service import build_missing_master_cards
 from app.paper_block_schedule import (
@@ -253,14 +255,22 @@ class PaperBlockScheduleTest(unittest.TestCase):
         ap_or = self.db.query(Location).filter_by(abbreviation="AP-OR").one()
         day = date(2026, 9, 14)
         save_template_cell_value(self.db, jorge.id, 0, "am", ap_or.id, "assigned", "all")
-        case = SurgicalCase(
-            surgeon_id=jorge.id,
-            date=day,
-            start_time=time(7, 15),
-            patient_name="PARKED, CASE",
-            procedure="Test procedure",
-            location_id=ap_or.id,
-            status="scheduled",
+        week = ScheduleCardWeek(surgeon_id=jorge.id, week_start=day, master_revision="test")
+        self.db.add(week)
+        self.db.flush()
+        card = ScheduleCard(
+            week_id=week.id, surgeon_id=jorge.id, date=day, session="am",
+            baseline_state="assigned", effective_state="assigned",
+            baseline_location_id=ap_or.id, effective_location_id=ap_or.id,
+        )
+        self.db.add(card)
+        self.db.flush()
+        case = ScheduleCardActivity(
+            schedule_card_id=card.id, surgeon_id=jorge.id, location_id=ap_or.id,
+            activity_date=day, session="am", activity_type="surgical",
+            start_time=time(7, 15), patient_name="PARKED, CASE", procedure="Test procedure",
+            source_system="fax", source_record_key="parked", identity_key="parked",
+            is_active=True,
         )
         self.db.add(case)
         self.db.commit()
@@ -527,14 +537,22 @@ class PaperBlockScheduleTest(unittest.TestCase):
         self.db.add(block)
         self.db.flush()
         backup = create_schedule_build_backup(self.db, admin_id=None, start=day, end=day)
-        self.db.add(SurgicalCase(
-            surgeon_id=jorge.id,
-            date=day,
-            start_time=time(7, 15),
-            patient_name="Test Patient",
-            procedure="Test",
-            location_id=ap.id,
-            or_block_instance_id=block.id,
+        week = ScheduleCardWeek(surgeon_id=jorge.id, week_start=day, master_revision="test")
+        self.db.add(week)
+        self.db.flush()
+        card = ScheduleCard(
+            week_id=week.id, surgeon_id=jorge.id, date=day, session="am",
+            baseline_state="assigned", effective_state="assigned",
+            baseline_location_id=ap.id, effective_location_id=ap.id,
+        )
+        self.db.add(card)
+        self.db.flush()
+        self.db.add(ScheduleCardActivity(
+            schedule_card_id=card.id, surgeon_id=jorge.id, location_id=ap.id,
+            activity_date=day, session="am", activity_type="surgical",
+            start_time=time(7, 15), patient_name="Test Patient", procedure="Test",
+            source_system="fax", source_record_key="linked", identity_key="linked",
+            or_block_instance_id=block.id, is_active=True,
         ))
         self.db.commit()
 

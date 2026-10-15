@@ -44,7 +44,6 @@ def run_migration():
                 source_record_key VARCHAR(128) NOT NULL,
                 identity_key VARCHAR(512) NOT NULL,
                 fax_ingest_row_id INTEGER,
-                surgical_case_id INTEGER,
                 aprima_appointment_id VARCHAR(36),
                 is_active BOOLEAN NOT NULL,
                 UNIQUE (restore_set_id, schedule_card_activity_id),

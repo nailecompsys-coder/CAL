@@ -1,7 +1,7 @@
 from datetime import date, datetime, time
 from sqlalchemy import (
     Boolean, Column, Date, DateTime, ForeignKey, Integer,
-    CheckConstraint, String, Text, Time, UniqueConstraint, func
+    CheckConstraint, ForeignKeyConstraint, String, Text, Time, UniqueConstraint, func
 )
 from sqlalchemy.orm import relationship
 from .database import Base
@@ -557,6 +557,7 @@ class ScheduleCard(Base):
     __tablename__ = "schedule_cards"
     __table_args__ = (
         UniqueConstraint("surgeon_id", "date", "session"),
+        UniqueConstraint("id", "surgeon_id", "date", "session", name="uq_schedule_cards_identity"),
         CheckConstraint("session IN ('am', 'pm')", name="ck_schedule_cards_session"),
         CheckConstraint(
             "baseline_state IN ('assigned', 'na', 'off')",
@@ -598,6 +599,8 @@ class ScheduleCard(Base):
         "ScheduleCardActivity",
         back_populates="schedule_card",
         cascade="all, delete-orphan",
+        primaryjoin="ScheduleCard.id == ScheduleCardActivity.schedule_card_id",
+        foreign_keys="ScheduleCardActivity.schedule_card_id",
     )
     baseline_location = relationship("Location", foreign_keys=[baseline_location_id])
     effective_location = relationship("Location", foreign_keys=[effective_location_id])
@@ -628,6 +631,13 @@ class ScheduleCardActivity(Base):
             "activity_type IN ('surgical', 'clinic')",
             name="ck_schedule_card_activities_type",
         ),
+        ForeignKeyConstraint(
+            ["schedule_card_id", "surgeon_id", "activity_date", "session"],
+            ["schedule_cards.id", "schedule_cards.surgeon_id", "schedule_cards.date", "schedule_cards.session"],
+            name="fk_schedule_card_activities_card_identity",
+            onupdate="CASCADE",
+            ondelete="CASCADE",
+        ),
     )
 
     id = Column(Integer, primary_key=True)
@@ -653,7 +663,12 @@ class ScheduleCardActivity(Base):
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    schedule_card = relationship("ScheduleCard", back_populates="activities")
+    schedule_card = relationship(
+        "ScheduleCard",
+        back_populates="activities",
+        primaryjoin="ScheduleCard.id == ScheduleCardActivity.schedule_card_id",
+        foreign_keys=[schedule_card_id],
+    )
     surgeon = relationship("Surgeon")
     location = relationship("Location")
 

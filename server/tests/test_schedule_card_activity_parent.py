@@ -6,6 +6,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SECRET_KEY", "test-secret")
 
 from sqlalchemy import create_engine, event, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from app.models import (
@@ -162,13 +163,50 @@ class CardLineParentTest(unittest.TestCase):
         finally:
             db.close()
 
+    def test_line_cannot_name_a_different_half_day_than_its_card(self):
+        db = self.Session()
+        try:
+            surgeon = Surgeon(first_name="Alex", last_name="Smith", email="as2@example.com", is_active=True)
+            location = Location(name="Minneola OR", abbreviation="MN-OR", location_type="hospital", is_active=True)
+            db.add_all([surgeon, location])
+            db.commit()
+            week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=date(2026, 10, 19), master_revision="test")
+            db.add(week)
+            db.commit()
+            card = ScheduleCard(
+                week_id=week.id,
+                surgeon_id=surgeon.id,
+                date=date(2026, 10, 19),
+                session="am",
+                baseline_state="na",
+                effective_state="na",
+            )
+            db.add(card)
+            db.commit()
+            db.add(ScheduleCardActivity(
+                schedule_card_id=card.id,
+                surgeon_id=surgeon.id,
+                activity_date=card.date,
+                session="pm",
+                activity_type="surgical",
+                patient_name="Moved",
+                procedure="Case",
+                source_system="fax",
+                source_record_key="wrong-session",
+                identity_key="wrong-session",
+            ))
+            with self.assertRaises(IntegrityError):
+                db.commit()
+        finally:
+            db.close()
+
     def test_card_line_schema_names_one_deleting_parent(self):
         with self.engine.connect() as conn:
             ddl = conn.execute(text(
                 "SELECT sql FROM sqlite_master WHERE name = 'schedule_card_activities'"
             )).scalar()
         self.assertIn("REFERENCES schedule_cards", ddl)
-        self.assertEqual(ddl.upper().count("ON DELETE CASCADE"), 1)
+        self.assertIn("fk_schedule_card_activities_card_identity", ddl)
         self.assertEqual(ddl.upper().count("ON DELETE SET NULL"), 3)
 
 

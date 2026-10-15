@@ -1425,9 +1425,13 @@ def _save_block_line(
         start_time=next_start,
         preferred_session=preferred,
     )
-    activity.surgeon_id = next_surgeon
+    if card is None:
+        raise ValueError("This surgeon has no card for that half-day.")
+    activity.schedule_card_id = card.id
+    activity.surgeon_id = card.surgeon_id
+    activity.activity_date = card.date
+    activity.session = card.session
     activity.location_id = dest.location_id
-    activity.activity_date = dest.date
     activity.start_time = next_start
     if end_time is not None:
         activity.end_time = next_end
@@ -1437,11 +1441,6 @@ def _save_block_line(
         activity.patient_name = patient_name.strip() or activity.patient_name or "Patient"
     if dest.room_text and not (activity.room_text or "").strip():
         activity.room_text = dest.room_text
-    if card is not None:
-        activity.schedule_card_id = card.id
-        activity.session = card.session
-    elif preferred:
-        activity.session = preferred
     activity.identity_key = _identity(activity.patient_name, activity.start_time, activity.activity_type or "surgical")
     db.flush()
 

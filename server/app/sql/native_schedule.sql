@@ -30,8 +30,9 @@ card_activity AS (
             PARTITION BY a.schedule_card_id, a.identity_key ORDER BY a.id
         ) AS duplicate_rank
         FROM schedule_card_activities a
-        WHERE a.surgeon_id = :surgeon_id AND a.is_active = TRUE
-          AND a.activity_date BETWEEN :start_date AND :end_date
+        JOIN schedule_cards card ON card.id = a.schedule_card_id
+        WHERE card.surgeon_id = :surgeon_id AND a.is_active = TRUE
+          AND card.date BETWEEN :start_date AND :end_date
     ) a
     WHERE a.duplicate_rank = 1
     GROUP BY a.schedule_card_id
@@ -92,7 +93,7 @@ items AS (
     FROM cards c
     UNION ALL
     SELECT 'act-' || CAST(a.id AS TEXT),
-           a.activity_date, 'surgery', coalesce(nullif(a.patient_name, ''), 'Surgery'),
+           c.date, 'surgery', coalesce(nullif(a.patient_name, ''), 'Surgery'),
            coalesce(a.procedure, ''),
            coalesce(substr(CAST(a.start_time AS TEXT), 1, 5), '08:00'),
            substr(CAST(a.end_time AS TEXT), 1, 5),
@@ -109,9 +110,10 @@ items AS (
             PARTITION BY a.schedule_card_id, a.identity_key ORDER BY a.id
         ) AS duplicate_rank
         FROM schedule_card_activities a
-        WHERE a.surgeon_id = :surgeon_id
+        JOIN schedule_cards card ON card.id = a.schedule_card_id
+        WHERE card.surgeon_id = :surgeon_id
           AND a.activity_type = 'surgical' AND a.is_active = TRUE
-          AND a.activity_date BETWEEN :start_date AND :end_date
+          AND card.date BETWEEN :start_date AND :end_date
     ) a
     JOIN cards c ON c.id = a.schedule_card_id
     LEFT JOIN locations l ON l.id = a.location_id

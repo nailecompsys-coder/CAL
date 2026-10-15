@@ -30,20 +30,27 @@ leave_segments AS (
     WHERE d.status = 'approved' AND NOT (HAS_SEGMENTS)
 ),
 clinic_activity AS (
-    SELECT a.*, row_number() OVER (
-        PARTITION BY a.surgeon_id, a.activity_date, a.identity_key ORDER BY a.id
-    ) AS duplicate_rank
+    SELECT a.id, a.schedule_card_id, a.identity_key, a.patient_name, a.procedure,
+           a.start_time, a.end_time, a.room_text, a.location_id,
+           c.surgeon_id, c.date AS activity_date, c.session,
+           row_number() OVER (
+               PARTITION BY c.surgeon_id, c.date, a.identity_key ORDER BY a.id
+           ) AS duplicate_rank
     FROM schedule_card_activities a
+    JOIN schedule_cards c ON c.id = a.schedule_card_id
     WHERE a.is_active = TRUE AND a.activity_type = 'clinic'
-      AND a.activity_date BETWEEN :start_date AND :end_date
+      AND c.date BETWEEN :start_date AND :end_date
 ),
 surgical_activity AS (
-    SELECT a.*, row_number() OVER (
-        PARTITION BY a.surgeon_id, a.activity_date, a.identity_key ORDER BY a.id
-    ) AS duplicate_rank
+    SELECT a.id, a.schedule_card_id, a.identity_key, a.location_id,
+           c.surgeon_id, c.date AS activity_date,
+           row_number() OVER (
+               PARTITION BY c.surgeon_id, c.date, a.identity_key ORDER BY a.id
+           ) AS duplicate_rank
     FROM schedule_card_activities a
+    JOIN schedule_cards c ON c.id = a.schedule_card_id
     WHERE a.is_active = TRUE AND a.activity_type = 'surgical'
-      AND a.activity_date BETWEEN :start_date AND :end_date
+      AND c.date BETWEEN :start_date AND :end_date
 ),
 call_activity AS (
     SELECT c.*, row_number() OVER (

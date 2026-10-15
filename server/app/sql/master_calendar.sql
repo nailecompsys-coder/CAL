@@ -31,12 +31,15 @@ leave_segments AS (
     WHERE d.status IN ('approved','pending') AND NOT (HAS_SEGMENTS)
 ),
 ranked_activity AS (
-    SELECT a.*, row_number() OVER (PARTITION BY a.schedule_card_id, a.identity_key ORDER BY a.id) AS rank
-    FROM schedule_card_activities a JOIN selected s ON s.id = a.surgeon_id
-    WHERE a.is_active = TRUE AND a.activity_date BETWEEN :start_date AND :end_date
+    SELECT a.*, c.surgeon_id AS card_surgeon_id,
+           row_number() OVER (PARTITION BY a.schedule_card_id, a.identity_key ORDER BY a.id) AS rank
+    FROM schedule_card_activities a
+    JOIN schedule_cards c ON c.id = a.schedule_card_id
+    JOIN selected s ON s.id = c.surgeon_id
+    WHERE a.is_active = TRUE AND c.date BETWEEN :start_date AND :end_date
 ),
 activity AS (
-    SELECT id, schedule_card_id, surgeon_id, activity_type, location_id, start_time,
+    SELECT id, schedule_card_id, card_surgeon_id AS surgeon_id, activity_type, location_id, start_time,
            patient_name, procedure, room_text, source_system
     FROM ranked_activity WHERE rank = 1
 ),

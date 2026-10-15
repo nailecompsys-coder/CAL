@@ -12,9 +12,10 @@ WHERE source_system = 'fax'
       SELECT 1
       FROM fax_ingest_rows_applicable applicable
       JOIN fax_ingest_rows covered ON covered.id = applicable.fax_row_id
+      JOIN schedule_cards card ON card.id = schedule_card_activities.schedule_card_id
       WHERE applicable.run_id = :run_id
-        AND covered.surgeon_id = schedule_card_activities.surgeon_id
-        AND covered.case_date = schedule_card_activities.activity_date
+        AND covered.surgeon_id = card.surgeon_id
+        AND covered.case_date = card.date
   )
   AND fax_ingest_row_id NOT IN (
       SELECT fax_row_id FROM fax_ingest_rows_applicable WHERE run_id = :run_id

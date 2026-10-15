@@ -123,6 +123,7 @@ def run_migration() -> None:
         ):
             conn.execute(text(ddl))
         _keep_card_as_only_deleting_parent(conn)
+        _line_identity_matches_card(conn)
 
 
 def _keep_card_as_only_deleting_parent(conn) -> None:
@@ -183,3 +184,45 @@ def _keep_card_as_only_deleting_parent(conn) -> None:
               END IF;
             END $$
         """))
+
+
+def _line_identity_matches_card(conn) -> None:
+    """A line's surgeon, date, and half-day are the card's. Copy any drift, then lock it."""
+    conn.execute(text("""
+        UPDATE schedule_card_activities AS activity
+        SET surgeon_id = card.surgeon_id,
+            activity_date = card.date,
+            session = card.session
+        FROM schedule_cards AS card
+        WHERE activity.schedule_card_id = card.id
+          AND (
+              activity.surgeon_id IS DISTINCT FROM card.surgeon_id
+              OR activity.activity_date IS DISTINCT FROM card.date
+              OR activity.session IS DISTINCT FROM card.session
+          )
+    """))
+    conn.execute(text("""
+        DO $$ BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conname = 'uq_schedule_cards_identity'
+            ) THEN
+                ALTER TABLE schedule_cards
+                    ADD CONSTRAINT uq_schedule_cards_identity
+                    UNIQUE (id, surgeon_id, date, session);
+            END IF;
+        END $$
+    """))
+    conn.execute(text("""
+        DO $$ BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint WHERE conname = 'fk_schedule_card_activities_card_identity'
+            ) THEN
+                ALTER TABLE schedule_card_activities
+                    ADD CONSTRAINT fk_schedule_card_activities_card_identity
+                    FOREIGN KEY (schedule_card_id, surgeon_id, activity_date, session)
+                    REFERENCES schedule_cards (id, surgeon_id, date, session)
+                    ON UPDATE CASCADE
+                    ON DELETE CASCADE;
+            END IF;
+        END $$
+    """))

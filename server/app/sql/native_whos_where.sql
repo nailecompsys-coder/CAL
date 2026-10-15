@@ -45,9 +45,17 @@ half_days AS (
     JOIN schedule_cards c ON c.surgeon_id = r.id AND c.date = DAY_VALUE AND c.session = ses.session
 ),
 call_today AS (
-    SELECT DISTINCT c.surgeon_id, c.call_group_id
-    FROM call_daily_assignments c
-    WHERE c.date = DAY_VALUE
+    SELECT DISTINCT COALESCE(cov.covering_surgeon_id, r.surgeon_id) AS surgeon_id, r.call_group_id
+    FROM call_rotations r
+    LEFT JOIN call_coverages cov ON cov.id = (
+        SELECT c2.id FROM call_coverages c2
+        WHERE c2.call_rotation_id = r.id AND c2.status = 'active'
+        ORDER BY c2.id DESC
+        LIMIT 1
+    )
+    WHERE r.date = DAY_VALUE
+      AND r.call_group_id IS NOT NULL
+      AND COALESCE(cov.covering_surgeon_id, r.surgeon_id) IS NOT NULL
 ),
 rows_out AS (
     SELECT h.surgeon_id, h.session, h.session_rank, h.state, h.on_leave,

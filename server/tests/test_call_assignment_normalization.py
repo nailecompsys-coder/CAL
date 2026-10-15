@@ -8,7 +8,7 @@ os.environ.setdefault("SECRET_KEY", "test-secret")
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.call_assignment_normalization import sync_call_rotation
+from app.call_assignment_normalization import effective_calls, sync_call_rotation
 from app.models import (
     Base,
     CallCoverage,
@@ -32,19 +32,28 @@ class CallAssignmentNormalizationTest(unittest.TestCase):
         Base.metadata.drop_all(self.engine)
         self.engine.dispose()
 
-    def test_swap_replaces_effective_surgeon_per_location(self):
-        original = Surgeon(first_name="One", last_name="Surgeon", email="one@example.com")
-        covering = Surgeon(first_name="Two", last_name="Surgeon", email="two@example.com")
-        location = Location(name="Winter Garden", abbreviation="WG-OR", location_type="hospital")
+    def test_one_group_is_one_call_even_with_two_hospitals(self):
+        original = Surgeon(first_name="One", last_name="Surgeon", email="one@example.com", is_active=True)
+        covering = Surgeon(first_name="Two", last_name="Surgeon", email="two@example.com", is_active=True)
+        first = Location(name="Winter Garden", abbreviation="WG", location_type="hospital")
+        second = Location(name="Apopka", abbreviation="AP", location_type="hospital")
         group = CallGroup(name="Winter Garden")
-        self.db.add_all([original, covering, location, group])
+        self.db.add_all([original, covering, first, second, group])
         self.db.flush()
-        self.db.add(CallGroupLocation(call_group_id=group.id, location_id=location.id))
-        rotation = CallRotation(date=date(2026, 9, 23), call_group_id=group.id, surgeon_id=original.id)
+        self.db.add_all([
+            CallGroupLocation(call_group_id=group.id, location_id=first.id),
+            CallGroupLocation(call_group_id=group.id, location_id=second.id),
+        ])
+        day = date(2026, 9, 23)
+        rotation = CallRotation(date=day, call_group_id=group.id, surgeon_id=original.id)
         self.db.add(rotation)
         self.db.flush()
-        sync_call_rotation(self.db, rotation)
-        self.assertEqual(self.db.query(CallDailyAssignment).one().surgeon_id, original.id)
+
+        rows = effective_calls(self.db, day, day)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].surgeon_id, original.id)
+        self.assertIsNone(rows[0].call_coverage_id)
+        self.assertEqual(rows[0].place, "WG, AP")
 
         coverage = CallCoverage(
             call_rotation_id=rotation.id,
@@ -54,12 +63,16 @@ class CallAssignmentNormalizationTest(unittest.TestCase):
         )
         self.db.add(coverage)
         self.db.flush()
-        sync_call_rotation(self.db, rotation)
+        self.db.expire_all()
 
-        assignment = self.db.query(CallDailyAssignment).one()
-        self.assertEqual(assignment.surgeon_id, covering.id)
-        self.assertEqual(assignment.call_coverage_id, coverage.id)
-        self.assertEqual(assignment.location_id, location.id)
+        rows = effective_calls(self.db, day, day)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].surgeon_id, covering.id)
+        self.assertEqual(rows[0].call_coverage_id, coverage.id)
+        self.assertEqual([location.id for location in rows[0].locations], [first.id, second.id])
+
+        self.assertEqual(sync_call_rotation(self.db, rotation), 0)
+        self.assertEqual(self.db.query(CallDailyAssignment).count(), 0)
 
 
 if __name__ == "__main__":

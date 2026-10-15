@@ -17,10 +17,7 @@ from .grok_ask_intent import is_identity_question, is_when_question
 from .models import (
     AdminNotification,
     Availability,
-    CallCoverage,
-    CallDailyAssignment,
     CallGroup,
-    CallRotation,
     ClinicGroup,
     ClinicSchedule,
     DayOff,
@@ -150,15 +147,9 @@ def collect_surgeon_facts(db: Session, surgeon: Surgeon, start: date, end: date)
         )
         .scalar() or 0
     )
-    call_rows = (
-        db.query(CallDailyAssignment)
-        .filter(
-            CallDailyAssignment.surgeon_id == surgeon.id,
-            CallDailyAssignment.date >= start,
-            CallDailyAssignment.date <= end,
-        )
-        .all()
-    )
+    from .call_assignment_normalization import effective_calls
+
+    call_rows = effective_calls(db, start, end, surgeon_id=surgeon.id)
     meetings = (
         db.query(Meeting)
         .join(MeetingAttendee)
@@ -688,35 +679,18 @@ def _off_lists_for_window(db: Session, window: dict) -> tuple[list[str], list[st
 
 def _answer_who_call(db: Session, window: dict) -> dict:
     """Same facts as the dashboard Today's Coverage card."""
-    rows = (
-        db.query(CallDailyAssignment)
-        .options(
-            joinedload(CallDailyAssignment.surgeon),
-            joinedload(CallDailyAssignment.call_group),
-            joinedload(CallDailyAssignment.location),
-        )
-        .filter(
-            CallDailyAssignment.date >= window["start"],
-            CallDailyAssignment.date <= window["end"],
-        )
-        .order_by(
-            CallDailyAssignment.date,
-            CallDailyAssignment.location_id,
-            CallDailyAssignment.surgeon_id,
-        )
-        .all()
-    )
+    from .call_assignment_normalization import effective_calls
+
     lines = []
-    for row in rows:
+    for row in effective_calls(db, window["start"], window["end"]):
         if not surgeon_is_visible(row.surgeon):
             continue
         group = row.call_group.name if row.call_group else "On-Call"
-        location = row.location.abbreviation if row.location else "Location"
         stamp = ""
         if window["start"] != window["end"]:
             stamp = f"{row.date.strftime('%a %b %-d')} · "
         coverage = " · covering" if row.call_coverage_id else ""
-        lines.append(f"{stamp}{location} · {row.surgeon.full_name} · {group}{coverage}")
+        lines.append(f"{stamp}{row.place} · {row.surgeon.full_name} · {group}{coverage}")
 
     heading = (
         "Today's Coverage"

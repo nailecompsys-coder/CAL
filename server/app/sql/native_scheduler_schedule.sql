@@ -53,11 +53,19 @@ surgical_activity AS (
       AND c.date BETWEEN :start_date AND :end_date
 ),
 call_activity AS (
-    SELECT c.*, row_number() OVER (
-        PARTITION BY c.call_rotation_id ORDER BY c.location_id, c.id
-    ) AS rotation_rank
-    FROM call_daily_assignments c
-    WHERE c.date BETWEEN :start_date AND :end_date
+    SELECT r.id, r.date, r.id AS call_rotation_id, r.call_group_id,
+           COALESCE(cov.covering_surgeon_id, r.surgeon_id) AS surgeon_id,
+           cov.id AS call_coverage_id
+    FROM call_rotations r
+    LEFT JOIN call_coverages cov ON cov.id = (
+        SELECT c2.id FROM call_coverages c2
+        WHERE c2.call_rotation_id = r.id AND c2.status = 'active'
+        ORDER BY c2.id DESC
+        LIMIT 1
+    )
+    WHERE r.date BETWEEN :start_date AND :end_date
+      AND r.call_group_id IS NOT NULL
+      AND COALESCE(cov.covering_surgeon_id, r.surgeon_id) IS NOT NULL
 ),
 core_rows AS (CORE_ROWS),
 facts AS (
@@ -138,7 +146,6 @@ facts AS (
              ELSE '' END, '', '', '', '', 0, 5
     FROM call_activity c JOIN roster r ON r.id = c.surgeon_id
     LEFT JOIN call_groups g ON g.id = c.call_group_id
-    WHERE c.rotation_rank = 1
 ),
 visible_facts AS (
     SELECT * FROM facts

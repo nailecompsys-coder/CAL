@@ -361,7 +361,7 @@ class CallBackup(Base):
 
 
 class CallDailyAssignment(Base):
-    """Canonical effective call assignment: one relational row per day and location."""
+    """Old per-hospital copy. Screens read call_rotations and join the group's hospitals."""
     __tablename__ = "call_daily_assignments"
     __table_args__ = (UniqueConstraint("date", "location_id"),)
 

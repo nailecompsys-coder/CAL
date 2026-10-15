@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models import (
-    Base, CallDailyAssignment, CallGroup, CallRotation, DayOff, Location, ScheduleCard, ScheduleCardWeek, Surgeon,
+    Base, CallCoverage, CallGroup, CallRotation, DayOff, Location, ScheduleCard, ScheduleCardWeek, Surgeon,
 )
 from app.native_whos_where import whos_where
 
@@ -77,11 +77,7 @@ class NativeWhosWhereTest(unittest.TestCase):
             DayOff(surgeon_id=self.other.id, start_date=MONDAY, end_date=MONDAY, reason="No Call",
                    status="approved", is_full_day=True),
         ])
-        rotation = CallRotation(call_group_id=self.wg.id, surgeon_id=self.doc.id, date=MONDAY, rotation_type="primary")
-        self.db.add(rotation)
-        self.db.flush()
-        self.db.add(CallDailyAssignment(date=MONDAY, location_id=self.wg_or.id, surgeon_id=self.doc.id,
-                                        call_group_id=self.wg.id, call_rotation_id=rotation.id))
+        self.db.add(CallRotation(call_group_id=self.wg.id, surgeon_id=self.doc.id, date=MONDAY, rotation_type="primary"))
         self.db.commit()
 
         rows = whos_where(self.db, MONDAY)
@@ -90,6 +86,21 @@ class NativeWhosWhereTest(unittest.TestCase):
         self.assertFalse(other["pm"]["onLeave"])
         self.assertTrue(other["pm"]["noCall"])
         call = [r for r in rows if r["session"] == "call"]
+        self.assertEqual([(r["surgeonId"], r["groupId"]) for r in call], [(self.doc.id, self.wg.id)])
+
+    def test_covering_surgeon_is_the_call_row(self):
+        rotation = CallRotation(call_group_id=self.wg.id, surgeon_id=self.other.id, date=MONDAY, rotation_type="primary")
+        self.db.add(rotation)
+        self.db.flush()
+        self.db.add(CallCoverage(
+            call_rotation_id=rotation.id,
+            original_surgeon_id=self.other.id,
+            covering_surgeon_id=self.doc.id,
+            status="active",
+        ))
+        self.db.commit()
+
+        call = [r for r in whos_where(self.db, MONDAY) if r["session"] == "call"]
         self.assertEqual([(r["surgeonId"], r["groupId"]) for r in call], [(self.doc.id, self.wg.id)])
 
     def test_rows_carry_no_patient_fields(self):

@@ -12,20 +12,23 @@ import re
 from dataclasses import dataclass
 from datetime import date, time
 
-from sqlalchemy import text
+from sqlalchemy import or_, text
 from sqlalchemy.orm import Session
 
-from .models import FaxDocument, FaxIngestRow, FaxIngestRun, FaxRowDecision, Location, ScheduleCard, Surgeon
+from .models import (
+    FaxDocument,
+    FaxIngestRow,
+    FaxIngestRun,
+    FaxRowDecision,
+    Location,
+    ORBlockAssignment,
+    ORBlockInstance,
+    ScheduleCard,
+    Surgeon,
+)
 
 
 ENGINE_VERSION = "fax-png-stage-v1"
-
-ROOM_LOCATION_ABBREVIATIONS = {
-    "ALT": "AL-OR", "AL": "AL-OR", "APK": "AP-OR", "AP": "AP-OR",
-    "MIN": "MN-OR", "MN": "MN-OR", "WGD": "WG-OR", "WG": "WG-OR",
-    "CLMMFLGS": "CL-OV", "MGALTGS": "AL-OV", "MGWGDGS": "WG-OV", "MGWGDS": "WG-OV",
-}
-GENERIC_LOCATION_ROOMS = {"AHMGGENSRG", "AHMGGENSURG", "MGLKMGENSRG", "MGLKMGENSURG"}
 
 
 @dataclass(frozen=True)
@@ -108,15 +111,47 @@ def _normal(value: str | None) -> str:
     return re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).strip()
 
 
-def _room_location(db: Session, room: str) -> Location | None:
-    normalized = _text(room).upper()
-    if normalized in GENERIC_LOCATION_ROOMS:
-        return None
-    token = normalized.split(" ", 1)[0] if normalized else ""
-    abbreviation = ROOM_LOCATION_ABBREVIATIONS.get(normalized) or ROOM_LOCATION_ABBREVIATIONS.get(token)
-    if not abbreviation:
-        return None
-    return db.query(Location).filter(Location.abbreviation == abbreviation).one_or_none()
+def _fitted_blocks(db: Session, surgeon_id: int, day: date, at_time: time) -> list[ORBlockInstance]:
+    """Blocks whose clock contains this case for this surgeon."""
+    rows = (
+        db.query(ORBlockInstance)
+        .outerjoin(
+            ORBlockAssignment,
+            ORBlockAssignment.block_instance_id == ORBlockInstance.id,
+        )
+        .filter(
+            ORBlockInstance.date == day,
+            ORBlockInstance.status.in_(("open", "assigned")),
+            ORBlockInstance.start_time <= at_time,
+            ORBlockInstance.end_time > at_time,
+            or_(
+                ORBlockInstance.assigned_surgeon_id == surgeon_id,
+                ORBlockAssignment.surgeon_id == surgeon_id,
+            ),
+        )
+        .all()
+    )
+    return list({row.id: row for row in rows}.values())
+
+
+def _facility_for_case(
+    db: Session,
+    surgeon_id: int | None,
+    day: date,
+    at_time: time | None,
+    card: ScheduleCard | None,
+) -> tuple[Location | None, str]:
+    """The hospital is the block the case fits. The room text is not a hospital."""
+    if surgeon_id and at_time is not None:
+        blocks = _fitted_blocks(db, surgeon_id, day, at_time)
+        location_ids = {block.location_id for block in blocks if block.location_id}
+        if len(location_ids) > 1:
+            return None, "unclear"
+        if len(location_ids) == 1:
+            return db.get(Location, next(iter(location_ids))), "block"
+    if card and card.baseline_state == "assigned" and card.baseline_location_id:
+        return card.baseline_location, "card"
+    return None, "none"
 
 
 def _surgeon_for_row(db: Session, row: ReviewedFaxRow) -> Surgeon | None:
@@ -138,69 +173,6 @@ def _surgeon_for_row(db: Session, row: ReviewedFaxRow) -> Surgeon | None:
 def _key(row: ReviewedFaxRow) -> str:
     clock = row.start_time.strftime("%H:%M") if row.start_time else ""
     return "|".join((_normal(row.surgeon_name or row.surgeon_initials), row.case_date.isoformat(), clock, row.row_type, _normal(row.patient_name)))
-
-
-def _minutes(value: time | None) -> int:
-    return value.hour * 60 + value.minute if value else 24 * 60
-
-
-def _location_matches_row_type(location: Location, row_type: str) -> bool:
-    abbreviation = (location.abbreviation or "").upper()
-    if row_type == "surgical":
-        return abbreviation.endswith("-OR") or (location.location_type or "").lower() in {"hospital", "or"}
-    return abbreviation.endswith("-OV") or (location.location_type or "").lower() == "clinic"
-
-
-def _infer_generic_group_location(group: list[_PreparedRow], prepared: list[_PreparedRow]) -> Location | None:
-    """Resolve a generic room into an existing NA card from same-day evidence.
-
-    AHMGGENSRG is a placeholder, not a facility. The fax still provides the
-    surgeon, date, session, time sequence, and row type. Prefer a location
-    already assigned to the target card, then explicit activity in the same
-    session, then the nearest prior compatible same-day activity.
-    """
-    row_type_counts = {
-        row_type: sum(item.row.row_type == row_type for item in group)
-        for row_type in {item.row.row_type for item in group}
-    }
-    dominant_type = max(row_type_counts, key=row_type_counts.get)
-    if list(row_type_counts.values()).count(row_type_counts[dominant_type]) > 1:
-        return None
-
-    surgeon_id = group[0].surgeon.id if group[0].surgeon else None
-    day = group[0].row.case_date
-    session = group[0].session
-    candidates = [
-        item for item in prepared
-        if item.surgeon
-        and item.surgeon.id == surgeon_id
-        and item.row.case_date == day
-        and item.source_location
-        and _location_matches_row_type(item.source_location, dominant_type)
-    ]
-    same_session = [item for item in candidates if item.session == session]
-    if same_session:
-        candidates = same_session
-    else:
-        card = group[0].card
-        if card and card.baseline_location:
-            return card.baseline_location
-        if not candidates:
-            return card.effective_location if card and card.effective_location else None
-
-    first_group_minute = min(_minutes(item.row.start_time) for item in group)
-    prior = [item for item in candidates if _minutes(item.row.start_time) <= first_group_minute]
-    pool = prior or candidates
-    best_minute = (
-        max(_minutes(item.row.start_time) for item in pool)
-        if prior
-        else min(_minutes(item.row.start_time) for item in pool)
-    )
-    nearest = [item for item in pool if _minutes(item.row.start_time) == best_minute]
-    location_ids = {item.source_location.id for item in nearest if item.source_location}
-    if len(location_ids) != 1:
-        return None
-    return nearest[0].source_location
 
 
 def stage_reviewed_rows(
@@ -239,8 +211,6 @@ def stage_reviewed_rows(
         if row.row_type not in {"surgical", "clinic"}:
             raise ValueError("row_type must be surgical or clinic")
         surgeon = _surgeon_for_row(db, row)
-        room = _text(row.room).upper()
-        source_location = _room_location(db, room)
         card = None
         if surgeon:
             card = db.query(ScheduleCard).filter(
@@ -248,39 +218,19 @@ def stage_reviewed_rows(
                 ScheduleCard.date == row.case_date,
                 ScheduleCard.session == resolved_session,
             ).one_or_none()
+        source_location, _kind = _facility_for_case(
+            db,
+            surgeon.id if surgeon else None,
+            row.case_date,
+            row.start_time,
+            card,
+        )
         prepared.append(_PreparedRow(row, surgeon, resolved_session, source_location, card))
 
-    generic_groups: dict[tuple[int | None, date, str, str], list[_PreparedRow]] = {}
     for item in prepared:
-        room = _text(item.row.room).upper()
-        if room not in GENERIC_LOCATION_ROOMS or item.source_location:
-            continue
-        key = (item.surgeon.id if item.surgeon else None, item.row.case_date, item.session, room)
-        generic_groups.setdefault(key, []).append(item)
-    for group in generic_groups.values():
-        inferred = _infer_generic_group_location(group, prepared)
-        if inferred:
-            for item in group:
-                item.source_location = inferred
-
-    # A room code CAL does not know is read off the surgeon's AM/PM card.
-    unknown_room: set[int] = set()
-    row_types: dict[int, str] = {}
-    for index, item in enumerate(prepared):
-        room = _text(item.row.room).upper()
-        if not room or room in GENERIC_LOCATION_ROOMS or item.source_location:
-            continue
-        card = item.card
-        if card and card.baseline_state == "assigned" and card.baseline_location:
-            item.source_location = card.baseline_location
-            row_types[index] = "surgical" if _location_matches_row_type(card.baseline_location, "surgical") else "clinic"
-        else:
-            unknown_room.add(index)
-
-    for index, item in enumerate(prepared):
         row = item.row
         room = _text(row.room).upper()
-        flags = [value for value in (_text(row.extraction_flags), "unknown_room" if index in unknown_room else "") if value]
+        flags = [value for value in (_text(row.extraction_flags),) if value]
         staged = FaxIngestRow(
             run_id=run.id,
             page_number=row.page,
@@ -289,7 +239,7 @@ def stage_reviewed_rows(
             case_date=row.case_date,
             start_time=row.start_time,
             session=item.session,
-            row_type=row_types.get(index, row.row_type),
+            row_type=row.row_type,
             room_text=room,
             patient_name=_text(row.patient_name),
             procedure=_text(row.procedure),
@@ -320,23 +270,38 @@ def _decide(db: Session, row: FaxIngestRow) -> FaxRowDecision:
         return FaxRowDecision(fax_row_id=row.id, status="needs_review", reason_code="missing_scaffold", detail="Permanent AM/PM card is missing; ingest is not allowed to create one.")
     if card.effective_state == "off":
         return FaxRowDecision(fax_row_id=row.id, schedule_card_id=card.id, status="needs_review", reason_code="off_collision", detail="Fax activity is preserved for review against approved OFF.")
-    if row.room_text in GENERIC_LOCATION_ROOMS and card.effective_state == "na" and not row.source_location_id:
-        return FaxRowDecision(fax_row_id=row.id, schedule_card_id=card.id, status="needs_review", reason_code="generic_room_on_na", detail="Generic room has no facility evidence and the card is NA.")
-    if row.source_location_id and card.baseline_location_id and row.source_location_id != card.baseline_location_id:
+    _location, kind = _facility_for_case(db, row.surgeon_id, row.case_date, row.start_time, card)
+    if kind == "unclear":
+        return FaxRowDecision(
+            fax_row_id=row.id,
+            schedule_card_id=card.id,
+            status="needs_review",
+            reason_code="block_facility_unclear",
+            detail="More than one block fits this time, so the hospital is not chosen from the room.",
+        )
+    if kind == "none":
+        return FaxRowDecision(
+            fax_row_id=row.id,
+            schedule_card_id=card.id,
+            status="needs_review",
+            reason_code="no_block_for_facility",
+            detail="No block fits this time, and the room name is not a hospital.",
+        )
+    if kind == "block" and card.baseline_location_id and row.source_location_id != card.baseline_location_id:
         return FaxRowDecision(
             fax_row_id=row.id,
             schedule_card_id=card.id,
             status="ready",
             reason_code="epic_override",
-            detail="EPIC activity differs from the master assignment and will overlay the existing card.",
+            detail="The block this case fits is a different hospital from the master card.",
         )
-    if row.room_text in GENERIC_LOCATION_ROOMS and card.effective_state == "na" and row.source_location_id:
+    if kind == "block" and card.effective_state == "na":
         return FaxRowDecision(
             fax_row_id=row.id,
             schedule_card_id=card.id,
             status="ready",
-            reason_code="na_context_location",
-            detail="Generic EPIC activity was resolved from same-day surgeon and location evidence.",
+            reason_code="block_location",
+            detail="The hospital comes from the block this case fits.",
         )
     detail = "Ready to attach to the existing permanent card; no card or baseline will be changed."
     return FaxRowDecision(fax_row_id=row.id, schedule_card_id=card.id, status="ready", reason_code="existing_card", detail=detail)

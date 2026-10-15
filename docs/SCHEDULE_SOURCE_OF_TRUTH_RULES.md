@@ -29,6 +29,7 @@ This is Don's current scheduling rule set for the master calendar, the surgeon a
 - Fax data may create, update, or cancel surgical-case and clinic-visit **details**. It may update an effective assignment on a dated card but must not rewrite that card's immutable master baseline. A failed stage/apply check leaves the live schedule unchanged.
 - Aprima is read-only and is the source for Surgery One/CBO activity. Manual changes by Shannon/admin have their own provenance. Never invent CBO from generic Epic/Advent room codes such as `AHMGGENSRG`.
 - CAL does not choose a lead surgeon. Epic already made the schedule. Each fax detail line is written, then one SQL fill attaches that line to the named surgeon's existing AM/PM card. A case that already names an assisting surgeon still occupies that surgeon's time. Fax apply does not invent an assistant, and it does not collapse two printed lines into one case.
+- Epic room text stays on the line. The hospital is the block that case time fits. A room name can be a placeholder, so the room does not choose the hospital. When two blocks fit that time, the hospital stays blank for review.
 
 ## Conflicts and visibility
 

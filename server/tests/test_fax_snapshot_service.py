@@ -28,6 +28,8 @@ from app.models import (
     FaxRestoreLine,
     FaxRestoreSet,
     Location,
+    ORBlockAssignment,
+    ORBlockInstance,
     ScheduleBuildBackup,
     ScheduleCard,
     ScheduleCardActivity,
@@ -101,6 +103,25 @@ class FaxSnapshotServiceTest(unittest.TestCase):
             ),
         ])
         self.db.add(FaxDocument(external_fax_id=191, source_label="test", status="rendered"))
+        self.db.commit()
+
+    def _assign_block(self, location, start, end, day=date(2026, 9, 22)):
+        block = ORBlockInstance(
+            location_id=location.id,
+            date=day,
+            session="am" if start < time(12, 0) else "pm",
+            start_time=start,
+            end_time=end,
+            status="assigned",
+            assigned_surgeon_id=self.surgeon.id,
+        )
+        self.db.add(block)
+        self.db.flush()
+        self.db.add(ORBlockAssignment(
+            block_instance_id=block.id,
+            surgeon_id=self.surgeon.id,
+            start_time=start,
+        ))
         self.db.commit()
 
     def tearDown(self):
@@ -221,6 +242,8 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.assertEqual(self.db.query(ScheduleCardActivity).count(), 1)
 
     def test_daily_snapshot_keeps_mixed_facilities_on_one_session_card(self):
+        self._assign_block(self.wg_or, time(12, 0), time(13, 30))
+        self._assign_block(self.alt_or, time(13, 30), time(17, 0))
         staged = stage_reviewed_rows(
             self.db,
             external_fax_id=191,
@@ -275,6 +298,8 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         pm_card.baseline_state = "assigned"
         pm_card.effective_state = "assigned"
         self.db.commit()
+        self._assign_block(self.alt_or, time(7, 0), time(9, 0))
+        self._assign_block(self.wg_or, time(9, 0), time(12, 0))
         staged = stage_reviewed_rows(
             self.db,
             external_fax_id=191,

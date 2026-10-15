@@ -15,6 +15,8 @@ from app.models import (
     FaxDocument,
     FaxIngestRow,
     Location,
+    ORBlockAssignment,
+    ORBlockInstance,
     ScheduleCard,
     ScheduleCardActivity,
     ScheduleCardWeek,
@@ -42,6 +44,8 @@ class FaxPreviewTest(unittest.TestCase):
         surgeon = Surgeon(first_name="Jorge", last_name="Florin", email="jf@example.com", is_active=True)
         wg_or = Location(name="Winter Garden OR", abbreviation="WG-OR", location_type="hospital", is_active=True)
         al_or = Location(name="Altamonte OR", abbreviation="AL-OR", location_type="hospital", is_active=True)
+        self.surgeon = surgeon
+        self.wg_or = wg_or
         self.db.add_all([surgeon, wg_or, al_or])
         self.db.flush()
         week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=MONDAY, master_revision="test")
@@ -67,6 +71,28 @@ class FaxPreviewTest(unittest.TestCase):
                 patient_name=patient, procedure="Lap chole", source_system="surgical_case",
                 source_record_key=patient, identity_key=patient,
             ))
+        self.db.commit()
+        self._block(wg_or, MONDAY, time(12, 0), time(17, 0))
+        self._block(wg_or, TUESDAY, time(12, 0), time(17, 0))
+        self._block(wg_or, WEDNESDAY, time(7, 0), time(12, 0))
+
+    def _block(self, location, day, start, end):
+        block = ORBlockInstance(
+            location_id=location.id,
+            date=day,
+            session="am" if start < time(12, 0) else "pm",
+            start_time=start,
+            end_time=end,
+            status="assigned",
+            assigned_surgeon_id=self.surgeon.id,
+        )
+        self.db.add(block)
+        self.db.flush()
+        self.db.add(ORBlockAssignment(
+            block_instance_id=block.id,
+            surgeon_id=self.surgeon.id,
+            start_time=start,
+        ))
         self.db.commit()
 
     def tearDown(self):

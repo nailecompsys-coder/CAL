@@ -111,6 +111,7 @@ def run_migration() -> None:
             "ALTER TABLE schedule_card_activities ADD COLUMN IF NOT EXISTS surgical_case_id INTEGER REFERENCES surgical_cases(id) ON DELETE SET NULL",
             "ALTER TABLE schedule_card_activities ADD COLUMN IF NOT EXISTS fax_ingest_row_id INTEGER REFERENCES fax_ingest_rows(id) ON DELETE SET NULL",
             "ALTER TABLE schedule_card_activities ADD COLUMN IF NOT EXISTS aprima_appointment_id VARCHAR(36) REFERENCES aprima_cached_appointments(appointment_id) ON DELETE SET NULL",
+            "ALTER TABLE schedule_card_activities ADD COLUMN IF NOT EXISTS or_block_instance_id INTEGER REFERENCES or_block_instances(id) ON DELETE SET NULL",
             "CREATE INDEX IF NOT EXISTS ix_schedule_card_activities_schedule_card_id ON schedule_card_activities(schedule_card_id)",
             "CREATE INDEX IF NOT EXISTS ix_schedule_card_activities_surgeon_id ON schedule_card_activities(surgeon_id)",
             "CREATE INDEX IF NOT EXISTS ix_schedule_card_activities_location_id ON schedule_card_activities(location_id)",
@@ -120,6 +121,7 @@ def run_migration() -> None:
             "CREATE INDEX IF NOT EXISTS ix_schedule_card_activities_surgical_case_id ON schedule_card_activities(surgical_case_id)",
             "CREATE INDEX IF NOT EXISTS ix_schedule_card_activities_fax_ingest_row_id ON schedule_card_activities(fax_ingest_row_id)",
             "CREATE INDEX IF NOT EXISTS ix_schedule_card_activities_aprima_appointment_id ON schedule_card_activities(aprima_appointment_id)",
+            "CREATE INDEX IF NOT EXISTS ix_schedule_card_activities_or_block_instance_id ON schedule_card_activities(or_block_instance_id)",
         ):
             conn.execute(text(ddl))
         _keep_card_as_only_deleting_parent(conn)
@@ -143,6 +145,11 @@ def _keep_card_as_only_deleting_parent(conn) -> None:
             "aprima_appointment_id",
             "schedule_card_activities_aprima_appointment_id_fkey",
             "FOREIGN KEY (aprima_appointment_id) REFERENCES aprima_cached_appointments(appointment_id) ON DELETE SET NULL",
+        ),
+        (
+            "or_block_instance_id",
+            "schedule_card_activities_or_block_instance_id_fkey",
+            "FOREIGN KEY (or_block_instance_id) REFERENCES or_block_instances(id) ON DELETE SET NULL",
         ),
     )
     for column, constraint_name, definition in parents:

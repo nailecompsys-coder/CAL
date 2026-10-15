@@ -658,6 +658,7 @@ class ScheduleCardActivity(Base):
     surgical_case_id = Column(Integer, ForeignKey("surgical_cases.id", ondelete="SET NULL"), nullable=True, index=True)
     fax_ingest_row_id = Column(Integer, ForeignKey("fax_ingest_rows.id", ondelete="SET NULL"), nullable=True, index=True)
     aprima_appointment_id = Column(String(36), ForeignKey("aprima_cached_appointments.appointment_id", ondelete="SET NULL"), nullable=True, index=True)
+    or_block_instance_id = Column(Integer, ForeignKey("or_block_instances.id", ondelete="SET NULL"), nullable=True, index=True)
     identity_key = Column(String(512), nullable=False, index=True)
     is_active = Column(Boolean, nullable=False, default=True, server_default="true", index=True)
     created_at = Column(DateTime, server_default=func.now())
@@ -671,6 +672,7 @@ class ScheduleCardActivity(Base):
     )
     surgeon = relationship("Surgeon")
     location = relationship("Location")
+    or_block_instance = relationship("ORBlockInstance")
 
 
 class FaxDocument(Base):

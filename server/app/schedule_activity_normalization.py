@@ -95,6 +95,9 @@ def active_surgical_lines(
     return kept
 
 
+_LEAVE_BLOCK = object()
+
+
 def _upsert_activity(
     db: Session,
     *,
@@ -112,6 +115,7 @@ def _upsert_activity(
     surgical_case_id: int | None = None,
     fax_ingest_row_id: int | None = None,
     aprima_appointment_id: str | None = None,
+    or_block_instance_id: int | None | object = _LEAVE_BLOCK,
 ) -> ScheduleCardActivity:
     row = db.query(ScheduleCardActivity).filter(
         ScheduleCardActivity.source_system == source_system,
@@ -136,6 +140,8 @@ def _upsert_activity(
     row.surgical_case_id = surgical_case_id
     row.fax_ingest_row_id = fax_ingest_row_id
     row.aprima_appointment_id = aprima_appointment_id
+    if or_block_instance_id is not _LEAVE_BLOCK:
+        row.or_block_instance_id = or_block_instance_id
     return row
 
 
@@ -196,6 +202,7 @@ def normalize_surgical_case_card(db: Session, case: SurgicalCase) -> ScheduleCar
             location_id=case.location_id,
             is_active=(case.status or "scheduled") != "cancelled",
             surgical_case_id=case.id,
+            or_block_instance_id=case.or_block_instance_id,
         )
     else:
         deactivate_surgical_case_activity(db, case.id)

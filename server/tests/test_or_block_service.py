@@ -795,7 +795,9 @@ class ORBlockServiceTest(unittest.TestCase):
                 patient_name="Test Patient",
             )
             from app.schedule_activity_normalization import active_surgical_lines
-            self.assertEqual(len(active_surgical_lines(db, surgeon_id=surgeon.id, day=block_day)), 1)
+            lines = active_surgical_lines(db, surgeon_id=surgeon.id, day=block_day)
+            self.assertEqual(len(lines), 1)
+            self.assertEqual(lines[0].or_block_instance_id, block_id)
             self.assertEqual(db.query(SurgicalCase).count(), 0)
             self.assertFalse(any("on call" in row.lower() for row in warnings))
             with self.assertRaisesRegex(ValueError, "already has a case"):

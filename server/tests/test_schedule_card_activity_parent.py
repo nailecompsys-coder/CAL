@@ -207,7 +207,8 @@ class CardLineParentTest(unittest.TestCase):
             )).scalar()
         self.assertIn("REFERENCES schedule_cards", ddl)
         self.assertIn("fk_schedule_card_activities_card_identity", ddl)
-        self.assertEqual(ddl.upper().count("ON DELETE SET NULL"), 3)
+        self.assertIn("or_block_instances", ddl)
+        self.assertEqual(ddl.upper().count("ON DELETE SET NULL"), 4)
 
 
 if __name__ == "__main__":

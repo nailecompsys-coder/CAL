@@ -22,7 +22,6 @@ from .models import (
     ORBlockInstance,
     Surgeon,
     SurgicalBlock,
-    SurgicalCase,
 )
 from .surgeon_visibility import surgeon_is_visible
 
@@ -368,43 +367,32 @@ def scheduler_safe_warning(message: str) -> str:
 
 
 def scheduler_safe_rows(db: Session, start_date: date, end_date: date, surgeon_id: int | None = None) -> list[dict]:
-    q = (
-        db.query(SurgicalCase)
-        .join(Surgeon, SurgicalCase.surgeon_id == Surgeon.id)
-        .filter(
-            SurgicalCase.date >= start_date,
-            SurgicalCase.date <= end_date,
-            SurgicalCase.status != "cancelled",
-            Surgeon.is_active == True,  # noqa: E712
-        )
-        .options(joinedload(SurgicalCase.surgeon), joinedload(SurgicalCase.location))
-        .order_by(SurgicalCase.date, SurgicalCase.start_time)
-    )
-    if surgeon_id:
-        q = q.filter(SurgicalCase.surgeon_id == surgeon_id)
+    """Block warnings for the same surgical lines the phone and the office board read."""
+    from .schedule_activity_normalization import active_surgical_lines
+
     rows = []
-    for case in q.all():
-        if not surgeon_is_visible(case.surgeon):
+    for line in active_surgical_lines(db, surgeon_id=surgeon_id, start=start_date, end=end_date):
+        if line.start_time is None or not surgeon_is_visible(line.surgeon):
             continue
         warnings = surgical_case_warning_messages(
             db,
-            case.surgeon_id,
-            case.date,
-            case.start_time,
-            case.end_time,
-            case.location_id,
-            exclude_case_id=case.id,
-            or_block_instance_id=case.or_block_instance_id,
+            line.surgeon_id,
+            line.activity_date,
+            line.start_time,
+            line.end_time,
+            line.location_id,
+            exclude_activity_id=line.id,
+            or_block_instance_id=line.or_block_instance_id,
         )
         rows.append({
-            "date": case.date,
-            "start": case.start_time,
-            "end": case.end_time,
-            "surgeon": case.surgeon.full_name if case.surgeon else "",
-            "surgeon_initials": case.surgeon.initials if case.surgeon else "",
-            "location": case.location.name if case.location else (case.room_text or "OR"),
-            "procedure": case.procedure or "",
-            "status": case.status or "scheduled",
+            "date": line.activity_date,
+            "start": line.start_time,
+            "end": line.end_time,
+            "surgeon": line.surgeon.full_name if line.surgeon else "",
+            "surgeon_initials": line.surgeon.initials if line.surgeon else "",
+            "location": line.location.name if line.location else (line.room_text or "OR"),
+            "procedure": line.procedure or "",
+            "status": "scheduled",
             "warnings": [scheduler_safe_warning(warning) for warning in warnings],
         })
     return rows

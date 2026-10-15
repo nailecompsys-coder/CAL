@@ -602,6 +602,16 @@ def fold_block_into_host(
         case.or_block_instance_id = host.id
         case.location_id = host.location_id
         moved_cases += 1
+    from .models import ScheduleCardActivity
+    db.query(ScheduleCardActivity).filter(
+        ScheduleCardActivity.or_block_instance_id == fragment.id
+    ).update(
+        {
+            ScheduleCardActivity.or_block_instance_id: host.id,
+            ScheduleCardActivity.location_id: host.location_id,
+        },
+        synchronize_session=False,
+    )
 
     host_by_surgeon = {
         row.surgeon_id: row
@@ -781,6 +791,11 @@ def delete_or_block_instance(
         {SurgicalCase.or_block_instance_id: None},
         synchronize_session=False,
     )
+    from .models import ScheduleCardActivity
+    db.query(ScheduleCardActivity).filter(ScheduleCardActivity.or_block_instance_id == block.id).update(
+        {ScheduleCardActivity.or_block_instance_id: None},
+        synchronize_session=False,
+    )
     db.query(ORBlockAuditEvent).filter(ORBlockAuditEvent.block_instance_id == block.id).delete(
         synchronize_session=False
     )
@@ -846,6 +861,14 @@ def split_day_spanning_block(
     for case in list(_active_block_cases(block)):
         if case.start_time and case.start_time >= SESSION_SPLIT_NOON:
             case.or_block_instance_id = pm.id
+    from .models import ScheduleCardActivity
+    db.query(ScheduleCardActivity).filter(
+        ScheduleCardActivity.or_block_instance_id == block.id,
+        ScheduleCardActivity.start_time >= SESSION_SPLIT_NOON,
+    ).update(
+        {ScheduleCardActivity.or_block_instance_id: pm.id},
+        synchronize_session=False,
+    )
 
     block.session = "am"
     block.start_time = am_start
@@ -1343,6 +1366,7 @@ def add_case_to_block(
         procedure=saved_procedure,
         room_text=(block.room_text or "").strip() or None,
         location_id=block.location_id,
+        or_block_instance_id=block.id,
     )
     db.flush()
     warnings = []
@@ -1441,6 +1465,7 @@ def _save_block_line(
         activity.patient_name = patient_name.strip() or activity.patient_name or "Patient"
     if dest.room_text and not (activity.room_text or "").strip():
         activity.room_text = dest.room_text
+    activity.or_block_instance_id = dest.id
     activity.identity_key = _identity(activity.patient_name, activity.start_time, activity.activity_type or "surgical")
     db.flush()
 

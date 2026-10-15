@@ -3,6 +3,9 @@ import unittest
 from datetime import date, timedelta
 from unittest.mock import patch
 
+from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
+
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SECRET_KEY", "test-secret")
 
@@ -57,6 +60,8 @@ class CallScheduleAuditTest(unittest.TestCase):
             self.assertIn("Shannon", rows[0].actor_label)
 
             clear_rotation(db, day, group.id, admin=admin)
+            with self.assertRaises(HTTPException):
+                clear_rotation(db, day, None, admin=admin)
             rows = recent_call_schedule_audit_logs(db, limit=10)
             self.assertEqual(len(rows), 2)
             self.assertEqual(rows[0].action, "clear")
@@ -104,6 +109,35 @@ class CallScheduleAuditTest(unittest.TestCase):
             self.assertIsNotNone(portal)
             self.assertEqual(portal.to_surgeon_id, chris.id)
             self.assertEqual(portal.actor_admin_id, admin.id)
+        finally:
+            db.close()
+
+    def test_a_call_row_must_name_its_group(self):
+        db = self.Session()
+        try:
+            admin, chris, _, group = self._seed(db)
+            day = date.today() + timedelta(days=4)
+            with self.assertRaises(HTTPException) as raised:
+                assign_rotation(db, day, chris.id, None, admin=admin)
+            self.assertEqual(raised.exception.status_code, 400)
+            self.assertEqual(db.query(CallRotation).count(), 0)
+
+            db.add(CallRotation(date=day, surgeon_id=chris.id, rotation_type="primary"))
+            with self.assertRaises(IntegrityError):
+                db.flush()
+            db.rollback()
+
+            db.add(CallRotation(date=day, call_group_id=group.id, surgeon_id=chris.id))
+            db.add(CallRotation(date=day, call_group_id=group.id, surgeon_id=None))
+            with self.assertRaises(IntegrityError):
+                db.flush()
+            db.rollback()
+
+            db.add(CallRotation(date=day, call_group_id=group.id, surgeon_id=None, rotation_type="primary"))
+            db.commit()
+            saved = db.query(CallRotation).one()
+            self.assertEqual(saved.call_group_id, group.id)
+            self.assertIsNone(saved.surgeon_id)
         finally:
             db.close()
 

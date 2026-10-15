@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
+from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 from .call_schedule_audit_service import actor_label_for_admin, log_call_schedule_change
@@ -37,6 +38,8 @@ def assign_rotation(
     backup_surgeon_id: int | None | object = _UNCHANGED_BACKUP,
     backup_note: str = "",
 ) -> list[str]:
+    if call_group_id is None:
+        raise HTTPException(status_code=400, detail="Choose a call group")
     existing = rotation_query_for_assignment(db, assignment_date, call_group_id).first()
     from_surgeon_id = existing.surgeon_id if existing else None
     from .call_backup_service import set_backup_on_rotation, validate_backup_choice, backup_warnings
@@ -175,6 +178,8 @@ def clear_rotation(
     *,
     admin: AdminUser | None = None,
 ) -> None:
+    if call_group_id is None:
+        raise HTTPException(status_code=400, detail="Choose a call group")
     existing = (
         rotation_query_for_assignment(db, assignment_date, call_group_id)
         .options(joinedload(CallRotation.call_group))

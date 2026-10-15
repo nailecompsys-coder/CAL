@@ -307,7 +307,7 @@ class CallRotation(Base):
     __tablename__ = "call_rotations"
     __table_args__ = (UniqueConstraint("date", "call_group_id"),)
     id = Column(Integer, primary_key=True)
-    call_group_id = Column(Integer, ForeignKey("call_groups.id"), nullable=True)  # nullable for migration
+    call_group_id = Column(Integer, ForeignKey("call_groups.id"), nullable=False)
     surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=True)  # null = NO call
     date = Column(Date, nullable=False)
     rotation_type = Column(String(16), default="primary")  # always primary; kept for legacy compat

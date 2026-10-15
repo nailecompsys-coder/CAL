@@ -96,9 +96,9 @@ def run_migration() -> None:
                 room_text VARCHAR(128),
                 source_system VARCHAR(32) NOT NULL,
                 source_record_key VARCHAR(128) NOT NULL,
-                surgical_case_id INTEGER REFERENCES surgical_cases(id) ON DELETE CASCADE,
-                fax_ingest_row_id INTEGER REFERENCES fax_ingest_rows(id) ON DELETE CASCADE,
-                aprima_appointment_id VARCHAR(36) REFERENCES aprima_cached_appointments(appointment_id) ON DELETE CASCADE,
+                surgical_case_id INTEGER REFERENCES surgical_cases(id) ON DELETE SET NULL,
+                fax_ingest_row_id INTEGER REFERENCES fax_ingest_rows(id) ON DELETE SET NULL,
+                aprima_appointment_id VARCHAR(36) REFERENCES aprima_cached_appointments(appointment_id) ON DELETE SET NULL,
                 identity_key VARCHAR(512) NOT NULL,
                 is_active BOOLEAN NOT NULL DEFAULT TRUE,
                 created_at TIMESTAMP DEFAULT now(),
@@ -108,9 +108,9 @@ def run_migration() -> None:
         """))
         for ddl in (
             "ALTER TABLE schedule_card_activities ADD COLUMN IF NOT EXISTS end_time TIME",
-            "ALTER TABLE schedule_card_activities ADD COLUMN IF NOT EXISTS surgical_case_id INTEGER REFERENCES surgical_cases(id) ON DELETE CASCADE",
-            "ALTER TABLE schedule_card_activities ADD COLUMN IF NOT EXISTS fax_ingest_row_id INTEGER REFERENCES fax_ingest_rows(id) ON DELETE CASCADE",
-            "ALTER TABLE schedule_card_activities ADD COLUMN IF NOT EXISTS aprima_appointment_id VARCHAR(36) REFERENCES aprima_cached_appointments(appointment_id) ON DELETE CASCADE",
+            "ALTER TABLE schedule_card_activities ADD COLUMN IF NOT EXISTS surgical_case_id INTEGER REFERENCES surgical_cases(id) ON DELETE SET NULL",
+            "ALTER TABLE schedule_card_activities ADD COLUMN IF NOT EXISTS fax_ingest_row_id INTEGER REFERENCES fax_ingest_rows(id) ON DELETE SET NULL",
+            "ALTER TABLE schedule_card_activities ADD COLUMN IF NOT EXISTS aprima_appointment_id VARCHAR(36) REFERENCES aprima_cached_appointments(appointment_id) ON DELETE SET NULL",
             "CREATE INDEX IF NOT EXISTS ix_schedule_card_activities_schedule_card_id ON schedule_card_activities(schedule_card_id)",
             "CREATE INDEX IF NOT EXISTS ix_schedule_card_activities_surgeon_id ON schedule_card_activities(surgeon_id)",
             "CREATE INDEX IF NOT EXISTS ix_schedule_card_activities_location_id ON schedule_card_activities(location_id)",
@@ -122,3 +122,64 @@ def run_migration() -> None:
             "CREATE INDEX IF NOT EXISTS ix_schedule_card_activities_aprima_appointment_id ON schedule_card_activities(aprima_appointment_id)",
         ):
             conn.execute(text(ddl))
+        _keep_card_as_only_deleting_parent(conn)
+
+
+def _keep_card_as_only_deleting_parent(conn) -> None:
+    """A source row may disappear. That must not delete the card line."""
+    parents = (
+        (
+            "surgical_case_id",
+            "schedule_card_activities_surgical_case_id_fkey",
+            "FOREIGN KEY (surgical_case_id) REFERENCES surgical_cases(id) ON DELETE SET NULL",
+        ),
+        (
+            "fax_ingest_row_id",
+            "schedule_card_activities_fax_ingest_row_id_fkey",
+            "FOREIGN KEY (fax_ingest_row_id) REFERENCES fax_ingest_rows(id) ON DELETE SET NULL",
+        ),
+        (
+            "aprima_appointment_id",
+            "schedule_card_activities_aprima_appointment_id_fkey",
+            "FOREIGN KEY (aprima_appointment_id) REFERENCES aprima_cached_appointments(appointment_id) ON DELETE SET NULL",
+        ),
+    )
+    for column, constraint_name, definition in parents:
+        conn.execute(text(f"""
+            DO $$
+            DECLARE
+              bad_name text;
+            BEGIN
+              FOR bad_name IN
+                SELECT con.conname
+                FROM pg_constraint con
+                JOIN pg_class rel ON rel.oid = con.conrelid
+                JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+                JOIN pg_attribute att
+                  ON att.attrelid = rel.oid
+                 AND att.attnum = ANY (con.conkey)
+                WHERE nsp.nspname = 'public'
+                  AND rel.relname = 'schedule_card_activities'
+                  AND con.contype = 'f'
+                  AND att.attname = '{column}'
+                  AND con.confdeltype IS DISTINCT FROM 'n'
+              LOOP
+                EXECUTE format('ALTER TABLE schedule_card_activities DROP CONSTRAINT %I', bad_name);
+              END LOOP;
+              IF NOT EXISTS (
+                SELECT 1
+                FROM pg_constraint con
+                JOIN pg_class rel ON rel.oid = con.conrelid
+                JOIN pg_attribute att
+                  ON att.attrelid = rel.oid
+                 AND att.attnum = ANY (con.conkey)
+                WHERE rel.relname = 'schedule_card_activities'
+                  AND con.contype = 'f'
+                  AND att.attname = '{column}'
+                  AND con.confdeltype = 'n'
+              ) THEN
+                ALTER TABLE schedule_card_activities
+                  ADD CONSTRAINT {constraint_name} {definition};
+              END IF;
+            END $$
+        """))

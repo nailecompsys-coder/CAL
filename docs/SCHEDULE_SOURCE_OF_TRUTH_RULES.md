@@ -17,6 +17,7 @@ This is Don's current scheduling rule set for the master calendar, the surgeon a
 - The call schedule is its own list, `call_rotations`. One row is one surgeon, one date, and one call group. It stays separate from the Monday–Friday block and clinic cards.
 - The iPhone is that person's schedule. It shows who is where, and when they need to be at a facility for a case or a clinic. Those facts are the saved card lines.
 - One card has many lines. Each line belongs to that one card. The phone reads the card and its lines.
+- The card is the only parent that removes a line. Removing a fax row, an Aprima row, or an old surgery row leaves the line on the card.
 
 ## Source overlay
 

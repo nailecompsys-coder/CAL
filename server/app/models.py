@@ -644,9 +644,10 @@ class ScheduleCardActivity(Base):
     room_text = Column(String(128))
     source_system = Column(String(32), nullable=False)
     source_record_key = Column(String(128), nullable=False)
-    surgical_case_id = Column(Integer, ForeignKey("surgical_cases.id", ondelete="CASCADE"), nullable=True, index=True)
-    fax_ingest_row_id = Column(Integer, ForeignKey("fax_ingest_rows.id", ondelete="CASCADE"), nullable=True, index=True)
-    aprima_appointment_id = Column(String(36), ForeignKey("aprima_cached_appointments.appointment_id", ondelete="CASCADE"), nullable=True, index=True)
+    # Pointers back to a source row. The card is the only parent that deletes the line.
+    surgical_case_id = Column(Integer, ForeignKey("surgical_cases.id", ondelete="SET NULL"), nullable=True, index=True)
+    fax_ingest_row_id = Column(Integer, ForeignKey("fax_ingest_rows.id", ondelete="SET NULL"), nullable=True, index=True)
+    aprima_appointment_id = Column(String(36), ForeignKey("aprima_cached_appointments.appointment_id", ondelete="SET NULL"), nullable=True, index=True)
     identity_key = Column(String(512), nullable=False, index=True)
     is_active = Column(Boolean, nullable=False, default=True, server_default="true", index=True)
     created_at = Column(DateTime, server_default=func.now())

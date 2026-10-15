@@ -62,7 +62,12 @@ def day_off_status_map(
     rows = (
         db.query(DayOff, ScheduleCard)
         .join(DayOffScheduleCard, DayOffScheduleCard.day_off_id == DayOff.id)
-        .join(ScheduleCard, ScheduleCard.id == DayOffScheduleCard.schedule_card_id)
+        .join(
+            ScheduleCard,
+            (ScheduleCard.id == DayOffScheduleCard.schedule_card_id)
+            & (ScheduleCard.surgeon_id == DayOff.surgeon_id)
+            & (ScheduleCard.surgeon_id == DayOffScheduleCard.surgeon_id),
+        )
         .options(joinedload(DayOff.surgeon))
         .filter(
             ScheduleCard.date >= start_date,

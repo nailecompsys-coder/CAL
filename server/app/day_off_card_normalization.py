@@ -34,7 +34,11 @@ def sync_day_off_card_links(db: Session, day_off: DayOff) -> int:
         ScheduleCard.date <= day_off.end_date,
     ).all()
     links = [
-        DayOffScheduleCard(day_off_id=day_off.id, schedule_card_id=card.id)
+        DayOffScheduleCard(
+            day_off_id=day_off.id,
+            schedule_card_id=card.id,
+            surgeon_id=day_off.surgeon_id,
+        )
         for card in cards
         if _covers_session(day_off, card.date, card.session)
     ]

@@ -450,6 +450,10 @@ class Availability(Base):
 
 class DayOff(Base):
     __tablename__ = "days_off"
+    __table_args__ = (
+        UniqueConstraint("id", "surgeon_id", name="uq_days_off_id_surgeon"),
+    )
+
     id = Column(Integer, primary_key=True)
     surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=False)
     start_date = Column(Date, nullable=False)
@@ -537,6 +541,7 @@ class ScheduleCard(Base):
     __tablename__ = "schedule_cards"
     __table_args__ = (
         UniqueConstraint("surgeon_id", "date", "session"),
+        UniqueConstraint("id", "surgeon_id", name="uq_schedule_cards_id_surgeon"),
         UniqueConstraint("id", "surgeon_id", "date", "session", name="uq_schedule_cards_identity"),
         CheckConstraint("session IN ('am', 'pm')", name="ck_schedule_cards_session"),
         CheckConstraint(
@@ -588,17 +593,44 @@ class ScheduleCard(Base):
 
 
 class DayOffScheduleCard(Base):
-    """Normalized card overlay for one day-off request; never derived at render time."""
+    """One request points at that same surgeon's morning or afternoon card."""
     __tablename__ = "day_off_schedule_cards"
-    __table_args__ = (UniqueConstraint("day_off_id", "schedule_card_id"),)
+    __table_args__ = (
+        UniqueConstraint("day_off_id", "schedule_card_id"),
+        ForeignKeyConstraint(
+            ["day_off_id", "surgeon_id"],
+            ["days_off.id", "days_off.surgeon_id"],
+            name="fk_day_off_schedule_cards_day_off_surgeon",
+            onupdate="CASCADE",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["schedule_card_id", "surgeon_id"],
+            ["schedule_cards.id", "schedule_cards.surgeon_id"],
+            name="fk_day_off_schedule_cards_card_surgeon",
+            onupdate="CASCADE",
+            ondelete="CASCADE",
+        ),
+    )
 
     id = Column(Integer, primary_key=True)
-    day_off_id = Column(Integer, ForeignKey("days_off.id", ondelete="CASCADE"), nullable=False, index=True)
-    schedule_card_id = Column(Integer, ForeignKey("schedule_cards.id", ondelete="CASCADE"), nullable=False, index=True)
+    day_off_id = Column(Integer, nullable=False, index=True)
+    schedule_card_id = Column(Integer, nullable=False, index=True)
+    surgeon_id = Column(Integer, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 
-    day_off = relationship("DayOff")
-    schedule_card = relationship("ScheduleCard")
+    day_off = relationship(
+        "DayOff",
+        primaryjoin="and_(DayOff.id == DayOffScheduleCard.day_off_id, DayOff.surgeon_id == DayOffScheduleCard.surgeon_id)",
+        foreign_keys="[DayOffScheduleCard.day_off_id, DayOffScheduleCard.surgeon_id]",
+        viewonly=True,
+    )
+    schedule_card = relationship(
+        "ScheduleCard",
+        primaryjoin="and_(ScheduleCard.id == DayOffScheduleCard.schedule_card_id, ScheduleCard.surgeon_id == DayOffScheduleCard.surgeon_id)",
+        foreign_keys="[DayOffScheduleCard.schedule_card_id, DayOffScheduleCard.surgeon_id]",
+        viewonly=True,
+    )
 
 
 class ScheduleCardActivity(Base):

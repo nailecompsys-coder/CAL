@@ -20,6 +20,7 @@ This is Don's current scheduling rule set for the master calendar, the surgeon a
 - A clinic place lives on the morning card and the afternoon card. A whole day fills both cards. The surgeon website, the office, the master build, and the phone read those cards. The old clinic list is gone.
 - One card has many lines. Each line belongs to that one card. The phone reads the card and its lines.
 - A line takes its surgeon, date, and morning or afternoon from that card. The database refuses a line that names a different surgeon, date, or half-day.
+- A day-off request points at that same surgeon's morning and afternoon cards. The database refuses a link to another surgeon's card.
 - The card is the only parent that removes a line. Removing a fax row or an Aprima row leaves the line on the card.
 - A card line remembers the Block OR room it belongs to. Block warnings read that line. Removing the Block OR room clears the pointer and leaves the line.
 

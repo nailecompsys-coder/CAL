@@ -149,7 +149,7 @@ class CalAssistantEndpointTest(unittest.TestCase):
             )
             db.add(card)
             db.flush()
-            db.add(DayOffScheduleCard(day_off_id=off.id, schedule_card_id=card.id))
+            db.add(DayOffScheduleCard(day_off_id=off.id, schedule_card_id=card.id, surgeon_id=jf.id))
             db.add_all([
                 ScheduleCardActivity(
                     schedule_card_id=card.id, surgeon_id=jf.id, location_id=clinic.id,
@@ -216,7 +216,7 @@ class CalAssistantEndpointTest(unittest.TestCase):
             )
             db.add(off)
             db.flush()
-            db.add(DayOffScheduleCard(day_off_id=off.id, schedule_card_id=card.id))
+            db.add(DayOffScheduleCard(day_off_id=off.id, schedule_card_id=card.id, surgeon_id=jf.id))
             db.add(ScheduleCardActivity(
                 schedule_card_id=card.id, surgeon_id=jf.id, location_id=hosp.id,
                 activity_date=day, session="am", activity_type="surgical",

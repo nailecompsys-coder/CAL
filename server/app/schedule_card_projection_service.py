@@ -90,8 +90,11 @@ def card_grid_page_data(db: Session, start: date, end: date) -> dict:
         card_id for (card_id,) in (
             db.query(DayOffScheduleCard.schedule_card_id)
             .join(DayOff, DayOff.id == DayOffScheduleCard.day_off_id)
+            .join(ScheduleCard, ScheduleCard.id == DayOffScheduleCard.schedule_card_id)
             .filter(
                 DayOff.status == "approved",
+                DayOff.surgeon_id == ScheduleCard.surgeon_id,
+                DayOffScheduleCard.surgeon_id == DayOff.surgeon_id,
                 DayOffScheduleCard.schedule_card_id.in_(card_ids),
             )
             .all()

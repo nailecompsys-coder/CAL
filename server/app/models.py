@@ -770,6 +770,67 @@ class FaxRowDecision(Base):
     schedule_card = relationship("ScheduleCard")
 
 
+class FaxRestoreSet(Base):
+    """Photo of card lines taken before Send to Calendar writes one fax."""
+    __tablename__ = "fax_restore_sets"
+
+    id = Column(Integer, primary_key=True)
+    source_fax_id = Column(
+        Integer,
+        ForeignKey("fax_documents.external_fax_id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    run_id = Column(Integer, ForeignKey("fax_ingest_runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+    restored_at = Column(DateTime)
+
+    lines = relationship("FaxRestoreLine", back_populates="restore_set", cascade="all, delete-orphan")
+
+
+class FaxRestoreLine(Base):
+    """One saved card line. The fax plus that line can be stored only once."""
+    __tablename__ = "fax_restore_lines"
+    __table_args__ = (
+        UniqueConstraint("restore_set_id", "schedule_card_activity_id"),
+        CheckConstraint("session IN ('am', 'pm')", name="ck_fax_restore_lines_session"),
+        CheckConstraint(
+            "activity_type IN ('surgical', 'clinic')",
+            name="ck_fax_restore_lines_type",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    restore_set_id = Column(Integer, ForeignKey("fax_restore_sets.id", ondelete="CASCADE"), nullable=False, index=True)
+    schedule_card_activity_id = Column(
+        Integer,
+        ForeignKey("schedule_card_activities.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    schedule_card_id = Column(Integer, nullable=False)
+    surgeon_id = Column(Integer, nullable=False)
+    location_id = Column(Integer)
+    activity_date = Column(Date, nullable=False)
+    session = Column(String(2), nullable=False)
+    activity_type = Column(String(16), nullable=False)
+    start_time = Column(Time)
+    end_time = Column(Time)
+    patient_name = Column(String(255), nullable=False)
+    procedure = Column(Text, nullable=False, default="")
+    room_text = Column(String(128))
+    source_system = Column(String(32), nullable=False)
+    source_record_key = Column(String(128), nullable=False)
+    identity_key = Column(String(512), nullable=False)
+    fax_ingest_row_id = Column(Integer)
+    surgical_case_id = Column(Integer)
+    aprima_appointment_id = Column(String(36))
+    is_active = Column(Boolean, nullable=False)
+
+    restore_set = relationship("FaxRestoreSet", back_populates="lines")
+    activity = relationship("ScheduleCardActivity")
+
+
 class SurgicalCase(Base):
     """One row per surgery (hospital schedule). Scheduler adds; surgeon sees on schedule and can add notes."""
     __tablename__ = "surgical_cases"
@@ -1008,6 +1069,28 @@ class ScheduleChangeEvent(Base):
 
     surgeon = relationship("Surgeon")
     admin_user = relationship("AdminUser")
+
+
+class ScheduleWarning(Base):
+    """A sticky note on the card that has the problem. The card stays when the note is removed."""
+    __tablename__ = "schedule_warnings"
+    __table_args__ = (
+        UniqueConstraint("source_fax_id", "schedule_card_id", "warning_code"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    warning_code = Column(String(64), nullable=False)
+    schedule_card_id = Column(Integer, ForeignKey("schedule_cards.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_fax_id = Column(
+        Integer,
+        ForeignKey("fax_documents.external_fax_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    detail = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+
+    schedule_card = relationship("ScheduleCard")
 
 
 class PushSubscription(Base):

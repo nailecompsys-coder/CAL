@@ -22,6 +22,7 @@ from .models import (
 )
 from .fax_card_fill import fill_cards_from_fax_lines
 from .fax_ingest_engine import mark_fax_ingest_transaction
+from .fax_restore_service import replace_fax_warnings, save_fax_line_photo
 from .fax_pdf_intake import cleanup_fax_derivatives, prune_immutable_fax_sources
 from .schedule_build_backup_service import create_fax_snapshot_backup
 
@@ -191,6 +192,19 @@ def apply_staged_snapshot(
                 "faxLocationIds": mixed_location_ids[key],
             })
 
+    photo = save_fax_line_photo(
+        db,
+        source_fax_id=source_fax_id,
+        run_id=run.id,
+        covered={(row.surgeon_id, row.case_date) for row in rows if row.surgeon_id},
+    )
+    warning_count = replace_fax_warnings(
+        db,
+        source_fax_id=source_fax_id,
+        conflicts=conflicts,
+        cards=cards,
+    )
+
     clinic_sessions = len({
         (row.surgeon_id, row.case_date, row.session) for row in rows if row.row_type == "clinic"
     })
@@ -218,6 +232,8 @@ def apply_staged_snapshot(
             "faxId": source_fax_id,
             "runId": run.id,
             "backupId": backup.id,
+            "restoreSetId": photo.id,
+            "warningCount": warning_count,
             "range": {"start": start.isoformat(), "end": end.isoformat()},
             "conflicts": conflicts,
         }),
@@ -249,6 +265,8 @@ def apply_staged_snapshot(
         "faxId": source_fax_id,
         "runId": run.id,
         "backupId": backup.id,
+        "restoreSetId": photo.id,
+        "warningCount": warning_count,
         "range": {"start": start.isoformat(), "end": end.isoformat()},
         "rows": len(rows),
         "surgicalCreated": created,

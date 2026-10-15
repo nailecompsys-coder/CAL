@@ -24,6 +24,7 @@ This is Don's current scheduling rule set for the master calendar, the surgeon a
 ## Source overlay
 
 - A newly **applied** Epic/Desk fax supersedes older applied faxes for the surgeon/dates in its snapshot. Old fax rows remain history, not a second layer of current cases. The live app reads saved database facts, not all fax files.
+- Send to Calendar is the moment the fax writes the cards. Before that write, CAL saves a photo of the card lines for the surgeons and days that fax covers. Each saved line belongs to that one fax. Putting the photo back turns off the lines that fax added and puts the saved lines back. A warning is its own row, tied to the card it is about. The same fax, card, and problem can be saved only once.
 - Fax data may create, update, or cancel surgical-case and clinic-visit **details**. It may update an effective assignment on a dated card but must not rewrite that card's immutable master baseline. A failed stage/apply check leaves the live schedule unchanged.
 - Aprima is read-only and is the source for Surgery One/CBO activity. Manual changes by Shannon/admin have their own provenance. Never invent CBO from generic Epic/Advent room codes such as `AHMGGENSRG`.
 - CAL does not choose a lead surgeon. Epic already made the schedule. Each fax detail line is written, then one SQL fill attaches that line to the named surgeon's existing AM/PM card. A case that already names an assisting surgeon still occupies that surgeon's time. Fax apply does not invent an assistant, and it does not collapse two printed lines into one case.

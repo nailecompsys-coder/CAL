@@ -4,6 +4,8 @@ import unittest
 from datetime import date, time
 from unittest.mock import patch
 
+from sqlalchemy.exc import IntegrityError
+
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SECRET_KEY", "test-secret")
 
@@ -11,6 +13,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.fax_ingest_engine import ReviewedFaxRow, stage_reviewed_rows
+from app.fax_restore_service import restore_fax_snapshot
 from app.fax_snapshot_service import apply_staged_snapshot
 from app.native_home_items import empty_days
 from app.native_schedule_feed import append_native_schedule
@@ -21,11 +24,15 @@ from app.models import (
     CoSurgeonPair,
     FaxDocument,
     FaxIngestRow,
+    FaxIngestRun,
+    FaxRestoreLine,
+    FaxRestoreSet,
     Location,
     ScheduleBuildBackup,
     ScheduleCard,
     ScheduleCardActivity,
     ScheduleCardWeek,
+    ScheduleWarning,
     Surgeon,
     SurgicalCase,
 )
@@ -287,6 +294,11 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.assertEqual([line.schedule_card_id for line in lines], [pm.id, pm.id])
         self.assertEqual([line.location_id for line in lines], [self.wg_or.id, self.alt_or.id])
         self.assertTrue(any(item["code"] == "mixed_facilities_in_session" for item in result["baselineConflicts"]))
+        warning = self.db.query(ScheduleWarning).one()
+        self.assertEqual(warning.warning_code, "mixed_facilities_in_session")
+        self.assertEqual(warning.schedule_card_id, pm.id)
+        self.assertEqual(warning.source_fax_id, 191)
+        self.assertNotIn("Patient", warning.detail or "")
 
     def test_validated_session_wins_when_case_location_matches_other_card(self):
         pm_card = self.db.query(ScheduleCard).filter_by(session="pm").one()
@@ -586,6 +598,146 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self._assert_each_named_line_fills_its_card(result, assistant)
         na_cards = self.db.query(ScheduleCard).filter_by(session="pm").all()
         self.assertEqual({card.baseline_state for card in na_cards}, {"na"})
+
+    def test_send_saves_the_line_photo_and_restore_puts_it_back(self):
+        prior_fax = FaxDocument(external_fax_id=190, source_label="test", status="applied")
+        self.db.add(prior_fax)
+        self.db.flush()
+        prior_run = FaxIngestRun(
+            fax_document_id=prior_fax.id,
+            engine_version="test",
+            status="applied",
+            surgeon_scope_json='["JF"]',
+        )
+        self.db.add(prior_run)
+        self.db.flush()
+        prior_row = FaxIngestRow(
+            run_id=prior_run.id,
+            page_number=1,
+            surgeon_id=self.surgeon.id,
+            surgeon_initials="JF",
+            case_date=date(2026, 9, 22),
+            start_time=time(9, 0),
+            session="pm",
+            row_type="surgical",
+            room_text="WGD S07",
+            patient_name="Before, Line",
+            procedure="Earlier procedure",
+            source_location_id=self.wg_or.id,
+            normalized_key="before-line",
+        )
+        self.db.add(prior_row)
+        self.db.flush()
+        pm = self.db.query(ScheduleCard).filter_by(session="pm").one()
+        prior = ScheduleCardActivity(
+            schedule_card_id=pm.id,
+            surgeon_id=self.surgeon.id,
+            location_id=self.wg_or.id,
+            activity_date=date(2026, 9, 22),
+            session="pm",
+            activity_type="surgical",
+            start_time=time(9, 0),
+            patient_name="Before, Line",
+            procedure="Earlier procedure",
+            room_text="WGD S07",
+            source_system="fax",
+            source_record_key="before-line",
+            fax_ingest_row_id=prior_row.id,
+            identity_key="before-line",
+            is_active=True,
+        )
+        self.db.add(prior)
+        self.db.commit()
+
+        first = stage_reviewed_rows(
+            self.db, external_fax_id=191, source_label="test", surgeon_scope=["JF"],
+            rows=[self._row("First, Line")],
+        )
+        self.db.commit()
+        apply_staged_snapshot(self.db, source_fax_id=191, run_id=first["runId"])
+
+        photo = self.db.query(FaxRestoreSet).one()
+        saved = self.db.query(FaxRestoreLine).one()
+        self.assertEqual(saved.schedule_card_activity_id, prior.id)
+        self.assertEqual(saved.patient_name, "Before, Line")
+        self.assertTrue(saved.is_active)
+        self.db.refresh(prior)
+        self.assertFalse(prior.is_active)
+        self.assertEqual(self.db.query(ScheduleCardActivity).filter_by(is_active=True).count(), 1)
+
+        second = stage_reviewed_rows(
+            self.db, external_fax_id=191, source_label="test", surgeon_scope=["JF"],
+            rows=[self._row("Second, Line")],
+        )
+        self.db.commit()
+        apply_staged_snapshot(self.db, source_fax_id=191, run_id=second["runId"])
+
+        self.assertEqual(self.db.query(FaxRestoreSet).count(), 1)
+        saved = self.db.query(FaxRestoreLine).one()
+        self.assertEqual(saved.patient_name, "Before, Line")
+        self.assertTrue(saved.is_active)
+        self.assertIsNone(photo.restored_at)
+
+        result = restore_fax_snapshot(self.db, source_fax_id=191)
+        self.assertEqual(result["linesRestored"], 1)
+        self.assertGreaterEqual(result["linesTurnedOff"], 1)
+        self.db.refresh(prior)
+        self.assertTrue(prior.is_active)
+        self.assertEqual(prior.patient_name, "Before, Line")
+        self.assertEqual(prior.procedure, "Earlier procedure")
+        fax_lines = self.db.query(ScheduleCardActivity).filter(ScheduleCardActivity.id != prior.id).all()
+        self.assertTrue(fax_lines)
+        self.assertTrue(all(line.is_active is False for line in fax_lines))
+        self.db.refresh(photo)
+        self.assertIsNotNone(photo.restored_at)
+        document = self.db.query(FaxDocument).filter_by(external_fax_id=191).one()
+        self.assertEqual(document.status, "restored")
+        self.assertEqual(self.db.query(ScheduleWarning).count(), 0)
+        with self.assertRaisesRegex(ValueError, "already put back"):
+            restore_fax_snapshot(self.db, source_fax_id=191)
+
+    def test_off_card_warning_points_at_that_card(self):
+        am = self.db.query(ScheduleCard).filter_by(session="am").one()
+        am.effective_state = "off"
+        self.db.commit()
+        staged = stage_reviewed_rows(
+            self.db,
+            external_fax_id=191,
+            source_label="test",
+            surgeon_scope=["JF"],
+            rows=[
+                ReviewedFaxRow(
+                    page=2,
+                    surgeon_initials="JF",
+                    surgeon_name="Jorge Florin",
+                    case_date=date(2026, 9, 22),
+                    start_time=time(11, 0),
+                    row_type="clinic",
+                    room="AHMGGENSRG",
+                    patient_name="Clinic, Patient",
+                ),
+            ],
+        )
+        self.db.commit()
+
+        apply_staged_snapshot(self.db, source_fax_id=191, run_id=staged["runId"])
+
+        warning = self.db.query(ScheduleWarning).one()
+        self.assertEqual(warning.warning_code, "off_collision")
+        self.assertEqual(warning.schedule_card_id, am.id)
+        self.assertEqual(warning.source_fax_id, 191)
+        self.assertEqual(self.db.query(ScheduleCardActivity).filter_by(is_active=True).count(), 1)
+        self.db.add(ScheduleWarning(
+            source_fax_id=191,
+            schedule_card_id=am.id,
+            warning_code="off_collision",
+        ))
+        with self.assertRaises(IntegrityError):
+            self.db.flush()
+
+    def test_restore_without_a_photo_refuses(self):
+        with self.assertRaisesRegex(ValueError, "no calendar photo"):
+            restore_fax_snapshot(self.db, source_fax_id=191)
 
 
 if __name__ == "__main__":

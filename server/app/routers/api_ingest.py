@@ -21,6 +21,7 @@ from ..database import get_db
 from ..fax_ingest_engine import ReviewedFaxRow, stage_reviewed_rows
 from ..fax_pdf_intake import prepare_fax_pdf
 from ..fax_preview import preview_reviewed_rows
+from ..fax_restore_service import restore_fax_snapshot
 from ..fax_snapshot_service import apply_staged_snapshot
 from ..migrate_fax_ingest import PRACTICE_TIMEZONE
 
@@ -69,6 +70,10 @@ class VisualScheduleBatch(BaseModel):
 class SnapshotApplyIn(BaseModel):
     run_id: int
     confirm_authoritative_snapshot: bool = False
+
+
+class SnapshotRestoreIn(BaseModel):
+    confirm_restore: bool = False
 
 
 @router.post("/fax/{source_fax_id:int}/prepare")
@@ -217,6 +222,24 @@ def apply_fax_snapshot_route(
             source_fax_id=source_fax_id,
             run_id=body.run_id,
         )
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, "result": result}
+
+
+@router.post("/fax/{source_fax_id:int}/restore-snapshot")
+def restore_fax_snapshot_route(
+    source_fax_id: int,
+    body: SnapshotRestoreIn,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_ingest_token),
+) -> dict[str, Any]:
+    """Put back the card lines saved before this fax was sent to the calendar."""
+    if not body.confirm_restore:
+        raise HTTPException(400, "confirm_restore is required")
+    try:
+        result = restore_fax_snapshot(db, source_fax_id=source_fax_id)
     except ValueError as exc:
         db.rollback()
         raise HTTPException(400, str(exc)) from exc

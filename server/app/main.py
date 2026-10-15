@@ -22,6 +22,7 @@ from . import migrate_schedule_build_backups
 from . import migrate_clinic_schedule_card_guard
 from . import migrate_schedule_cards
 from . import migrate_fax_ingest
+from . import migrate_fax_restore
 from . import migrate_normalized_schedule_activity
 from .routers import (
     admin_otp_audit,
@@ -77,6 +78,7 @@ async def lifespan(app: FastAPI):
         migrate_clinic_schedule_card_guard.run_migration()
         migrate_schedule_cards.run_migration()
         migrate_fax_ingest.run_migration()
+        migrate_fax_restore.run_migration()
         migrate_normalized_schedule_activity.run_migration()
         migrate_grok_bot_rules.run_migration()
         migrate_call_builder.run_migration()

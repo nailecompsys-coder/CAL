@@ -16,7 +16,7 @@ This is Don's current scheduling rule set for the master calendar, the surgeon a
 - Shannon adds meetings, days off, and the call schedule. The office does not add clinic visits or surgical cases.
 - The call schedule is its own list, `call_rotations`. One row is one surgeon, one date, and one call group. Every row names its group, so one day holds one row per group. An empty doctor means nobody is on call for that group that day. It stays separate from the Monday–Friday block and clinic cards. Screens read that row. The hospitals in the group come from `call_group_locations`. The old copy that saved one row per hospital is not the schedule answer.
 - Call Builder saves in `call_draft_assignments` until Publish. Publish writes those rows onto `call_rotations`. The two lists stay matched, so a published change shows in the builder. An unpublished builder edit stays until Publish.
-- The iPhone is that person's schedule. It shows who is where, and when they need to be at a facility for a case or a clinic. Those facts are the saved card lines.
+- The iPhone is that person's schedule. It shows who is where, and when they need to be at a facility for a case or a clinic. Those facts are the saved card lines. The office week board and the surgeon website read the same surgical lines. The old surgery list is not that answer.
 - One card has many lines. Each line belongs to that one card. The phone reads the card and its lines.
 - A line takes its surgeon, date, and morning or afternoon from that card. The database refuses a line that names a different surgeon, date, or half-day.
 - The card is the only parent that removes a line. Removing a fax row, an Aprima row, or an old surgery row leaves the line on the card.

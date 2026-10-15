@@ -23,8 +23,51 @@ from app.admin_clinic_schedule_page_service import (
 )
 from app.clinic_schedule_card_guard import normalize_clinic_day_cards
 from app.migrate_location_admin_fields import normalize_office_location_name
-from app.models import Base, ClinicSchedule, Location, Surgeon, SurgicalCase
+from app.models import (
+    Base, ClinicSchedule, Location, ScheduleCard, ScheduleCardActivity, ScheduleCardWeek, Surgeon, SurgicalCase,
+)
 from app.or_block_service import BlockORCreateInput, assign_block, create_or_blocks
+
+def _save_card_line(db, surgeon, day, location, start, patient, procedure="Procedure", room=""):
+    session = "am" if start < time(12, 0) else "pm"
+    week_start = day - timedelta(days=day.weekday())
+    week = db.query(ScheduleCardWeek).filter_by(surgeon_id=surgeon.id, week_start=week_start).one_or_none()
+    if week is None:
+        week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=week_start)
+        db.add(week)
+        db.flush()
+    card = db.query(ScheduleCard).filter_by(surgeon_id=surgeon.id, date=day, session=session).one_or_none()
+    if card is None:
+        card = ScheduleCard(
+            week_id=week.id,
+            surgeon_id=surgeon.id,
+            date=day,
+            session=session,
+            baseline_state="assigned",
+            effective_state="assigned",
+            baseline_location_id=location.id,
+            effective_location_id=location.id,
+        )
+        db.add(card)
+        db.flush()
+    key = f"{surgeon.id}-{day.isoformat()}-{start.strftime('%H%M')}-{patient}"
+    db.add(ScheduleCardActivity(
+        schedule_card_id=card.id,
+        surgeon_id=surgeon.id,
+        location_id=location.id,
+        activity_date=day,
+        session=session,
+        activity_type="surgical",
+        start_time=start,
+        patient_name=patient,
+        procedure=procedure,
+        room_text=room,
+        source_system="fax",
+        source_record_key=key,
+        identity_key=key,
+        is_active=True,
+    ))
+
 
 class AdminClinicScheduleTest(unittest.TestCase):
     def setUp(self):
@@ -224,6 +267,31 @@ class AdminClinicScheduleTest(unittest.TestCase):
             self.assertEqual(jason_blocks[0]["pillCountLabel"], "2 cases")
             self.assertEqual(jason_blocks[0]["session"], "am")
             self.assertEqual(len(jason_blocks[0]["segments"]), 1)
+        finally:
+            db.close()
+
+    def test_office_board_reads_card_lines(self):
+        db = self.Session()
+        try:
+            hospital = Location(name="Winter Garden OR", abbreviation="WG-OR", location_type="hospital", is_active=True)
+            db.add(hospital)
+            surgeon = self._surgeon(db, "Chris", "Johnson")
+            db.flush()
+            monday = date.today() - timedelta(days=date.today().weekday())
+            db.add(SurgicalCase(
+                surgeon_id=surgeon.id,
+                date=monday,
+                start_time=time(7, 15),
+                patient_name="Old List",
+                procedure="Old",
+                location_id=hospital.id,
+                status="scheduled",
+            ))
+            _save_card_line(db, surgeon, monday, hospital, time(8, 0), "Card Line", "New", "WG S01")
+            db.commit()
+            data = page_data(db, week_offset=0)
+            shown = data["surgical_cases_json"].get(f"{surgeon.id}_{monday.isoformat()}", [])
+            self.assertEqual([row["patient"] for row in shown], ["Card Line"])
         finally:
             db.close()
 
@@ -545,17 +613,8 @@ class AdminClinicScheduleTest(unittest.TestCase):
                     session="pm",
                     assignment_type="assigned",
                 ),
-                SurgicalCase(
-                    surgeon_id=surgeon.id,
-                    date=monday,
-                    start_time=time(7, 30),
-                    patient_name="Alvarado, Hunter",
-                    procedure="Case 1",
-                    location_id=hospital.id,
-                    room_text="ALT S07",
-                    status="scheduled",
-                ),
             ])
+            _save_card_line(db, surgeon, monday, hospital, time(7, 30), "Alvarado, Hunter", "Case 1", "ALT S07")
             db.commit()
 
             data = page_data(db, week_offset=0)
@@ -609,17 +668,8 @@ class AdminClinicScheduleTest(unittest.TestCase):
                     session="pm",
                     assignment_type="assigned",
                 ),
-                SurgicalCase(
-                    surgeon_id=surgeon.id,
-                    date=monday,
-                    start_time=time(7, 15),
-                    patient_name="Case One",
-                    procedure="Procedure",
-                    location_id=hospital.id,
-                    room_text="WG S01",
-                    status="scheduled",
-                ),
             ])
+            _save_card_line(db, surgeon, monday, hospital, time(7, 15), "Case One", "Procedure", "WG S01")
             db.commit()
 
             data = page_data(db, week_offset=0)
@@ -655,28 +705,8 @@ class AdminClinicScheduleTest(unittest.TestCase):
                 assignment_type="assigned",
             )
             db.add(schedule)
-            db.add_all([
-                SurgicalCase(
-                    surgeon_id=surgeon.id,
-                    date=monday,
-                    start_time=time(7, 15),
-                    patient_name="Case One",
-                    procedure="Procedure",
-                    location_id=hospital.id,
-                    room_text="WG S01",
-                    status="scheduled",
-                ),
-                SurgicalCase(
-                    surgeon_id=surgeon.id,
-                    date=monday,
-                    start_time=time(9, 0),
-                    patient_name="Case Two",
-                    procedure="Procedure",
-                    location_id=hospital.id,
-                    room_text="WG S01",
-                    status="scheduled",
-                ),
-            ])
+            _save_card_line(db, surgeon, monday, hospital, time(7, 15), "Case One", "Procedure", "WG S01")
+            _save_card_line(db, surgeon, monday, hospital, time(9, 0), "Case Two", "Procedure", "WG S01")
             db.commit()
 
             data = page_data(db, week_offset=0)

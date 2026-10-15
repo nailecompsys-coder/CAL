@@ -12,8 +12,8 @@ from .models import (
     DayOff,
     Meeting,
     MeetingAttendee,
+    ScheduleCardActivity,
     SurgeonDayItem,
-    SurgicalCase,
 )
 from .surgeon_visibility import surgeon_is_visible
 
@@ -99,16 +99,22 @@ def surgeon_clinics_by_day(db: Session, surgeon_id: int, start_day: date, end_da
 
 def surgeon_surgeries_by_day(db: Session, surgeon_id: int, start_day: date, end_day: date) -> dict:
     return bucket_rows_by_day(
-        db.query(SurgicalCase)
-        .options(joinedload(SurgicalCase.location))
+        db.query(ScheduleCardActivity)
+        .options(joinedload(ScheduleCardActivity.location))
         .filter(
-            SurgicalCase.surgeon_id == surgeon_id,
-            SurgicalCase.date >= start_day,
-            SurgicalCase.date <= end_day,
-            SurgicalCase.status != "cancelled",
+            ScheduleCardActivity.surgeon_id == surgeon_id,
+            ScheduleCardActivity.activity_date >= start_day,
+            ScheduleCardActivity.activity_date <= end_day,
+            ScheduleCardActivity.activity_type == "surgical",
+            ScheduleCardActivity.is_active == True,  # noqa: E712
         )
-        .order_by(SurgicalCase.date, SurgicalCase.start_time, SurgicalCase.id)
-        .all()
+        .order_by(
+            ScheduleCardActivity.activity_date,
+            ScheduleCardActivity.start_time,
+            ScheduleCardActivity.id,
+        )
+        .all(),
+        day_attr="activity_date",
     )
 
 

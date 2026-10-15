@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.models import (
-    Base, CallBackup, CallCoverage, CallGroup, CallRotation, ClinicSchedule, DayOff, Location, ScheduleCard, ScheduleCardActivity,
+    Base, CallBackup, CallCoverage, CallGroup, CallRotation, DayOff, Location, ScheduleCard, ScheduleCardActivity,
     ScheduleCardWeek, Surgeon,
 )
 from app.native_scheduler_schedule import scheduler_schedule
@@ -58,7 +58,12 @@ class NativeSchedulerScheduleTest(unittest.TestCase):
             week_id=assistant_week.id, surgeon_id=assistant.id, date=monday, session="am",
             baseline_state="off", effective_state="off",
         )
-        self.db.add_all([am, pm, assistant_off])
+        assistant_clinic = ScheduleCard(
+            week_id=assistant_week.id, surgeon_id=assistant.id, date=monday, session="pm",
+            baseline_state="assigned", effective_state="assigned",
+            baseline_location_id=clinic.id, effective_location_id=clinic.id,
+        )
+        self.db.add_all([am, pm, assistant_off, assistant_clinic])
         self.db.flush()
         self.db.add_all([
             ScheduleCardActivity(
@@ -80,8 +85,6 @@ class NativeSchedulerScheduleTest(unittest.TestCase):
                    start_time=time(8), end_time=time(12)),
             DayOff(surgeon_id=assistant.id, start_date=monday, end_date=monday,
                    reason="No Call", status="approved", is_full_day=True),
-            ClinicSchedule(surgeon_id=assistant.id, location_id=clinic.id, date=monday,
-                           session="pm", assignment_type="assigned"),
         ])
         self.db.commit()
 
@@ -104,7 +107,7 @@ class NativeSchedulerScheduleTest(unittest.TestCase):
         self.assertFalse(any(row["type"] == "surgery" for row in assistant_rows))
         self.assertTrue(any(row["type"] == "card" and row["title"] == "OFF" for row in assistant_rows))
         self.assertTrue(any(row["type"] == "no_call" for row in assistant_rows))
-        self.assertTrue(any(row["type"] == "clinic_block" for row in assistant_rows))
+        self.assertTrue(any(row["type"] == "card" and row["title"] == "LM" for row in assistant_rows))
         self.assertEqual(1, rows[0]["dayCaseCount"])
         self.assertEqual(1, rows[0]["dayVisitCount"])
         self.assertEqual(1, rows[0]["dayOffCount"])

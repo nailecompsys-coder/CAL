@@ -10,7 +10,8 @@ from sqlalchemy.orm import sessionmaker
 
 from app.day_off_card_normalization import backfill_day_off_card_links
 from app.migrate_fax_ingest import create_applicable_view
-from app.models import Base, ClinicSchedule, DayOff, Location, ScheduleCard, ScheduleCardActivity, Surgeon
+from app.clinic_schedule_card_guard import present_card, set_card_place
+from app.models import Base, DayOff, Location, ScheduleCard, ScheduleCardActivity, Surgeon
 from app.off_conflict_service import (
     detect_off_conflicts,
     should_show_as_off,
@@ -72,19 +73,16 @@ class OffConflictServiceTest(unittest.TestCase):
                 status="approved",
                 reason="Vacation",
             ))
-            db.add(ClinicSchedule(
-                surgeon_id=chris.id,
-                location_id=clinic.id,
-                date=day,
-                session="full",
-                assignment_type="assigned",
-            ))
             db.commit()
             self._normalize(db, day)
+            cards = db.query(ScheduleCard).filter_by(surgeon_id=chris.id, date=day).all()
+            for card in cards:
+                set_card_place(card, clinic.id, "assigned")
+            db.commit()
 
             display = build_clinic_off_display(
                 db, day, day,
-                sched_map={chris.id: {day: db.query(ClinicSchedule).all()}},
+                sched_map={chris.id: {day: [present_card(card) for card in cards]}},
                 surgical_map={},
             )
             self.assertEqual(len(display["off_conflicts"]), 0)
@@ -113,24 +111,14 @@ class OffConflictServiceTest(unittest.TestCase):
                 start_time=time(7, 0),
                 end_time=time(12, 0),
             ))
-            am = ClinicSchedule(
-                surgeon_id=chris.id,
-                location_id=hospital.id,
-                date=day,
-                session="am",
-                assignment_type="assigned",
-            )
-            pm = ClinicSchedule(
-                surgeon_id=chris.id,
-                location_id=clinic.id,
-                date=day,
-                session="pm",
-                assignment_type="assigned",
-            )
-            db.add_all([am, pm])
             db.commit()
             self._normalize(db, day)
-            schedules = db.query(ClinicSchedule).order_by(ClinicSchedule.session).all()
+            am = db.query(ScheduleCard).filter_by(surgeon_id=chris.id, date=day, session="am").one()
+            pm = db.query(ScheduleCard).filter_by(surgeon_id=chris.id, date=day, session="pm").one()
+            set_card_place(am, hospital.id, "assigned")
+            set_card_place(pm, clinic.id, "assigned")
+            db.commit()
+            schedules = [present_card(am), present_card(pm)]
             display = build_clinic_off_display(
                 db, day, day,
                 sched_map={chris.id: {day: schedules}},
@@ -204,14 +192,6 @@ class OffConflictServiceTest(unittest.TestCase):
                 end_date=day,
                 status="approved",
             ))
-            db.add(ClinicSchedule(
-                surgeon_id=chris.id,
-                location_id=clinic.id,
-                date=day,
-                session="pm",
-                assignment_type="assigned",
-                notes="Desk fax ingest · 13:00 SMITH, JANE; 13:15 DOE, JOHN",
-            ))
             db.commit()
             self._normalize(db, day)
             pm_card = db.query(ScheduleCard).filter_by(
@@ -232,7 +212,10 @@ class OffConflictServiceTest(unittest.TestCase):
                 ),
             ])
             db.commit()
-            schedules = db.query(ClinicSchedule).all()
+            schedules = [
+                present_card(row)
+                for row in db.query(ScheduleCard).filter_by(surgeon_id=chris.id, date=day).all()
+            ]
             display = build_clinic_off_display(
                 db, day, day,
                 sched_map={chris.id: {day: schedules}},

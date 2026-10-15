@@ -7,13 +7,16 @@ from sqlalchemy.orm import Session
 
 
 def clinic_rows_for_surgeon(db: Session, surgeon_id: int, start_date, end_date):
-    from ..models import ClinicSchedule
+    from ..clinic_schedule_card_guard import place_cards
+    from ..models import ScheduleCard
 
-    return db.query(ClinicSchedule).filter(
-        ClinicSchedule.surgeon_id == surgeon_id,
-        ClinicSchedule.date >= start_date,
-        ClinicSchedule.date <= end_date,
-    ).all()
+    return place_cards(
+        db,
+        ScheduleCard.surgeon_id == surgeon_id,
+        ScheduleCard.date >= start_date,
+        ScheduleCard.date <= end_date,
+        ScheduleCard.effective_state.in_(("assigned", "off")),
+    )
 
 
 def surgery_rows_for_surgeon(

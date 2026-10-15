@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from .conflicts import check_conflicts
 from .clinic_schedule_card_guard import target_card_sessions
-from .models import ClinicSchedule, Location, ScheduleCard, Surgeon
+from .models import Location, ScheduleCard, Surgeon
 from .practice_time import practice_today
 from .or_block_service import log_schedule_change
 
@@ -15,9 +15,7 @@ def schedule_rows_for_slot(query, session: str):
     session = (session or "full").lower()
     if session == "full":
         return query.all()
-    return query.filter(
-        ClinicSchedule.session.in_([session, "full"])
-    ).all()
+    return query.filter(ScheduleCard.session == session).all()
 
 
 def _clear_card(card: ScheduleCard) -> None:

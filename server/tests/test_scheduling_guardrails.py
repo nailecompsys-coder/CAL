@@ -14,7 +14,6 @@ from app.models import (
     CallRotation,
     ClinicGroup,
     ClinicGroupMember,
-    ClinicSchedule,
     DayOff,
     Location,
     Meeting,
@@ -121,13 +120,7 @@ class SchedulingGuardrailsTest(unittest.TestCase):
                 end_time=time(12, 0),
                 recurrence="weekly",
             ))
-            db.add(ClinicSchedule(
-                surgeon_id=surgeon.id,
-                location_id=clinic.id,
-                date=case_day,
-                session="am",
-                assignment_type="assigned",
-            ))
+            self._card(db, surgeon, case_day, "am", clinic.id)
             meeting = Meeting(title="Assigned Meeting", date=case_day, start_time=time(10, 0), end_time=time(11, 0))
             db.add(meeting)
             db.flush()
@@ -196,22 +189,7 @@ class SchedulingGuardrailsTest(unittest.TestCase):
                 start_time=time(8, 30),
                 case_count=2,
             ))
-            db.add_all([
-                ClinicSchedule(
-                    surgeon_id=surgeon.id,
-                    location_id=ap_or.id,
-                    date=case_day,
-                    session="am",
-                    assignment_type="assigned",
-                ),
-                ClinicSchedule(
-                    surgeon_id=surgeon.id,
-                    location_id=ap_cl.id,
-                    date=case_day,
-                    session="pm",
-                    assignment_type="assigned",
-                ),
-            ])
+            self._card(db, surgeon, case_day, "pm", ap_cl.id)
             card = self._card(db, surgeon, case_day, "am", ap_or.id)
             self._line(
                 db, card, start=time(8, 30), patient="Sheffield, Martin",
@@ -322,12 +300,7 @@ class SchedulingGuardrailsTest(unittest.TestCase):
                 start_time=time(7, 0),
                 case_count=1,
             ))
-            db.add(ClinicSchedule(
-                surgeon_id=surgeon.id,
-                location_id=clinic.id,
-                date=case_day,
-                session="pm",
-            ))
+            self._card(db, surgeon, case_day, "pm", clinic.id)
             db.commit()
 
             target = {

@@ -5,7 +5,8 @@ from datetime import date, time, timedelta
 
 from sqlalchemy.orm import Session, joinedload
 
-from .models import ClinicSchedule, Location, ScheduleCardActivity
+from .clinic_schedule_card_guard import present_card
+from .models import Location, ScheduleCard, ScheduleCardActivity
 from .practice_time import practice_today
 from .or_block_service import (
     block_instances_for_range,
@@ -84,9 +85,9 @@ def parse_clinic_fax_visit_segments(notes: str) -> list[dict]:
 
 
 def clinic_fax_overlay_from_notes(
-    schedule: ClinicSchedule,
+    schedule: ScheduleCard,
 ) -> dict | None:
-    """Build a clinic pill overlay from fax times stored in ClinicSchedule.notes."""
+    """Build a clinic pill overlay from fax times stored on the card."""
     if (schedule.assignment_type or "").lower() != "assigned":
         return None
     loc = schedule.location
@@ -340,7 +341,7 @@ def enforce_two_card_daily_limit(
     kept_schedule_ids: set[int] = set()
     for surgeon_id, by_day in sched_map.items():
         for day, schedules in by_day.items():
-            groups: dict[str, list[ClinicSchedule]] = {}
+            groups: dict[str, list[ScheduleCard]] = {}
             for schedule in schedules:
                 raw_session = (schedule.session or "am").lower()
                 session = raw_session if raw_session in {"am", "pm"} else "am"
@@ -415,7 +416,7 @@ def enforce_two_card_daily_limit(
 
 
 def _entry_display_rank(
-    schedule: ClinicSchedule,
+    schedule: ScheduleCard,
     or_block_overlays: dict[int, dict],
     clinic_fax_overlays: dict[int, dict],
 ) -> tuple[int, int, int, int]:
@@ -432,7 +433,7 @@ def _entry_display_rank(
     )
 
 
-def _slot_schedule_candidates(schedules: list[ClinicSchedule], session: str) -> list[ClinicSchedule]:
+def _slot_schedule_candidates(schedules: list[ScheduleCard], session: str) -> list[ScheduleCard]:
     candidates = [
         schedule for schedule in schedules
         if (schedule.session or "am").lower() == session
@@ -606,7 +607,7 @@ def build_hospital_case_overlays(
     sched_map: dict,
     surgical_map: dict,
 ) -> dict[int, dict]:
-    """Show live OR case counts on existing hospital ClinicSchedule cards.
+    """Show live OR case counts on existing hospital cards.
 
     The Clinic / OR grid has two fixed surgeon/day slots. If the master card
     already says AL-OR/WG-OR/etc., fax/Epic cases should fill that card, not
@@ -658,7 +659,7 @@ def merge_or_blocks_into_clinic_grid(
     assigned_or_blocks: dict,
 ) -> tuple[dict[int, dict], dict]:
     """
-    Append Block OR start/cases onto the ClinicSchedule hospital pill (SSOT grid).
+    Append Block OR start/cases onto the hospital card pill.
     Drop the duplicate Block OR pill when location+session already exists on the grid.
     """
     overlays: dict[int, dict] = {}
@@ -696,7 +697,7 @@ def merge_or_blocks_into_clinic_grid(
     return overlays, remaining
 
 
-def clinic_schedule_sort_key(schedule: ClinicSchedule) -> tuple[int, int]:
+def clinic_schedule_sort_key(schedule: ScheduleCard) -> tuple[int, int]:
     return (
         SESSION_SORT_ORDER.get((schedule.session or "full").lower(), 9),
         schedule.id or 0,
@@ -854,14 +855,17 @@ def page_data(db: Session, week_offset: int) -> dict:
         Location.is_active == True,
     ).order_by(Location.location_type, Location.name).all()
     schedules = (
-        db.query(ClinicSchedule)
-        .options(joinedload(ClinicSchedule.location))
+        db.query(ScheduleCard)
+        .options(joinedload(ScheduleCard.effective_location))
         .filter(
-            ClinicSchedule.date >= week_days[0],
-            ClinicSchedule.date <= week_end,
+            ScheduleCard.date >= week_days[0],
+            ScheduleCard.date <= week_end,
+            ScheduleCard.effective_state.in_(("assigned", "off")),
         )
         .all()
     )
+    for schedule in schedules:
+        present_card(schedule)
     sched_map = {}
     for schedule in sorted(schedules, key=clinic_schedule_sort_key):
         sched_map.setdefault(schedule.surgeon_id, {}).setdefault(schedule.date, []).append(schedule)

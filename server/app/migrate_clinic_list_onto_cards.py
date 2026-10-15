@@ -58,8 +58,9 @@ def run_migration() -> None:
     if engine.dialect.name == "sqlite":
         return
     with engine.begin() as conn:
-        if not conn.execute(text("SELECT to_regclass('public.clinic_schedules')")).scalar():
+        clinic_list = conn.execute(text("SELECT to_regclass('public.clinic_schedules')")).scalar()
+        if not clinic_list:
             return
-        if not conn.execute(text("SELECT to_regclass('public.schedule_cards')")).scalar():
-            return
-        conn.execute(text(_COPY_SQL))
+        if conn.execute(text("SELECT to_regclass('public.schedule_cards')")).scalar():
+            conn.execute(text(_COPY_SQL))
+        conn.execute(text("DROP TABLE clinic_schedules CASCADE"))

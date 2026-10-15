@@ -1,6 +1,7 @@
 import os
+import re
 import unittest
-from datetime import date, time
+from datetime import date, time, timedelta
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SECRET_KEY", "test-secret")
@@ -9,7 +10,43 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.grok_ask_service import ask_grok, parse_topic, parse_window
-from app.models import Base, CallGroup, CallRotation, ClinicSchedule, DayOff, Location, Meeting, Surgeon
+from app.models import (
+    Base, CallGroup, CallRotation, DayOff, Location, Meeting, ScheduleCard,
+    ScheduleCardActivity, ScheduleCardWeek, Surgeon,
+)
+
+
+def _place_clinic(db, surgeon, location, day, session, notes=""):
+    week_start = day - timedelta(days=day.weekday())
+    week = db.query(ScheduleCardWeek).filter_by(
+        surgeon_id=surgeon.id, week_start=week_start,
+    ).one_or_none()
+    if week is None:
+        week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=week_start, master_revision="test")
+        db.add(week)
+        db.flush()
+    card = db.query(ScheduleCard).filter_by(
+        surgeon_id=surgeon.id, date=day, session=session,
+    ).one_or_none()
+    if card is None:
+        card = ScheduleCard(
+            week_id=week.id, surgeon_id=surgeon.id, date=day, session=session,
+            baseline_state="assigned", effective_state="assigned",
+            baseline_location_id=location.id, effective_location_id=location.id,
+        )
+        db.add(card)
+        db.flush()
+    for index, match in enumerate(re.finditer(r"(\d{2}):(\d{2})\s+([^;]+)", notes or "")):
+        name = match.group(3).strip()
+        key = f"{surgeon.id}-{day.isoformat()}-{session}-{index}"
+        db.add(ScheduleCardActivity(
+            schedule_card_id=card.id, surgeon_id=surgeon.id, location_id=location.id,
+            activity_date=day, session=session, activity_type="clinic",
+            start_time=time(int(match.group(1)), int(match.group(2))),
+            patient_name=name, procedure="", source_system="fax_clinic",
+            source_record_key=key, identity_key=key, is_active=True,
+        ))
+    return card
 
 # Practice English → topic. When Ask misses, add the phrase here first.
 QUESTION_CATALOG = (
@@ -178,14 +215,10 @@ class GrokAskLiveBoardTest(unittest.TestCase):
             loc = Location(name="Health Park", abbreviation="HP-CL", location_type="clinic", is_active=True)
             db.add_all([chris, loc])
             db.flush()
-            db.add(ClinicSchedule(
-                surgeon_id=chris.id,
-                location_id=loc.id,
-                date=date(2026, 8, 18),
-                session="am",
-                assignment_type="assigned",
-                notes="Desk fax #9 · 09:00 SMITH, JANE; 09:15 DOE, JOHN; 09:30 LEE, PAT",
-            ))
+            _place_clinic(
+                db, chris, loc, date(2026, 8, 18), "am",
+                "Desk fax #9 · 09:00 SMITH, JANE; 09:15 DOE, JOHN; 09:30 LEE, PAT",
+            )
             db.commit()
             result = ask_grok(
                 db,
@@ -262,30 +295,9 @@ class GrokAskLiveBoardTest(unittest.TestCase):
             loc = Location(name="Health Park", abbreviation="HP-CL", location_type="clinic", is_active=True)
             db.add_all([alex, loc])
             db.flush()
-            db.add(ClinicSchedule(
-                surgeon_id=alex.id,
-                location_id=loc.id,
-                date=date(2026, 8, 4),
-                session="am",
-                assignment_type="assigned",
-                notes="Desk fax · 09:00 SMITH, JANE; 09:15 DOE, JOHN",
-            ))
-            db.add(ClinicSchedule(
-                surgeon_id=alex.id,
-                location_id=loc.id,
-                date=date(2026, 8, 18),
-                session="am",
-                assignment_type="assigned",
-                notes="Desk fax · 09:00 LEE, PAT",
-            ))
-            db.add(ClinicSchedule(
-                surgeon_id=alex.id,
-                location_id=loc.id,
-                date=date(2026, 7, 8),
-                session="am",
-                assignment_type="assigned",
-                notes="Desk fax · 09:00 OLD, PATIENT",
-            ))
+            _place_clinic(db, alex, loc, date(2026, 8, 4), "am", "Desk fax · 09:00 SMITH, JANE; 09:15 DOE, JOHN")
+            _place_clinic(db, alex, loc, date(2026, 8, 18), "am", "Desk fax · 09:00 LEE, PAT")
+            _place_clinic(db, alex, loc, date(2026, 7, 8), "am", "Desk fax · 09:00 OLD, PATIENT")
             db.commit()
             result = ask_grok(
                 db,
@@ -382,14 +394,7 @@ class GrokAskLiveBoardTest(unittest.TestCase):
             )
             db.add_all([chris, loc])
             db.flush()
-            db.add(ClinicSchedule(
-                surgeon_id=chris.id,
-                location_id=loc.id,
-                date=date(2026, 8, 26),
-                session="am",
-                assignment_type="assigned",
-                notes="Desk fax · 09:00 SMITH, JANE; 09:15 DOE, JOHN",
-            ))
+            _place_clinic(db, chris, loc, date(2026, 8, 26), "am", "Desk fax · 09:00 SMITH, JANE; 09:15 DOE, JOHN")
             db.commit()
             result = ask_grok(db, "Clinic Visits Today", today=date(2026, 8, 26))
             self.assertEqual(result["topic"], "clinic_visits", result)
@@ -446,30 +451,9 @@ class GrokAskLiveBoardTest(unittest.TestCase):
             )
             db.add_all([chris, clermont, winter])
             db.flush()
-            db.add(ClinicSchedule(
-                surgeon_id=chris.id,
-                location_id=clermont.id,
-                date=date(2026, 8, 28),
-                session="am",
-                assignment_type="assigned",
-                notes="Desk fax · 09:00 SMITH, JANE; 09:15 DOE, JOHN",
-            ))
-            db.add(ClinicSchedule(
-                surgeon_id=chris.id,
-                location_id=clermont.id,
-                date=date(2026, 8, 27),
-                session="am",
-                assignment_type="assigned",
-                notes="Desk fax · 09:00 LEE, PAT",
-            ))
-            db.add(ClinicSchedule(
-                surgeon_id=chris.id,
-                location_id=winter.id,
-                date=date(2026, 8, 28),
-                session="am",
-                assignment_type="assigned",
-                notes="Desk fax · 07:00 OR, CASE",
-            ))
+            _place_clinic(db, chris, clermont, date(2026, 8, 28), "am", "Desk fax · 09:00 SMITH, JANE; 09:15 DOE, JOHN")
+            _place_clinic(db, chris, clermont, date(2026, 8, 27), "am", "Desk fax · 09:00 LEE, PAT")
+            _place_clinic(db, chris, winter, date(2026, 8, 28), "pm", "Desk fax · 07:00 OR, CASE")
             db.commit()
             friday = ask_grok(
                 db,

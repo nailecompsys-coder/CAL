@@ -13,7 +13,6 @@ from app.models import (
     Base,
     CallGroup,
     CallRotation,
-    ClinicSchedule,
     DayOff,
     Holiday,
     Location,
@@ -180,7 +179,7 @@ class NativeHomeContractTest(unittest.TestCase):
                 sort_order=2,
                 is_active=True,
             )
-            location = Location(name="Altamonte Hosp", location_type="hospital", color="#0ea5e9", is_active=True)
+            location = Location(name="Altamonte Clinic", location_type="clinic", color="#0ea5e9", is_active=True)
             group = CallGroup(name="Winter Garden / Apopka", sort_order=1)
             db.add_all([surgeon, off_surgeon, location, group])
             db.flush()
@@ -214,13 +213,6 @@ class NativeHomeContractTest(unittest.TestCase):
                     end_time=time(8, 0),
                     location_text="Winter Garden",
                 ),
-                ClinicSchedule(
-                    surgeon_id=surgeon.id,
-                    location_id=location.id,
-                    date=date(2026, 6, 4),
-                    session="am",
-                    assignment_type="assigned",
-                ),
                 SurgeonDayItem(
                     surgeon_id=surgeon.id,
                     date=date(2026, 6, 7),
@@ -235,6 +227,16 @@ class NativeHomeContractTest(unittest.TestCase):
                     kind="schedule",
                 ),
             ])
+            week = ScheduleCardWeek(
+                surgeon_id=surgeon.id, week_start=date(2026, 6, 1), master_revision="test",
+            )
+            db.add(week)
+            db.flush()
+            db.add(ScheduleCard(
+                week_id=week.id, surgeon_id=surgeon.id, date=date(2026, 6, 4), session="am",
+                baseline_state="assigned", effective_state="assigned",
+                baseline_location_id=location.id, effective_location_id=location.id,
+            ))
             db.commit()
 
             with patch("app.native_home_service.date", FixedDate), patch("app.native_home_service.practice_today", return_value=date(2026, 6, 4)):

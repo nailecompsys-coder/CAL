@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 from datetime import date, time, timedelta
-import re
 
 from sqlalchemy.orm import Session, joinedload
 
 from .admin_schedule_template_clinic_service import week_pattern_matches
 from .admin_schedule_template_common import approved_off_dates
 from .ingest_fix_service import save_ingest_placements
-from .models import ClinicSchedule, ORBlockAssignment, ORBlockInstance, ScheduleCardActivity, Surgeon, SurgeonLocationSchedule
+from .clinic_schedule_card_guard import set_card_place
+from .models import ORBlockAssignment, ORBlockInstance, ScheduleCard, ScheduleCardActivity, Surgeon, SurgeonLocationSchedule
 from .or_block_service import ACTIVE_BLOCK_STATUSES, _session_bucket
 from .paper_block_schedule import _place_or_block
 from .surgeon_visibility import surgeon_is_visible
@@ -18,17 +18,12 @@ from .surgeon_visibility import surgeon_is_visible
 NA_ASSIGNMENT_TYPE = "na"
 
 
-def _session_rows(db: Session, surgeon_id: int, day: date) -> dict[str, ClinicSchedule]:
-    rows = db.query(ClinicSchedule).filter(
-        ClinicSchedule.surgeon_id == surgeon_id,
-        ClinicSchedule.date == day,
+def _session_rows(db: Session, surgeon_id: int, day: date) -> dict[str, ScheduleCard]:
+    rows = db.query(ScheduleCard).filter(
+        ScheduleCard.surgeon_id == surgeon_id,
+        ScheduleCard.date == day,
     ).all()
-    result: dict[str, ClinicSchedule] = {}
-    for row in rows:
-        session = (row.session or "").lower()
-        if session in {"am", "pm", "full"}:
-            result[session] = row
-    return result
+    return {row.session: row for row in rows if row.session in {"am", "pm"}}
 
 
 def _case_session(case: ScheduleCardActivity) -> str | None:
@@ -46,15 +41,27 @@ def _handoff_sessions(db: Session, case: ScheduleCardActivity) -> list[str]:
     if session != "am" or case.start_time is None or case.start_time < time(11, 30):
         return [session] if session else []
     campus = _campus(case.location)
-    cards = db.query(ClinicSchedule).filter(
-        ClinicSchedule.surgeon_id == case.surgeon_id,
-        ClinicSchedule.date == case.activity_date,
-        ClinicSchedule.session == "am",
-    ).all()
-    for card in cards:
-        if not card.location or card.location.location_type != "clinic" or _campus(card.location) != campus:
-            continue
-        times = [time.fromisoformat(value) for value in re.findall(r"\b\d{2}:\d{2}\b", card.notes or "")]
+    card = (
+        db.query(ScheduleCard)
+        .options(joinedload(ScheduleCard.effective_location))
+        .filter(
+            ScheduleCard.surgeon_id == case.surgeon_id,
+            ScheduleCard.date == case.activity_date,
+            ScheduleCard.session == "am",
+            ScheduleCard.effective_state == "assigned",
+        )
+        .one_or_none()
+    )
+    if card and card.effective_location and card.effective_location.location_type == "clinic" and _campus(card.effective_location) == campus:
+        times = [
+            row.start_time
+            for row in db.query(ScheduleCardActivity).filter(
+                ScheduleCardActivity.schedule_card_id == card.id,
+                ScheduleCardActivity.activity_type == "clinic",
+                ScheduleCardActivity.is_active == True,  # noqa: E712
+                ScheduleCardActivity.start_time.isnot(None),
+            ).all()
+        ]
         if times and max(times).hour * 60 + max(times).minute + 30 <= case.start_time.hour * 60 + case.start_time.minute:
             return ["pm", "am"]
     return ["am"]
@@ -161,24 +168,12 @@ def build_missing_master_cards(db: Session, *, start: date, end: date) -> dict:
                 }
                 for session in ("am", "pm"):
                     template = applicable.get(session)
-                    current = existing.get(session) or existing.get("full")
+                    current = existing.get(session)
 
-                    # Every non-OFF weekday session is a real dated card. A
-                    # locationless NA card is capacity the fax may fill; it is
-                    # not a missing card and it is never an OFF day.
+                    # An empty card is capacity the fax may fill. The builder
+                    # fills that card. It does not create a new card.
                     if template is None or template.assignment_type in {"float", "na"}:
-                        if current is None:
-                            db.add(ClinicSchedule(
-                                surgeon_id=surgeon.id,
-                                location_id=None,
-                                date=day,
-                                session=session,
-                                assignment_type=NA_ASSIGNMENT_TYPE,
-                                notes=None,
-                            ))
-                            existing[session] = ClinicSchedule(location_id=None, assignment_type=NA_ASSIGNMENT_TYPE)
-                            clinic_created += 1
-                        else:
+                        if current is not None:
                             skipped_existing += 1
                         continue
 
@@ -186,24 +181,15 @@ def build_missing_master_cards(db: Session, *, start: date, end: date) -> dict:
                         continue
                     if template.assignment_type != "assigned" or not template.location_id:
                         continue
-                    if current is not None:
+                    if current is None:
+                        continue
+                    if current.effective_state == "assigned":
                         skipped_existing += 1
-                        if current.location_id != template.location_id:
+                        if current.effective_location_id != template.location_id:
                             conflicts += 1
-                        # A card that already matches a hospital master slot may
-                        # still be missing its OR assignment; fill only that link.
-                        if current.location_id != template.location_id:
                             continue
                     else:
-                        db.add(ClinicSchedule(
-                            surgeon_id=surgeon.id,
-                            location_id=template.location_id,
-                            date=day,
-                            session=session,
-                            assignment_type="assigned",
-                            notes=None,
-                        ))
-                        existing[session] = ClinicSchedule(location_id=template.location_id)
+                        set_card_place(current, template.location_id, "assigned")
                         clinic_created += 1
 
                     location = template.location

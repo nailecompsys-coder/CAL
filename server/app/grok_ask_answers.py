@@ -19,7 +19,7 @@ from .models import (
     Availability,
     CallGroup,
     ClinicGroup,
-    ClinicSchedule,
+    ScheduleCard,
     DayOff,
     Location,
     Meeting,
@@ -104,15 +104,19 @@ def collect_surgeon_facts(db: Session, surgeon: Surgeon, start: date, end: date)
     pending_days = _off_days(db, surgeon.id, start, end, "pending")
     cases = []
     clinics = (
-        db.query(ClinicSchedule)
-        .options(joinedload(ClinicSchedule.location))
+        db.query(ScheduleCard)
+        .options(joinedload(ScheduleCard.effective_location))
         .filter(
-            ClinicSchedule.surgeon_id == surgeon.id,
-            ClinicSchedule.date >= start,
-            ClinicSchedule.date <= end,
+            ScheduleCard.surgeon_id == surgeon.id,
+            ScheduleCard.date >= start,
+            ScheduleCard.date <= end,
+            ScheduleCard.effective_state == "assigned",
         )
         .all()
     )
+    for card in clinics:
+        card.location = card.effective_location
+        card.assignment_type = card.effective_state
     clinic_patients = int(
         db.query(func.count(func.distinct(ScheduleCardActivity.identity_key)))
         .filter(
@@ -769,18 +773,19 @@ def _answer_clinics_or(db: Session, window: dict) -> dict:
 
 def _answer_who_clinic(db: Session, window: dict) -> dict:
     rows = (
-        db.query(ClinicSchedule)
-        .options(joinedload(ClinicSchedule.surgeon), joinedload(ClinicSchedule.location))
+        db.query(ScheduleCard)
+        .options(joinedload(ScheduleCard.surgeon), joinedload(ScheduleCard.effective_location))
         .filter(
-            ClinicSchedule.date >= window["start"],
-            ClinicSchedule.date <= window["end"],
+            ScheduleCard.date >= window["start"],
+            ScheduleCard.date <= window["end"],
+            ScheduleCard.effective_state == "assigned",
         )
         .all()
     )
     bits = []
     for row in rows:
-        if (row.assignment_type or "assigned").lower() == "off":
-            continue
+        row.location = row.effective_location
+        row.assignment_type = row.effective_state
         if not surgeon_is_visible(row.surgeon):
             continue
         loc = ""

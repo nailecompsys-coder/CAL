@@ -150,14 +150,6 @@ events AS (
            JOBJ('type','personal','surgeon_id',s.id,'surgeon',s.full_name,'initials',s.initials,'notes',p.notes,'sort_key',60)
     FROM surgeon_day_items p JOIN selected s ON s.id = p.surgeon_id WHERE p.date BETWEEN :start_date AND :end_date
     UNION ALL
-    SELECT 'clinic-' || CAST(c.id AS TEXT),CAST(c.date AS TEXT),NULL,NULL,
-           upper(c.session) || ' · ' || CASE WHEN c.assignment_type = 'off' THEN 'OFF' ELSE coalesce(l.abbreviation,l.name,'NA') END,
-           JOBJ('type','clinic','surgeon_id',s.id,'surgeon',s.full_name,'initials',s.initials,
-                'session',c.session,'location',l.name,'notes',c.notes,'sort_key',30)
-    FROM clinic_schedules c JOIN selected s ON s.id = c.surgeon_id LEFT JOIN locations l ON l.id = c.location_id
-    WHERE c.date BETWEEN :start_date AND :end_date AND WEEKDAY_CARD
-      AND NOT EXISTS (SELECT 1 FROM schedule_cards mc WHERE mc.surgeon_id = c.surgeon_id AND mc.date = c.date)
-    UNION ALL
     SELECT 'unavailable-' || CAST(a.id AS TEXT),CAST(a.date AS TEXT),CAST(a.start_time AS TEXT),CAST(a.end_time AS TEXT),'Unavailable',
            JOBJ('type','unavailable','surgeon_id',s.id,'surgeon',s.full_name,'initials',s.initials,'notes',a.notes,'sort_key',15)
     FROM availability a JOIN selected s ON s.id = a.surgeon_id

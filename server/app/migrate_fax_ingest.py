@@ -1,6 +1,6 @@
 """Fax ingest schema and database rules.
 
-The AM/PM block schedule (schedule_cards, clinic_schedules) belongs to the
+The AM/PM block schedule (schedule_cards) belongs to the
 portal admin. Fax ingest only adds line items on top of it, and the database
 enforces that: while a fax is being applied (cal.writer = 'fax_ingest'), any
 write to the block tables is rejected, and cancelling a case is ignored when
@@ -255,7 +255,10 @@ def run_migration() -> None:
         conn.execute(text("ALTER TABLE fax_documents ADD COLUMN IF NOT EXISTS page_count INTEGER"))
         conn.execute(text("ALTER TABLE fax_ingest_runs ADD COLUMN IF NOT EXISTS surgeon_scope_json TEXT NOT NULL DEFAULT '[]'"))
         old_list = conn.execute(text("SELECT to_regclass('public.surgical_cases')")).scalar()
+        clinic_list = conn.execute(text("SELECT to_regclass('public.clinic_schedules')")).scalar()
         for statement in POSTGRES_RULES:
             if not old_list and "ON surgical_cases" in statement:
+                continue
+            if not clinic_list and "clinic_schedules" in statement:
                 continue
             conn.execute(text(statement))

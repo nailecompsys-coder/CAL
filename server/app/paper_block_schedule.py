@@ -20,14 +20,14 @@ from sqlalchemy.orm import Session, selectinload
 from .admin_schedule_template_clinic_service import normalize_week_pattern, save_template_cell_value
 from .admin_schedule_template_common import approved_off_dates
 from .models import (
-    ClinicSchedule,
     Location,
     ORBlockAuditEvent,
     ORBlockInstance,
+    ScheduleCard,
     Surgeon,
     SurgeonLocationSchedule,
 )
-from .clinic_schedule_card_guard import normalize_clinic_day_cards, upsert_clinic_schedule_cards
+from .clinic_schedule_card_guard import upsert_clinic_schedule_cards
 from .or_block_service import (
     BlockORCreateInput,
     SESSION_DEFAULTS,
@@ -376,21 +376,26 @@ def _replace_clinic_day(
     day: date,
     locations: dict[str, Location],
 ) -> tuple[int, int]:
-    existing = (
-        db.query(ClinicSchedule)
-        .filter(ClinicSchedule.surgeon_id == surgeon.id, ClinicSchedule.date == day)
-        .all()
-    )
-    for row in existing:
-        db.delete(row)
-    db.flush()
+    existing = db.query(ScheduleCard).filter(
+        ScheduleCard.surgeon_id == surgeon.id,
+        ScheduleCard.date == day,
+        ScheduleCard.effective_state == "assigned",
+    ).count()
     created = 0
     for session in ("am", "pm"):
         abbrev = paper_cell(surgeon.initials, day, session)
         if not abbrev:
+            upsert_clinic_schedule_cards(
+                db,
+                surgeon_id=surgeon.id,
+                day=day,
+                location_id=None,
+                session=session,
+                assignment_type="na",
+            )
             continue
         loc = locations[abbrev]
-        upsert_clinic_schedule_cards(
+        created += upsert_clinic_schedule_cards(
             db,
             surgeon_id=surgeon.id,
             day=day,
@@ -399,9 +404,7 @@ def _replace_clinic_day(
             assignment_type="assigned",
             notes=None,
         )
-        created += 1
-    normalize_clinic_day_cards(db, surgeon.id, day)
-    return created, len(existing)
+    return created, existing
 
 
 def _place_or_block(

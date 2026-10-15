@@ -118,26 +118,6 @@ items AS (
     JOIN cards c ON c.id = a.schedule_card_id
     LEFT JOIN locations l ON l.id = a.location_id
     WHERE a.duplicate_rank = 1
-),
-legacy_clinic AS (
-    SELECT 'clinic-' || CAST(cl.id AS TEXT) AS item_id, cl.date AS item_date,
-           'clinic' AS item_type,
-           CASE WHEN cl.assignment_type = 'off' THEN 'OFF' ELSE coalesce(l.abbreviation, l.name, 'Clinic') END AS title,
-           upper(cl.session) AS subtitle,
-           CASE WHEN cl.session = 'am' THEN '08:00' WHEN cl.session = 'pm' THEN '13:00' ELSE '08:00' END AS start_time,
-           CASE WHEN cl.session = 'am' THEN '12:00' WHEN cl.session = 'pm' THEN '17:00' ELSE '17:00' END AS end_time,
-           coalesce(l.name, '') AS location, CAST(NULL AS TEXT) AS room,
-           coalesce(cl.notes, '') AS notes, 'clinic_schedule' AS source,
-           0 AS needs_review, CAST(NULL AS INTEGER) AS raw_id,
-           coalesce(l.color, '#0ea5e9') AS color,
-           CAST(NULL AS TEXT) AS status, CAST(NULL AS TEXT) AS surgeon_notes,
-           CAST(NULL AS TEXT) AS assisting_surgeon, 0 AS assisting, 0 AS sort_rank,
-           0 AS case_count, 0 AS visit_count, CAST(NULL AS INTEGER) AS card_id
-    FROM clinic_schedules cl LEFT JOIN locations l ON l.id = cl.location_id
-    WHERE cl.surgeon_id = :surgeon_id AND cl.date BETWEEN :start_date AND :end_date
-      AND NOT EXISTS (SELECT 1 FROM cards c WHERE c.date = cl.date AND (c.session = cl.session OR cl.session = 'full'))
 )
-SELECT * FROM (
-    SELECT * FROM items UNION ALL SELECT * FROM legacy_clinic
-) feed
+SELECT * FROM items
 ORDER BY item_date, start_time, sort_rank, item_id

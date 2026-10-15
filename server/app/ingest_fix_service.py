@@ -9,7 +9,8 @@ from typing import Any
 from sqlalchemy.orm import Session, joinedload
 
 from .admin_schedule_template_clinic_service import week_pattern_matches
-from .models import AdminNotification, ClinicSchedule, ORBlockInstance, ScheduleCardActivity, Surgeon, SurgeonLocationSchedule
+from .clinic_schedule_card_guard import set_card_place
+from .models import AdminNotification, ORBlockInstance, ScheduleCard, ScheduleCardActivity, Surgeon, SurgeonLocationSchedule
 from .or_block_service import (
     ACTIVE_BLOCK_STATUSES,
     block_instances_for_range,
@@ -357,17 +358,16 @@ def confirm_blank_slot_card(db: Session, *, case_id: int, session: str) -> dict[
         return {"ok": False, "reason": "Case or time slot is invalid."}
     if case.location is None or case.location.location_type != "hospital":
         return {"ok": False, "reason": "A blank-slot confirmation requires a hospital OR case."}
-    existing = db.query(ClinicSchedule).filter(
-        ClinicSchedule.surgeon_id == case.surgeon_id,
-        ClinicSchedule.date == case.activity_date,
-        ClinicSchedule.session == session,
+    existing = db.query(ScheduleCard).filter(
+        ScheduleCard.surgeon_id == case.surgeon_id,
+        ScheduleCard.date == case.activity_date,
+        ScheduleCard.session == session,
     ).first()
-    if existing is not None:
+    if existing is None:
+        return {"ok": False, "reason": "This surgeon has no morning or afternoon card for that day."}
+    if existing.effective_state == "assigned":
         return {"ok": False, "reason": "That time slot already has a card."}
-    db.add(ClinicSchedule(
-        surgeon_id=case.surgeon_id, location_id=case.location_id, date=case.activity_date,
-        session=session, assignment_type="assigned", notes="Confirmed blank-slot OR exception",
-    ))
+    set_card_place(existing, case.location_id, "assigned")
     placed = _place_or_block(db, case.surgeon, case.activity_date, session, case.location)
     if placed not in {"assigned", "already"}:
         db.rollback()

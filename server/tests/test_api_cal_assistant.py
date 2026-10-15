@@ -29,7 +29,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models import (
-    AdminUser, Base, ClinicSchedule, DayOff, DayOffScheduleCard, Location,
+    AdminUser, Base, DayOff, DayOffScheduleCard, Location,
     ScheduleCard, ScheduleCardActivity, ScheduleCardWeek, Surgeon,
 )
 from app.routers.api_cal_assistant import _week_bounds, _conflict_actions
@@ -129,14 +129,41 @@ class CalAssistantEndpointTest(unittest.TestCase):
             db.flush()
 
             day = date.today() + timedelta(days=1)
-            db.add(DayOff(
+            while day.weekday() > 4:
+                day += timedelta(days=1)
+            off = DayOff(
                 surgeon_id=jf.id, start_date=day, end_date=day, status="approved",
-            ))
-            db.add(ClinicSchedule(
-                surgeon_id=jf.id, location_id=clinic.id, date=day,
-                session="am", assignment_type="assigned",
-                notes="Desk fax ingest · 09:00 SMITH, JANE; 09:15 DOE, JOHN",
-            ))
+            )
+            db.add(off)
+            week = ScheduleCardWeek(
+                surgeon_id=jf.id,
+                week_start=day - timedelta(days=day.weekday()),
+                master_revision="test",
+            )
+            db.add(week)
+            db.flush()
+            card = ScheduleCard(
+                week_id=week.id, surgeon_id=jf.id, date=day, session="am",
+                baseline_state="assigned", effective_state="assigned",
+                baseline_location_id=clinic.id, effective_location_id=clinic.id,
+            )
+            db.add(card)
+            db.flush()
+            db.add(DayOffScheduleCard(day_off_id=off.id, schedule_card_id=card.id))
+            db.add_all([
+                ScheduleCardActivity(
+                    schedule_card_id=card.id, surgeon_id=jf.id, location_id=clinic.id,
+                    activity_date=day, session="am", activity_type="clinic", start_time=time(9, 0),
+                    patient_name="Smith, Jane", procedure="", source_system="fax_clinic",
+                    source_record_key="jane", identity_key="jane", is_active=True,
+                ),
+                ScheduleCardActivity(
+                    schedule_card_id=card.id, surgeon_id=jf.id, location_id=clinic.id,
+                    activity_date=day, session="am", activity_type="clinic", start_time=time(9, 15),
+                    patient_name="Doe, John", procedure="", source_system="fax_clinic",
+                    source_record_key="john", identity_key="john", is_active=True,
+                ),
+            ])
             db.commit()
 
             conflicts = detect_off_conflicts(db, day, day)

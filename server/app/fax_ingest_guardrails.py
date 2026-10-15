@@ -16,7 +16,7 @@ import json
 from sqlalchemy.orm import Session
 
 from .email_service import send_email
-from .models import AdminNotification, AdminUser, ClinicSchedule, DayOff, Location, ORBlockAssignment, ORBlockInstance
+from .models import AdminNotification, AdminUser, DayOff, Location, ORBlockAssignment, ORBlockInstance, ScheduleCard
 from .native_dayoff_support import segment_for_date
 from .or_block_service import ACTIVE_BLOCK_STATUSES, _host_rank, _session_bucket
 from .push import create_admin_notification
@@ -35,7 +35,7 @@ PLACEABLE_REVIEW_REASONS = frozenset({
 
 @dataclass(frozen=True)
 class ClinicCardMatch:
-    card: ClinicSchedule | None
+    card: ScheduleCard | None
     reason: str
 
     @property
@@ -123,12 +123,12 @@ def matching_assigned_or_block(
 
     session = "am" if start_time < time(12, 0) else "pm"
     na_card = (
-        db.query(ClinicSchedule)
+        db.query(ScheduleCard)
         .filter(
-            ClinicSchedule.surgeon_id == surgeon_id,
-            ClinicSchedule.date == day,
-            ClinicSchedule.session == session,
-            ClinicSchedule.assignment_type == "na",
+            ScheduleCard.surgeon_id == surgeon_id,
+            ScheduleCard.date == day,
+            ScheduleCard.session == session,
+            ScheduleCard.effective_state == "na",
         )
         .first()
     )
@@ -211,26 +211,27 @@ def existing_clinic_card(
     sess = (session or "pm").lower()
     if sess not in {"am", "pm", "full"}:
         sess = "pm"
+    sessions = ["am", "pm"] if sess == "full" else [sess]
     cards = (
-        db.query(ClinicSchedule)
+        db.query(ScheduleCard)
         .filter(
-            ClinicSchedule.surgeon_id == surgeon_id,
-            ClinicSchedule.date == day,
-            ClinicSchedule.session.in_([sess, "full"]),
+            ScheduleCard.surgeon_id == surgeon_id,
+            ScheduleCard.date == day,
+            ScheduleCard.session.in_(sessions),
         )
-        .order_by(ClinicSchedule.id)
+        .order_by(ScheduleCard.id)
         .all()
     )
     if not cards:
         return ClinicCardMatch(None, "clinic_card_not_found")
     if location_id:
-        same = [row for row in cards if row.location_id == location_id]
+        same = [row for row in cards if row.effective_location_id == location_id]
         if same:
             return ClinicCardMatch(same[0], "matched")
     return ClinicCardMatch(cards[0], "matched_session")
 
 
-def fax_may_update_clinic_location(card: ClinicSchedule, loc: Location | None, room: str | None) -> bool:
+def fax_may_update_clinic_location(card: ScheduleCard, loc: Location | None, room: str | None) -> bool:
     """Placeholder rooms are not locations; otherwise a mapped clinic can update."""
     del card
     return loc is not None and not is_placeholder_clinic_room(room)

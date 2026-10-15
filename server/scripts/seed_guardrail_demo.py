@@ -25,7 +25,6 @@ from app.models import (  # noqa: E402
     AdminUser,
     ClinicGroup,
     ClinicGroupMember,
-    ClinicSchedule,
     DayOff,
     Location,
     Meeting,
@@ -250,14 +249,25 @@ def seed():
             db, block_doc, wg_or, block_day, time(15, 0), time(15, 45),
             "Demo outside block warning", "demo-outside-block",
         )
-        db.add(ClinicSchedule(
-            surgeon_id=block_doc.id,
-            location_id=main_office.id,
-            date=block_day,
-            session="am",
-            assignment_type="assigned",
-            notes="Demo clinic overlap warning",
-        ))
+        pm_card = db.query(ScheduleCard).filter_by(
+            surgeon_id=block_doc.id, date=block_day, session="pm",
+        ).first()
+        if pm_card is None:
+            pm_week = db.query(ScheduleCardWeek).filter_by(
+                surgeon_id=block_doc.id,
+                week_start=block_day - timedelta(days=block_day.weekday()),
+            ).one()
+            pm_card = ScheduleCard(
+                week_id=pm_week.id,
+                surgeon_id=block_doc.id,
+                date=block_day,
+                session="pm",
+                baseline_state="assigned",
+                effective_state="assigned",
+                baseline_location_id=main_office.id,
+                effective_location_id=main_office.id,
+            )
+            db.add(pm_card)
         db.add(DayOff(
             surgeon_id=block_doc.id,
             start_date=block_day + timedelta(days=1),

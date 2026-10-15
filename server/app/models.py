@@ -142,7 +142,6 @@ class Surgeon(Base):
     native_schedule_alerts = relationship("NativeScheduleAlert", back_populates="surgeon", cascade="all, delete-orphan")
     location_schedules = relationship("SurgeonLocationSchedule", back_populates="surgeon", cascade="all, delete-orphan")
     location_overrides = relationship("LocationOverride", back_populates="surgeon", cascade="all, delete-orphan")
-    clinic_schedules = relationship("ClinicSchedule", back_populates="surgeon", cascade="all, delete-orphan")
     day_items = relationship("SurgeonDayItem", back_populates="surgeon", cascade="all, delete-orphan")
     clinic_group_memberships = relationship("ClinicGroupMember", back_populates="surgeon", cascade="all, delete-orphan")
     surgical_blocks = relationship("SurgicalBlock", back_populates="surgeon", cascade="all, delete-orphan")
@@ -515,24 +514,6 @@ class MeetingAttendee(Base):
 
     meeting = relationship("Meeting", back_populates="attendees")
     surgeon = relationship("Surgeon", back_populates="meeting_attendees")
-
-
-class ClinicSchedule(Base):
-    """Specific-date clinic assignment: which doctor is at which clinic on a given day."""
-    __tablename__ = "clinic_schedules"
-    id = Column(Integer, primary_key=True)
-    surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=False)
-    location_id = Column(Integer, ForeignKey("locations.id"), nullable=True)
-    date = Column(Date, nullable=False)
-    session = Column(String(8), default="full")  # am | pm | full
-    assignment_type = Column(String(16), default="assigned", server_default="assigned")  # assigned | off
-    notes = Column(Text)
-    created_at = Column(DateTime, server_default=func.now())
-
-    __table_args__ = (UniqueConstraint("surgeon_id", "date", "session"),)
-
-    surgeon = relationship("Surgeon", back_populates="clinic_schedules")
-    location = relationship("Location")
 
 
 class ScheduleCardWeek(Base):

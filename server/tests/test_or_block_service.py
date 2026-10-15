@@ -14,7 +14,6 @@ from app.models import (
     CallGroup,
     CallGroupLocation,
     CallRotation,
-    ClinicSchedule,
     DayOff,
     Location,
     ORBlockAuditEvent,
@@ -501,8 +500,16 @@ class ORBlockServiceTest(unittest.TestCase):
                 end_time=time(12, 0),
                 recurrence="once",
             ))["instance_ids"][0]
+            week_start = block_day - timedelta(days=block_day.weekday())
+            week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=week_start, master_revision="test")
+            db.add(week)
+            db.flush()
             db.add_all([
-                ClinicSchedule(surgeon_id=surgeon.id, location_id=clinic.id, date=block_day, session="am"),
+                ScheduleCard(
+                    week_id=week.id, surgeon_id=surgeon.id, date=block_day, session="am",
+                    baseline_state="assigned", effective_state="assigned",
+                    baseline_location_id=clinic.id, effective_location_id=clinic.id,
+                ),
                 DayOff(surgeon_id=surgeon.id, start_date=block_day, end_date=block_day, status="approved"),
             ])
             db.commit()
@@ -647,11 +654,14 @@ class ORBlockServiceTest(unittest.TestCase):
                 end_time=time(12, 0),
                 recurrence="once",
             ))["instance_ids"][0]
-            db.add(ClinicSchedule(
-                surgeon_id=surgeon.id,
-                location_id=clinic.id,
-                date=block_day,
-                session="pm",
+            week_start = block_day - timedelta(days=block_day.weekday())
+            week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=week_start, master_revision="test")
+            db.add(week)
+            db.flush()
+            db.add(ScheduleCard(
+                week_id=week.id, surgeon_id=surgeon.id, date=block_day, session="pm",
+                baseline_state="assigned", effective_state="assigned",
+                baseline_location_id=clinic.id, effective_location_id=clinic.id,
             ))
             db.commit()
 

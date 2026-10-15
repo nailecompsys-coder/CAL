@@ -1,6 +1,6 @@
 """Block OR scheduling services.
 
-Block OR is practice capacity inventory. It is separate from ClinicSchedule rows
+Block OR is practice capacity inventory. It is separate from the morning and afternoon cards
 because open block time may exist before any surgeon is assigned.
 """
 

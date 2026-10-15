@@ -223,28 +223,24 @@ def check_overlap_clinic(
     exclude_entity: Optional[tuple[str, int]] = None,
     target_entity: Optional[dict] = None,
 ) -> Iterator[Conflict]:
-    from ..models import ClinicSchedule
+    from ..models import ScheduleCard
     from sqlalchemy.orm import joinedload
 
     target = overlap_target(target_entity, start_date, end_date)
     for cs in (
-        db.query(ClinicSchedule)
-        .options(joinedload(ClinicSchedule.location))
+        db.query(ScheduleCard)
+        .options(joinedload(ScheduleCard.effective_location))
         .filter(
-            ClinicSchedule.surgeon_id == surgeon_id,
-            ClinicSchedule.date >= target.start,
-            ClinicSchedule.date <= target.end,
+            ScheduleCard.surgeon_id == surgeon_id,
+            ScheduleCard.date >= target.start,
+            ScheduleCard.date <= target.end,
+            ScheduleCard.effective_state == "assigned",
         )
         .all()
     ):
         if _exclude_entity(exclude_entity, "clinic_schedule", cs.id):
             continue
-        # "Off" clinic markers are not a scheduled clinic commitment.
-        if (cs.assignment_type or "").lower() in {"off", "__off__", "day_off"}:
-            continue
-        # Clinic/OR grid stores OR days as hospital locations on ClinicSchedule —
-        # that is Block OR capacity, not a clinic conflict.
-        loc = cs.location
+        loc = cs.effective_location
         if loc:
             abbr = (loc.abbreviation or "").upper()
             ltype = (loc.location_type or "").lower()

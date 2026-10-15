@@ -6,7 +6,7 @@ from datetime import date
 
 from sqlalchemy.orm import Session, joinedload
 
-from .models import ClinicSchedule, Location, Surgeon, SurgeonOcrAlias
+from .models import Location, ScheduleCard, Surgeon, SurgeonOcrAlias
 
 _CRED_RE = re.compile(
     r"\b(?:dr\.?|md|do|pa\s*-?\s*c|pac|np|aprn|facs|phd|mba|rn|lpn)\b",
@@ -274,24 +274,26 @@ def schedule_location_for_day(
     want: \"or\" | \"clinic\"
     """
     rows = (
-        db.query(ClinicSchedule)
-        .options(joinedload(ClinicSchedule.location))
+        db.query(ScheduleCard)
+        .options(joinedload(ScheduleCard.effective_location))
         .filter(
-            ClinicSchedule.surgeon_id == surgeon_id,
-            ClinicSchedule.date == day,
-            ClinicSchedule.assignment_type == "assigned",
-            ClinicSchedule.location_id.isnot(None),
+            ScheduleCard.surgeon_id == surgeon_id,
+            ScheduleCard.date == day,
+            ScheduleCard.effective_state == "assigned",
+            ScheduleCard.effective_location_id.isnot(None),
         )
         .all()
     )
+    for row in rows:
+        row.location = row.effective_location
     if not rows:
         return None
 
     sess = (session or "").lower() or None
 
-    def _session_ok(row: ClinicSchedule) -> bool:
-        rs = (row.session or "full").lower()
-        if not sess or sess == "full" or rs == "full":
+    def _session_ok(row: ScheduleCard) -> bool:
+        rs = (row.session or "am").lower()
+        if not sess or sess == "full":
             return True
         return rs == sess
 
@@ -438,16 +440,18 @@ def _campus_clinic_from_or_day(
 ) -> Location | None:
     """If the day grid only has hospital OR, use the matching *-OV clinic on that campus."""
     rows = (
-        db.query(ClinicSchedule)
-        .options(joinedload(ClinicSchedule.location))
+        db.query(ScheduleCard)
+        .options(joinedload(ScheduleCard.effective_location))
         .filter(
-            ClinicSchedule.surgeon_id == surgeon_id,
-            ClinicSchedule.date == day,
-            ClinicSchedule.assignment_type == "assigned",
-            ClinicSchedule.location_id.isnot(None),
+            ScheduleCard.surgeon_id == surgeon_id,
+            ScheduleCard.date == day,
+            ScheduleCard.effective_state == "assigned",
+            ScheduleCard.effective_location_id.isnot(None),
         )
         .all()
     )
+    for row in rows:
+        row.location = row.effective_location
     for row in rows:
         loc = row.location
         if not loc or not _is_or_location(loc):

@@ -7,6 +7,8 @@ def run_migration():
     if engine.dialect.name == "sqlite":
         return
     with engine.begin() as conn:
+        if not conn.execute(text("SELECT to_regclass('public.clinic_schedules')")).scalar():
+            return
         conn.execute(text("""
             ALTER TABLE clinic_schedules
             ADD COLUMN IF NOT EXISTS assignment_type VARCHAR(16) NOT NULL DEFAULT 'assigned'

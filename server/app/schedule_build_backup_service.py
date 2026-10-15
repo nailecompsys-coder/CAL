@@ -7,7 +7,6 @@ from sqlalchemy import Date, DateTime, Time, inspect, text
 from sqlalchemy.orm import Session
 
 from .models import (
-    ClinicSchedule,
     ORBlockAssignment,
     ORBlockAuditEvent,
     ORBlockInstance,
@@ -86,12 +85,18 @@ def create_schedule_build_backup(
     payload = {
         "version": SNAPSHOT_VERSION,
         "range": {"start": start.isoformat(), "end": end.isoformat()},
-        "clinic_schedules": [
-            _row_payload(row)
+        "schedule_card_places": [
+            {
+                "id": row.id,
+                "baseline_state": row.baseline_state,
+                "effective_state": row.effective_state,
+                "baseline_location_id": row.baseline_location_id,
+                "effective_location_id": row.effective_location_id,
+            }
             for row in (
-                db.query(ClinicSchedule)
-                .filter(ClinicSchedule.date >= start, ClinicSchedule.date <= end)
-                .order_by(ClinicSchedule.id)
+                db.query(ScheduleCard)
+                .filter(ScheduleCard.date >= start, ScheduleCard.date <= end)
+                .order_by(ScheduleCard.id)
                 .all()
             )
         ],
@@ -177,13 +182,6 @@ def create_fax_snapshot_backup(
                 ScheduleCard.date <= end,
             ).order_by(ScheduleCard.id).all()
         ],
-        "clinic_schedules": [
-            _row_payload(row)
-            for row in db.query(ClinicSchedule).filter(
-                ClinicSchedule.date >= start,
-                ClinicSchedule.date <= end,
-            ).order_by(ClinicSchedule.id).all()
-        ],
         "card_lines": [
             _row_payload(row)
             for row in db.query(ScheduleCardActivity).filter(
@@ -221,22 +219,14 @@ def _revert_fax_snapshot(db: Session, backup: ScheduleBuildBackup, payload: dict
                 continue
             setattr(card, column.key, _load_value(column, saved[column.key]))
 
-    db.query(ClinicSchedule).filter(
-        ClinicSchedule.date >= start,
-        ClinicSchedule.date <= end,
-    ).delete(synchronize_session="fetch")
-    for row in payload.get("clinic_schedules", []):
-        db.add(_model_from_payload(ClinicSchedule, row))
-
     backup.reverted_at = datetime.now(UTC).replace(tzinfo=None)
-    _bump_pg_sequence(db, "clinic_schedules")
     db.commit()
     return {
         "ok": True,
         "from": start.isoformat(),
         "to": end.isoformat(),
         "cards": len(card_payloads),
-        "clinic": len(payload.get("clinic_schedules", [])),
+        "clinic": len(card_payloads),
         "cases": len(payload.get("card_lines", [])),
     }
 
@@ -292,10 +282,14 @@ def revert_schedule_build_backup(
                 "ok": False,
                 "reason": "Revert blocked because surgical cases were added after this build.",
             }
-    db.query(ClinicSchedule).filter(
-        ClinicSchedule.date >= start,
-        ClinicSchedule.date <= end,
-    ).delete(synchronize_session=False)
+    for saved in payload.get("schedule_card_places", []):
+        card = db.get(ScheduleCard, saved.get("id"))
+        if card is None:
+            continue
+        card.baseline_state = saved.get("baseline_state") or card.baseline_state
+        card.effective_state = saved.get("effective_state") or card.effective_state
+        card.baseline_location_id = saved.get("baseline_location_id")
+        card.effective_location_id = saved.get("effective_location_id")
 
     if current_block_ids:
         # Preserve cases while restoring their pre-build linkage after the
@@ -314,8 +308,6 @@ def revert_schedule_build_backup(
             ORBlockInstance.id.in_(current_block_ids)
         ).delete(synchronize_session=False)
 
-    for row in payload.get("clinic_schedules", []):
-        db.add(_model_from_payload(ClinicSchedule, row))
     for row in payload.get("or_block_instances", []):
         db.add(_model_from_payload(ORBlockInstance, row))
     db.flush()
@@ -336,7 +328,6 @@ def revert_schedule_build_backup(
 
     backup.reverted_at = datetime.now(UTC).replace(tzinfo=None)
     backup.reverted_by_admin_id = admin_id
-    _bump_pg_sequence(db, "clinic_schedules")
     _bump_pg_sequence(db, "or_block_instances")
     _bump_pg_sequence(db, "or_block_assignments")
     _bump_pg_sequence(db, "or_block_audit_events")
@@ -345,6 +336,6 @@ def revert_schedule_build_backup(
         "ok": True,
         "from": start.isoformat(),
         "to": end.isoformat(),
-        "clinic": len(payload.get("clinic_schedules", [])),
+        "clinic": len(payload.get("schedule_card_places", [])),
         "blocks": len(payload.get("or_block_instances", [])),
     }

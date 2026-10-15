@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from .models import (
     AdminNotification,
-    ClinicSchedule,
     ORBlockAssignment,
     ScheduleCardActivity,
     ScheduleChangeEvent,
@@ -26,8 +25,6 @@ def desk_fax_ids_in_text(text: str | None) -> set[int]:
 def revert_desk_faxes(db: Session, fax_ids: list[int] | set[int]) -> dict[str, Any]:
     """Remove schedule rows written by the given Desk fax ids.
 
-    - Cancels surgical cases tagged with those faxes
-    - Deletes clinic schedule rows tagged with those faxes
     - Deletes Block OR assignments tagged with those faxes
     - Does NOT delete Block OR capacity cards
     - Clears matching ingest/schedule-flag notifications
@@ -41,13 +38,6 @@ def revert_desk_faxes(db: Session, fax_ids: list[int] | set[int]) -> dict[str, A
     assigns_deleted = 0
     notifs_deleted = 0
     flags_deleted = 0
-
-    for row in db.query(ClinicSchedule).filter(ClinicSchedule.notes.isnot(None)).all():
-        ids = desk_fax_ids_in_text(row.notes)
-        if not ids.intersection(wanted):
-            continue
-        db.delete(row)
-        clinics_deleted += 1
 
     for assign in db.query(ORBlockAssignment).filter(ORBlockAssignment.note.isnot(None)).all():
         ids = desk_fax_ids_in_text(assign.note)

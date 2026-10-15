@@ -394,7 +394,7 @@ class Holiday(Base):
 
 
 class CallDraftAssignment(Base):
-    """Shared Call Builder draft — never published until Publish writes call_rotations."""
+    """Temporary Call Builder list. Publish copies each row onto call_rotations."""
     __tablename__ = "call_draft_assignments"
     __table_args__ = (UniqueConstraint("date", "call_group_id"),)
     id = Column(Integer, primary_key=True)

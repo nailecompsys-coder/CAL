@@ -102,6 +102,17 @@ class NativeHomeDraftCallTest(unittest.TestCase):
             november = build_native_home(db, viewer, date(2026, 11, 30), date(2026, 11, 30))
             self.assertEqual(november["days"][0]["callAssignments"][0]["initials"], "AS")
             self.assertEqual(november["days"][0]["callAssignments"][0]["source"], "draft")
+
+            db.query(CallDraftAssignment).filter(CallDraftAssignment.date == date(2026, 11, 30)).update(
+                {CallDraftAssignment.surgeon_id: chris.id},
+                synchronize_session=False,
+            )
+            db.commit()
+            matched = build_native_home(db, viewer, date(2026, 11, 30), date(2026, 11, 30))
+            chip = matched["days"][0]["callAssignments"][0]
+            self.assertEqual(chip["initials"], "CJ")
+            self.assertEqual(chip["source"], "live")
+            self.assertGreater(chip["rotationId"], 0)
         finally:
             db.close()
 

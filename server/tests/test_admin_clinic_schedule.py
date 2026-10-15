@@ -9,6 +9,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.admin_clinic_schedule_action_service import assign_clinic, copy_clinic_week
+from app.api_calendar_surgeon_service import build_surgeon_calendar_events
+from app.surgeon_schedule_queries import surgeon_clinics_by_day
 from app.ingest_fix_service import save_ingest_placements
 from app.admin_clinic_schedule_page_service import (
     aggregate_assigned_or_blocks,
@@ -79,6 +81,32 @@ class AdminClinicScheduleTest(unittest.TestCase):
         Base.metadata.drop_all(bind=self.engine)
         self.engine.dispose()
 
+    def _na_cards(self, db, surgeon, day):
+        week_start = day - timedelta(days=day.weekday())
+        week = db.query(ScheduleCardWeek).filter_by(
+            surgeon_id=surgeon.id, week_start=week_start,
+        ).one_or_none()
+        if week is None:
+            week = ScheduleCardWeek(
+                surgeon_id=surgeon.id, week_start=week_start, master_revision="test",
+            )
+            db.add(week)
+            db.flush()
+        cards = []
+        for session in ("am", "pm"):
+            card = db.query(ScheduleCard).filter_by(
+                surgeon_id=surgeon.id, date=day, session=session,
+            ).one_or_none()
+            if card is None:
+                card = ScheduleCard(
+                    week_id=week.id, surgeon_id=surgeon.id, date=day, session=session,
+                    baseline_state="na", effective_state="na",
+                )
+                db.add(card)
+                db.flush()
+            cards.append(card)
+        return cards
+
     def test_clinic_schedule_sort_key_places_am_pm_then_full(self):
         rows = [
             ClinicSchedule(id=10, session="pm"),
@@ -101,18 +129,29 @@ class AdminClinicScheduleTest(unittest.TestCase):
 
             today = date.today()
             src_start = today - timedelta(days=today.weekday())
-            db.add_all([
-                ClinicSchedule(surgeon_id=chris.id, location_id=clinic.id, date=src_start, session="am"),
-                ClinicSchedule(surgeon_id=alex.id, location_id=clinic.id, date=src_start, session="pm"),
-            ])
+            next_week = src_start + timedelta(days=7)
+            chris_src = self._na_cards(db, chris, src_start)
+            alex_src = self._na_cards(db, alex, src_start)
+            self._na_cards(db, chris, next_week)
+            self._na_cards(db, alex, next_week)
+            chris_src[0].baseline_state = "assigned"
+            chris_src[0].effective_state = "assigned"
+            chris_src[0].baseline_location_id = clinic.id
+            chris_src[0].effective_location_id = clinic.id
+            alex_src[1].baseline_state = "assigned"
+            alex_src[1].effective_state = "assigned"
+            alex_src[1].baseline_location_id = clinic.id
+            alex_src[1].effective_location_id = clinic.id
             db.commit()
 
             result = copy_clinic_week(db, 0, str(chris.id))
 
             self.assertTrue(result["ok"])
             self.assertEqual(result["created"], 1)
-            next_week = src_start + timedelta(days=7)
-            copied = db.query(ClinicSchedule).filter(ClinicSchedule.date == next_week).all()
+            copied = db.query(ScheduleCard).filter(
+                ScheduleCard.date == next_week,
+                ScheduleCard.effective_state == "assigned",
+            ).all()
             self.assertEqual(len(copied), 1)
             self.assertEqual(copied[0].surgeon_id, chris.id)
             self.assertEqual(copied[0].session, "am")
@@ -129,17 +168,12 @@ class AdminClinicScheduleTest(unittest.TestCase):
             db.flush()
 
             schedule_date = date(2026, 7, 8)
-            existing = ClinicSchedule(
-                surgeon_id=surgeon.id,
-                location_id=clinic.id,
-                date=schedule_date,
-                session="am",
-                assignment_type="assigned",
-                notes="old note",
-            )
-            db.add(existing)
+            cards = self._na_cards(db, surgeon, schedule_date)
+            cards[0].baseline_state = "assigned"
+            cards[0].effective_state = "assigned"
+            cards[0].baseline_location_id = clinic.id
+            cards[0].effective_location_id = clinic.id
             db.commit()
-            existing_id = existing.id
 
             conflicts = assign_clinic(
                 db,
@@ -148,18 +182,48 @@ class AdminClinicScheduleTest(unittest.TestCase):
                 str(hospital.id),
                 "pm",
                 "new note",
-                schedule_id=existing_id,
+                schedule_id=cards[0].id,
             )
 
             self.assertEqual(conflicts, [])
-            rows = db.query(ClinicSchedule).filter(
-                ClinicSchedule.surgeon_id == surgeon.id,
-                ClinicSchedule.date == schedule_date,
-            ).all()
-            self.assertEqual(len(rows), 1)
-            self.assertEqual(rows[0].location_id, hospital.id)
-            self.assertEqual(rows[0].session, "pm")
-            self.assertEqual(rows[0].notes, "new note")
+            db.refresh(cards[0])
+            db.refresh(cards[1])
+            self.assertEqual(cards[0].effective_state, "na")
+            self.assertEqual(cards[1].effective_state, "assigned")
+            self.assertEqual(cards[1].effective_location_id, hospital.id)
+            self.assertEqual(cards[1].session, "pm")
+        finally:
+            db.close()
+
+    def test_whole_day_fills_the_morning_and_afternoon_cards(self):
+        db = self.Session()
+        try:
+            surgeon = self._surgeon(db, "Chris", "Johnson")
+            clinic = Location(name="Winter Garden Clinic", abbreviation="WG", location_type="clinic", is_active=True)
+            db.add(clinic)
+            db.flush()
+            schedule_date = date(2026, 7, 8)
+            self._na_cards(db, surgeon, schedule_date)
+            db.commit()
+
+            conflicts = assign_clinic(
+                db, schedule_date, surgeon.id, str(clinic.id), "full", "",
+            )
+
+            self.assertEqual(conflicts, [])
+            shown = surgeon_clinics_by_day(db, surgeon.id, schedule_date, schedule_date)
+            sessions = sorted(card.session for card in shown[schedule_date])
+            self.assertEqual(sessions, ["am", "pm"])
+            self.assertEqual({card.location.id for card in shown[schedule_date]}, {clinic.id})
+            events = [
+                event for event in build_surgeon_calendar_events(
+                    db, surgeon, schedule_date, schedule_date,
+                )
+                if str(event["id"]).startswith("clinic-")
+            ]
+            self.assertEqual(sorted(event["extendedProps"]["session"] for event in events), ["am", "pm"])
+            self.assertTrue(all("Winter Garden Clinic" in event["title"] for event in events))
+            self.assertEqual(db.query(ClinicSchedule).count(), 0)
         finally:
             db.close()
 

@@ -8,10 +8,10 @@ from sqlalchemy.orm import Session, joinedload
 from .models import (
     CallGroup,
     CallRotation,
-    ClinicSchedule,
     DayOff,
     Meeting,
     MeetingAttendee,
+    ScheduleCard,
     ScheduleCardActivity,
     SurgeonDayItem,
 )
@@ -84,17 +84,24 @@ def surgeon_meetings_by_day(db: Session, surgeon_id: int, start_day: date, end_d
 
 
 def surgeon_clinics_by_day(db: Session, surgeon_id: int, start_day: date, end_day: date) -> dict:
-    return bucket_rows_by_day(
-        db.query(ClinicSchedule)
-        .options(joinedload(ClinicSchedule.location))
+    cards = (
+        db.query(ScheduleCard)
+        .options(joinedload(ScheduleCard.effective_location))
         .filter(
-            ClinicSchedule.surgeon_id == surgeon_id,
-            ClinicSchedule.date >= start_day,
-            ClinicSchedule.date <= end_day,
+            ScheduleCard.surgeon_id == surgeon_id,
+            ScheduleCard.date >= start_day,
+            ScheduleCard.date <= end_day,
+            ScheduleCard.effective_state.in_(("assigned", "off")),
         )
-        .order_by(ClinicSchedule.date, ClinicSchedule.session, ClinicSchedule.id)
+        .order_by(ScheduleCard.date, ScheduleCard.session, ScheduleCard.id)
         .all()
     )
+    rows = []
+    for card in cards:
+        card.location = card.effective_location
+        card.assignment_type = card.effective_state
+        rows.append(card)
+    return bucket_rows_by_day(rows)
 
 
 def surgeon_surgeries_by_day(db: Session, surgeon_id: int, start_day: date, end_day: date) -> dict:

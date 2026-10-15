@@ -25,6 +25,7 @@ from . import migrate_fax_ingest
 from . import migrate_fax_restore
 from . import migrate_normalized_schedule_activity
 from . import migrate_drop_surgical_cases
+from . import migrate_clinic_list_onto_cards
 from .routers import (
     admin_otp_audit,
     admin_block_or,
@@ -83,6 +84,7 @@ async def lifespan(app: FastAPI):
         migrate_normalized_schedule_activity.run_migration()
         migrate_grok_bot_rules.run_migration()
         migrate_drop_surgical_cases.run_migration()
+        migrate_clinic_list_onto_cards.run_migration()
         migrate_call_builder.run_migration()
         migrate_push_sound.run_migration()
         db = SessionLocal()

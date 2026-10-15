@@ -157,24 +157,56 @@ def reject_if_duplicate_day_off(
     )
 
 
-def find_exact_pending_day_off(
+def day_off_is_no_call(reason: str | None) -> bool:
+    return " ".join((reason or "").strip().lower().split()) == "no call"
+
+
+def find_exact_live_day_off(
     db: Session,
     surgeon_id: int,
     start_date: date,
     end_date: date,
+    reason: str | None = None,
     *,
     exclude_id: int | None = None,
 ) -> DayOff | None:
-    """Same surgeon + same start/end already pending — reuse instead of another row."""
+    """The live request already filed for this surgeon, these dates, and this kind."""
+    want_no_call = day_off_is_no_call(reason)
     query = db.query(DayOff).filter(
         DayOff.surgeon_id == surgeon_id,
-        DayOff.status == "pending",
+        DayOff.status.in_(("pending", "approved")),
         DayOff.start_date == start_date,
         DayOff.end_date == end_date,
     )
     if exclude_id is not None:
         query = query.filter(DayOff.id != exclude_id)
-    return query.order_by(DayOff.id.asc()).first()
+    for row in query.order_by(DayOff.id.asc()).all():
+        if day_off_is_no_call(row.reason) == want_no_call:
+            return row
+    return None
+
+
+def find_exact_pending_day_off(
+    db: Session,
+    surgeon_id: int,
+    start_date: date,
+    end_date: date,
+    reason: str | None = None,
+    *,
+    exclude_id: int | None = None,
+) -> DayOff | None:
+    """Same surgeon + same start/end already pending — reuse instead of another row."""
+    row = find_exact_live_day_off(
+        db,
+        surgeon_id,
+        start_date,
+        end_date,
+        reason,
+        exclude_id=exclude_id,
+    )
+    if row is None or row.status != "pending":
+        return None
+    return row
 
 
 def purge_exact_pending_duplicates(

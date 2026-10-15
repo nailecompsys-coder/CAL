@@ -27,6 +27,7 @@ from . import migrate_normalized_schedule_activity
 from . import migrate_drop_surgical_cases
 from . import migrate_clinic_list_onto_cards
 from . import migrate_day_off_same_surgeon
+from . import migrate_day_off_one_request
 from .routers import (
     admin_otp_audit,
     admin_block_or,
@@ -87,6 +88,7 @@ async def lifespan(app: FastAPI):
         migrate_drop_surgical_cases.run_migration()
         migrate_clinic_list_onto_cards.run_migration()
         migrate_day_off_same_surgeon.run_migration()
+        migrate_day_off_one_request.run_migration()
         migrate_call_builder.run_migration()
         migrate_push_sound.run_migration()
         db = SessionLocal()

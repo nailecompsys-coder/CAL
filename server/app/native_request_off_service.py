@@ -15,6 +15,7 @@ from .or_block_service import log_schedule_change
 from .push import notify_admins, send_native_push_to_surgeon
 from .scheduling_gate_service import (
     day_off_overlap_advisory,
+    find_exact_live_day_off,
     find_exact_pending_day_off,
     purge_exact_pending_duplicates,
     surgeon_friendly_conflict_message,
@@ -29,8 +30,20 @@ def create_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequ
 
     warnings: list[str] = []
     existing = find_exact_pending_day_off(
-        db, surgeon.id, payload.start_date, payload.end_date
+        db, surgeon.id, payload.start_date, payload.end_date, payload.reason,
     )
+    approved = find_exact_live_day_off(
+        db, surgeon.id, payload.start_date, payload.end_date, payload.reason,
+    )
+    if approved and approved.status == "approved":
+        warnings.append("That day off is already on the schedule.")
+        emailed = send_time_off_request_copy(surgeon, payload, segments, warnings, updated=False)
+        return {
+            "ok": True,
+            "request": serialize_day_off(approved),
+            "warnings": warnings[:3],
+            "emailed": emailed,
+        }
     if existing:
         warnings.append("This request is already pending approval.")
         overlap_note = day_off_overlap_advisory(
@@ -149,6 +162,16 @@ def update_native_request_off(db: Session, surgeon: Surgeon, dayoff_id: int, pay
     )
     if overlap_note:
         warnings.append(overlap_note)
+    already = find_exact_live_day_off(
+        db,
+        surgeon.id,
+        payload.start_date,
+        payload.end_date,
+        payload.reason,
+        exclude_id=row.id,
+    )
+    if already:
+        raise HTTPException(409, "That day off is already filed for those dates.")
 
     row.start_date = payload.start_date
     row.end_date = payload.end_date

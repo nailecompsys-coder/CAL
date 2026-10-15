@@ -1,7 +1,7 @@
 from datetime import date, datetime, time
 from sqlalchemy import (
-    Boolean, Column, Date, DateTime, ForeignKey, Integer,
-    CheckConstraint, ForeignKeyConstraint, String, Text, Time, UniqueConstraint, func
+    Boolean, Column, Date, DateTime, ForeignKey, Index, Integer,
+    CheckConstraint, ForeignKeyConstraint, String, Text, Time, UniqueConstraint, func, text,
 )
 from sqlalchemy.orm import relationship
 from .database import Base
@@ -452,6 +452,33 @@ class DayOff(Base):
     __tablename__ = "days_off"
     __table_args__ = (
         UniqueConstraint("id", "surgeon_id", name="uq_days_off_id_surgeon"),
+        CheckConstraint("start_date <= end_date", name="ck_days_off_start_before_end"),
+        Index(
+            "uq_days_off_live_leave",
+            "surgeon_id",
+            "start_date",
+            "end_date",
+            unique=True,
+            sqlite_where=text(
+                "status IN ('pending', 'approved') AND lower(trim(coalesce(reason, ''))) <> 'no call'"
+            ),
+            postgresql_where=text(
+                "status IN ('pending', 'approved') AND lower(trim(coalesce(reason, ''))) <> 'no call'"
+            ),
+        ),
+        Index(
+            "uq_days_off_live_no_call",
+            "surgeon_id",
+            "start_date",
+            "end_date",
+            unique=True,
+            sqlite_where=text(
+                "status IN ('pending', 'approved') AND lower(trim(coalesce(reason, ''))) = 'no call'"
+            ),
+            postgresql_where=text(
+                "status IN ('pending', 'approved') AND lower(trim(coalesce(reason, ''))) = 'no call'"
+            ),
+        ),
     )
 
     id = Column(Integer, primary_key=True)

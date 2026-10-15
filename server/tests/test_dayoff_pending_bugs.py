@@ -8,6 +8,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SECRET_KEY", "test-secret")
 
 from sqlalchemy import create_engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from app.admin_dayoff_service import approve_dayoff, deny_dayoff
@@ -134,8 +135,6 @@ class DayOffPendingBugsTest(unittest.TestCase):
         )
 
     def test_purge_exact_pending_duplicates(self):
-        from app.scheduling_gate_service import purge_exact_pending_duplicates
-
         start = date(2026, 12, 8)
         end = date(2026, 12, 12)
         keep = DayOff(
@@ -145,13 +144,19 @@ class DayOffPendingBugsTest(unittest.TestCase):
             status="pending",
             reason="Day Off",
         )
-        dup = DayOff(
+        self.db.add(keep)
+        self.db.commit()
+        self.db.add(DayOff(
             surgeon_id=self.surgeon.id,
             start_date=start,
             end_date=end,
             status="pending",
             reason="Day Off",
-        )
+        ))
+        with self.assertRaises(IntegrityError):
+            self.db.commit()
+        self.db.rollback()
+
         other = DayOff(
             surgeon_id=self.surgeon.id,
             start_date=date(2026, 11, 26),
@@ -159,17 +164,8 @@ class DayOffPendingBugsTest(unittest.TestCase):
             status="pending",
             reason="Day Off",
         )
-        self.db.add_all([keep, dup, other])
+        self.db.add(other)
         self.db.commit()
-        self.db.refresh(keep)
-        self.db.refresh(dup)
-        self.db.refresh(other)
-
-        removed = purge_exact_pending_duplicates(
-            self.db, self.surgeon.id, start, end, keep_id=keep.id
-        )
-        self.assertEqual(removed, 1)
-        self.assertIsNone(self.db.get(DayOff, dup.id))
         self.assertIsNotNone(self.db.get(DayOff, keep.id))
         self.assertIsNotNone(self.db.get(DayOff, other.id))
 

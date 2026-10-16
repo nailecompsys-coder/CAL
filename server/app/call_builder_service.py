@@ -1,4 +1,4 @@
-"""Call Builder: access, SQL-owned history, shared draft helpers. Does not touch live call_rotations."""
+"""Call Builder: the temporary call list. Publish copies it onto call_rotations."""
 
 from __future__ import annotations
 
@@ -464,8 +464,12 @@ def board_for_month(db: Session, year: int, month: int) -> dict:
             has_live = key in live
             draft_id = draft.get(key) if has_draft else None
             live_id = live.get(key) if has_live else None
-            surgeon_id = draft_id if has_draft else live_id
-            source = "draft" if has_draft else ("live" if has_live else "empty")
+            source, surgeon_id = displayed_call_cell(
+                has_draft=has_draft,
+                draft_id=draft_id,
+                has_live=has_live,
+                live_id=live_id,
+            )
             flag = leave.get(f"{day.isoformat()}|{surgeon_id}", "") if surgeon_id else ""
             surg = surgeons.get(surgeon_id) if surgeon_id else None
             cells.append({
@@ -527,6 +531,53 @@ def resolve_surgeon_id_by_initials(db: Session, initials: str) -> int:
     if not matches:
         raise HTTPException(400, f"No surgeon matches {key}")
     raise HTTPException(400, f"Ambiguous initials {key}")
+
+
+def mirror_prod_cell_into_draft(
+    db: Session,
+    *,
+    day: date,
+    call_group_id: int | None,
+    surgeon_id: int | None,
+    previous_surgeon_id: int | None,
+) -> None:
+    """Copy one published cell into the builder unless an unpublished edit is waiting."""
+    if call_group_id is None:
+        return
+    row = (
+        db.query(CallDraftAssignment)
+        .filter(
+            CallDraftAssignment.date == day,
+            CallDraftAssignment.call_group_id == call_group_id,
+        )
+        .first()
+    )
+    if row is not None and row.surgeon_id not in (previous_surgeon_id, surgeon_id):
+        return
+    if surgeon_id is None:
+        if row is not None:
+            db.delete(row)
+        return
+    if row is None:
+        row = CallDraftAssignment(date=day, call_group_id=call_group_id)
+        db.add(row)
+    row.surgeon_id = surgeon_id
+
+
+def displayed_call_cell(
+    *,
+    has_draft: bool,
+    draft_id: int | None,
+    has_live: bool,
+    live_id: int | None,
+) -> tuple[str, int | None]:
+    """Builder shows an unpublished edit. A matching temp row shows as the live call."""
+    pending = has_draft and (not has_live or draft_id != live_id)
+    if pending:
+        return "draft", draft_id
+    if has_live:
+        return "live", live_id
+    return "empty", None
 
 
 def upsert_draft(
@@ -832,7 +883,7 @@ def publish_draft(
     end: date,
     admin: AdminUser,
 ) -> list[str]:
-    """Write draft cells through the same assign path as Call Schedule, then clear them."""
+    """Copy builder rows onto the live call list. Matching temp rows stay so the builder shows them."""
     require_admin_call_builder(admin)
     warnings: list[str] = []
     changes = publish_changes(db, start, end)
@@ -841,7 +892,6 @@ def publish_draft(
         group_id = change["callGroupId"]
         to_id = change["toSurgeonId"]
         warnings.extend(assign_rotation(db, day, to_id, group_id, admin=admin) or [])
-        clear_draft(db, day=day, call_group_id=group_id, admin=admin)
     return warnings
 
 
@@ -887,12 +937,16 @@ def page_data(db: Session, month_offset: int) -> dict:
     for day in days:
         for group in groups:
             key = f"{day.isoformat()}|{group.id}"
-            draft_id = draft.get(key) if key in draft else None
             has_draft = key in draft
-            live_id = live.get(key) if key in live else None
             has_live = key in live
-            surgeon_id = draft_id if has_draft else live_id
-            source = "draft" if has_draft else ("live" if has_live else "empty")
+            draft_id = draft.get(key) if has_draft else None
+            live_id = live.get(key) if has_live else None
+            source, surgeon_id = displayed_call_cell(
+                has_draft=has_draft,
+                draft_id=draft_id,
+                has_live=has_live,
+                live_id=live_id,
+            )
             flag = leave.get(f"{day.isoformat()}|{surgeon_id}", "") if surgeon_id else ""
             surg = surgeons.get(surgeon_id) if surgeon_id else None
             cells.append({

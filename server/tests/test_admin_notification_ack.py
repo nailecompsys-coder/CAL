@@ -33,8 +33,10 @@ from app.models import (
     CallGroup,
     CallRotation,
     DayOff,
+    ScheduleCard,
+    ScheduleCardActivity,
+    ScheduleCardWeek,
     Surgeon,
-    SurgicalCase,
 )
 
 
@@ -249,13 +251,21 @@ class IngestCardRereadTest(unittest.TestCase):
             )
             db.add(surgeon)
             db.commit()
-            db.add(SurgicalCase(
-                surgeon_id=surgeon.id,
-                date=date(2026, 8, 27),
-                start_time=time(12, 0),
-                patient_name="White, Latisha Monique",
-                procedure="HERNIA",
-                status="scheduled",
+            week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=date(2026, 8, 24), master_revision="test")
+            db.add(week)
+            db.flush()
+            card = ScheduleCard(
+                week_id=week.id, surgeon_id=surgeon.id, date=date(2026, 8, 27), session="pm",
+                baseline_state="na", effective_state="na",
+            )
+            db.add(card)
+            db.flush()
+            db.add(ScheduleCardActivity(
+                schedule_card_id=card.id, surgeon_id=surgeon.id, activity_date=date(2026, 8, 27),
+                session="pm", activity_type="surgical", start_time=time(12, 0),
+                patient_name="White, Latisha Monique", procedure="HERNIA",
+                source_system="fax", source_record_key="latisha", identity_key="latisha",
+                is_active=True,
             ))
             note = AdminNotification(
                 admin_user_id=admin.id,
@@ -279,41 +289,11 @@ class IngestCardRereadTest(unittest.TestCase):
             db.close()
             engine.dispose()
 
-    def test_cancels_desk_case_on_a_dob_year(self):
+    def test_desk_fax_notes_are_not_a_second_surgery_list(self):
         engine, db, admin = self._db()
         try:
             del admin
-            surgeon = Surgeon(
-                first_name="Christopher", last_name="Johnson",
-                email="cj@example.com", is_active=True, staff_type="physician",
-            )
-            db.add(surgeon)
-            db.commit()
-            junk = SurgicalCase(
-                surgeon_id=surgeon.id,
-                date=date(1954, 9, 30),
-                start_time=time(9, 15),
-                patient_name="Hoffmeister, Howard",
-                procedure="CHOLE",
-                status="scheduled",
-                notes="Desk fax #102",
-            )
-            keep = SurgicalCase(
-                surgeon_id=surgeon.id,
-                date=date(2026, 8, 25),
-                start_time=time(7, 15),
-                patient_name="Dhanessur, Shirley",
-                procedure="THYROID",
-                status="scheduled",
-                notes="Desk fax #102",
-            )
-            db.add_all([junk, keep])
-            db.commit()
-            self.assertGreaterEqual(reconcile_desk_fax_outlier_cases(db), 1)
-            db.refresh(junk)
-            db.refresh(keep)
-            self.assertEqual(junk.status, "cancelled")
-            self.assertEqual(keep.status, "scheduled")
+            self.assertEqual(reconcile_desk_fax_outlier_cases(db), 0)
         finally:
             db.close()
             engine.dispose()

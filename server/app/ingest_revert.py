@@ -10,10 +10,9 @@ from sqlalchemy.orm import Session
 
 from .models import (
     AdminNotification,
-    ClinicSchedule,
     ORBlockAssignment,
+    ScheduleCardActivity,
     ScheduleChangeEvent,
-    SurgicalCase,
 )
 
 _FAX_RE = re.compile(r"Desk fax\s*#\s*(\d+)", re.IGNORECASE)
@@ -26,8 +25,6 @@ def desk_fax_ids_in_text(text: str | None) -> set[int]:
 def revert_desk_faxes(db: Session, fax_ids: list[int] | set[int]) -> dict[str, Any]:
     """Remove schedule rows written by the given Desk fax ids.
 
-    - Cancels surgical cases tagged with those faxes
-    - Deletes clinic schedule rows tagged with those faxes
     - Deletes Block OR assignments tagged with those faxes
     - Does NOT delete Block OR capacity cards
     - Clears matching ingest/schedule-flag notifications
@@ -41,25 +38,6 @@ def revert_desk_faxes(db: Session, fax_ids: list[int] | set[int]) -> dict[str, A
     assigns_deleted = 0
     notifs_deleted = 0
     flags_deleted = 0
-
-    for case in db.query(SurgicalCase).filter(SurgicalCase.notes.isnot(None)).all():
-        ids = desk_fax_ids_in_text(case.notes)
-        if not ids.intersection(wanted):
-            continue
-        if (case.status or "") != "cancelled":
-            case.status = "cancelled"
-            cases_cancelled += 1
-        from .schedule_activity_normalization import normalize_surgical_case_card
-        normalize_surgical_case_card(db, case)
-        # Drop block link so cancelled fax cases do not keep pills alive.
-        case.or_block_instance_id = None
-
-    for row in db.query(ClinicSchedule).filter(ClinicSchedule.notes.isnot(None)).all():
-        ids = desk_fax_ids_in_text(row.notes)
-        if not ids.intersection(wanted):
-            continue
-        db.delete(row)
-        clinics_deleted += 1
 
     for assign in db.query(ORBlockAssignment).filter(ORBlockAssignment.note.isnot(None)).all():
         ids = desk_fax_ids_in_text(assign.note)
@@ -76,28 +54,18 @@ def revert_desk_faxes(db: Session, fax_ids: list[int] | set[int]) -> dict[str, A
     )
     for assign in orphans:
         active = (
-            db.query(SurgicalCase)
+            db.query(ScheduleCardActivity)
             .filter(
-                SurgicalCase.or_block_instance_id == assign.block_instance_id,
-                SurgicalCase.surgeon_id == assign.surgeon_id,
-                SurgicalCase.status != "cancelled",
+                ScheduleCardActivity.or_block_instance_id == assign.block_instance_id,
+                ScheduleCardActivity.surgeon_id == assign.surgeon_id,
+                ScheduleCardActivity.is_active == True,  # noqa: E712
+                ScheduleCardActivity.activity_type == "surgical",
             )
             .count()
         )
         if active:
             continue
-        # Only remove if this surgeon/block had a cancelled fax case from wanted set.
-        had_fax = (
-            db.query(SurgicalCase)
-            .filter(
-                SurgicalCase.or_block_instance_id == assign.block_instance_id,
-                SurgicalCase.surgeon_id == assign.surgeon_id,
-                SurgicalCase.status == "cancelled",
-                SurgicalCase.notes.isnot(None),
-            )
-            .all()
-        )
-        if not any(desk_fax_ids_in_text(c.notes).intersection(wanted) for c in had_fax):
+        if not desk_fax_ids_in_text(assign.note).intersection(wanted):
             continue
         db.delete(assign)
         assigns_deleted += 1

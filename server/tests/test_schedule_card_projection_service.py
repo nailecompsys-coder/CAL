@@ -17,7 +17,6 @@ from app.models import (
     Location,
     ScheduleCard,
     ScheduleCardActivity,
-    SurgicalCase,
     Surgeon,
     SurgeonLocationSchedule,
 )
@@ -48,9 +47,14 @@ class ScheduleCardProjectionServiceTest(unittest.TestCase):
             db.add(SurgeonLocationSchedule(surgeon_id=surgeon.id, day_of_week=0, session="am", location_id=location.id, assignment_type="assigned"))
             db.commit()
             materialize_master_schedule_cards(db, start=date(2026, 9, 14), end=date(2026, 9, 18))
-            db.add(SurgicalCase(surgeon_id=surgeon.id, date=date(2026, 9, 14), start_time=time(7, 15), patient_name="Patient", procedure="Procedure", location_id=location.id, status="scheduled"))
+            am_card = db.query(ScheduleCard).filter_by(surgeon_id=surgeon.id, date=date(2026, 9, 14), session="am").one()
+            db.add(ScheduleCardActivity(
+                schedule_card_id=am_card.id, surgeon_id=surgeon.id, location_id=location.id,
+                activity_date=date(2026, 9, 14), session="am", activity_type="surgical",
+                start_time=time(7, 15), patient_name="Patient", procedure="Procedure",
+                source_system="fax", source_record_key="patient", identity_key="patient", is_active=True,
+            ))
             db.commit()
-            backfill_normalized_schedule_activity(db)
             payload = card_grid_page_data(db, date(2026, 9, 14), date(2026, 9, 18))
             monday = payload["grid"][surgeon.id][date(2026, 9, 14)]
             self.assertEqual(set(monday), {"am", "pm"})
@@ -73,28 +77,32 @@ class ScheduleCardProjectionServiceTest(unittest.TestCase):
             db.add_all([surgeon, hospital, clinic])
             db.commit()
             materialize_master_schedule_cards(db, start=date(2026, 9, 21), end=date(2026, 9, 25))
+            am_card = db.query(ScheduleCard).filter_by(surgeon_id=surgeon.id, date=date(2026, 9, 21), session="am").one()
+            am_card.baseline_location_id = hospital.id
+            am_card.effective_location_id = hospital.id
+            am_card.baseline_state = "assigned"
+            am_card.effective_state = "assigned"
+            pm_card = db.query(ScheduleCard).filter_by(surgeon_id=surgeon.id, date=date(2026, 9, 21), session="pm").one()
+            pm_card.baseline_location_id = clinic.id
+            pm_card.effective_location_id = clinic.id
+            pm_card.baseline_state = "assigned"
+            pm_card.effective_state = "assigned"
             db.add_all([
-                SurgicalCase(
-                    surgeon_id=surgeon.id,
-                    date=date(2026, 9, 21),
-                    start_time=time(7, 15),
-                    patient_name="OR Patient",
-                    procedure="Procedure",
-                    location_id=hospital.id,
-                    status="scheduled",
+                ScheduleCardActivity(
+                    schedule_card_id=am_card.id, surgeon_id=surgeon.id, location_id=hospital.id,
+                    activity_date=date(2026, 9, 21), session="am", activity_type="surgical",
+                    start_time=time(7, 15), patient_name="OR Patient", procedure="Procedure",
+                    source_system="fax", source_record_key="or-patient", identity_key="or-patient", is_active=True,
                 ),
-                SurgicalCase(
-                    surgeon_id=surgeon.id,
-                    date=date(2026, 9, 21),
-                    start_time=time(8, 30),
-                    patient_name="Clinic Patient",
-                    procedure="Office visit",
-                    location_id=clinic.id,
-                    status="scheduled",
+                ScheduleCardActivity(
+                    schedule_card_id=pm_card.id, surgeon_id=surgeon.id, location_id=clinic.id,
+                    activity_date=date(2026, 9, 21), session="pm", activity_type="clinic",
+                    start_time=time(8, 30), patient_name="Clinic Patient", procedure="Office visit",
+                    source_system="fax_clinic", source_record_key="clinic-patient", identity_key="clinic-patient",
+                    is_active=True,
                 ),
             ])
             db.commit()
-            backfill_normalized_schedule_activity(db)
 
             payload = card_grid_page_data(db, date(2026, 9, 21), date(2026, 9, 25))
             header = payload["hospital_headers"][date(2026, 9, 21)]
@@ -135,19 +143,17 @@ class ScheduleCardProjectionServiceTest(unittest.TestCase):
             ])
             db.commit()
             materialize_master_schedule_cards(db, start=date(2026, 9, 21), end=date(2026, 9, 25))
-            db.add_all([
-                SurgicalCase(
-                    surgeon_id=surgeon.id,
-                    date=date(2026, 9, 21),
-                    start_time=time(11, 45),
-                    patient_name="Case, Patient",
-                    procedure="Procedure",
-                    location_id=hospital.id,
-                    status="scheduled",
-                ),
-            ])
+            pm_card = db.query(ScheduleCard).filter_by(
+                surgeon_id=surgeon.id, date=date(2026, 9, 21), session="pm"
+            ).one()
+            db.add(ScheduleCardActivity(
+                schedule_card_id=pm_card.id, surgeon_id=surgeon.id, location_id=hospital.id,
+                activity_date=date(2026, 9, 21), session="pm", activity_type="surgical",
+                start_time=time(11, 45), patient_name="Case, Patient", procedure="Procedure",
+                source_system="fax", source_record_key="case-patient", identity_key="case-patient",
+                is_active=True,
+            ))
             db.commit()
-            backfill_normalized_schedule_activity(db)
             am_card = db.query(ScheduleCard).filter_by(
                 surgeon_id=surgeon.id, date=date(2026, 9, 21), session="am"
             ).one()
@@ -259,6 +265,40 @@ class ScheduleCardProjectionServiceTest(unittest.TestCase):
 
             self.assertEqual(card["count_label"], "1 visit")
             self.assertEqual(len(card["roster_visits"]), 1)
+        finally:
+            db.close()
+
+    def test_one_card_owns_many_lines(self):
+        db = self.Session()
+        try:
+            surgeon = Surgeon(first_name="Alex", last_name="Smith", email="as@example.com", is_active=True, staff_type="physician")
+            location = Location(name="Minneola OR", abbreviation="MN-OR", location_type="hospital", is_active=True)
+            db.add_all([surgeon, location])
+            db.commit()
+            materialize_master_schedule_cards(db, start=date(2026, 9, 14), end=date(2026, 9, 14))
+            card = db.query(ScheduleCard).filter_by(surgeon_id=surgeon.id, date=date(2026, 9, 14), session="am").one()
+            other = db.query(ScheduleCard).filter_by(surgeon_id=surgeon.id, date=date(2026, 9, 14), session="pm").one()
+            db.add_all([
+                ScheduleCardActivity(
+                    schedule_card_id=card.id, surgeon_id=surgeon.id, location_id=location.id,
+                    activity_date=card.date, session="am", activity_type="surgical",
+                    start_time=time(7, 30), patient_name="First", procedure="Case",
+                    source_system="fax", source_record_key="line-1", identity_key="line-1",
+                ),
+                ScheduleCardActivity(
+                    schedule_card_id=card.id, surgeon_id=surgeon.id, location_id=location.id,
+                    activity_date=card.date, session="am", activity_type="clinic",
+                    start_time=time(9, 0), patient_name="Second", procedure="Visit",
+                    source_system="fax", source_record_key="line-2", identity_key="line-2",
+                ),
+            ])
+            db.commit()
+            db.expire_all()
+            card = db.get(ScheduleCard, card.id)
+            other = db.get(ScheduleCard, other.id)
+            self.assertEqual(len(card.activities), 2)
+            self.assertEqual({line.schedule_card.id for line in card.activities}, {card.id})
+            self.assertEqual(other.activities, [])
         finally:
             db.close()
 

@@ -9,12 +9,30 @@ This is Don's current scheduling rule set for the master calendar, the surgeon a
 - Do not generate baseline OR or clinic blocks on weekends. On weekends a surgeon is only on call, covering for someone, or OFF; Epic assigns no OR or clinic cases. A weekend OR or clinic line on a fax is a misread and must never be placed on the schedule.
 - A source may fill NA when its surgeon, time, and location are credible. Surgeons can roam to familiar facilities and assist others. An unused NA remains visible as NA; do not invent scheduled work or turn it into formal leave. An NA assignment is not automatically an error.
 
+## Who puts the day on the schedule
+
+- Epic sends the fax. CAL ingests it. That fax is the only schedule that arrives every day.
+- Aprima sends meetings and Surgery One patients. It does not replace the Epic fax.
+- Shannon adds meetings, days off, and the call schedule. The office does not add clinic visits or surgical cases.
+- The call schedule is its own list, `call_rotations`. One row is one surgeon, one date, and one call group. Every row names its group, so one day holds one row per group. An empty doctor means nobody is on call for that group that day. It stays separate from the Monday–Friday block and clinic cards. Screens read that row. The hospitals in the group come from `call_group_locations`. The old copy that saved one row per hospital is not the schedule answer.
+- Call Builder saves in `call_draft_assignments` until Publish. Publish writes those rows onto `call_rotations`. The two lists stay matched, so a published change shows in the builder. An unpublished builder edit stays until Publish.
+- The iPhone is that person's schedule. It shows who is where, and when they need to be at a facility for a case or a clinic. Those facts are the saved card lines. The office week board and the surgeon website read the same surgical lines. The old surgery list is gone.
+- A clinic place lives on the morning card and the afternoon card. A whole day fills both cards. The surgeon website, the office, the master build, and the phone read those cards. The old clinic list is gone.
+- One card has many lines. Each line belongs to that one card. The phone reads the card and its lines.
+- A line takes its surgeon, date, and morning or afternoon from that card. The database refuses a line that names a different surgeon, date, or half-day.
+- A day-off request points at that same surgeon's morning and afternoon cards. The database refuses a link to another surgeon's card.
+- One live day-off request is kept for a surgeon and those dates. No Call can sit beside that request. The start date is on or before the end date. A denied request can be filed again.
+- The card is the only parent that removes a line. Removing a fax row or an Aprima row leaves the line on the card.
+- A card line remembers the Block OR room it belongs to. Block warnings read that line. Removing the Block OR room clears the pointer and leaves the line.
+
 ## Source overlay
 
-- A newly **applied** Epic/Desk fax supersedes older applied faxes for the surgeon/dates in its snapshot. Old fax rows remain history, not a second layer of current cases. The live app reads saved database facts, not all fax files.
+- A newly **applied** Epic/Desk fax supersedes older applied faxes for the surgeon/dates in its snapshot. The card line remembers which fax wrote it. After Send to Calendar copies the lines, that fax's scratch reading is thrown away. The fax document and the run stay, so a later send of the same fax can still fix a line. A reading that has not been sent stays until Send to Calendar. The live app reads the card lines.
+- Send to Calendar is the moment the fax writes the cards. Before that write, CAL saves a photo of the card lines for the surgeons and days that fax covers. Each saved line belongs to that one fax. Putting the photo back turns off the lines that fax added and puts the saved lines back. A warning is its own row, tied to the card it is about. The same fax, card, and problem can be saved only once.
 - Fax data may create, update, or cancel surgical-case and clinic-visit **details**. It may update an effective assignment on a dated card but must not rewrite that card's immutable master baseline. A failed stage/apply check leaves the live schedule unchanged.
 - Aprima is read-only and is the source for Surgery One/CBO activity. Manual changes by Shannon/admin have their own provenance. Never invent CBO from generic Epic/Advent room codes such as `AHMGGENSRG`.
-- A surgical case with an assisting surgeon occupies that surgeon's time at the same location and room as the primary surgeon. It is one case, not two patients or two rooms.
+- CAL does not choose a lead surgeon. Epic already made the schedule. Each fax detail line is written, then one SQL fill attaches that line to the named surgeon's existing AM/PM card. A case that already names an assisting surgeon still occupies that surgeon's time. Fax apply does not invent an assistant, and it does not collapse two printed lines into one case.
+- Epic room text stays on the line. The hospital is the block that case time fits. A room name can be a placeholder, so the room does not choose the hospital. When two blocks fit that time, the hospital stays blank for review.
 
 ## Conflicts and visibility
 
@@ -33,6 +51,7 @@ This is Don's current scheduling rule set for the master calendar, the surgeon a
 ## Ownership and acceptance checks
 
 - SQL determines which facts belong to a surgeon/day, deduplicates them, calculates counts and conflicts, and orders the result. Python only maps those database results into the API response. The existing iPhone views consume that response.
+- The phone, the office calendar, the scheduler day counts, Block OR case lists, block warnings, and the website patient lookup read `schedule_card_activities`. A surgery shows for a surgeon only when that surgeon has an active line on a card. The old surgery list is gone.
 - Before saying a fax/display issue is fixed, trace representative **latest applied** fax rows through the saved case or clinic activity, permanent AM/PM card, and native API. Check a fixed block, NA, OFF, approved partial leave, assistance, group capacity, and weekend call. Compare current versus archived fax data separately.
 - Never claim all phone screens are correct solely because rows exist in PostgreSQL. Verify the API response and, for visual claims, the actual client view.
 

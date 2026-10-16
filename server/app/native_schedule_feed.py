@@ -1,4 +1,4 @@
-"""Read the native schedule from permanent master cards and source cases."""
+"""Read the native schedule from permanent master cards and their lines."""
 
 from functools import lru_cache
 from pathlib import Path

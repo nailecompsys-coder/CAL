@@ -17,12 +17,9 @@ from .grok_ask_intent import is_identity_question, is_when_question
 from .models import (
     AdminNotification,
     Availability,
-    CallCoverage,
-    CallDailyAssignment,
     CallGroup,
-    CallRotation,
     ClinicGroup,
-    ClinicSchedule,
+    ScheduleCard,
     DayOff,
     Location,
     Meeting,
@@ -32,7 +29,6 @@ from .models import (
     Surgeon,
     SurgeonDayItem,
     ScheduleCardActivity,
-    SurgicalCase,
 )
 from .practice_time import practice_now
 from .surgeon_visibility import surgeon_is_visible
@@ -106,28 +102,21 @@ def _answer_freeform(text: str, today: date) -> dict:
 def collect_surgeon_facts(db: Session, surgeon: Surgeon, start: date, end: date) -> dict:
     off_days = _off_days(db, surgeon.id, start, end, "approved")
     pending_days = _off_days(db, surgeon.id, start, end, "pending")
-    cases = (
-        db.query(SurgicalCase)
-        .options(joinedload(SurgicalCase.location))
-        .filter(
-            SurgicalCase.surgeon_id == surgeon.id,
-            SurgicalCase.date >= start,
-            SurgicalCase.date <= end,
-            SurgicalCase.status != "cancelled",
-        )
-        .order_by(SurgicalCase.date, SurgicalCase.start_time)
-        .all()
-    )
+    cases = []
     clinics = (
-        db.query(ClinicSchedule)
-        .options(joinedload(ClinicSchedule.location))
+        db.query(ScheduleCard)
+        .options(joinedload(ScheduleCard.effective_location))
         .filter(
-            ClinicSchedule.surgeon_id == surgeon.id,
-            ClinicSchedule.date >= start,
-            ClinicSchedule.date <= end,
+            ScheduleCard.surgeon_id == surgeon.id,
+            ScheduleCard.date >= start,
+            ScheduleCard.date <= end,
+            ScheduleCard.effective_state == "assigned",
         )
         .all()
     )
+    for card in clinics:
+        card.location = card.effective_location
+        card.assignment_type = card.effective_state
     clinic_patients = int(
         db.query(func.count(func.distinct(ScheduleCardActivity.identity_key)))
         .filter(
@@ -162,15 +151,9 @@ def collect_surgeon_facts(db: Session, surgeon: Surgeon, start: date, end: date)
         )
         .scalar() or 0
     )
-    call_rows = (
-        db.query(CallDailyAssignment)
-        .filter(
-            CallDailyAssignment.surgeon_id == surgeon.id,
-            CallDailyAssignment.date >= start,
-            CallDailyAssignment.date <= end,
-        )
-        .all()
-    )
+    from .call_assignment_normalization import effective_calls
+
+    call_rows = effective_calls(db, start, end, surgeon_id=surgeon.id)
     meetings = (
         db.query(Meeting)
         .join(MeetingAttendee)
@@ -356,17 +339,30 @@ def _answer_meetings_board(db: Session, window: dict) -> dict:
 
 
 def _answer_cases_board(db: Session, window: dict) -> dict:
-    rows = (
-        db.query(SurgicalCase)
-        .options(joinedload(SurgicalCase.surgeon), joinedload(SurgicalCase.location))
+    loaded = (
+        db.query(ScheduleCardActivity)
+        .options(joinedload(ScheduleCardActivity.surgeon), joinedload(ScheduleCardActivity.location))
         .filter(
-            SurgicalCase.date >= window["start"],
-            SurgicalCase.date <= window["end"],
-            SurgicalCase.status != "cancelled",
+            ScheduleCardActivity.activity_type == "surgical",
+            ScheduleCardActivity.is_active == True,  # noqa: E712
+            ScheduleCardActivity.activity_date >= window["start"],
+            ScheduleCardActivity.activity_date <= window["end"],
         )
-        .order_by(SurgicalCase.date, SurgicalCase.start_time)
+        .order_by(
+            ScheduleCardActivity.activity_date,
+            ScheduleCardActivity.start_time,
+            ScheduleCardActivity.id,
+        )
         .all()
     )
+    seen = set()
+    rows = []
+    for row in loaded:
+        key = (row.surgeon_id, row.activity_date, row.identity_key)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append(row)
     if not rows:
         return _talk(
             "Surgical cases",
@@ -382,7 +378,7 @@ def _answer_cases_board(db: Session, window: dict) -> dict:
         if row.location:
             loc = f" · {row.location.abbreviation or row.location.name}"
         lines.append(
-            f"{row.date.strftime('%a %b %-d')} · {clock} · {who}{loc}"
+            f"{row.activity_date.strftime('%a %b %-d')} · {clock} · {who}{loc}"
             + (f" · {row.procedure}" if row.procedure else "")
         )
     heading = (
@@ -687,35 +683,18 @@ def _off_lists_for_window(db: Session, window: dict) -> tuple[list[str], list[st
 
 def _answer_who_call(db: Session, window: dict) -> dict:
     """Same facts as the dashboard Today's Coverage card."""
-    rows = (
-        db.query(CallDailyAssignment)
-        .options(
-            joinedload(CallDailyAssignment.surgeon),
-            joinedload(CallDailyAssignment.call_group),
-            joinedload(CallDailyAssignment.location),
-        )
-        .filter(
-            CallDailyAssignment.date >= window["start"],
-            CallDailyAssignment.date <= window["end"],
-        )
-        .order_by(
-            CallDailyAssignment.date,
-            CallDailyAssignment.location_id,
-            CallDailyAssignment.surgeon_id,
-        )
-        .all()
-    )
+    from .call_assignment_normalization import effective_calls
+
     lines = []
-    for row in rows:
+    for row in effective_calls(db, window["start"], window["end"]):
         if not surgeon_is_visible(row.surgeon):
             continue
         group = row.call_group.name if row.call_group else "On-Call"
-        location = row.location.abbreviation if row.location else "Location"
         stamp = ""
         if window["start"] != window["end"]:
             stamp = f"{row.date.strftime('%a %b %-d')} · "
         coverage = " · covering" if row.call_coverage_id else ""
-        lines.append(f"{stamp}{location} · {row.surgeon.full_name} · {group}{coverage}")
+        lines.append(f"{stamp}{row.place} · {row.surgeon.full_name} · {group}{coverage}")
 
     heading = (
         "Today's Coverage"
@@ -794,18 +773,19 @@ def _answer_clinics_or(db: Session, window: dict) -> dict:
 
 def _answer_who_clinic(db: Session, window: dict) -> dict:
     rows = (
-        db.query(ClinicSchedule)
-        .options(joinedload(ClinicSchedule.surgeon), joinedload(ClinicSchedule.location))
+        db.query(ScheduleCard)
+        .options(joinedload(ScheduleCard.surgeon), joinedload(ScheduleCard.effective_location))
         .filter(
-            ClinicSchedule.date >= window["start"],
-            ClinicSchedule.date <= window["end"],
+            ScheduleCard.date >= window["start"],
+            ScheduleCard.date <= window["end"],
+            ScheduleCard.effective_state == "assigned",
         )
         .all()
     )
     bits = []
     for row in rows:
-        if (row.assignment_type or "assigned").lower() == "off":
-            continue
+        row.location = row.effective_location
+        row.assignment_type = row.effective_state
         if not surgeon_is_visible(row.surgeon):
             continue
         loc = ""

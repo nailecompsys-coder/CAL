@@ -1,6 +1,6 @@
 import os
 import unittest
-from datetime import date, time, timedelta
+from datetime import date, timedelta
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SECRET_KEY", "test-secret")
@@ -17,7 +17,6 @@ from app.models import (
     DayOff,
     Location,
     Surgeon,
-    SurgicalCase,
 )
 
 
@@ -130,15 +129,6 @@ class GrokLookaheadTest(unittest.TestCase):
                 end_date=day,
                 status="approved",
                 reason="Day Off",
-            ))
-            db.add(SurgicalCase(
-                surgeon_id=covering.id,
-                date=day,
-                start_time=time(8, 0),
-                patient_name="TEST, PATIENT",
-                procedure="ORIF",
-                location_id=loc.id,
-                status="scheduled",
             ))
             db.commit()
 

@@ -9,6 +9,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.admin_clinic_schedule_action_service import assign_clinic, copy_clinic_week
+from app.api_calendar_surgeon_service import build_surgeon_calendar_events
+from app.surgeon_schedule_queries import surgeon_clinics_by_day
 from app.ingest_fix_service import save_ingest_placements
 from app.admin_clinic_schedule_page_service import (
     aggregate_assigned_or_blocks,
@@ -23,8 +25,65 @@ from app.admin_clinic_schedule_page_service import (
 )
 from app.clinic_schedule_card_guard import normalize_clinic_day_cards
 from app.migrate_location_admin_fields import normalize_office_location_name
-from app.models import Base, ClinicSchedule, Location, Surgeon, SurgicalCase
+from app.models import (
+    Base, Location, ScheduleCard, ScheduleCardActivity, ScheduleCardWeek, Surgeon,
+)
+
+
+class ClinicSchedule:
+    """Stand-in for grid tests that only read place fields."""
+
+    def __init__(self, **kwargs):
+        self.id = kwargs.get("id")
+        self.session = kwargs.get("session")
+        self.surgeon_id = kwargs.get("surgeon_id")
+        self.location_id = kwargs.get("location_id")
+        self.date = kwargs.get("date")
+        self.assignment_type = kwargs.get("assignment_type", "assigned")
+        self.notes = kwargs.get("notes") or ""
+        self.location = kwargs.get("location")
 from app.or_block_service import BlockORCreateInput, assign_block, create_or_blocks
+
+def _save_card_line(db, surgeon, day, location, start, patient, procedure="Procedure", room=""):
+    session = "am" if start < time(12, 0) else "pm"
+    week_start = day - timedelta(days=day.weekday())
+    week = db.query(ScheduleCardWeek).filter_by(surgeon_id=surgeon.id, week_start=week_start).one_or_none()
+    if week is None:
+        week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=week_start)
+        db.add(week)
+        db.flush()
+    card = db.query(ScheduleCard).filter_by(surgeon_id=surgeon.id, date=day, session=session).one_or_none()
+    if card is None:
+        card = ScheduleCard(
+            week_id=week.id,
+            surgeon_id=surgeon.id,
+            date=day,
+            session=session,
+            baseline_state="assigned",
+            effective_state="assigned",
+            baseline_location_id=location.id,
+            effective_location_id=location.id,
+        )
+        db.add(card)
+        db.flush()
+    key = f"{surgeon.id}-{day.isoformat()}-{start.strftime('%H%M')}-{patient}"
+    db.add(ScheduleCardActivity(
+        schedule_card_id=card.id,
+        surgeon_id=surgeon.id,
+        location_id=location.id,
+        activity_date=day,
+        session=session,
+        activity_type="surgical",
+        start_time=start,
+        patient_name=patient,
+        procedure=procedure,
+        room_text=room,
+        source_system="fax",
+        source_record_key=key,
+        identity_key=key,
+        is_active=True,
+    ))
+
 
 class AdminClinicScheduleTest(unittest.TestCase):
     def setUp(self):
@@ -35,6 +94,57 @@ class AdminClinicScheduleTest(unittest.TestCase):
     def tearDown(self):
         Base.metadata.drop_all(bind=self.engine)
         self.engine.dispose()
+
+    def _na_cards(self, db, surgeon, day):
+        week_start = day - timedelta(days=day.weekday())
+        week = db.query(ScheduleCardWeek).filter_by(
+            surgeon_id=surgeon.id, week_start=week_start,
+        ).one_or_none()
+        if week is None:
+            week = ScheduleCardWeek(
+                surgeon_id=surgeon.id, week_start=week_start, master_revision="test",
+            )
+            db.add(week)
+            db.flush()
+        cards = []
+        for session in ("am", "pm"):
+            card = db.query(ScheduleCard).filter_by(
+                surgeon_id=surgeon.id, date=day, session=session,
+            ).one_or_none()
+            if card is None:
+                card = ScheduleCard(
+                    week_id=week.id, surgeon_id=surgeon.id, date=day, session=session,
+                    baseline_state="na", effective_state="na",
+                )
+                db.add(card)
+                db.flush()
+            cards.append(card)
+        return cards
+
+    def _place(self, db, surgeon, day, session, location):
+        week_start = day - timedelta(days=day.weekday())
+        week = db.query(ScheduleCardWeek).filter_by(
+            surgeon_id=surgeon.id, week_start=week_start,
+        ).one_or_none()
+        if week is None:
+            week = ScheduleCardWeek(
+                surgeon_id=surgeon.id, week_start=week_start, master_revision="test",
+            )
+            db.add(week)
+            db.flush()
+        card = ScheduleCard(
+            week_id=week.id,
+            surgeon_id=surgeon.id,
+            date=day,
+            session=session,
+            baseline_state="assigned",
+            effective_state="assigned",
+            baseline_location_id=location.id,
+            effective_location_id=location.id,
+        )
+        db.add(card)
+        db.flush()
+        return card
 
     def test_clinic_schedule_sort_key_places_am_pm_then_full(self):
         rows = [
@@ -58,18 +168,29 @@ class AdminClinicScheduleTest(unittest.TestCase):
 
             today = date.today()
             src_start = today - timedelta(days=today.weekday())
-            db.add_all([
-                ClinicSchedule(surgeon_id=chris.id, location_id=clinic.id, date=src_start, session="am"),
-                ClinicSchedule(surgeon_id=alex.id, location_id=clinic.id, date=src_start, session="pm"),
-            ])
+            next_week = src_start + timedelta(days=7)
+            chris_src = self._na_cards(db, chris, src_start)
+            alex_src = self._na_cards(db, alex, src_start)
+            self._na_cards(db, chris, next_week)
+            self._na_cards(db, alex, next_week)
+            chris_src[0].baseline_state = "assigned"
+            chris_src[0].effective_state = "assigned"
+            chris_src[0].baseline_location_id = clinic.id
+            chris_src[0].effective_location_id = clinic.id
+            alex_src[1].baseline_state = "assigned"
+            alex_src[1].effective_state = "assigned"
+            alex_src[1].baseline_location_id = clinic.id
+            alex_src[1].effective_location_id = clinic.id
             db.commit()
 
             result = copy_clinic_week(db, 0, str(chris.id))
 
             self.assertTrue(result["ok"])
             self.assertEqual(result["created"], 1)
-            next_week = src_start + timedelta(days=7)
-            copied = db.query(ClinicSchedule).filter(ClinicSchedule.date == next_week).all()
+            copied = db.query(ScheduleCard).filter(
+                ScheduleCard.date == next_week,
+                ScheduleCard.effective_state == "assigned",
+            ).all()
             self.assertEqual(len(copied), 1)
             self.assertEqual(copied[0].surgeon_id, chris.id)
             self.assertEqual(copied[0].session, "am")
@@ -86,17 +207,12 @@ class AdminClinicScheduleTest(unittest.TestCase):
             db.flush()
 
             schedule_date = date(2026, 7, 8)
-            existing = ClinicSchedule(
-                surgeon_id=surgeon.id,
-                location_id=clinic.id,
-                date=schedule_date,
-                session="am",
-                assignment_type="assigned",
-                notes="old note",
-            )
-            db.add(existing)
+            cards = self._na_cards(db, surgeon, schedule_date)
+            cards[0].baseline_state = "assigned"
+            cards[0].effective_state = "assigned"
+            cards[0].baseline_location_id = clinic.id
+            cards[0].effective_location_id = clinic.id
             db.commit()
-            existing_id = existing.id
 
             conflicts = assign_clinic(
                 db,
@@ -105,18 +221,48 @@ class AdminClinicScheduleTest(unittest.TestCase):
                 str(hospital.id),
                 "pm",
                 "new note",
-                schedule_id=existing_id,
+                schedule_id=cards[0].id,
             )
 
             self.assertEqual(conflicts, [])
-            rows = db.query(ClinicSchedule).filter(
-                ClinicSchedule.surgeon_id == surgeon.id,
-                ClinicSchedule.date == schedule_date,
-            ).all()
-            self.assertEqual(len(rows), 1)
-            self.assertEqual(rows[0].location_id, hospital.id)
-            self.assertEqual(rows[0].session, "pm")
-            self.assertEqual(rows[0].notes, "new note")
+            db.refresh(cards[0])
+            db.refresh(cards[1])
+            self.assertEqual(cards[0].effective_state, "na")
+            self.assertEqual(cards[1].effective_state, "assigned")
+            self.assertEqual(cards[1].effective_location_id, hospital.id)
+            self.assertEqual(cards[1].session, "pm")
+        finally:
+            db.close()
+
+    def test_whole_day_fills_the_morning_and_afternoon_cards(self):
+        db = self.Session()
+        try:
+            surgeon = self._surgeon(db, "Chris", "Johnson")
+            clinic = Location(name="Winter Garden Clinic", abbreviation="WG", location_type="clinic", is_active=True)
+            db.add(clinic)
+            db.flush()
+            schedule_date = date(2026, 7, 8)
+            self._na_cards(db, surgeon, schedule_date)
+            db.commit()
+
+            conflicts = assign_clinic(
+                db, schedule_date, surgeon.id, str(clinic.id), "full", "",
+            )
+
+            self.assertEqual(conflicts, [])
+            shown = surgeon_clinics_by_day(db, surgeon.id, schedule_date, schedule_date)
+            sessions = sorted(card.session for card in shown[schedule_date])
+            self.assertEqual(sessions, ["am", "pm"])
+            self.assertEqual({card.location.id for card in shown[schedule_date]}, {clinic.id})
+            events = [
+                event for event in build_surgeon_calendar_events(
+                    db, surgeon, schedule_date, schedule_date,
+                )
+                if str(event["id"]).startswith("clinic-")
+            ]
+            self.assertEqual(sorted(event["extendedProps"]["session"] for event in events), ["am", "pm"])
+            self.assertTrue(all("Winter Garden Clinic" in event["title"] for event in events))
+            self.assertEqual(db.query(ScheduleCard).count(), 2)
         finally:
             db.close()
 
@@ -139,37 +285,30 @@ class AdminClinicScheduleTest(unittest.TestCase):
                 conflicts,
                 ["Use Days Off to mark approved OFF time. Blank schedule slots display as NA."],
             )
-            rows = db.query(ClinicSchedule).filter(
-                ClinicSchedule.surgeon_id == surgeon.id,
-                ClinicSchedule.date == schedule_date,
-            ).order_by(ClinicSchedule.session).all()
+            rows = db.query(ScheduleCard).filter(
+                ScheduleCard.surgeon_id == surgeon.id,
+                ScheduleCard.date == schedule_date,
+            ).order_by(ScheduleCard.session).all()
             self.assertEqual(rows, [])
         finally:
             db.close()
 
-    def test_normalize_day_cards_converts_legacy_full_to_two_slots(self):
+    def test_normalize_day_cards_leaves_the_morning_and_afternoon(self):
         db = self.Session()
         try:
             surgeon = self._surgeon(db, "Chris", "Johnson")
-            clinic = Location(name="Winter Garden Clinic", abbreviation="WG-OV", location_type="clinic", is_active=True)
-            db.add(clinic)
-            db.flush()
             schedule_date = date(2026, 7, 8)
-            db.add_all([
-                ClinicSchedule(surgeon_id=surgeon.id, location_id=clinic.id, date=schedule_date, session="am", assignment_type="assigned"),
-                ClinicSchedule(surgeon_id=surgeon.id, location_id=clinic.id, date=schedule_date, session="full", assignment_type="off"),
-            ])
-            db.flush()
-
-            normalize_clinic_day_cards(db, surgeon.id, schedule_date)
+            self._na_cards(db, surgeon, schedule_date)
             db.commit()
 
-            rows = db.query(ClinicSchedule).filter(
-                ClinicSchedule.surgeon_id == surgeon.id,
-                ClinicSchedule.date == schedule_date,
-            ).order_by(ClinicSchedule.session).all()
-            self.assertEqual([row.session for row in rows], ["am"])
-            self.assertLessEqual(len(rows), 1)
+            changed = normalize_clinic_day_cards(db, surgeon.id, schedule_date)
+
+            rows = db.query(ScheduleCard).filter(
+                ScheduleCard.surgeon_id == surgeon.id,
+                ScheduleCard.date == schedule_date,
+            ).order_by(ScheduleCard.session).all()
+            self.assertEqual(changed, 0)
+            self.assertEqual([row.session for row in rows], ["am", "pm"])
         finally:
             db.close()
 
@@ -227,6 +366,22 @@ class AdminClinicScheduleTest(unittest.TestCase):
         finally:
             db.close()
 
+    def test_office_board_reads_card_lines(self):
+        db = self.Session()
+        try:
+            hospital = Location(name="Winter Garden OR", abbreviation="WG-OR", location_type="hospital", is_active=True)
+            db.add(hospital)
+            surgeon = self._surgeon(db, "Chris", "Johnson")
+            db.flush()
+            monday = date.today() - timedelta(days=date.today().weekday())
+            _save_card_line(db, surgeon, monday, hospital, time(8, 0), "Card Line", "New", "WG S01")
+            db.commit()
+            data = page_data(db, week_offset=0)
+            shown = data["surgical_cases_json"].get(f"{surgeon.id}_{monday.isoformat()}", [])
+            self.assertEqual([row["patient"] for row in shown], ["Card Line"])
+        finally:
+            db.close()
+
     def test_page_data_does_not_surface_unlinked_surgical_cases_as_or_pills(self):
         db = self.Session()
         try:
@@ -241,38 +396,6 @@ class AdminClinicScheduleTest(unittest.TestCase):
             surgeon = self._surgeon(db, "Alex", "Schroeder")
             db.flush()
             monday = date.today() - timedelta(days=date.today().weekday())
-            db.add_all([
-                SurgicalCase(
-                    surgeon_id=surgeon.id,
-                    date=monday,
-                    start_time=time(7, 15),
-                    patient_name="Bishop, David",
-                    procedure="Case 1",
-                    location_id=hospital.id,
-                    room_text="MIN S05",
-                    status="scheduled",
-                ),
-                SurgicalCase(
-                    surgeon_id=surgeon.id,
-                    date=monday,
-                    start_time=time(8, 55),
-                    patient_name="Vercamen, Donald",
-                    procedure="Case 2",
-                    location_id=hospital.id,
-                    room_text="MIN S05",
-                    status="scheduled",
-                ),
-                SurgicalCase(
-                    surgeon_id=surgeon.id,
-                    date=monday,
-                    start_time=time(13, 30),
-                    patient_name="Torres, Carla",
-                    procedure="Case 3",
-                    location_id=hospital.id,
-                    room_text="MIN S05",
-                    status="scheduled",
-                ),
-            ])
             db.commit()
 
             data = page_data(db, week_offset=0)
@@ -313,16 +436,6 @@ class AdminClinicScheduleTest(unittest.TestCase):
                 ),
             )["instance_ids"][0]
             assign_block(db, block_id, surgeon.id, assigned_start_time=time(7, 0), case_count=0, notify=False)
-            db.add(SurgicalCase(
-                surgeon_id=surgeon.id,
-                date=monday,
-                start_time=time(12, 30),
-                patient_name="Colon, Nancy",
-                procedure="Case 1",
-                location_id=hospital.id,
-                room_text="ALT S04",
-                status="scheduled",
-            ))
             db.commit()
 
             data = page_data(db, week_offset=0)
@@ -362,18 +475,9 @@ class AdminClinicScheduleTest(unittest.TestCase):
                     recurrence="once",
                 ),
             )["instance_ids"][0]
-            case = SurgicalCase(
-                surgeon_id=surgeon.id,
-                date=monday,
-                start_time=time(7, 15),
-                patient_name="Case, Parked",
-                procedure="Procedure",
-                location_id=hospital.id,
-                room_text="MIN S05",
-                status="scheduled",
-            )
-            db.add(case)
+            _save_card_line(db, surgeon, monday, hospital, time(7, 15), "Case, Parked")
             db.commit()
+            case = db.query(ScheduleCardActivity).filter_by(patient_name="Case, Parked").one()
 
             result = save_ingest_placements(
                 db,
@@ -422,18 +526,9 @@ class AdminClinicScheduleTest(unittest.TestCase):
                 ),
             )["instance_ids"][0]
             assign_block(db, block_id, surgeon.id, assigned_start_time=time(7, 0), case_count=0, notify=False)
-            case = SurgicalCase(
-                surgeon_id=surgeon.id,
-                date=monday,
-                start_time=time(7, 15),
-                patient_name="Case, Parked",
-                procedure="Procedure",
-                location_id=hospital.id,
-                room_text="MIN S05",
-                status="scheduled",
-            )
-            db.add(case)
+            _save_card_line(db, surgeon, monday, hospital, time(7, 15), "Case, Parked")
             db.commit()
+            case = db.query(ScheduleCardActivity).filter_by(patient_name="Case, Parked").one()
 
             result = save_ingest_placements(
                 db,
@@ -475,13 +570,7 @@ class AdminClinicScheduleTest(unittest.TestCase):
             surgeon = self._surgeon(db, "Geoff", "Yurcisin")
             db.flush()
             monday = date.today() - timedelta(days=date.today().weekday())
-            db.add(ClinicSchedule(
-                surgeon_id=surgeon.id,
-                location_id=clinic.id,
-                date=monday,
-                session="am",
-                assignment_type="assigned",
-            ))
+            self._place(db, surgeon, monday, "am", clinic)
             for session, start, end in (("am", time(7, 0), time(12, 0)), ("pm", time(12, 0), time(17, 0))):
                 block_id = create_or_blocks(
                     db,
@@ -530,32 +619,9 @@ class AdminClinicScheduleTest(unittest.TestCase):
             surgeon = self._surgeon(db, "Geoff", "Yurcisin")
             db.flush()
             monday = date.today() - timedelta(days=date.today().weekday())
-            db.add_all([
-                ClinicSchedule(
-                    surgeon_id=surgeon.id,
-                    location_id=hospital.id,
-                    date=monday,
-                    session="am",
-                    assignment_type="assigned",
-                ),
-                ClinicSchedule(
-                    surgeon_id=surgeon.id,
-                    location_id=clinic.id,
-                    date=monday,
-                    session="pm",
-                    assignment_type="assigned",
-                ),
-                SurgicalCase(
-                    surgeon_id=surgeon.id,
-                    date=monday,
-                    start_time=time(7, 30),
-                    patient_name="Alvarado, Hunter",
-                    procedure="Case 1",
-                    location_id=hospital.id,
-                    room_text="ALT S07",
-                    status="scheduled",
-                ),
-            ])
+            self._place(db, surgeon, monday, "am", hospital)
+            self._place(db, surgeon, monday, "pm", clinic)
+            _save_card_line(db, surgeon, monday, hospital, time(7, 30), "Alvarado, Hunter", "Case 1", "ALT S07")
             db.commit()
 
             data = page_data(db, week_offset=0)
@@ -594,32 +660,9 @@ class AdminClinicScheduleTest(unittest.TestCase):
             surgeon = self._surgeon(db, "Jorge", "Florin")
             db.flush()
             monday = date.today() - timedelta(days=date.today().weekday())
-            db.add_all([
-                ClinicSchedule(
-                    surgeon_id=surgeon.id,
-                    location_id=hospital.id,
-                    date=monday,
-                    session="full",
-                    assignment_type="assigned",
-                ),
-                ClinicSchedule(
-                    surgeon_id=surgeon.id,
-                    location_id=clinic.id,
-                    date=monday,
-                    session="pm",
-                    assignment_type="assigned",
-                ),
-                SurgicalCase(
-                    surgeon_id=surgeon.id,
-                    date=monday,
-                    start_time=time(7, 15),
-                    patient_name="Case One",
-                    procedure="Procedure",
-                    location_id=hospital.id,
-                    room_text="WG S01",
-                    status="scheduled",
-                ),
-            ])
+            self._place(db, surgeon, monday, "am", hospital)
+            self._place(db, surgeon, monday, "pm", clinic)
+            _save_card_line(db, surgeon, monday, hospital, time(7, 15), "Case One", "Procedure", "WG S01")
             db.commit()
 
             data = page_data(db, week_offset=0)
@@ -647,36 +690,9 @@ class AdminClinicScheduleTest(unittest.TestCase):
             surgeon = self._surgeon(db, "Jorge", "Florin")
             db.flush()
             monday = date.today() - timedelta(days=date.today().weekday())
-            schedule = ClinicSchedule(
-                surgeon_id=surgeon.id,
-                location_id=hospital.id,
-                date=monday,
-                session="am",
-                assignment_type="assigned",
-            )
-            db.add(schedule)
-            db.add_all([
-                SurgicalCase(
-                    surgeon_id=surgeon.id,
-                    date=monday,
-                    start_time=time(7, 15),
-                    patient_name="Case One",
-                    procedure="Procedure",
-                    location_id=hospital.id,
-                    room_text="WG S01",
-                    status="scheduled",
-                ),
-                SurgicalCase(
-                    surgeon_id=surgeon.id,
-                    date=monday,
-                    start_time=time(9, 0),
-                    patient_name="Case Two",
-                    procedure="Procedure",
-                    location_id=hospital.id,
-                    room_text="WG S01",
-                    status="scheduled",
-                ),
-            ])
+            schedule = self._place(db, surgeon, monday, "am", hospital)
+            _save_card_line(db, surgeon, monday, hospital, time(7, 15), "Case One", "Procedure", "WG S01")
+            _save_card_line(db, surgeon, monday, hospital, time(9, 0), "Case Two", "Procedure", "WG S01")
             db.commit()
 
             data = page_data(db, week_offset=0)
@@ -980,33 +996,50 @@ class AdminClinicScheduleTest(unittest.TestCase):
         surgical_map = {
             16: {
                 day: [
-                    SurgicalCase(
+                    ScheduleCardActivity(
                         surgeon_id=16,
-                        date=day,
+                        activity_date=day,
+                        session="am",
+                        activity_type="surgical",
                         start_time=time(7, 15),
                         patient_name="Philome, Natasha",
+                        procedure="",
                         location_id=8,
                         location=location,
-                        status="scheduled",
+                        source_system="test",
+                        source_record_key="philome",
+                        identity_key="philome",
+                        is_active=True,
                     ),
-                    SurgicalCase(
+                    ScheduleCardActivity(
                         surgeon_id=16,
-                        date=day,
+                        activity_date=day,
+                        session="am",
+                        activity_type="surgical",
                         start_time=time(8, 15),
                         patient_name="Arent, Tadeusz",
+                        procedure="",
                         location_id=8,
                         location=location,
-                        status="scheduled",
+                        source_system="test",
+                        source_record_key="arent",
+                        identity_key="arent",
+                        is_active=True,
                     ),
-                    SurgicalCase(
+                    ScheduleCardActivity(
                         surgeon_id=16,
-                        date=day,
+                        activity_date=day,
+                        session="am",
+                        activity_type="surgical",
                         start_time=time(9, 15),
                         patient_name="Linked case",
+                        procedure="",
                         location_id=8,
                         location=location,
-                        or_block_instance_id=1450,
-                        status="scheduled",
+                        source_system="test",
+                        source_record_key="linked",
+                        identity_key="linked",
+                        is_active=True,
                     ),
                 ]
             }
@@ -1046,25 +1079,35 @@ class AdminClinicScheduleTest(unittest.TestCase):
         }
         surgical_map = {
             16: {day: [
-                SurgicalCase(
+                ScheduleCardActivity(
                     surgeon_id=16,
-                    date=day,
+                    activity_date=day,
+                    session="am",
+                    activity_type="surgical",
                     start_time=time(7, 15),
                     patient_name="OR patient",
                     procedure="Procedure",
                     location_id=8,
                     location=hospital,
-                    status="scheduled",
+                    source_system="test",
+                    source_record_key="or-patient",
+                    identity_key="or-patient",
+                    is_active=True,
                 ),
-                SurgicalCase(
+                ScheduleCardActivity(
                     surgeon_id=16,
-                    date=day,
+                    activity_date=day,
+                    session="am",
+                    activity_type="surgical",
                     start_time=time(8, 30),
                     patient_name="Clinic patient",
                     procedure="Office visit",
                     location_id=4,
                     location=clinic,
-                    status="scheduled",
+                    source_system="test",
+                    source_record_key="clinic-patient",
+                    identity_key="clinic-patient",
+                    is_active=True,
                 ),
             ]}
         }

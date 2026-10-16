@@ -13,8 +13,8 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.models import (
-    Base, CallBackup, CallDailyAssignment, CallGroup, CallRotation, ClinicSchedule, DayOff, Location, ScheduleCard, ScheduleCardActivity,
-    ScheduleCardWeek, Surgeon, SurgicalCase,
+    Base, CallBackup, CallCoverage, CallGroup, CallRotation, DayOff, Location, ScheduleCard, ScheduleCardActivity,
+    ScheduleCardWeek, Surgeon,
 )
 from app.native_scheduler_schedule import scheduler_schedule
 
@@ -58,14 +58,20 @@ class NativeSchedulerScheduleTest(unittest.TestCase):
             week_id=assistant_week.id, surgeon_id=assistant.id, date=monday, session="am",
             baseline_state="off", effective_state="off",
         )
-        self.db.add_all([am, pm, assistant_off])
+        assistant_clinic = ScheduleCard(
+            week_id=assistant_week.id, surgeon_id=assistant.id, date=monday, session="pm",
+            baseline_state="assigned", effective_state="assigned",
+            baseline_location_id=clinic.id, effective_location_id=clinic.id,
+        )
+        self.db.add_all([am, pm, assistant_off, assistant_clinic])
         self.db.flush()
         self.db.add_all([
-            SurgicalCase(
-                surgeon_id=primary.id, assisting_surgeon_id=assistant.id, date=monday,
+            ScheduleCardActivity(
+                schedule_card_id=am.id, surgeon_id=primary.id, location_id=hospital.id,
+                activity_date=monday, session="am", activity_type="surgical",
                 start_time=time(9), end_time=time(10), patient_name="Case Patient",
-                procedure="Procedure", location_id=hospital.id, schedule_card_id=am.id,
-                status="scheduled", or_block_instance_id=None,
+                procedure="Procedure", source_system="fax", source_record_key="case-1",
+                identity_key="case-patient-0900", is_active=True,
             ),
             ScheduleCardActivity(
                 schedule_card_id=pm.id, surgeon_id=primary.id, location_id=clinic.id,
@@ -79,8 +85,6 @@ class NativeSchedulerScheduleTest(unittest.TestCase):
                    start_time=time(8), end_time=time(12)),
             DayOff(surgeon_id=assistant.id, start_date=monday, end_date=monday,
                    reason="No Call", status="approved", is_full_day=True),
-            ClinicSchedule(surgeon_id=assistant.id, location_id=clinic.id, date=monday,
-                           session="pm", assignment_type="assigned"),
         ])
         self.db.commit()
 
@@ -91,18 +95,19 @@ class NativeSchedulerScheduleTest(unittest.TestCase):
         primary_rows = [row for row in rows if row["surgeonId"] == primary.id]
         assistant_rows = [row for row in rows if row["surgeonId"] == assistant.id]
         self.assertEqual(["AL-OR", "NA"], [row["title"] for row in primary_rows if row["type"] == "card"])
+        self.assertEqual(1, sum(1 for row in primary_rows if row["type"] == "surgery"))
         self.assertTrue(any(row["type"] == "surgery" and row["needsReview"] for row in primary_rows))
         self.assertTrue(any(row["type"] == "clinic_visit" for row in primary_rows))
         self.assertTrue(any(row["type"] == "surgery" and row["start"] == "09:00" and row["end"] == "10:00"
                             and row["subtitle"] == "Procedure" for row in primary_rows))
+        self.assertNotIn("Old List Patient", str(primary_rows))
         self.assertTrue(any(row["type"] == "clinic_visit" and row["start"] == "13:00" and row["end"] == "13:30"
                             and row["subtitle"] == "Visit" for row in primary_rows))
         self.assertTrue(any(row["type"] == "approved_off" and row["start"] == "08:00" for row in primary_rows))
-        self.assertTrue(any(row["type"] == "surgery" and row["subtitle"].startswith("Assisting") for row in assistant_rows))
+        self.assertFalse(any(row["type"] == "surgery" for row in assistant_rows))
         self.assertTrue(any(row["type"] == "card" and row["title"] == "OFF" for row in assistant_rows))
-        self.assertTrue(any(row["type"] == "surgery" and row["needsReview"] for row in assistant_rows))
         self.assertTrue(any(row["type"] == "no_call" for row in assistant_rows))
-        self.assertTrue(any(row["type"] == "clinic_block" for row in assistant_rows))
+        self.assertTrue(any(row["type"] == "card" and row["title"] == "LM" for row in assistant_rows))
         self.assertEqual(1, rows[0]["dayCaseCount"])
         self.assertEqual(1, rows[0]["dayVisitCount"])
         self.assertEqual(1, rows[0]["dayOffCount"])
@@ -161,18 +166,10 @@ class NativeSchedulerScheduleTest(unittest.TestCase):
         primary = Surgeon(first_name="Chris", last_name="Johnson", is_active=True)
         backup = Surgeon(first_name="Jorge", last_name="Florin", is_active=True)
         group = CallGroup(name="Winter Garden", sort_order=1)
-        first = Location(name="Winter Garden", abbreviation="WG")
-        second = Location(name="Apopka", abbreviation="AP")
-        self.db.add_all([primary, backup, group, first, second])
+        self.db.add_all([primary, backup, group])
         self.db.flush()
         rotation = CallRotation(date=friday, call_group_id=group.id, surgeon_id=primary.id)
         self.db.add(rotation)
-        self.db.flush()
-        self.db.add_all([
-            CallDailyAssignment(date=friday, location_id=location.id, surgeon_id=primary.id,
-                                call_group_id=group.id, call_rotation_id=rotation.id)
-            for location in (first, second)
-        ])
         self.db.commit()
         call_rows = [row for row in scheduler_schedule(self.db, friday, friday) if row["type"] == "call"]
         self.assertEqual(1, len(call_rows))
@@ -183,6 +180,19 @@ class NativeSchedulerScheduleTest(unittest.TestCase):
         call_rows = [row for row in scheduler_schedule(self.db, friday, friday) if row["type"] == "call"]
         self.assertEqual(1, len(call_rows))
         self.assertEqual("Winter Garden · Backup", call_rows[0]["subtitle"])
+        self.assertEqual(primary.id, call_rows[0]["surgeonId"])
+
+        self.db.add(CallCoverage(
+            call_rotation_id=rotation.id,
+            original_surgeon_id=primary.id,
+            covering_surgeon_id=backup.id,
+            status="active",
+        ))
+        self.db.commit()
+        call_rows = [row for row in scheduler_schedule(self.db, friday, friday) if row["type"] == "call"]
+        self.assertEqual(1, len(call_rows))
+        self.assertEqual(backup.id, call_rows[0]["surgeonId"])
+        self.assertEqual("Winter Garden", call_rows[0]["subtitle"])
 
 
 if __name__ == "__main__":

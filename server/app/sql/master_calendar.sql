@@ -31,26 +31,17 @@ leave_segments AS (
     WHERE d.status IN ('approved','pending') AND NOT (HAS_SEGMENTS)
 ),
 ranked_activity AS (
-    SELECT a.*, row_number() OVER (PARTITION BY a.schedule_card_id, a.identity_key ORDER BY a.id) AS rank
-    FROM schedule_card_activities a JOIN selected s ON s.id = a.surgeon_id
-    WHERE a.is_active = TRUE AND a.activity_date BETWEEN :start_date AND :end_date
+    SELECT a.*, c.surgeon_id AS card_surgeon_id,
+           row_number() OVER (PARTITION BY a.schedule_card_id, a.identity_key ORDER BY a.id) AS rank
+    FROM schedule_card_activities a
+    JOIN schedule_cards c ON c.id = a.schedule_card_id
+    JOIN selected s ON s.id = c.surgeon_id
+    WHERE a.is_active = TRUE AND c.date BETWEEN :start_date AND :end_date
 ),
 activity AS (
-    SELECT id, schedule_card_id, surgeon_id, activity_type, location_id, start_time,
-           patient_name, procedure, room_text, source_system, surgical_case_id
+    SELECT id, schedule_card_id, card_surgeon_id AS surgeon_id, activity_type, location_id, start_time,
+           patient_name, procedure, room_text, source_system
     FROM ranked_activity WHERE rank = 1
-    UNION ALL
-    -- Older imports normalized only the primary surgeon. Project missing assistance
-    -- into the assistant's time slot without changing source data or master blocks.
-    -- Existing reviewed activity wins; untimed/weekend cases remain standalone below.
-    SELECT -sc.id, c.id, s.id, 'surgical', sc.location_id, sc.start_time,
-           sc.patient_name, sc.procedure, sc.room_text, 'surgical_case_assist', sc.id
-    FROM surgical_cases sc JOIN selected s ON s.id = sc.assisting_surgeon_id
-    JOIN schedule_cards c ON c.surgeon_id = s.id AND c.date = sc.date
-      AND c.session = CASE WHEN substr(CAST(sc.start_time AS TEXT),1,5) < '12:00' THEN 'am' ELSE 'pm' END
-    WHERE sc.date BETWEEN :start_date AND :end_date AND sc.status <> 'cancelled'
-      AND sc.start_time IS NOT NULL AND WEEKDAY_CARD
-      AND NOT EXISTS (SELECT 1 FROM ranked_activity a WHERE a.surgeon_id = s.id AND a.surgical_case_id = sc.id)
 ),
 activity_summary AS (
     SELECT a.schedule_card_id, count(*) AS activity_count,
@@ -61,9 +52,8 @@ activity_summary AS (
                 'patient', a.patient_name, 'procedure', a.procedure,
                 'location', coalesce(l.abbreviation,l.name,''), 'room',coalesce(a.room_text,''),
                 'source', a.source_system,
-                'role', CASE WHEN sc.assisting_surgeon_id = a.surgeon_id THEN 'Assisting' ELSE '' END) ORDER BY a.start_time,a.id) AS roster
+                'role', '') ORDER BY a.start_time,a.id) AS roster
     FROM activity a LEFT JOIN locations l ON l.id = a.location_id
-    LEFT JOIN surgical_cases sc ON sc.id = a.surgical_case_id
     GROUP BY a.schedule_card_id
 ),
 card_data AS (
@@ -159,23 +149,6 @@ events AS (
     SELECT 'personal-' || CAST(p.id AS TEXT),CAST(p.date AS TEXT),CAST(p.start_time AS TEXT),CAST(p.end_time AS TEXT),p.title,
            JOBJ('type','personal','surgeon_id',s.id,'surgeon',s.full_name,'initials',s.initials,'notes',p.notes,'sort_key',60)
     FROM surgeon_day_items p JOIN selected s ON s.id = p.surgeon_id WHERE p.date BETWEEN :start_date AND :end_date
-    UNION ALL
-    SELECT 'surg-' || CAST(sc.id AS TEXT) || '-' || CAST(s.id AS TEXT),CAST(sc.date AS TEXT),CAST(sc.start_time AS TEXT),CAST(sc.end_time AS TEXT),
-           CASE WHEN sc.assisting_surgeon_id = s.id THEN 'Assisting · OR' ELSE 'OR case' END,
-           JOBJ('type','surgery','surgeon_id',s.id,'surgeon',s.full_name,'initials',s.initials,
-                'location',coalesce(l.name,sc.room_text),'patient_name',sc.patient_name,'procedure',sc.procedure,'sort_key',45)
-    FROM surgical_cases sc JOIN selected s ON s.id = sc.surgeon_id OR s.id = sc.assisting_surgeon_id
-    LEFT JOIN locations l ON l.id = sc.location_id
-    WHERE sc.date BETWEEN :start_date AND :end_date AND sc.status <> 'cancelled'
-      AND NOT EXISTS (SELECT 1 FROM activity a WHERE a.surgeon_id = s.id AND a.surgical_case_id = sc.id)
-    UNION ALL
-    SELECT 'clinic-' || CAST(c.id AS TEXT),CAST(c.date AS TEXT),NULL,NULL,
-           upper(c.session) || ' · ' || CASE WHEN c.assignment_type = 'off' THEN 'OFF' ELSE coalesce(l.abbreviation,l.name,'NA') END,
-           JOBJ('type','clinic','surgeon_id',s.id,'surgeon',s.full_name,'initials',s.initials,
-                'session',c.session,'location',l.name,'notes',c.notes,'sort_key',30)
-    FROM clinic_schedules c JOIN selected s ON s.id = c.surgeon_id LEFT JOIN locations l ON l.id = c.location_id
-    WHERE c.date BETWEEN :start_date AND :end_date AND WEEKDAY_CARD
-      AND NOT EXISTS (SELECT 1 FROM schedule_cards mc WHERE mc.surgeon_id = c.surgeon_id AND mc.date = c.date)
     UNION ALL
     SELECT 'unavailable-' || CAST(a.id AS TEXT),CAST(a.date AS TEXT),CAST(a.start_time AS TEXT),CAST(a.end_time AS TEXT),'Unavailable',
            JOBJ('type','unavailable','surgeon_id',s.id,'surgeon',s.full_name,'initials',s.initials,'notes',a.notes,'sort_key',15)

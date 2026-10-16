@@ -243,7 +243,7 @@ class CallBuilderTest(unittest.TestCase):
         finally:
             db.close()
 
-    def test_publish_writes_live_and_clears_draft(self):
+    def test_publish_writes_live_and_keeps_the_builder_in_sync(self):
         db = self.Session()
         try:
             admin, _, chris, alex, _, wg, alt = self._seed(db)
@@ -257,11 +257,57 @@ class CallBuilderTest(unittest.TestCase):
                     db, start=date(2026, 12, 1), end=date(2026, 12, 31), admin=admin,
                 )
             self.assertEqual(warnings, [])
-            self.assertEqual(db.query(CallDraftAssignment).count(), 0)
             live = db.query(CallRotation).filter(CallRotation.date == day).all()
             by_group = {r.call_group_id: r.surgeon_id for r in live}
             self.assertEqual(by_group[wg.id], chris.id)
             self.assertEqual(by_group[alt.id], alex.id)
+            drafts = db.query(CallDraftAssignment).filter(CallDraftAssignment.date == day).all()
+            draft_by_group = {row.call_group_id: row.surgeon_id for row in drafts}
+            self.assertEqual(draft_by_group[wg.id], chris.id)
+            self.assertEqual(draft_by_group[alt.id], alex.id)
+            self.assertEqual(publish_changes(db, date(2026, 12, 1), date(2026, 12, 31)), [])
+            from app.call_builder_service import board_for_month
+            board = board_for_month(db, 2026, 12)
+            cell = next(
+                c for c in board["cells"]
+                if c["date"] == day.isoformat() and c["callGroupId"] == wg.id
+            )
+            self.assertEqual(cell["source"], "live")
+            self.assertEqual(cell["surgeonId"], chris.id)
+        finally:
+            db.close()
+
+    def test_live_call_change_shows_in_the_builder(self):
+        db = self.Session()
+        try:
+            admin, _, chris, alex, _, wg, _alt = self._seed(db)
+            day = date(2026, 12, 12)
+            with patch("app.admin_call_schedule_action_service.send_push_to_surgeon"):
+                from app.admin_call_schedule_action_service import assign_rotation
+                assign_rotation(db, day, chris.id, wg.id, admin=admin)
+            draft = db.query(CallDraftAssignment).one()
+            self.assertEqual(draft.surgeon_id, chris.id)
+            from app.call_builder_service import board_for_month
+            board = board_for_month(db, 2026, 12)
+            cell = next(
+                c for c in board["cells"]
+                if c["date"] == day.isoformat() and c["callGroupId"] == wg.id
+            )
+            self.assertEqual(cell["source"], "live")
+            self.assertEqual(cell["initials"], "CJ")
+
+            upsert_draft(db, day=day, call_group_id=wg.id, surgeon_id=alex.id, admin=admin)
+            with patch("app.admin_call_schedule_action_service.send_push_to_surgeon"):
+                assign_rotation(db, day, chris.id, wg.id, admin=admin)
+            draft = db.query(CallDraftAssignment).one()
+            self.assertEqual(draft.surgeon_id, alex.id)
+            board = board_for_month(db, 2026, 12)
+            cell = next(
+                c for c in board["cells"]
+                if c["date"] == day.isoformat() and c["callGroupId"] == wg.id
+            )
+            self.assertEqual(cell["source"], "draft")
+            self.assertEqual(cell["surgeonId"], alex.id)
         finally:
             db.close()
 

@@ -1,7 +1,7 @@
 from datetime import date, datetime, time
 from sqlalchemy import (
-    Boolean, Column, Date, DateTime, ForeignKey, Integer,
-    CheckConstraint, String, Text, Time, UniqueConstraint, func
+    Boolean, Column, Date, DateTime, ForeignKey, Index, Integer,
+    CheckConstraint, ForeignKeyConstraint, String, Text, Time, UniqueConstraint, func, text,
 )
 from sqlalchemy.orm import relationship
 from .database import Base
@@ -142,8 +142,6 @@ class Surgeon(Base):
     native_schedule_alerts = relationship("NativeScheduleAlert", back_populates="surgeon", cascade="all, delete-orphan")
     location_schedules = relationship("SurgeonLocationSchedule", back_populates="surgeon", cascade="all, delete-orphan")
     location_overrides = relationship("LocationOverride", back_populates="surgeon", cascade="all, delete-orphan")
-    clinic_schedules = relationship("ClinicSchedule", back_populates="surgeon", cascade="all, delete-orphan")
-    surgical_cases = relationship("SurgicalCase", foreign_keys="SurgicalCase.surgeon_id", back_populates="surgeon", cascade="all, delete-orphan")
     day_items = relationship("SurgeonDayItem", back_populates="surgeon", cascade="all, delete-orphan")
     clinic_group_memberships = relationship("ClinicGroupMember", back_populates="surgeon", cascade="all, delete-orphan")
     surgical_blocks = relationship("SurgicalBlock", back_populates="surgeon", cascade="all, delete-orphan")
@@ -307,7 +305,7 @@ class CallRotation(Base):
     __tablename__ = "call_rotations"
     __table_args__ = (UniqueConstraint("date", "call_group_id"),)
     id = Column(Integer, primary_key=True)
-    call_group_id = Column(Integer, ForeignKey("call_groups.id"), nullable=True)  # nullable for migration
+    call_group_id = Column(Integer, ForeignKey("call_groups.id"), nullable=False)
     surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=True)  # null = NO call
     date = Column(Date, nullable=False)
     rotation_type = Column(String(16), default="primary")  # always primary; kept for legacy compat
@@ -361,7 +359,7 @@ class CallBackup(Base):
 
 
 class CallDailyAssignment(Base):
-    """Canonical effective call assignment: one relational row per day and location."""
+    """Old per-hospital copy. Screens read call_rotations and join the group's hospitals."""
     __tablename__ = "call_daily_assignments"
     __table_args__ = (UniqueConstraint("date", "location_id"),)
 
@@ -394,7 +392,7 @@ class Holiday(Base):
 
 
 class CallDraftAssignment(Base):
-    """Shared Call Builder draft — never published until Publish writes call_rotations."""
+    """Temporary Call Builder list. Publish copies each row onto call_rotations."""
     __tablename__ = "call_draft_assignments"
     __table_args__ = (UniqueConstraint("date", "call_group_id"),)
     id = Column(Integer, primary_key=True)
@@ -452,6 +450,37 @@ class Availability(Base):
 
 class DayOff(Base):
     __tablename__ = "days_off"
+    __table_args__ = (
+        UniqueConstraint("id", "surgeon_id", name="uq_days_off_id_surgeon"),
+        CheckConstraint("start_date <= end_date", name="ck_days_off_start_before_end"),
+        Index(
+            "uq_days_off_live_leave",
+            "surgeon_id",
+            "start_date",
+            "end_date",
+            unique=True,
+            sqlite_where=text(
+                "status IN ('pending', 'approved') AND lower(trim(coalesce(reason, ''))) <> 'no call'"
+            ),
+            postgresql_where=text(
+                "status IN ('pending', 'approved') AND lower(trim(coalesce(reason, ''))) <> 'no call'"
+            ),
+        ),
+        Index(
+            "uq_days_off_live_no_call",
+            "surgeon_id",
+            "start_date",
+            "end_date",
+            unique=True,
+            sqlite_where=text(
+                "status IN ('pending', 'approved') AND lower(trim(coalesce(reason, ''))) = 'no call'"
+            ),
+            postgresql_where=text(
+                "status IN ('pending', 'approved') AND lower(trim(coalesce(reason, ''))) = 'no call'"
+            ),
+        ),
+    )
+
     id = Column(Integer, primary_key=True)
     surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=False)
     start_date = Column(Date, nullable=False)
@@ -518,24 +547,6 @@ class MeetingAttendee(Base):
     surgeon = relationship("Surgeon", back_populates="meeting_attendees")
 
 
-class ClinicSchedule(Base):
-    """Specific-date clinic assignment: which doctor is at which clinic on a given day."""
-    __tablename__ = "clinic_schedules"
-    id = Column(Integer, primary_key=True)
-    surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=False)
-    location_id = Column(Integer, ForeignKey("locations.id"), nullable=True)
-    date = Column(Date, nullable=False)
-    session = Column(String(8), default="full")  # am | pm | full
-    assignment_type = Column(String(16), default="assigned", server_default="assigned")  # assigned | off
-    notes = Column(Text)
-    created_at = Column(DateTime, server_default=func.now())
-
-    __table_args__ = (UniqueConstraint("surgeon_id", "date", "session"),)
-
-    surgeon = relationship("Surgeon", back_populates="clinic_schedules")
-    location = relationship("Location")
-
-
 class ScheduleCardWeek(Base):
     """One materialized Monday-Friday card set for one surgeon."""
     __tablename__ = "schedule_card_weeks"
@@ -557,6 +568,8 @@ class ScheduleCard(Base):
     __tablename__ = "schedule_cards"
     __table_args__ = (
         UniqueConstraint("surgeon_id", "date", "session"),
+        UniqueConstraint("id", "surgeon_id", name="uq_schedule_cards_id_surgeon"),
+        UniqueConstraint("id", "surgeon_id", "date", "session", name="uq_schedule_cards_identity"),
         CheckConstraint("session IN ('am', 'pm')", name="ck_schedule_cards_session"),
         CheckConstraint(
             "baseline_state IN ('assigned', 'na', 'off')",
@@ -594,23 +607,57 @@ class ScheduleCard(Base):
 
     week = relationship("ScheduleCardWeek", back_populates="cards")
     surgeon = relationship("Surgeon")
+    activities = relationship(
+        "ScheduleCardActivity",
+        back_populates="schedule_card",
+        cascade="all, delete-orphan",
+        primaryjoin="ScheduleCard.id == ScheduleCardActivity.schedule_card_id",
+        foreign_keys="ScheduleCardActivity.schedule_card_id",
+    )
     baseline_location = relationship("Location", foreign_keys=[baseline_location_id])
     effective_location = relationship("Location", foreign_keys=[effective_location_id])
     master_template = relationship("SurgeonLocationSchedule")
 
 
 class DayOffScheduleCard(Base):
-    """Normalized card overlay for one day-off request; never derived at render time."""
+    """One request points at that same surgeon's morning or afternoon card."""
     __tablename__ = "day_off_schedule_cards"
-    __table_args__ = (UniqueConstraint("day_off_id", "schedule_card_id"),)
+    __table_args__ = (
+        UniqueConstraint("day_off_id", "schedule_card_id"),
+        ForeignKeyConstraint(
+            ["day_off_id", "surgeon_id"],
+            ["days_off.id", "days_off.surgeon_id"],
+            name="fk_day_off_schedule_cards_day_off_surgeon",
+            onupdate="CASCADE",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["schedule_card_id", "surgeon_id"],
+            ["schedule_cards.id", "schedule_cards.surgeon_id"],
+            name="fk_day_off_schedule_cards_card_surgeon",
+            onupdate="CASCADE",
+            ondelete="CASCADE",
+        ),
+    )
 
     id = Column(Integer, primary_key=True)
-    day_off_id = Column(Integer, ForeignKey("days_off.id", ondelete="CASCADE"), nullable=False, index=True)
-    schedule_card_id = Column(Integer, ForeignKey("schedule_cards.id", ondelete="CASCADE"), nullable=False, index=True)
+    day_off_id = Column(Integer, nullable=False, index=True)
+    schedule_card_id = Column(Integer, nullable=False, index=True)
+    surgeon_id = Column(Integer, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 
-    day_off = relationship("DayOff")
-    schedule_card = relationship("ScheduleCard")
+    day_off = relationship(
+        "DayOff",
+        primaryjoin="and_(DayOff.id == DayOffScheduleCard.day_off_id, DayOff.surgeon_id == DayOffScheduleCard.surgeon_id)",
+        foreign_keys="[DayOffScheduleCard.day_off_id, DayOffScheduleCard.surgeon_id]",
+        viewonly=True,
+    )
+    schedule_card = relationship(
+        "ScheduleCard",
+        primaryjoin="and_(ScheduleCard.id == DayOffScheduleCard.schedule_card_id, ScheduleCard.surgeon_id == DayOffScheduleCard.surgeon_id)",
+        foreign_keys="[DayOffScheduleCard.schedule_card_id, DayOffScheduleCard.surgeon_id]",
+        viewonly=True,
+    )
 
 
 class ScheduleCardActivity(Base):
@@ -622,6 +669,13 @@ class ScheduleCardActivity(Base):
         CheckConstraint(
             "activity_type IN ('surgical', 'clinic')",
             name="ck_schedule_card_activities_type",
+        ),
+        ForeignKeyConstraint(
+            ["schedule_card_id", "surgeon_id", "activity_date", "session"],
+            ["schedule_cards.id", "schedule_cards.surgeon_id", "schedule_cards.date", "schedule_cards.session"],
+            name="fk_schedule_card_activities_card_identity",
+            onupdate="CASCADE",
+            ondelete="CASCADE",
         ),
     )
 
@@ -638,18 +692,27 @@ class ScheduleCardActivity(Base):
     procedure = Column(Text, nullable=False, default="")
     room_text = Column(String(128))
     source_system = Column(String(32), nullable=False)
-    source_record_key = Column(String(128), nullable=False)
-    surgical_case_id = Column(Integer, ForeignKey("surgical_cases.id", ondelete="CASCADE"), nullable=True, index=True)
-    fax_ingest_row_id = Column(Integer, ForeignKey("fax_ingest_rows.id", ondelete="CASCADE"), nullable=True, index=True)
-    aprima_appointment_id = Column(String(36), ForeignKey("aprima_cached_appointments.appointment_id", ondelete="CASCADE"), nullable=True, index=True)
+    source_record_key = Column(String(640), nullable=False)
+    # Pointers back to a source row. The card is the only parent that deletes the line.
+    # source_fax_id is the fax that wrote this line. It stays after the scratch reading is deleted.
+    source_fax_id = Column(Integer, nullable=True, index=True)
+    fax_ingest_row_id = Column(Integer, ForeignKey("fax_ingest_rows.id", ondelete="SET NULL"), nullable=True, index=True)
+    aprima_appointment_id = Column(String(36), ForeignKey("aprima_cached_appointments.appointment_id", ondelete="SET NULL"), nullable=True, index=True)
+    or_block_instance_id = Column(Integer, ForeignKey("or_block_instances.id", ondelete="SET NULL"), nullable=True, index=True)
     identity_key = Column(String(512), nullable=False, index=True)
     is_active = Column(Boolean, nullable=False, default=True, server_default="true", index=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    schedule_card = relationship("ScheduleCard")
+    schedule_card = relationship(
+        "ScheduleCard",
+        back_populates="activities",
+        primaryjoin="ScheduleCard.id == ScheduleCardActivity.schedule_card_id",
+        foreign_keys=[schedule_card_id],
+    )
     surgeon = relationship("Surgeon")
     location = relationship("Location")
+    or_block_instance = relationship("ORBlockInstance")
 
 
 class FaxDocument(Base):
@@ -702,7 +765,7 @@ class FaxIngestRun(Base):
 
 
 class FaxIngestRow(Base):
-    """One reviewed Desk extraction row. This table never creates cards."""
+    """Scratch reading of one fax line. Send to Calendar copies it onto the card, then deletes it."""
     __tablename__ = "fax_ingest_rows"
     __table_args__ = (
         UniqueConstraint("run_id", "normalized_key"),
@@ -749,45 +812,72 @@ class FaxRowDecision(Base):
     schedule_card = relationship("ScheduleCard")
 
 
-class SurgicalCase(Base):
-    """One row per surgery (hospital schedule). Scheduler adds; surgeon sees on schedule and can add notes."""
-    __tablename__ = "surgical_cases"
+class FaxRestoreSet(Base):
+    """Photo of card lines taken before Send to Calendar writes one fax."""
+    __tablename__ = "fax_restore_sets"
+
     id = Column(Integer, primary_key=True)
-    surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=False)
-    date = Column(Date, nullable=False)
+    source_fax_id = Column(
+        Integer,
+        ForeignKey("fax_documents.external_fax_id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    run_id = Column(Integer, ForeignKey("fax_ingest_runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+    restored_at = Column(DateTime)
+
+    lines = relationship("FaxRestoreLine", back_populates="restore_set", cascade="all, delete-orphan")
+
+
+class FaxRestoreLine(Base):
+    """One saved card line. The fax plus that line can be stored only once."""
+    __tablename__ = "fax_restore_lines"
+    __table_args__ = (
+        UniqueConstraint("restore_set_id", "schedule_card_activity_id"),
+        CheckConstraint("session IN ('am', 'pm')", name="ck_fax_restore_lines_session"),
+        CheckConstraint(
+            "activity_type IN ('surgical', 'clinic')",
+            name="ck_fax_restore_lines_type",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    restore_set_id = Column(Integer, ForeignKey("fax_restore_sets.id", ondelete="CASCADE"), nullable=False, index=True)
+    schedule_card_activity_id = Column(
+        Integer,
+        ForeignKey("schedule_card_activities.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    schedule_card_id = Column(Integer, nullable=False)
+    surgeon_id = Column(Integer, nullable=False)
+    location_id = Column(Integer)
+    activity_date = Column(Date, nullable=False)
+    session = Column(String(2), nullable=False)
+    activity_type = Column(String(16), nullable=False)
     start_time = Column(Time)
     end_time = Column(Time)
     patient_name = Column(String(255), nullable=False)
-    patient_dob = Column(String(32))
-    patient_phone = Column(String(32))
-    procedure = Column(Text, nullable=False)
-    location_id = Column(Integer, ForeignKey("locations.id"))
-    schedule_card_id = Column(Integer, ForeignKey("schedule_cards.id"), index=True)
-    or_block_instance_id = Column(Integer, ForeignKey("or_block_instances.id"))
-    room_text = Column(String(64))
-    # Co-surgeon: when a case is shared (e.g. one surgeon assisting another),
-    # `surgeon_id` is the primary and this is the assisting surgeon.
-    assisting_surgeon_id = Column(Integer, ForeignKey("surgeons.id"))
-    status = Column(String(16), default="scheduled", server_default="scheduled")  # scheduled | confirmed | completed | cancelled
-    notes = Column(Text)  # scheduler notes
-    surgeon_notes = Column(Text)  # surgeon's own notes (add from mobile)
-    created_at = Column(DateTime, server_default=func.now())
-    updated_at = Column(DateTime, onupdate=func.now())
+    procedure = Column(Text, nullable=False, default="")
+    room_text = Column(String(128))
+    source_system = Column(String(32), nullable=False)
+    source_record_key = Column(String(640), nullable=False)
+    identity_key = Column(String(512), nullable=False)
+    fax_ingest_row_id = Column(Integer)
+    source_fax_id = Column(Integer)
+    aprima_appointment_id = Column(String(36))
+    is_active = Column(Boolean, nullable=False)
 
-    surgeon = relationship("Surgeon", foreign_keys=[surgeon_id], back_populates="surgical_cases")
-    assisting_surgeon = relationship("Surgeon", foreign_keys=[assisting_surgeon_id])
-    location = relationship("Location")
-    schedule_card = relationship("ScheduleCard")
-    or_block_instance = relationship("ORBlockInstance", back_populates="cases")
+    restore_set = relationship("FaxRestoreSet", back_populates="lines")
+    activity = relationship("ScheduleCardActivity")
 
 
 class CoSurgeonPair(Base):
-    """Directional co-surgeon rule.
+    """Saved co-surgeon preference.
 
-    Advent daily faxes reprint a shared case under BOTH surgeons' sections. When
-    the two surgeons on such a case match a pair here, the case is attached to
-    `primary_surgeon` and `assisting_surgeon` is recorded as the assist — instead
-    of creating a duplicate row / double-booking the room.
+    Fax apply does not read this table. Epic already printed each surgeon's line,
+    and SQL places that line on that surgeon's existing card.
     """
     __tablename__ = "co_surgeon_pairs"
     __table_args__ = (UniqueConstraint("primary_surgeon_id", "assisting_surgeon_id"),)
@@ -922,7 +1012,6 @@ class ORBlockInstance(Base):
     location = relationship("Location")
     assigned_surgeon = relationship("Surgeon", foreign_keys=[assigned_surgeon_id], back_populates="or_block_instances")
     assignments = relationship("ORBlockAssignment", back_populates="block_instance", cascade="all, delete-orphan")
-    cases = relationship("SurgicalCase", back_populates="or_block_instance")
     audit_events = relationship("ORBlockAuditEvent", back_populates="block_instance", cascade="all, delete-orphan")
 
 
@@ -989,6 +1078,28 @@ class ScheduleChangeEvent(Base):
 
     surgeon = relationship("Surgeon")
     admin_user = relationship("AdminUser")
+
+
+class ScheduleWarning(Base):
+    """A sticky note on the card that has the problem. The card stays when the note is removed."""
+    __tablename__ = "schedule_warnings"
+    __table_args__ = (
+        UniqueConstraint("source_fax_id", "schedule_card_id", "warning_code"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    warning_code = Column(String(64), nullable=False)
+    schedule_card_id = Column(Integer, ForeignKey("schedule_cards.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_fax_id = Column(
+        Integer,
+        ForeignKey("fax_documents.external_fax_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    detail = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+
+    schedule_card = relationship("ScheduleCard")
 
 
 class PushSubscription(Base):

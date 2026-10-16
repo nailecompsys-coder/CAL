@@ -133,6 +133,7 @@ def staff_sections(months: list[tuple[int, int]], all_requests: list[DayOff]) ->
 def submit_request_off(db: Session, surgeon: Surgeon, start_date: str, end_date: str, reason: str, notes: str) -> dict:
     from .scheduling_gate_service import (
         day_off_overlap_advisory,
+        find_exact_live_day_off,
         find_exact_pending_day_off,
         practice_today,
         purge_exact_pending_duplicates,
@@ -147,7 +148,10 @@ def submit_request_off(db: Session, surgeon: Surgeon, start_date: str, end_date:
     if end < start:
         return {"ok": False, "warn": "End date must be the same day or after the start date."}
 
-    existing = find_exact_pending_day_off(db, surgeon.id, start, end)
+    existing = find_exact_pending_day_off(db, surgeon.id, start, end, reason)
+    approved = find_exact_live_day_off(db, surgeon.id, start, end, reason)
+    if approved and approved.status == "approved":
+        return {"ok": False, "warn": "That day off is already on the schedule."}
     if existing:
         return {
             "ok": True,

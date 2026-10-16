@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
+from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 from .call_schedule_audit_service import actor_label_for_admin, log_call_schedule_change
@@ -37,6 +38,8 @@ def assign_rotation(
     backup_surgeon_id: int | None | object = _UNCHANGED_BACKUP,
     backup_note: str = "",
 ) -> list[str]:
+    if call_group_id is None:
+        raise HTTPException(status_code=400, detail="Choose a call group")
     existing = rotation_query_for_assignment(db, assignment_date, call_group_id).first()
     from_surgeon_id = existing.surgeon_id if existing else None
     from .call_backup_service import set_backup_on_rotation, validate_backup_choice, backup_warnings
@@ -68,7 +71,15 @@ def assign_rotation(
         set_backup_on_rotation(db, rotation, None, "", admin=admin)
 
     from .call_assignment_normalization import sync_call_rotation
+    from .call_builder_service import mirror_prod_cell_into_draft
     sync_call_rotation(db, rotation)
+    mirror_prod_cell_into_draft(
+        db,
+        day=assignment_date,
+        call_group_id=call_group_id,
+        surgeon_id=surgeon_id,
+        previous_surgeon_id=from_surgeon_id,
+    )
 
     if from_surgeon_id != surgeon_id:
         log_call_schedule_change(
@@ -146,7 +157,15 @@ def copy_call_week(db: Session, source_offset: int) -> int:
                 db.add(new_rotation)
                 db.flush()
                 from .call_assignment_normalization import sync_call_rotation
+                from .call_builder_service import mirror_prod_cell_into_draft
                 sync_call_rotation(db, new_rotation)
+                mirror_prod_cell_into_draft(
+                    db,
+                    day=destination_day,
+                    call_group_id=rotation.call_group_id,
+                    surgeon_id=rotation.surgeon_id,
+                    previous_surgeon_id=None,
+                )
                 copied += 1
     db.commit()
     return copied
@@ -159,6 +178,8 @@ def clear_rotation(
     *,
     admin: AdminUser | None = None,
 ) -> None:
+    if call_group_id is None:
+        raise HTTPException(status_code=400, detail="Choose a call group")
     existing = (
         rotation_query_for_assignment(db, assignment_date, call_group_id)
         .options(joinedload(CallRotation.call_group))
@@ -183,6 +204,15 @@ def clear_rotation(
         actor_label=actor_label_for_admin(admin),
     )
     db.delete(existing)
+    if call_group_id is not None:
+        from .call_builder_service import mirror_prod_cell_into_draft
+        mirror_prod_cell_into_draft(
+            db,
+            day=assignment_date,
+            call_group_id=call_group_id,
+            surgeon_id=None,
+            previous_surgeon_id=from_surgeon_id,
+        )
     db.commit()
     if from_surgeon_id:
         send_push_to_surgeon(

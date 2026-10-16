@@ -10,7 +10,17 @@ from sqlalchemy.orm import sessionmaker
 
 from app.fax_ingest_engine import ReviewedFaxRow, stage_reviewed_rows
 from app.migrate_fax_ingest import create_applicable_view
-from app.models import Base, FaxIngestRow, FaxRowDecision, Location, ScheduleCard, ScheduleCardWeek, Surgeon
+from app.models import (
+    Base,
+    FaxIngestRow,
+    FaxRowDecision,
+    Location,
+    ORBlockAssignment,
+    ORBlockInstance,
+    ScheduleCard,
+    ScheduleCardWeek,
+    Surgeon,
+)
 
 
 class FaxIngestEngineTest(unittest.TestCase):
@@ -44,6 +54,26 @@ class FaxIngestEngineTest(unittest.TestCase):
         self.db.close()
         self.engine.dispose()
 
+    def _block(self, location, start, end, day=date(2026, 9, 16)):
+        block = ORBlockInstance(
+            location_id=location.id,
+            date=day,
+            session="am" if start < time(12, 0) else "pm",
+            start_time=start,
+            end_time=end,
+            status="assigned",
+            assigned_surgeon_id=self.surgeon.id,
+        )
+        self.db.add(block)
+        self.db.flush()
+        self.db.add(ORBlockAssignment(
+            block_instance_id=block.id,
+            surgeon_id=self.surgeon.id,
+            start_time=start,
+        ))
+        self.db.commit()
+        return block
+
     def row(self, **changes):
         values = dict(page=2, surgeon_initials="JF", surgeon_name="Jorge Florin", case_date=date(2026, 9, 16), start_time=time(7, 15), row_type="surgical", room="MIN S05", patient_name="White, Jeffrey", procedure="Robotic repair")
         values.update(changes)
@@ -64,10 +94,11 @@ class FaxIngestEngineTest(unittest.TestCase):
         self.db.commit()
         decision = self.db.query(FaxRowDecision).one()
         self.assertEqual(result["decisions"], {"needs_review": 1})
-        self.assertEqual(decision.reason_code, "generic_room_on_na")
+        self.assertEqual(decision.reason_code, "no_block_for_facility")
         self.assertIsNone(decision.schedule_card.effective_location_id)
 
-    def test_generic_room_on_na_uses_nearest_prior_same_day_location(self):
+    def test_placeholder_room_uses_the_block_not_an_earlier_room(self):
+        self._block(self.ap_location, time(12, 0), time(17, 0))
         result = stage_reviewed_rows(
             self.db,
             external_fax_id=171,
@@ -82,15 +113,18 @@ class FaxIngestEngineTest(unittest.TestCase):
         decisions = self.db.query(FaxRowDecision).order_by(FaxRowDecision.id).all()
         staged = self.db.query(FaxIngestRow).order_by(FaxIngestRow.id).all()
         self.assertEqual(result["decisions"], {"ready": 3})
-        self.assertEqual([decision.reason_code for decision in decisions[1:]], ["na_context_location", "na_context_location"])
+        self.assertEqual(decisions[0].reason_code, "existing_card")
+        self.assertEqual(staged[0].source_location_id, self.location.id)
+        self.assertEqual([decision.reason_code for decision in decisions[1:]], ["block_location", "block_location"])
         self.assertEqual({row.source_location_id for row in staged[1:]}, {self.ap_location.id})
 
     def test_epic_location_override_is_ready_for_existing_card(self):
+        self._block(self.ap_location, time(7, 0), time(12, 0))
         result = stage_reviewed_rows(
             self.db,
             external_fax_id=172,
             source_label="Fax 172",
-            rows=[self.row(room="APK S03")],
+            rows=[self.row(room="MIN S05")],
         )
         self.db.commit()
         decision = self.db.query(FaxRowDecision).one()
@@ -98,12 +132,13 @@ class FaxIngestEngineTest(unittest.TestCase):
         self.assertEqual(decision.reason_code, "epic_override")
 
     def test_generic_rows_follow_explicit_same_session_epic_location(self):
+        self._block(self.ap_location, time(12, 0), time(17, 0))
         result = stage_reviewed_rows(
             self.db,
             external_fax_id=173,
             source_label="Fax 173",
             rows=[
-                self.row(start_time=time(13, 10), room="APK S03"),
+                self.row(start_time=time(13, 10), room="MIN S99"),
                 self.row(start_time=time(13, 30), room="AHMGGENSRG", patient_name="Second, Patient"),
             ],
         )
@@ -127,7 +162,7 @@ class FaxIngestEngineTest(unittest.TestCase):
         self.db.commit()
         staged = self.db.query(FaxIngestRow).one()
         self.assertEqual(staged.source_location_id, self.location.id)
-        self.assertEqual(staged.row_type, "surgical")
+        self.assertEqual(staged.row_type, "clinic")
         self.assertIsNone(staged.extraction_flags)
 
     def test_unknown_room_on_unassigned_card_is_flagged(self):
@@ -135,8 +170,18 @@ class FaxIngestEngineTest(unittest.TestCase):
         self.db.commit()
         staged = self.db.query(FaxIngestRow).one()
         self.assertIsNone(staged.source_location_id)
-        self.assertEqual(staged.extraction_flags, "unknown_room")
-        self.assertEqual(self.db.query(FaxRowDecision).one().reason_code, "extraction_flagged")
+        self.assertIsNone(staged.extraction_flags)
+        self.assertEqual(self.db.query(FaxRowDecision).one().reason_code, "no_block_for_facility")
+
+    def test_two_blocks_leave_the_hospital_blank(self):
+        self._block(self.location, time(7, 0), time(12, 0))
+        self._block(self.ap_location, time(7, 0), time(12, 0))
+        stage_reviewed_rows(self.db, external_fax_id=174, source_label="Fax 174", rows=[self.row(room="APK S03")])
+        self.db.commit()
+        staged = self.db.query(FaxIngestRow).one()
+        decision = self.db.query(FaxRowDecision).one()
+        self.assertIsNone(staged.source_location_id)
+        self.assertEqual(decision.reason_code, "block_facility_unclear")
 
 
 if __name__ == "__main__":

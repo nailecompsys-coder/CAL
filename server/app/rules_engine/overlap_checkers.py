@@ -16,6 +16,19 @@ from .overlap_helpers import overlap_target, should_skip_time_overlap
 from .registry import Conflict
 
 
+class _LineClock:
+    """Give a card line the date/time shape case_range already understands."""
+
+    def __init__(self, row):
+        self.date = row.activity_date
+        self.start_time = row.start_time
+        self.end_time = row.end_time
+
+
+def _line_clock(row) -> _LineClock:
+    return _LineClock(row)
+
+
 def check_overlap_day_off(
     surgeon_id: int,
     start_date: date,
@@ -117,23 +130,12 @@ def check_overlap_call(
     On-call does not conflict with an OR block or a surgical case — operating while on
     call is expected. Overlaps with day-off / clinic / meeting are still surfaced.
     """
-    from ..models import CallDailyAssignment
+    from ..call_assignment_normalization import effective_calls
 
     target = overlap_target(target_entity, start_date, end_date)
     target_start, target_end = target.start, target.end
 
-    assignments = (
-        db.query(CallDailyAssignment)
-        .options(joinedload(CallDailyAssignment.call_group), joinedload(CallDailyAssignment.location))
-        .filter(
-            CallDailyAssignment.surgeon_id == surgeon_id,
-            CallDailyAssignment.date >= target_start,
-            CallDailyAssignment.date <= target_end,
-        )
-        .order_by(CallDailyAssignment.date, CallDailyAssignment.location_id)
-        .all()
-    )
-    for assignment in assignments:
+    for assignment in effective_calls(db, target_start, target_end, surgeon_id=surgeon_id):
         if _exclude_entity(exclude_entity, "call_rotation", assignment.call_rotation_id):
             continue
         # Full-day call commitment unless target is a partial day-off that ends before overnight call
@@ -151,13 +153,13 @@ def check_overlap_call(
         if _operating_while_on_call(target_entity):
             continue
         group = assignment.call_group.name if assignment.call_group else "call"
-        location = assignment.location.abbreviation if assignment.location else "location"
+        where = f"{group} at {assignment.place}" if assignment.locations else group
         if assignment.call_coverage_id:
-            msg = f"Covering on-call ({group}, {location}) on {assignment.date.strftime('%b %-d')}"
+            msg = f"Covering on-call ({where}) on {assignment.date.strftime('%b %-d')}"
             entity_type = "call_coverage"
             entity_id = assignment.call_coverage_id
         else:
-            msg = f"Assigned on-call ({group}, {location}) on {assignment.date.strftime('%b %-d')}"
+            msg = f"Assigned on-call ({where}) on {assignment.date.strftime('%b %-d')}"
             entity_type = "call_rotation"
             entity_id = assignment.call_rotation_id
         yield Conflict(
@@ -221,28 +223,24 @@ def check_overlap_clinic(
     exclude_entity: Optional[tuple[str, int]] = None,
     target_entity: Optional[dict] = None,
 ) -> Iterator[Conflict]:
-    from ..models import ClinicSchedule
+    from ..models import ScheduleCard
     from sqlalchemy.orm import joinedload
 
     target = overlap_target(target_entity, start_date, end_date)
     for cs in (
-        db.query(ClinicSchedule)
-        .options(joinedload(ClinicSchedule.location))
+        db.query(ScheduleCard)
+        .options(joinedload(ScheduleCard.effective_location))
         .filter(
-            ClinicSchedule.surgeon_id == surgeon_id,
-            ClinicSchedule.date >= target.start,
-            ClinicSchedule.date <= target.end,
+            ScheduleCard.surgeon_id == surgeon_id,
+            ScheduleCard.date >= target.start,
+            ScheduleCard.date <= target.end,
+            ScheduleCard.effective_state == "assigned",
         )
         .all()
     ):
         if _exclude_entity(exclude_entity, "clinic_schedule", cs.id):
             continue
-        # "Off" clinic markers are not a scheduled clinic commitment.
-        if (cs.assignment_type or "").lower() in {"off", "__off__", "day_off"}:
-            continue
-        # Clinic/OR grid stores OR days as hospital locations on ClinicSchedule —
-        # that is Block OR capacity, not a clinic conflict.
-        loc = cs.location
+        loc = cs.effective_location
         if loc:
             abbr = (loc.abbreviation or "").upper()
             ltype = (loc.location_type or "").lower()
@@ -275,42 +273,46 @@ def check_overlap_surgery(
     exclude_entity: Optional[tuple[str, int]] = None,
     target_entity: Optional[dict] = None,
 ) -> Iterator[Conflict]:
-    from ..models import SurgicalCase
+    from ..schedule_activity_normalization import active_surgical_lines
     target = overlap_target(target_entity, start_date, end_date)
-    q = db.query(SurgicalCase).filter(
-        SurgicalCase.surgeon_id == surgeon_id,
-        SurgicalCase.date >= target.start,
-        SurgicalCase.date <= target.end,
-        SurgicalCase.status != "cancelled",
+    exclude_activity_id = (
+        exclude_entity[1]
+        if exclude_entity and exclude_entity[0] in {"surgical_case", "schedule_card_activity"}
+        else None
     )
-    if exclude_entity and exclude_entity[0] == "surgical_case":
-        q = q.filter(SurgicalCase.id != exclude_entity[1])
-    for sc in q.all():
+    rows = active_surgical_lines(
+        db,
+        surgeon_id=surgeon_id,
+        start=target.start,
+        end=target.end,
+        exclude_activity_id=exclude_activity_id,
+    )
+    for row in rows:
+        if row.start_time is None:
+            continue
         # On-call + operating is expected at any hospital — not a scheduling flag.
         if _on_call_target(target_entity):
             continue
-        # Cases under this Block OR are inventory under the block — not a conflict.
+        # Lines at this Block OR hospital are inventory under the block — not a conflict.
         if target.kind == "or_block":
-            block_id = (target.entity or {}).get("or_block_instance_id") or (target.entity or {}).get("block_id")
-            if block_id and sc.or_block_instance_id and int(block_id) == int(sc.or_block_instance_id):
-                continue
             loc_id = (target.entity or {}).get("location_id")
-            if loc_id and sc.location_id and int(loc_id) == int(sc.location_id):
+            if loc_id and row.location_id and int(loc_id) == int(row.location_id):
                 continue
+        clock = _line_clock(row)
         if should_skip_time_overlap(
             target,
-            sc.date,
-            case_range(sc),
+            row.activity_date,
+            case_range(clock),
             {"surgical_case", "clinic_schedule", "meeting", "day_off", "or_block", "call_rotation"},
         ):
             continue
         yield Conflict(
             rule_id="OVERLAP_SURGERY",
             surgeon_id=surgeon_id,
-            date=sc.date,
-            message=f"Surgery on {sc.date.strftime('%b %-d')} ({sc.start_time.strftime('%-I:%M %p')} — {sc.patient_name or 'case'})",
+            date=row.activity_date,
+            message=f"Surgery on {row.activity_date.strftime('%b %-d')} ({row.start_time.strftime('%-I:%M %p')} — {row.patient_name or 'case'})",
             conflicting_entity_type="surgical_case",
-            conflicting_entity_id=sc.id,
+            conflicting_entity_id=row.id,
         )
 
 

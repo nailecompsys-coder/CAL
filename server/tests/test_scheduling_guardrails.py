@@ -14,14 +14,15 @@ from app.models import (
     CallRotation,
     ClinicGroup,
     ClinicGroupMember,
-    ClinicSchedule,
     DayOff,
     Location,
     Meeting,
     MeetingAttendee,
+    ScheduleCard,
+    ScheduleCardActivity,
+    ScheduleCardWeek,
     Surgeon,
     SurgicalBlock,
-    SurgicalCase,
 )
 from app.scheduling_guardrails_service import (
     clinic_group_day_off_findings,
@@ -119,39 +120,22 @@ class SchedulingGuardrailsTest(unittest.TestCase):
                 end_time=time(12, 0),
                 recurrence="weekly",
             ))
-            db.add(ClinicSchedule(
-                surgeon_id=surgeon.id,
-                location_id=clinic.id,
-                date=case_day,
-                session="am",
-                assignment_type="assigned",
-            ))
+            self._card(db, surgeon, case_day, "am", clinic.id)
             meeting = Meeting(title="Assigned Meeting", date=case_day, start_time=time(10, 0), end_time=time(11, 0))
             db.add(meeting)
             db.flush()
             db.add(MeetingAttendee(meeting_id=meeting.id, surgeon_id=surgeon.id))
-            db.add(SurgicalCase(
-                surgeon_id=surgeon.id,
-                date=case_day,
-                start_time=time(15, 0),
-                end_time=time(15, 30),
-                patient_name="Hidden Patient",
-                patient_dob="1/1/1960",
-                patient_phone="4075550100",
-                procedure="Demo procedure",
-                location_id=hospital.id,
-                status="scheduled",
-            ))
-            db.add(SurgicalCase(
-                surgeon_id=surgeon.id,
-                date=case_day,
-                start_time=time(15, 10),
-                end_time=time(15, 40),
-                patient_name="Overlap Patient",
-                procedure="Second demo procedure",
-                location_id=hospital.id,
-                status="scheduled",
-            ))
+            card = self._card(db, surgeon, case_day, "pm", hospital.id)
+            self._line(
+                db, card, start=time(15, 0), end=time(15, 30),
+                patient="Hidden Patient", procedure="Demo procedure",
+                location_id=hospital.id, key="hidden",
+            )
+            self._line(
+                db, card, start=time(15, 10), end=time(15, 40),
+                patient="Overlap Patient", procedure="Second demo procedure",
+                location_id=hospital.id, key="overlap",
+            )
             db.commit()
 
             warnings = surgical_case_warning_messages(
@@ -166,7 +150,8 @@ class SchedulingGuardrailsTest(unittest.TestCase):
 
             rows = scheduler_safe_rows(db, case_day, case_day)
             self.assertEqual(len(rows), 2)
-            self.assertEqual(rows[0]["procedure"], "Demo procedure")
+            self.assertEqual([row["procedure"] for row in rows], ["Demo procedure", "Second demo procedure"])
+            self.assertNotIn("Old list procedure", [row["procedure"] for row in rows])
             self.assertNotIn("patient_name", rows[0])
             self.assertNotIn("patient_dob", rows[0])
             self.assertNotIn("patient_phone", rows[0])
@@ -204,42 +189,16 @@ class SchedulingGuardrailsTest(unittest.TestCase):
                 start_time=time(8, 30),
                 case_count=2,
             ))
-            db.add_all([
-                ClinicSchedule(
-                    surgeon_id=surgeon.id,
-                    location_id=ap_or.id,
-                    date=case_day,
-                    session="am",
-                    assignment_type="assigned",
-                ),
-                ClinicSchedule(
-                    surgeon_id=surgeon.id,
-                    location_id=ap_cl.id,
-                    date=case_day,
-                    session="pm",
-                    assignment_type="assigned",
-                ),
-                SurgicalCase(
-                    surgeon_id=surgeon.id,
-                    date=case_day,
-                    start_time=time(8, 30),
-                    patient_name="Sheffield, Martin",
-                    procedure="Hernia",
-                    location_id=ap_or.id,
-                    or_block_instance_id=block.id,
-                    status="scheduled",
-                ),
-                SurgicalCase(
-                    surgeon_id=surgeon.id,
-                    date=case_day,
-                    start_time=time(9, 45),
-                    patient_name="Cruz Mejia, Cristina",
-                    procedure="Incisional",
-                    location_id=ap_or.id,
-                    or_block_instance_id=block.id,
-                    status="scheduled",
-                ),
-            ])
+            self._card(db, surgeon, case_day, "pm", ap_cl.id)
+            card = self._card(db, surgeon, case_day, "am", ap_or.id)
+            self._line(
+                db, card, start=time(8, 30), patient="Sheffield, Martin",
+                procedure="Hernia", location_id=ap_or.id, block_id=block.id, key="hernia",
+            )
+            self._line(
+                db, card, start=time(9, 45), patient="Cruz Mejia, Cristina",
+                procedure="Incisional", location_id=ap_or.id, block_id=block.id, key="incisional",
+            )
             db.commit()
 
             for start in (time(8, 30), time(9, 45)):
@@ -259,6 +218,7 @@ class SchedulingGuardrailsTest(unittest.TestCase):
 
             rows = scheduler_safe_rows(db, case_day, case_day)
             self.assertEqual(len(rows), 2)
+            self.assertNotIn("Old list procedure", [row["procedure"] for row in rows])
             for row in rows:
                 self.assertEqual(row["warnings"], [])
         finally:
@@ -340,23 +300,7 @@ class SchedulingGuardrailsTest(unittest.TestCase):
                 start_time=time(7, 0),
                 case_count=1,
             ))
-            db.add(ClinicSchedule(
-                surgeon_id=surgeon.id,
-                location_id=clinic.id,
-                date=case_day,
-                session="pm",
-            ))
-            db.add(SurgicalCase(
-                surgeon_id=surgeon.id,
-                date=case_day,
-                start_time=time(11, 30),
-                end_time=time(12, 30),
-                patient_name="Last AM case",
-                procedure="Hernia",
-                location_id=hospital.id,
-                or_block_instance_id=block.id,
-                status="scheduled",
-            ))
+            self._card(db, surgeon, case_day, "pm", clinic.id)
             db.commit()
 
             target = {
@@ -390,6 +334,54 @@ class SchedulingGuardrailsTest(unittest.TestCase):
             self.assertNotIn("between last surgery and clinic", joined)
         finally:
             db.close()
+
+    def _card(self, db, surgeon, day, session, location_id):
+        monday = day - timedelta(days=day.weekday())
+        week = (
+            db.query(ScheduleCardWeek)
+            .filter_by(surgeon_id=surgeon.id, week_start=monday)
+            .one_or_none()
+        )
+        if week is None:
+            week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=monday, master_revision="test")
+            db.add(week)
+            db.flush()
+        card = ScheduleCard(
+            week_id=week.id,
+            surgeon_id=surgeon.id,
+            date=day,
+            session=session,
+            baseline_state="assigned",
+            effective_state="assigned",
+            baseline_location_id=location_id,
+            effective_location_id=location_id,
+            source="master",
+        )
+        db.add(card)
+        db.flush()
+        return card
+
+    def _line(self, db, card, *, start, patient, procedure, location_id, key, end=None, block_id=None):
+        row = ScheduleCardActivity(
+            schedule_card_id=card.id,
+            surgeon_id=card.surgeon_id,
+            location_id=location_id,
+            activity_date=card.date,
+            session=card.session,
+            activity_type="surgical",
+            start_time=start,
+            end_time=end,
+            patient_name=patient,
+            procedure=procedure,
+            source_system="block_or" if block_id else "fax",
+            source_record_key=key,
+            identity_key=key,
+            or_block_instance_id=block_id,
+            is_active=True,
+        )
+        db.add(row)
+        db.flush()
+        return row
 
     def _surgeon(self, db, first_name, last_name, sort_order):
         surgeon = Surgeon(

@@ -41,34 +41,60 @@ def seed_default_call_groups():
             SELECT :name, 1
             WHERE NOT EXISTS (SELECT 1 FROM call_groups WHERE name = :name)
         """), {"name": GROUP2_NAME})
-        # Migrate: primary rotations with no group → group 1
-        conn.execute(text("""
-            UPDATE call_rotations
-            SET call_group_id = (SELECT id FROM call_groups WHERE name = :name LIMIT 1)
-            WHERE call_group_id IS NULL AND rotation_type = 'primary'
-        """), {"name": GROUP1_NAME})
-        # Migrate: backup rotations with no group → group 2
-        conn.execute(text("""
-            UPDATE call_rotations
-            SET call_group_id = (SELECT id FROM call_groups WHERE name = :name LIMIT 1)
-            WHERE call_group_id IS NULL AND rotation_type = 'backup'
-        """), {"name": GROUP2_NAME})
+        _claim_open_group(conn, GROUP1_NAME, "primary")
+        _claim_open_group(conn, GROUP2_NAME, "backup")
         merge_duplicate_call_groups(conn)
         reclaim_orphan_call_rotations(conn)
 
 
 def reclaim_orphan_call_rotations(conn):
-    """Assign any rotations still with call_group_id NULL to the correct group (primary→group1, backup→group2). Runs every startup so restored backups or late-inserted rows get fixed."""
+    """Give a blank call row its group when that day does not already have one.
+
+    One blank primary joins Winter Garden. One blank backup joins Altamonte.
+    A second blank for a day that already has that group stays blank so two
+    different assignments are not folded into one box.
+    """
+    _claim_open_group(conn, GROUP1_NAME, "primary")
+    _claim_open_group(conn, GROUP2_NAME, "backup")
+
+
+def _claim_open_group(conn, group_name: str, rotation_type: str) -> None:
     conn.execute(text("""
-        UPDATE call_rotations
-        SET call_group_id = (SELECT id FROM call_groups WHERE name = :name LIMIT 1)
-        WHERE call_group_id IS NULL AND rotation_type = 'primary'
-    """), {"name": GROUP1_NAME})
+        UPDATE call_rotations AS blank
+        SET call_group_id = group_row.id
+        FROM (
+            SELECT id FROM call_groups WHERE name = :name ORDER BY id LIMIT 1
+        ) AS group_row
+        WHERE blank.id IN (
+            SELECT MIN(id) FROM call_rotations
+            WHERE call_group_id IS NULL AND rotation_type = :rotation_type
+            GROUP BY date
+        )
+          AND NOT EXISTS (
+            SELECT 1 FROM call_rotations taken
+            WHERE taken.date = blank.date AND taken.call_group_id = group_row.id
+          )
+    """), {"name": group_name, "rotation_type": rotation_type})
+
+
+def require_call_group(conn) -> None:
+    """Require a group once every saved call row already has one."""
     conn.execute(text("""
-        UPDATE call_rotations
-        SET call_group_id = (SELECT id FROM call_groups WHERE name = :name LIMIT 1)
-        WHERE call_group_id IS NULL AND rotation_type = 'backup'
-    """), {"name": GROUP2_NAME})
+        DO $$ BEGIN
+            IF EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'call_rotations'
+                  AND column_name = 'call_group_id'
+                  AND is_nullable = 'YES'
+            ) AND NOT EXISTS (
+                SELECT 1 FROM call_rotations WHERE call_group_id IS NULL
+            ) THEN
+                ALTER TABLE call_rotations ALTER COLUMN call_group_id SET NOT NULL;
+            END IF;
+        END $$
+    """))
 
 
 def merge_duplicate_call_groups(conn):
@@ -122,6 +148,7 @@ def run_migration():
         # Reclaim again after merge so any NULL rotations (e.g. from backup restore) get assigned
         with engine.begin() as conn:
             reclaim_orphan_call_rotations(conn)
+            require_call_group(conn)
             normalize_surgeon_colors(conn)
     except Exception as e:
         # If call_groups doesn't exist yet, create_all hasn't run; skip and let next startup retry

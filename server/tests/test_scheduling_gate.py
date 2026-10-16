@@ -2,8 +2,6 @@
 import os
 import unittest
 from datetime import date, datetime, time, timedelta
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
@@ -114,39 +112,41 @@ class DuplicateGateStatusTest(unittest.TestCase):
 
 class CallCoverageOverlapTest(unittest.TestCase):
     def test_covering_surgeon_is_flagged_not_original(self):
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        from app.models import Base, CallCoverage, CallGroup, CallRotation, Surgeon
         from app.rules_engine.overlap_checkers import check_overlap_call
 
-        day = date.today() + timedelta(days=10)
-        assignment = SimpleNamespace(
-            id=1,
-            surgeon_id=16,
-            date=day,
-            call_group_id=1,
-            call_group=SimpleNamespace(name="Winter Garden"),
-            location=SimpleNamespace(abbreviation="WG"),
-            call_rotation_id=1,
-            call_coverage_id=9,
-        )
-        db = MagicMock()
-
-        def query_any(*args, **kwargs):
-            query = MagicMock()
-            query.options.return_value = query
-            query.filter.return_value = query
-            query.order_by.return_value = query
-            if not hasattr(query_any, "n"):
-                query_any.n = 0
-            query_any.n += 1
-            query.all.return_value = [assignment] if query_any.n == 1 else []
-            return query
-
-        db.query.side_effect = query_any
-
-        covering = list(check_overlap_call(22, day, day, db, {}, None, {"type": "day_off", "start_date": day, "end_date": day, "is_full_day": True, "segments": []}))
-        original = list(check_overlap_call(16, day, day, db, {}, None, {"type": "day_off", "start_date": day, "end_date": day, "is_full_day": True, "segments": []}))
-        self.assertEqual(len(covering), 1)
-        self.assertIn("Covering on-call", covering[0].message)
-        self.assertEqual(original, [])
+        engine = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(engine)
+        db = sessionmaker(bind=engine)()
+        try:
+            day = date.today() + timedelta(days=10)
+            original = Surgeon(first_name="Alex", last_name="Schroeder", email="alex@example.com", is_active=True)
+            covering = Surgeon(first_name="Chris", last_name="Johnson", email="chris@example.com", is_active=True)
+            group = CallGroup(name="Winter Garden")
+            db.add_all([original, covering, group])
+            db.flush()
+            rotation = CallRotation(surgeon_id=original.id, call_group_id=group.id, date=day)
+            db.add(rotation)
+            db.flush()
+            db.add(CallCoverage(
+                call_rotation_id=rotation.id,
+                original_surgeon_id=original.id,
+                covering_surgeon_id=covering.id,
+                status="active",
+            ))
+            db.commit()
+            target = {"type": "day_off", "start_date": day, "end_date": day, "is_full_day": True, "segments": []}
+            covering_hits = list(check_overlap_call(covering.id, day, day, db, {}, None, target))
+            original_hits = list(check_overlap_call(original.id, day, day, db, {}, None, target))
+            self.assertEqual(len(covering_hits), 1)
+            self.assertIn("Covering on-call", covering_hits[0].message)
+            self.assertEqual(original_hits, [])
+        finally:
+            db.close()
+            engine.dispose()
 
     def test_on_call_never_conflicts_with_or_block(self):
         """On call + a Block OR is fine at any hospital; day-off still conflicts."""
@@ -187,8 +187,6 @@ class CallCoverageOverlapTest(unittest.TestCase):
                 CallRotation(surgeon_id=surgeon.id, call_group_id=group.id, date=day),
             ])
             db.commit()
-            from app.call_assignment_normalization import backfill_call_daily_assignments
-            backfill_call_daily_assignments(db)
 
             same = list(
                 check_overlap_call(

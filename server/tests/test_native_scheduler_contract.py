@@ -11,7 +11,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.auth_tokens import ALGORITHM, SECRET_KEY
-from app.models import AdminUser, Base, Location, Surgeon, SurgicalCase
+from app.models import (
+    AdminUser, Base, Location, ScheduleCard, ScheduleCardActivity, ScheduleCardWeek, Surgeon,
+)
 from app.or_block_service import BlockORCreateInput, assign_block, create_or_blocks
 from app.routers.native_scheduler_api import (
     SchedulerCaseBody,
@@ -118,17 +120,22 @@ class NativeSchedulerContractTest(unittest.TestCase):
                 recurrence="once",
             ), admin_id=admin.id)["instance_ids"][0]
             assign_block(db, block_id, surgeon.id, admin.id)
-            db.add(SurgicalCase(
-                surgeon_id=surgeon.id,
-                or_block_instance_id=block_id,
-                date=block_day,
-                start_time=time(7, 30),
-                end_time=time(8, 30),
-                patient_name="Private Patient",
-                patient_dob="1/1/1950",
-                patient_phone="4075550100",
-                procedure="Private procedure",
-                location_id=hospital.id,
+            week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=block_day)
+            db.add(week)
+            db.flush()
+            card = ScheduleCard(
+                week_id=week.id, surgeon_id=surgeon.id, date=block_day, session="am",
+                baseline_state="assigned", effective_state="assigned",
+                baseline_location_id=hospital.id, effective_location_id=hospital.id,
+            )
+            db.add(card)
+            db.flush()
+            db.add(ScheduleCardActivity(
+                schedule_card_id=card.id, surgeon_id=surgeon.id, location_id=hospital.id,
+                activity_date=block_day, session="am", activity_type="surgical",
+                start_time=time(7, 30), end_time=time(8, 30), patient_name="Card Patient",
+                procedure="Card procedure", source_system="fax", source_record_key="home-line",
+                identity_key="card-patient-0730", is_active=True,
             ))
             db.commit()
 
@@ -170,6 +177,15 @@ class NativeSchedulerContractTest(unittest.TestCase):
                 recurrence="once",
             ), admin_id=admin.id)["instance_ids"][0]
             assign_block(db, block_id, surgeon.id, admin.id, assigned_start_time=time(7, 15), case_count=1)
+            week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=block_day)
+            db.add(week)
+            db.flush()
+            db.add(ScheduleCard(
+                week_id=week.id, surgeon_id=surgeon.id, date=block_day, session="am",
+                baseline_state="assigned", effective_state="assigned",
+                baseline_location_id=hospital.id, effective_location_id=hospital.id,
+            ))
+            db.commit()
 
             added = scheduler_add_block_case(
                 block_id,
@@ -243,15 +259,21 @@ class NativeSchedulerContractTest(unittest.TestCase):
                 recurrence="once",
             ), admin_id=admin.id)["instance_ids"][0]
             assign_block(db, block_id, surgeon.id, admin.id, assigned_start_time=time(7, 15), case_count=1)
-            db.add(SurgicalCase(
-                surgeon_id=surgeon.id,
-                or_block_instance_id=block_id,
-                date=block_day,
-                start_time=time(7, 15),
-                patient_name="Libby, Ryan",
-                procedure="Hernia",
-                location_id=hospital.id,
-                status="scheduled",
+            week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=block_day)
+            db.add(week)
+            db.flush()
+            card = ScheduleCard(
+                week_id=week.id, surgeon_id=surgeon.id, date=block_day, session="am",
+                baseline_state="assigned", effective_state="assigned",
+                baseline_location_id=hospital.id, effective_location_id=hospital.id,
+            )
+            db.add(card)
+            db.flush()
+            db.add(ScheduleCardActivity(
+                schedule_card_id=card.id, surgeon_id=surgeon.id, location_id=hospital.id,
+                activity_date=block_day, session="am", activity_type="surgical",
+                start_time=time(7, 15), patient_name="Card Patient", procedure="Hernia",
+                source_system="fax", source_record_key="clear-line", identity_key="clear-line",
             ))
             db.commit()
 
@@ -259,6 +281,35 @@ class NativeSchedulerContractTest(unittest.TestCase):
                 scheduler_clear_block_assignment(block_id, db=db, admin=admin)
             self.assertEqual(raised.exception.status_code, 409)
             self.assertIn("Reschedule", str(raised.exception.detail))
+        finally:
+            db.close()
+
+    def test_scheduler_clear_ignores_old_case_list(self):
+        db = self.Session()
+        try:
+            admin = AdminUser(username="admin", email="admin@example.com", password_hash="x", role="admin", is_active=True)
+            surgeon = Surgeon(first_name="Alex", last_name="Schroeder", email="alex@example.com", staff_type="physician", is_active=True)
+            hospital = Location(name="Advent Winter Garden", abbreviation="WG", location_type="hospital", is_active=True)
+            db.add_all([admin, surgeon, hospital])
+            db.flush()
+            block_day = date(2026, 7, 27)
+            block_id = create_or_blocks(db, BlockORCreateInput(
+                name="Open Block",
+                start_date=block_day,
+                end_date=block_day,
+                weekdays=[block_day.weekday()],
+                location_ids=[hospital.id],
+                session="am",
+                start_time=time(7, 15),
+                end_time=time(10, 45),
+                recurrence="once",
+            ), admin_id=admin.id)["instance_ids"][0]
+            assign_block(db, block_id, surgeon.id, admin.id, assigned_start_time=time(7, 15), case_count=1)
+            db.commit()
+
+            payload = scheduler_clear_block_assignment(block_id, db=db, admin=admin)
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["block"]["status"], "open")
         finally:
             db.close()
 

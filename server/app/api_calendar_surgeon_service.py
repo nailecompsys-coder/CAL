@@ -5,7 +5,7 @@ from datetime import timedelta
 from sqlalchemy.orm import Session, joinedload
 
 from .api_calendar_utils import NEUTRAL_CAL_BG, NEUTRAL_CAL_TEXT, pastel_from_location_hex
-from .models import CallRotation, ClinicSchedule, DayOff
+from .models import CallRotation, DayOff, ScheduleCard
 from .native_support import meetings_for_surgeon
 
 
@@ -51,25 +51,26 @@ def build_surgeon_calendar_events(db: Session, surgeon, start_date, end_date) ->
             "textColor": NEUTRAL_CAL_TEXT,
         })
 
-    my_clinics = db.query(ClinicSchedule).options(
-        joinedload(ClinicSchedule.location),
+    my_clinics = db.query(ScheduleCard).options(
+        joinedload(ScheduleCard.effective_location),
     ).filter(
-        ClinicSchedule.surgeon_id == surgeon.id,
-        ClinicSchedule.date >= start_date,
-        ClinicSchedule.date <= end_date,
+        ScheduleCard.surgeon_id == surgeon.id,
+        ScheduleCard.date >= start_date,
+        ScheduleCard.date <= end_date,
+        ScheduleCard.effective_state == "assigned",
     ).all()
-    for clinic_schedule in my_clinics:
-        loc = clinic_schedule.location
+    for card in my_clinics:
+        loc = card.effective_location
         loc_hex = (loc.color or "#0ea5e9").strip() if loc else "#0ea5e9"
-        time_slot = "T08:00:00" if clinic_schedule.session == "am" else "T13:00:00" if clinic_schedule.session == "pm" else "T08:00:00"
+        time_slot = "T08:00:00" if card.session == "am" else "T13:00:00"
         loc_label = loc.name if loc else "Clinic"
         events.append({
-            "id": f"clinic-{clinic_schedule.id}",
+            "id": f"clinic-{card.id}",
             "title": f"📍 {loc_label}",
-            "start": f"{clinic_schedule.date.isoformat()}{time_slot}",
+            "start": f"{card.date.isoformat()}{time_slot}",
             "color": pastel_from_location_hex(loc_hex),
             "textColor": "#1e293b",
-            "extendedProps": {"type": "clinic", "location": loc_label, "session": clinic_schedule.session},
+            "extendedProps": {"type": "clinic", "location": loc_label, "session": card.session},
         })
 
     return events

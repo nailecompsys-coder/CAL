@@ -23,7 +23,8 @@ def run_migration():
                 updated_at TIMESTAMP DEFAULT now()
             )
         """))
-        conn.execute(text("""
-            ALTER TABLE surgical_cases
-            ALTER COLUMN start_time DROP NOT NULL
-        """))
+        if conn.execute(text("SELECT to_regclass('public.surgical_cases')")).scalar():
+            conn.execute(text("""
+                ALTER TABLE surgical_cases
+                ALTER COLUMN start_time DROP NOT NULL
+            """))

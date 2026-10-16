@@ -18,14 +18,15 @@ def run_migration():
         return
 
     with engine.begin() as conn:
-        conn.execute(text("""
-            ALTER TABLE surgical_cases
-            ADD COLUMN IF NOT EXISTS assisting_surgeon_id INTEGER REFERENCES surgeons(id)
-        """))
-        conn.execute(text("""
-            CREATE INDEX IF NOT EXISTS ix_surgical_cases_assisting_surgeon
-            ON surgical_cases(assisting_surgeon_id)
-        """))
+        if conn.execute(text("SELECT to_regclass('public.surgical_cases')")).scalar():
+            conn.execute(text("""
+                ALTER TABLE surgical_cases
+                ADD COLUMN IF NOT EXISTS assisting_surgeon_id INTEGER REFERENCES surgeons(id)
+            """))
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS ix_surgical_cases_assisting_surgeon
+                ON surgical_cases(assisting_surgeon_id)
+            """))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS co_surgeon_pairs (
                 id SERIAL PRIMARY KEY,

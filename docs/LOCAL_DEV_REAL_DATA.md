@@ -165,7 +165,7 @@ docker exec cal_db psql -U cal_user -d surgical_cal -c \
   "SELECT
      (SELECT COUNT(*) FROM surgeons) AS surgeons,
      (SELECT COUNT(*) FROM locations) AS locations,
-     (SELECT COUNT(*) FROM clinic_schedules) AS clinic_rows,
+     (SELECT COUNT(*) FROM schedule_cards) AS card_rows,
      (SELECT COUNT(*) FROM or_block_instances) AS or_blocks;"
 ```
 

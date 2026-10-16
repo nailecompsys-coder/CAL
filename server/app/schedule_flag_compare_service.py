@@ -9,7 +9,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session, joinedload
 
-from .models import ORBlockAssignment, ORBlockInstance, ScheduleChangeEvent, Surgeon, SurgicalCase
+from .models import ORBlockAssignment, ORBlockInstance, ScheduleCardActivity, ScheduleChangeEvent, Surgeon
 from .or_block_service import ACTIVE_BLOCK_STATUSES
 
 _FAX_RE = re.compile(r"Desk fax\s*#\s*(\d+)", re.IGNORECASE)
@@ -108,32 +108,36 @@ def build_schedule_flag_compare(db: Session, event_id: int) -> dict[str, Any] | 
 
     cal_cases: list[dict[str, Any]] = []
     if day:
-        case_filters = [SurgicalCase.date == day, SurgicalCase.status != "cancelled"]
-        id_filters = []
+        q = (
+            db.query(ScheduleCardActivity)
+            .filter(
+                ScheduleCardActivity.activity_date == day,
+                ScheduleCardActivity.activity_type == "surgical",
+                ScheduleCardActivity.is_active == True,  # noqa: E712
+            )
+        )
         if surgeon:
-            id_filters.append(SurgicalCase.surgeon_id == surgeon.id)
-            id_filters.append(SurgicalCase.assisting_surgeon_id == surgeon.id)
-        if block_id:
-            id_filters.append(SurgicalCase.or_block_instance_id == block_id)
-        from sqlalchemy import or_ as sql_or
-        q = db.query(SurgicalCase).filter(*case_filters)
-        if id_filters:
-            q = q.filter(sql_or(*id_filters))
-        for case in q.order_by(SurgicalCase.start_time, SurgicalCase.id).all():
+            q = q.filter(ScheduleCardActivity.surgeon_id == surgeon.id)
+        seen = set()
+        flagged_location_id = flagged_block.location_id if flagged_block else None
+        for case in q.order_by(ScheduleCardActivity.start_time, ScheduleCardActivity.id).all():
+            key = (case.surgeon_id, case.identity_key)
+            if key in seen:
+                continue
+            seen.add(key)
             primary = db.get(Surgeon, case.surgeon_id)
-            assist = db.get(Surgeon, case.assisting_surgeon_id) if case.assisting_surgeon_id else None
             cal_cases.append({
                 "id": case.id,
                 "startTime": case.start_time.strftime("%H:%M") if case.start_time else "",
                 "patientName": case.patient_name,
                 "room": case.room_text or "",
                 "procedure": (case.procedure or "")[:100],
-                "blockId": case.or_block_instance_id,
+                "blockId": block_id if flagged_location_id and case.location_id == flagged_location_id else None,
                 "primary": primary.initials if primary else "",
-                "assist": assist.initials if assist else "",
-                "faxId": desk_fax_id_from_text(case.notes),
-                "notes": case.notes or "",
-                "onFlaggedBlock": case.or_block_instance_id == block_id,
+                "assist": "",
+                "faxId": None,
+                "notes": "",
+                "onFlaggedBlock": bool(flagged_location_id and case.location_id == flagged_location_id),
             })
 
     ocr_rows = payload.get("ocrRows") if isinstance(payload.get("ocrRows"), list) else []

@@ -111,20 +111,11 @@ def reclaim_orphan_rotations(
     admin=Depends(get_current_admin),
 ):
     """Assign restored legacy rotations to their call groups."""
-    from sqlalchemy import text
-
     from ..database import engine
-    from ..migrate_call_groups import GROUP1_NAME, GROUP2_NAME
+    from ..migrate_call_groups import reclaim_orphan_call_rotations
 
     with engine.begin() as conn:
-        conn.execute(text("""
-            UPDATE call_rotations SET call_group_id = (SELECT id FROM call_groups WHERE name = :name LIMIT 1)
-            WHERE call_group_id IS NULL AND rotation_type = 'primary'
-        """), {"name": GROUP1_NAME})
-        conn.execute(text("""
-            UPDATE call_rotations SET call_group_id = (SELECT id FROM call_groups WHERE name = :name LIMIT 1)
-            WHERE call_group_id IS NULL AND rotation_type = 'backup'
-        """), {"name": GROUP2_NAME})
+        reclaim_orphan_call_rotations(conn)
     return RedirectResponse(
         f"/admin/call-schedule?{_call_schedule_qs(month_offset)}&msg=orphans_reclaimed",
         status_code=303,

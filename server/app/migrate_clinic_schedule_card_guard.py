@@ -4,7 +4,11 @@ from .database import engine
 
 
 def run_migration():
+    if engine.dialect.name == "sqlite":
+        return
     with engine.begin() as conn:
+        if not conn.execute(text("SELECT to_regclass('public.clinic_schedules')")).scalar():
+            return
         # `full` cards render as both AM and PM. Convert stored rows to the
         # concrete AM/PM cards so the database can enforce the two-card limit.
         full_rows = conn.execute(text("""

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 from .admin_notification_href import admin_notification_href, clinic_schedule_fix_href
 from .grok_bot_rules import (
@@ -22,7 +22,7 @@ from .grok_bot_rules import (
     notice_date_has_passed,
     standing_instructions,
 )
-from .models import AdminNotification, CallDailyAssignment, CallRotation
+from .models import AdminNotification, CallRotation
 from .off_conflict_service import day_off_status_map, detect_off_conflicts
 from .scheduling_gate_service import practice_today
 from .surgeon_visibility import surgeon_is_visible
@@ -98,7 +98,7 @@ def _drop_past_dated_notices(db: Session, *, today: date | None = None) -> int:
 def _drop_missing_time_notices(db: Session) -> int:
     """Drop missing-time nags only when that patient is already on the day."""
     from .ingest_date_rules import parse_iso_date
-    from .models import SurgicalCase
+    from .models import ScheduleCardActivity
 
     removed = 0
     rows = db.query(AdminNotification).filter(AdminNotification.kind == "ingest_correction").all()
@@ -111,10 +111,11 @@ def _drop_missing_time_notices(db: Session) -> int:
         patient = (payload.get("patientName") or "").strip().lower()
         if not surgeon_id or day is None:
             continue
-        q = db.query(SurgicalCase).filter(
-            SurgicalCase.surgeon_id == surgeon_id,
-            SurgicalCase.date == day,
-            SurgicalCase.status != "cancelled",
+        q = db.query(ScheduleCardActivity).filter(
+            ScheduleCardActivity.surgeon_id == surgeon_id,
+            ScheduleCardActivity.activity_date == day,
+            ScheduleCardActivity.activity_type == "surgical",
+            ScheduleCardActivity.is_active == True,  # noqa: E712
         )
         placed = False
         for case in q.all():
@@ -239,31 +240,15 @@ def _status_label(status: str) -> str:
 
 def _call_vs_time_off(db: Session, start: date, end: date) -> list[dict]:
     off_map = day_off_status_map(db, start, end)
-    assignments = (
-        db.query(CallDailyAssignment)
-        .options(
-            joinedload(CallDailyAssignment.surgeon),
-            joinedload(CallDailyAssignment.original_surgeon),
-            joinedload(CallDailyAssignment.call_group),
-            joinedload(CallDailyAssignment.location),
-            joinedload(CallDailyAssignment.call_rotation),
-        )
-        .filter(CallDailyAssignment.date >= start, CallDailyAssignment.date <= end)
-        .order_by(CallDailyAssignment.date, CallDailyAssignment.location_id)
-        .all()
-    )
+    from .call_assignment_normalization import effective_calls
+
     issues: list[dict] = []
-    seen: set[tuple[int, date, bool]] = set()
-    for assignment in assignments:
+    for assignment in effective_calls(db, start, end):
         covered = bool(assignment.call_coverage_id)
-        key = (assignment.surgeon_id, assignment.date, covered)
-        if key in seen:
-            continue
-        seen.add(key)
         group = assignment.call_group.name if assignment.call_group else "call"
-        location = assignment.location.abbreviation if assignment.location else "location"
+        where = f"{group} at {assignment.place}" if assignment.locations else group
         day_label = assignment.date.strftime("%b %-d")
-        href = _call_href(assignment.call_rotation)
+        href = _call_href(assignment.rotation)
         if covered:
             covering = assignment.surgeon
             if not surgeon_is_visible(covering):
@@ -280,7 +265,7 @@ def _call_vs_time_off(db: Session, start: date, end: date) -> list[dict]:
                 "date": assignment.date.isoformat(),
                 "href": href,
                 "message": (
-                    f"{covering.initials} is covering {group} at {location} for {original_initials} on {day_label} "
+                    f"{covering.initials} is covering {where} for {original_initials} on {day_label} "
                     f"and also has {_status_label(off['status'])}."
                 ),
             })
@@ -298,7 +283,7 @@ def _call_vs_time_off(db: Session, start: date, end: date) -> list[dict]:
             "date": assignment.date.isoformat(),
             "href": href,
             "message": (
-                f"{assigned.initials} is on call ({group}, {location}) on {day_label} "
+                f"{assigned.initials} is on call ({where}) on {day_label} "
                 f"with {_status_label(off['status'])} and no cover assigned."
             ),
         })

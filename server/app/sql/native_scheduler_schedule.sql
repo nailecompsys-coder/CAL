@@ -1,5 +1,5 @@
--- Reuse native_schedule.sql for master cards, cases, and legacy clinic blocks.
--- Only Scheduler-wide overlays are added here.
+-- Reuse native_schedule.sql for master cards and card lines.
+-- Only Scheduler-wide overlays are added here. Day case counts are card lines.
 WITH RECURSIVE
 calendar_days(day) AS (
     SELECT CAST(:start_date AS DATE_SQL)
@@ -30,19 +30,42 @@ leave_segments AS (
     WHERE d.status = 'approved' AND NOT (HAS_SEGMENTS)
 ),
 clinic_activity AS (
-    SELECT a.*, row_number() OVER (
-        PARTITION BY a.surgeon_id, a.activity_date, a.identity_key ORDER BY a.id
-    ) AS duplicate_rank
+    SELECT a.id, a.schedule_card_id, a.identity_key, a.patient_name, a.procedure,
+           a.start_time, a.end_time, a.room_text, a.location_id,
+           c.surgeon_id, c.date AS activity_date, c.session,
+           row_number() OVER (
+               PARTITION BY c.surgeon_id, c.date, a.identity_key ORDER BY a.id
+           ) AS duplicate_rank
     FROM schedule_card_activities a
+    JOIN schedule_cards c ON c.id = a.schedule_card_id
     WHERE a.is_active = TRUE AND a.activity_type = 'clinic'
-      AND a.activity_date BETWEEN :start_date AND :end_date
+      AND c.date BETWEEN :start_date AND :end_date
+),
+surgical_activity AS (
+    SELECT a.id, a.schedule_card_id, a.identity_key, a.location_id,
+           c.surgeon_id, c.date AS activity_date,
+           row_number() OVER (
+               PARTITION BY c.surgeon_id, c.date, a.identity_key ORDER BY a.id
+           ) AS duplicate_rank
+    FROM schedule_card_activities a
+    JOIN schedule_cards c ON c.id = a.schedule_card_id
+    WHERE a.is_active = TRUE AND a.activity_type = 'surgical'
+      AND c.date BETWEEN :start_date AND :end_date
 ),
 call_activity AS (
-    SELECT c.*, row_number() OVER (
-        PARTITION BY c.call_rotation_id ORDER BY c.location_id, c.id
-    ) AS rotation_rank
-    FROM call_daily_assignments c
-    WHERE c.date BETWEEN :start_date AND :end_date
+    SELECT r.id, r.date, r.id AS call_rotation_id, r.call_group_id,
+           COALESCE(cov.covering_surgeon_id, r.surgeon_id) AS surgeon_id,
+           cov.id AS call_coverage_id
+    FROM call_rotations r
+    LEFT JOIN call_coverages cov ON cov.id = (
+        SELECT c2.id FROM call_coverages c2
+        WHERE c2.call_rotation_id = r.id AND c2.status = 'active'
+        ORDER BY c2.id DESC
+        LIMIT 1
+    )
+    WHERE r.date BETWEEN :start_date AND :end_date
+      AND r.call_group_id IS NOT NULL
+      AND COALESCE(cov.covering_surgeon_id, r.surgeon_id) IS NOT NULL
 ),
 core_rows AS (CORE_ROWS),
 facts AS (
@@ -123,7 +146,6 @@ facts AS (
              ELSE '' END, '', '', '', '', 0, 5
     FROM call_activity c JOIN roster r ON r.id = c.surgeon_id
     LEFT JOIN call_groups g ON g.id = c.call_group_id
-    WHERE c.rotation_rank = 1
 ),
 visible_facts AS (
     SELECT * FROM facts
@@ -139,8 +161,8 @@ visible_facts AS (
 ),
 daily_counts AS (
     SELECT cal.day,
-           (SELECT count(*) FROM surgical_cases sc JOIN roster r ON r.id = sc.surgeon_id
-            WHERE sc.date = cal.day AND coalesce(sc.status, 'scheduled') <> 'cancelled') AS case_count,
+           (SELECT count(*) FROM surgical_activity a JOIN roster r ON r.id = a.surgeon_id
+            WHERE a.activity_date = cal.day AND a.duplicate_rank = 1) AS case_count,
            (SELECT count(*) FROM clinic_activity a JOIN roster r ON r.id = a.surgeon_id
             WHERE a.activity_date = cal.day AND a.duplicate_rank = 1) AS visit_count,
            (SELECT count(DISTINCT d.surgeon_id) FROM leave_segments d JOIN roster r ON r.id = d.surgeon_id

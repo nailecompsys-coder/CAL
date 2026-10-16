@@ -65,10 +65,13 @@ def build_native_call_schedule(
     call_by_date: dict[str, list[dict]] = defaultdict(list)
     for day, group_id in cell_keys:
         draft = draft_by_cell.get((day, group_id)) if group_id is not None else None
-        if draft is not None:
+        live = live_by_cell.get((day, group_id))
+        if draft is not None and (live is None or live.surgeon_id != draft.surgeon_id):
             if draft.surgeon and not surgeon_is_visible(draft.surgeon):
                 continue
             assignment = serialize_draft_call_assignment(draft, viewer.id)
+        elif live is None:
+            continue
         else:
             rotation = live_by_cell[(day, group_id)]
             if rotation.surgeon and not surgeon_is_visible(rotation.surgeon):

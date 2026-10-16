@@ -6,8 +6,8 @@ from datetime import timedelta
 from sqlalchemy.orm import Session
 
 from .admin_schedule_template_common import approved_off_dates, parse_target_surgeon_ids
-from .clinic_schedule_card_guard import normalize_clinic_day_cards, upsert_clinic_schedule_cards
-from .models import CallGroup, CallRotationTemplate, ClinicSchedule, Location, Surgeon, SurgeonLocationSchedule
+from .clinic_schedule_card_guard import upsert_clinic_schedule_cards
+from .models import CallGroup, CallRotationTemplate, Location, ScheduleCard, Surgeon, SurgeonLocationSchedule
 from .surgeon_visibility import surgeon_is_visible
 
 
@@ -179,16 +179,17 @@ def apply_clinic_schedule_templates(
                     continue
 
                 if skip_existing:
-                    exists = db.query(ClinicSchedule).filter(
-                        ClinicSchedule.surgeon_id == sid,
-                        ClinicSchedule.date == cur_date,
-                        ClinicSchedule.session == session,
+                    exists = db.query(ScheduleCard).filter(
+                        ScheduleCard.surgeon_id == sid,
+                        ScheduleCard.date == cur_date,
+                        ScheduleCard.session == session,
+                        ScheduleCard.effective_state.in_(("assigned", "off")),
                     ).first()
                     if exists:
                         skipped_existing += 1
                         continue
 
-                upsert_clinic_schedule_cards(
+                written = upsert_clinic_schedule_cards(
                     db,
                     surgeon_id=sid,
                     day=cur_date,
@@ -197,8 +198,7 @@ def apply_clinic_schedule_templates(
                     assignment_type=template.assignment_type,
                     notes=None,
                 )
-                normalize_clinic_day_cards(db, sid, cur_date)
-                created += 1
+                created += 1 if written else 0
 
         cur_date += timedelta(days=1)
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from collections import defaultdict
 from datetime import date
 from typing import Any
@@ -16,59 +15,38 @@ from .models import (
     FaxDocument,
     FaxIngestRow,
     FaxIngestRun,
+    FaxRowDecision,
     Location,
     ScheduleCard,
+    ScheduleCardActivity,
     ScheduleChangeEvent,
     Surgeon,
-    SurgicalCase,
 )
+from .fax_card_fill import fill_cards_from_fax_lines
 from .fax_ingest_engine import mark_fax_ingest_transaction
+from .fax_restore_service import replace_fax_warnings, save_fax_line_photo
 from .fax_pdf_intake import cleanup_fax_derivatives, prune_immutable_fax_sources
 from .schedule_build_backup_service import create_fax_snapshot_backup
 
-FAX_NOTE_RE = re.compile(r"\bFax\s+\d+\b", re.IGNORECASE)
 logger = logging.getLogger(__name__)
 
 
-def _normal(value: str | None) -> str:
-    return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
-
-
-def _patient_name_tokens(value: str | None) -> list[str]:
-    return re.findall(r"[a-z0-9]+", (value or "").lower())
-
-
-def _same_patient_identity(left: str | None, right: str | None) -> bool:
-    """Match expanded/corrected fax names without guessing across patients."""
-    left_tokens = _patient_name_tokens(left)
-    right_tokens = _patient_name_tokens(right)
-    return len(left_tokens) >= 2 and left_tokens[:2] == right_tokens[:2]
-
-
-def _existing_case_for_row(
-    row: FaxIngestRow,
-    *,
-    exact: dict[tuple[date, str], list[SurgicalCase]],
-    by_date: dict[date, list[SurgicalCase]],
-) -> SurgicalCase | None:
-    """Match this surgeon's own line. Another surgeon's line is a different row."""
-    matches = [
-        case
-        for case in exact.get((row.case_date, _normal(row.patient_name)), [])
-        if case.surgeon_id == row.surgeon_id
-    ]
-    if matches:
-        return matches[0]
-    if row.start_time is None:
-        return None
-    identity_matches = [
-        case
-        for case in by_date.get(row.case_date, [])
-        if case.surgeon_id == row.surgeon_id
-        and case.start_time == row.start_time
-        and _same_patient_identity(case.patient_name, row.patient_name)
-    ]
-    return identity_matches[0] if len(identity_matches) == 1 else None
+def discard_applied_scratch_rows(db: Session, run_id: int) -> int:
+    """The card line remembers the fax. This send's scratch reading can go."""
+    rows = db.query(FaxIngestRow).filter(FaxIngestRow.run_id == run_id).all()
+    if not rows:
+        return 0
+    row_ids = [row.id for row in rows]
+    db.query(ScheduleCardActivity).filter(
+        ScheduleCardActivity.fax_ingest_row_id.in_(row_ids)
+    ).update({ScheduleCardActivity.fax_ingest_row_id: None}, synchronize_session=False)
+    db.query(FaxRowDecision).filter(
+        FaxRowDecision.fax_row_id.in_(row_ids)
+    ).delete(synchronize_session=False)
+    db.query(FaxIngestRow).filter(FaxIngestRow.id.in_(row_ids)).delete(synchronize_session=False)
+    for row in rows:
+        db.expunge(row)
+    return len(row_ids)
 
 
 def _surgeon_initials(surgeon: Surgeon) -> str:
@@ -80,14 +58,6 @@ def _is_hospital(location: Location) -> bool:
         (location.location_type or "").lower() in {"hospital", "or"}
         or (location.abbreviation or "").upper().endswith("-OR")
     )
-
-
-def _fax_note(notes: str | None, fax_id: int) -> str:
-    marker = f"Fax {fax_id} daily snapshot. No surgeon notification sent."
-    current = (notes or "").strip()
-    if marker.lower() in current.lower():
-        return current
-    return f"{current}\n{marker}".strip()
 
 
 def _applicable_row_ids(db: Session, run_id: int) -> set[int]:
@@ -145,7 +115,7 @@ def apply_staged_snapshot(
     run_id: int,
     admin_id: int | None = None,
 ) -> dict[str, Any]:
-    """Backup then reconcile one staged fax without creating schedule cards."""
+    """Backup, then one SQL fill places every staged detail line on its existing card."""
     run = db.get(FaxIngestRun, run_id)
     if not run:
         raise ValueError("Fax ingest run not found.")
@@ -242,85 +212,32 @@ def apply_staged_snapshot(
                 "faxLocationIds": mixed_location_ids[key],
             })
 
+    photo = save_fax_line_photo(
+        db,
+        source_fax_id=source_fax_id,
+        run_id=run.id,
+        covered={(row.surgeon_id, row.case_date) for row in rows if row.surgeon_id},
+    )
+    warning_count = replace_fax_warnings(
+        db,
+        source_fax_id=source_fax_id,
+        conflicts=conflicts,
+        cards=cards,
+    )
+
     clinic_sessions = len({
         (row.surgeon_id, row.case_date, row.session) for row in rows if row.row_type == "clinic"
     })
 
-    existing_cases = db.query(SurgicalCase).filter(
-        SurgicalCase.date >= start,
-        SurgicalCase.date <= end,
-        SurgicalCase.status != "cancelled",
-    ).all()
-    existing_by_patient: dict[tuple[date, str], list[SurgicalCase]] = defaultdict(list)
-    existing_by_date: dict[date, list[SurgicalCase]] = defaultdict(list)
-    for case in existing_cases:
-        existing_by_patient[(case.date, _normal(case.patient_name))].append(case)
-        existing_by_date[case.date].append(case)
-
-    kept_case_ids: set[int] = set()
-    created = updated = 0
-    for row in rows:
-        if row.row_type != "surgical":
-            continue
-        if not row.surgeon_id:
-            raise ValueError("Surgical fax row has no surgeon.")
-        existing = _existing_case_for_row(
-            row,
-            exact=existing_by_patient,
-            by_date=existing_by_date,
-        )
-        location_id = row.source_location_id or effective_locations[(row.surgeon_id, row.case_date, row.session)]
-        if existing:
-            case = existing
-            updated += 1
-        else:
-            case = SurgicalCase(
-                surgeon_id=row.surgeon_id,
-                date=row.case_date,
-                patient_name=row.patient_name,
-                procedure=row.procedure or "TBD",
-            )
-            db.add(case)
-            db.flush()
-            created += 1
-            existing_by_patient[(case.date, _normal(case.patient_name))].append(case)
-            existing_by_date[case.date].append(case)
-        case.surgeon_id = row.surgeon_id
-        case.assisting_surgeon_id = None
-        case.patient_name = row.patient_name
-        case.start_time = row.start_time
-        case.location_id = location_id
-        case.schedule_card_id = cards[(row.surgeon_id, row.case_date, row.session)].id
-        case.room_text = (row.room_text or "").upper()
-        case.procedure = row.procedure or case.procedure or "TBD"
-        case.status = "scheduled"
-        case.or_block_instance_id = None
-        case.notes = _fax_note(case.notes, source_fax_id)
-        from .schedule_activity_normalization import normalize_surgical_case_card
-        normalize_surgical_case_card(db, case)
-        kept_case_ids.add(case.id)
-
-    cancelled = kept_by_database = 0
-    for case in existing_cases:
-        if case.id in kept_case_ids or case.surgeon_id not in scope_ids:
-            continue
-        if not FAX_NOTE_RE.search(case.notes or ""):
-            continue
-        case.status = "cancelled"
-        case.notes = _fax_note(case.notes, source_fax_id)
-        db.flush()
-        db.refresh(case)
-        if case.status == "cancelled":
-            cancelled += 1
-        else:
-            kept_by_database += 1
-        from .schedule_activity_normalization import normalize_surgical_case_card
-        normalize_surgical_case_card(db, case)
+    filled = fill_cards_from_fax_lines(db, run_id=run.id)
+    created = filled["surgicalCreated"]
+    updated = filled["surgicalUpdated"]
+    cancelled = filled["surgicalCancelled"]
+    kept_by_database = filled["surgicalKeptOnUnappliedDays"]
 
     run.status = "applied"
     document.status = "applied"
-    from .schedule_activity_normalization import sync_applied_fax_clinic_activities
-    sync_applied_fax_clinic_activities(db, run)
+    discard_applied_scratch_rows(db, run.id)
     db.add(ScheduleChangeEvent(
         event_type="fax_daily_snapshot_applied",
         surgeon_id=None,
@@ -336,6 +253,8 @@ def apply_staged_snapshot(
             "faxId": source_fax_id,
             "runId": run.id,
             "backupId": backup.id,
+            "restoreSetId": photo.id,
+            "warningCount": warning_count,
             "range": {"start": start.isoformat(), "end": end.isoformat()},
             "conflicts": conflicts,
         }),
@@ -367,6 +286,8 @@ def apply_staged_snapshot(
         "faxId": source_fax_id,
         "runId": run.id,
         "backupId": backup.id,
+        "restoreSetId": photo.id,
+        "warningCount": warning_count,
         "range": {"start": start.isoformat(), "end": end.isoformat()},
         "rows": len(rows),
         "surgicalCreated": created,

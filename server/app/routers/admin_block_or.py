@@ -11,7 +11,7 @@ from ..admin_clinic_schedule_page_service import week_days_for_offset
 from ..auth import get_current_admin
 from ..database import get_db
 from ..jinja_env import templates
-from ..models import Location, ORBlockAssignment, ORBlockInstance, Surgeon, SurgicalCase
+from ..models import Location, ORBlockAssignment, ORBlockInstance, Surgeon
 from ..or_block_service import (
     BlockORCreateInput,
     add_case_to_block,
@@ -105,19 +105,9 @@ def block_or_page(
                 selected_block.assignments or [],
                 key=lambda row: (row.start_time or selected_block.start_time, row.id),
             )
-            block_cases = (
-                db.query(SurgicalCase)
-                .options(
-                    joinedload(SurgicalCase.surgeon),
-                    joinedload(SurgicalCase.location),
-                )
-                .filter(
-                    SurgicalCase.or_block_instance_id == selected_block.id,
-                    SurgicalCase.status != "cancelled",
-                )
-                .order_by(SurgicalCase.start_time, SurgicalCase.id)
-                .all()
-            )
+            from ..or_block_service import _lines_on_block
+
+            block_cases = _lines_on_block(db, selected_block)
     cases_by_surgeon: list[dict] = []
     editing_case = None
     if selected_block:

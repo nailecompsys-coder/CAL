@@ -1,11 +1,12 @@
 """Services for admin surgical schedule routes."""
 
 import urllib.parse
+import uuid
 from datetime import date, datetime, time, timedelta
 
 from sqlalchemy.orm import Session
 
-from .models import Location, ORBlockAssignment, ORBlockInstance, SurgicalCase
+from .models import Location, ORBlockAssignment, ORBlockInstance, ScheduleCard, ScheduleCardActivity
 from .practice_time import practice_today
 from .push import send_push_to_surgeon
 from .scheduling_guardrails_service import surgical_case_warning_messages
@@ -51,15 +52,16 @@ def surgery_fields(
     }
 
 
-def conflict_warning_query(db: Session, surgical_case: SurgicalCase, exclude_case_id: int | None = None) -> str:
+def conflict_warning_query(db: Session, line: ScheduleCardActivity) -> str:
     conflicts = surgical_case_warning_messages(
         db,
-        surgical_case.surgeon_id,
-        surgical_case.date,
-        surgical_case.start_time,
-        surgical_case.end_time,
-        surgical_case.location_id,
-        exclude_case_id,
+        line.surgeon_id,
+        line.activity_date,
+        line.start_time,
+        line.end_time,
+        line.location_id,
+        exclude_activity_id=line.id,
+        or_block_instance_id=line.or_block_instance_id,
     )
     if not conflicts:
         return ""
@@ -103,13 +105,14 @@ def _matching_assigned_block(db: Session, fields: dict, *, exclude_case_id: int 
         return None
 
     overlap = (
-        db.query(SurgicalCase)
+        db.query(ScheduleCardActivity)
         .filter(
-            SurgicalCase.id != exclude_case_id if exclude_case_id else True,
-            SurgicalCase.surgeon_id == surgeon_id,
-            SurgicalCase.date == case_date,
-            SurgicalCase.status != "cancelled",
-            SurgicalCase.start_time == start_time,
+            ScheduleCardActivity.id != exclude_case_id if exclude_case_id else True,
+            ScheduleCardActivity.surgeon_id == surgeon_id,
+            ScheduleCardActivity.activity_date == case_date,
+            ScheduleCardActivity.activity_type == "surgical",
+            ScheduleCardActivity.is_active == True,  # noqa: E712
+            ScheduleCardActivity.start_time == start_time,
         )
         .first()
     )
@@ -145,45 +148,97 @@ def enforce_surgical_case_write_guardrails(
     return out
 
 
+def _card_for_surgery(db: Session, fields: dict) -> ScheduleCard:
+    from .schedule_activity_normalization import resolve_schedule_card
+
+    start = fields.get("start_time")
+    session = "pm" if start and start >= time(12, 0) else "am"
+    card = resolve_schedule_card(
+        db,
+        surgeon_id=fields.get("surgeon_id"),
+        day=fields.get("date"),
+        location_id=fields.get("location_id"),
+        start_time=start,
+        preferred_session=session,
+    )
+    if card is None:
+        raise ValueError("This surgeon has no morning or afternoon card for that day.")
+    return card
+
+
+def _write_surgery_line(
+    db: Session,
+    card: ScheduleCard,
+    fields: dict,
+    *,
+    source_system: str,
+    source_record_key: str,
+) -> ScheduleCardActivity:
+    from .schedule_activity_normalization import _upsert_activity
+
+    return _upsert_activity(
+        db,
+        source_system=source_system,
+        source_record_key=source_record_key,
+        card=card,
+        activity_type="surgical",
+        start_time=fields.get("start_time"),
+        end_time=fields.get("end_time"),
+        patient_name=fields.get("patient_name") or "Patient",
+        procedure=fields.get("procedure") or "",
+        room_text=fields.get("room_text"),
+        location_id=fields.get("location_id"),
+        is_active=(fields.get("status") or "scheduled") != "cancelled",
+        or_block_instance_id=fields.get("or_block_instance_id"),
+    )
+
+
 def add_surgical_case(
     db: Session, fields: dict, *, notify: bool = True
-) -> tuple[SurgicalCase, str]:
+) -> tuple[ScheduleCardActivity, str]:
     fields = enforce_surgical_case_write_guardrails(db, fields)
-    surgical_case = SurgicalCase(**fields)
-    db.add(surgical_case)
-    from .schedule_activity_normalization import normalize_surgical_case_card
-    normalize_surgical_case_card(db, surgical_case)
+    card = _card_for_surgery(db, fields)
+    line = _write_surgery_line(
+        db,
+        card,
+        fields,
+        source_system="portal",
+        source_record_key=uuid.uuid4().hex,
+    )
     db.commit()
-    if notify:
+    if notify and line.start_time:
         send_push_to_surgeon(
-            surgical_case.surgeon_id,
+            line.surgeon_id,
             "Schedule updated",
-            f"Surgery added {surgical_case.date.strftime('%b %-d')} {surgical_case.start_time.strftime('%-I:%M %p')}",
+            f"Surgery added {line.activity_date.strftime('%b %-d')} {line.start_time.strftime('%-I:%M %p')}",
             db,
         )
-    return surgical_case, conflict_warning_query(db, surgical_case, exclude_case_id=surgical_case.id)
+    return line, conflict_warning_query(db, line)
 
 
-def update_surgical_case(db: Session, surgical_case: SurgicalCase, fields: dict) -> str:
-    fields = enforce_surgical_case_write_guardrails(db, fields, exclude_case_id=surgical_case.id)
-    for key, value in fields.items():
-        setattr(surgical_case, key, value)
-    from .schedule_activity_normalization import normalize_surgical_case_card
-    normalize_surgical_case_card(db, surgical_case)
-    db.commit()
-    send_push_to_surgeon(
-        surgical_case.surgeon_id,
-        "Schedule updated",
-        f"Surgery updated {surgical_case.date.strftime('%b %-d')} {surgical_case.start_time.strftime('%-I:%M %p')}",
+def update_surgical_case(db: Session, line: ScheduleCardActivity, fields: dict) -> str:
+    fields = enforce_surgical_case_write_guardrails(db, fields, exclude_case_id=line.id)
+    card = _card_for_surgery(db, fields)
+    line = _write_surgery_line(
         db,
+        card,
+        fields,
+        source_system=line.source_system,
+        source_record_key=line.source_record_key,
     )
-    return conflict_warning_query(db, surgical_case, exclude_case_id=surgical_case.id)
+    db.commit()
+    if line.start_time:
+        send_push_to_surgeon(
+            line.surgeon_id,
+            "Schedule updated",
+            f"Surgery updated {line.activity_date.strftime('%b %-d')} {line.start_time.strftime('%-I:%M %p')}",
+            db,
+        )
+    return conflict_warning_query(db, line)
 
 
-def delete_surgical_case(db: Session, surgical_case: SurgicalCase) -> date:
-    parsed_date = surgical_case.date
-    from .schedule_activity_normalization import deactivate_surgical_case_activity
-    deactivate_surgical_case_activity(db, surgical_case.id)
-    db.delete(surgical_case)
+def delete_surgical_case(db: Session, line: ScheduleCardActivity) -> date:
+    parsed_date = line.activity_date
+    line.is_active = False
     db.commit()
     return parsed_date

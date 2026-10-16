@@ -1,6 +1,6 @@
 """Block OR scheduling services.
 
-Block OR is practice capacity inventory. It is separate from ClinicSchedule rows
+Block OR is practice capacity inventory. It is separate from the morning and afternoon cards
 because open block time may exist before any surgeon is assigned.
 """
 
@@ -26,7 +26,6 @@ from .models import (
     NativePushToken,
     ScheduleChangeEvent,
     Surgeon,
-    SurgicalCase,
 )
 from .push import send_push_to_surgeon
 from .email_service import send_email
@@ -597,11 +596,16 @@ def fold_block_into_host(
     if host.location_id != fragment.location_id or host.date != fragment.date:
         return {"ok": False, "reason": "mismatch"}
 
-    moved_cases = 0
-    for case in db.query(SurgicalCase).filter(SurgicalCase.or_block_instance_id == fragment.id).all():
-        case.or_block_instance_id = host.id
-        case.location_id = host.location_id
-        moved_cases += 1
+    from .models import ScheduleCardActivity
+    moved_cases = db.query(ScheduleCardActivity).filter(
+        ScheduleCardActivity.or_block_instance_id == fragment.id
+    ).update(
+        {
+            ScheduleCardActivity.or_block_instance_id: host.id,
+            ScheduleCardActivity.location_id: host.location_id,
+        },
+        synchronize_session=False,
+    )
 
     host_by_surgeon = {
         row.surgeon_id: row
@@ -738,7 +742,6 @@ def delete_or_block_instance(
         .options(
             joinedload(ORBlockInstance.location),
             joinedload(ORBlockInstance.assignments),
-            joinedload(ORBlockInstance.cases),
         )
         .filter(ORBlockInstance.id == block_id)
         .first()
@@ -751,8 +754,7 @@ def delete_or_block_instance(
         raise ValueError(
             "This block has a surgeon assignment. Clear the assignment in the mobile app first, then delete."
         )
-    active_cases = [case for case in (block.cases or []) if (case.status or "") != "cancelled"]
-    if active_cases:
+    if _lines_on_block(db, block):
         raise ValueError("This block still has linked surgical cases. Reschedule those cases before deleting the block.")
 
     loc_label = block.location.abbreviation if block.location and block.location.abbreviation else (
@@ -778,10 +780,12 @@ def delete_or_block_instance(
             "status": block.status,
         },
     )
-    # Detach leftover case links. Audit FK has no ON DELETE CASCADE at DB level,
-    # so clear those rows before removing the instance.
-    for case in list(block.cases or []):
-        case.or_block_instance_id = None
+    # Drop leftover links so an old row cannot block deleting the empty card.
+    from .models import ScheduleCardActivity
+    db.query(ScheduleCardActivity).filter(ScheduleCardActivity.or_block_instance_id == block.id).update(
+        {ScheduleCardActivity.or_block_instance_id: None},
+        synchronize_session=False,
+    )
     db.query(ORBlockAuditEvent).filter(ORBlockAuditEvent.block_instance_id == block.id).delete(
         synchronize_session=False
     )
@@ -847,13 +851,21 @@ def split_day_spanning_block(
     for case in list(_active_block_cases(block)):
         if case.start_time and case.start_time >= SESSION_SPLIT_NOON:
             case.or_block_instance_id = pm.id
+    from .models import ScheduleCardActivity
+    db.query(ScheduleCardActivity).filter(
+        ScheduleCardActivity.or_block_instance_id == block.id,
+        ScheduleCardActivity.start_time >= SESSION_SPLIT_NOON,
+    ).update(
+        {ScheduleCardActivity.or_block_instance_id: pm.id},
+        synchronize_session=False,
+    )
 
     block.session = "am"
     block.start_time = am_start
     block.end_time = SESSION_SPLIT_NOON
     db.flush()
-    db.expire(block, ["assignments", "cases"])
-    db.expire(pm, ["assignments", "cases"])
+    db.expire(block, ["assignments"])
+    db.expire(pm, ["assignments"])
     block = _block_with_case_relations(db, block.id) or block
     pm = _block_with_case_relations(db, pm.id) or pm
 
@@ -874,7 +886,7 @@ def split_day_spanning_block(
         )
         pm_assigned.add(case.surgeon_id)
     db.flush()
-    db.expire(pm, ["assignments", "cases"])
+    db.expire(pm, ["assignments"])
     pm = _block_with_case_relations(db, pm.id) or pm
 
     _sync_assignment_case_counts_from_cases(db, block)
@@ -910,7 +922,6 @@ def ensure_am_pm_split_for_range(db: Session, start_date: date, end_date: date) 
         db.query(ORBlockInstance)
         .options(
             joinedload(ORBlockInstance.assignments),
-            joinedload(ORBlockInstance.cases),
         )
         .filter(ORBlockInstance.date >= start_date, ORBlockInstance.date <= end_date)
         .order_by(ORBlockInstance.date, ORBlockInstance.id)
@@ -936,7 +947,6 @@ def block_instances_for_range(db: Session, start_date: date, end_date: date) -> 
             joinedload(ORBlockInstance.location),
             joinedload(ORBlockInstance.assigned_surgeon),
             joinedload(ORBlockInstance.assignments).joinedload(ORBlockAssignment.surgeon),
-            joinedload(ORBlockInstance.cases),
         )
         .order_by(
             ORBlockInstance.date,
@@ -987,38 +997,74 @@ def _assignment_payload(block: ORBlockInstance, assignment: ORBlockAssignment) -
     }
 
 
-def _surgical_case_payload(case: SurgicalCase, *, include_details: bool = True) -> dict:
+def _activity_line_payload(row, *, include_details: bool) -> dict:
     payload = {
-        "id": case.id,
-        "surgeonId": case.surgeon_id,
-        "start": case.start_time.strftime("%H:%M") if case.start_time else "",
-        "end": case.end_time.strftime("%H:%M") if case.end_time else "",
+        "id": row.id,
+        "surgeonId": row.surgeon_id,
+        "start": row.start_time.strftime("%H:%M") if row.start_time else "",
+        "end": row.end_time.strftime("%H:%M") if row.end_time else "",
         "procedure": "",
         "patientName": "",
-        "room": (case.room_text or "").strip(),
+        "room": (row.room_text or "").strip(),
     }
     if include_details:
-        payload["procedure"] = (case.procedure or "").strip()
-        payload["patientName"] = (case.patient_name or "").strip()
+        payload["procedure"] = (row.procedure or "").strip()
+        payload["patientName"] = (row.patient_name or "").strip()
     return payload
 
 
+def _lines_on_block(db: Session, block: ORBlockInstance) -> list:
+    """Card lines for the surgeons on this half-day. This is the case list."""
+    from .schedule_activity_normalization import active_surgical_lines
+
+    surgeon_ids = [sid for sid in _assigned_surgeon_ids(block) if sid]
+    session = _session_bucket(block)
+    return active_surgical_lines(
+        db,
+        surgeon_ids=surgeon_ids,
+        day=block.date,
+        session=session if session in {"am", "pm"} else None,
+    )
+
+
+def _line_belongs_to_block(row, block: ORBlockInstance) -> bool:
+    if not row or not row.is_active or row.activity_type != "surgical":
+        return False
+    if row.surgeon_id not in _assigned_surgeon_ids(block) or row.activity_date != block.date:
+        return False
+    session = _session_bucket(block)
+    return session not in {"am", "pm"} or row.session == session
+
+
 def block_case_payloads(block: ORBlockInstance, *, include_details: bool = True) -> list[dict]:
-    rows = [
-        case
-        for case in list(block.cases or [])
-        if (case.status or "").lower() != "cancelled"
-    ]
-    rows.sort(key=lambda row: (row.start_time or time(0, 0), row.id or 0))
-    return [_surgical_case_payload(case, include_details=include_details) for case in rows]
+    """Cases on a block card are the surgeon's card lines for that half-day."""
+    from sqlalchemy.orm import object_session
 
-
-def _active_block_cases(block: ORBlockInstance) -> list[SurgicalCase]:
+    db = object_session(block)
+    if db is None:
+        return []
     return [
-        case
-        for case in list(block.cases or [])
-        if (case.status or "").lower() != "cancelled"
+        _activity_line_payload(row, include_details=include_details)
+        for row in _lines_on_block(db, block)
     ]
+
+
+def _active_block_cases(block: ORBlockInstance) -> list:
+    from sqlalchemy.orm import object_session
+    from .models import ScheduleCardActivity
+
+    db = object_session(block)
+    if db is None or block.id is None:
+        return []
+    return (
+        db.query(ScheduleCardActivity)
+        .filter(
+            ScheduleCardActivity.or_block_instance_id == block.id,
+            ScheduleCardActivity.is_active == True,  # noqa: E712
+            ScheduleCardActivity.activity_type == "surgical",
+        )
+        .all()
+    )
 
 
 def _assigned_surgeon_ids(block: ORBlockInstance) -> set[int]:
@@ -1035,7 +1081,6 @@ def _block_with_case_relations(db: Session, block_id: int) -> ORBlockInstance | 
             joinedload(ORBlockInstance.location),
             joinedload(ORBlockInstance.assignments).joinedload(ORBlockAssignment.surgeon),
             joinedload(ORBlockInstance.assigned_surgeon),
-            joinedload(ORBlockInstance.cases),
         )
         .filter(ORBlockInstance.id == block_id)
         .first()
@@ -1272,40 +1317,40 @@ def add_case_to_block(
         raise ValueError("Case start must fall inside the block window")
     if end_time is not None and end_time <= start_time:
         raise ValueError("Case end must be after start")
-    duplicate_case = (
-        db.query(SurgicalCase)
-        .filter(
-            SurgicalCase.surgeon_id == surgeon_id,
-            SurgicalCase.date == block.date,
-            SurgicalCase.status != "cancelled",
-            SurgicalCase.start_time == start_time,
-        )
-        .first()
-    )
-    if duplicate_case:
+    from .schedule_activity_normalization import _upsert_activity, active_surgical_lines, resolve_schedule_card
+
+    if any(row.start_time == start_time for row in active_surgical_lines(db, surgeon_id=surgeon_id, day=block.date)):
         raise ValueError("Schedule collision: this surgeon already has a case at that time.")
 
-    case = SurgicalCase(
+    bucket = _session_bucket(block)
+    preferred = bucket if bucket in {"am", "pm"} else None
+    card = resolve_schedule_card(
+        db,
         surgeon_id=surgeon_id,
-        date=block.date,
+        day=block.date,
+        location_id=block.location_id,
+        start_time=start_time,
+        preferred_session=preferred,
+    )
+    if card is None:
+        raise ValueError("This surgeon has no card for that half-day.")
+    saved_name = (patient_name or "").strip() or "TBD"
+    saved_procedure = (procedure or "").strip() or "Scheduled case"
+    activity = _upsert_activity(
+        db,
+        source_system="block_or",
+        source_record_key=f"{block.id}:{surgeon_id}:{start_time.strftime('%H%M')}:{saved_name}",
+        card=card,
+        activity_type="surgical",
         start_time=start_time,
         end_time=end_time,
-        patient_name=(patient_name or "").strip() or "TBD",
-        procedure=(procedure or "").strip() or "Scheduled case",
+        patient_name=saved_name,
+        procedure=saved_procedure,
+        room_text=(block.room_text or "").strip() or None,
         location_id=block.location_id,
         or_block_instance_id=block.id,
-        room_text=(block.room_text or "").strip() or None,
-        status="scheduled",
     )
-    db.add(case)
-    from .schedule_activity_normalization import normalize_surgical_case_card
-    normalize_surgical_case_card(db, case)
     db.flush()
-    db.expire(block, ["cases", "assignments"])
-    block = _block_with_case_relations(db, block_id)
-    if not block:
-        raise ValueError("Block not found")
-    _sync_assignment_case_counts_from_cases(db, block)
     warnings = []
     try:
         from .scheduling_guardrails_service import surgical_case_warning_messages
@@ -1317,7 +1362,8 @@ def add_case_to_block(
             start_time,
             end_time,
             block.location_id,
-            exclude_case_id=case.id,
+            exclude_activity_id=activity.id,
+            or_block_instance_id=block.id,
         ) or []
     except Exception:
         warnings = []
@@ -1328,12 +1374,119 @@ def add_case_to_block(
         admin_user_id=admin_id,
         event_date=block.date,
         title="Case added to Block OR",
-        body=f"{start_time.strftime('%H:%M')} · {(procedure or 'Scheduled case').strip() or 'Scheduled case'}",
-        payload={"blockId": block.id, "caseId": case.id},
+        body=f"{start_time.strftime('%H:%M')} · {saved_procedure}",
+        payload={"blockId": block.id, "caseId": activity.id},
     )
     db.commit()
     block = _block_with_case_relations(db, block_id)
     return block, [scheduler_safe_warning(w) for w in warnings if w]
+
+
+def _save_block_line(
+    db: Session,
+    source: ORBlockInstance,
+    activity,
+    *,
+    start_time: time | None,
+    end_time: time | None,
+    procedure: str | None,
+    patient_name: str | None,
+    surgeon_id: int | None,
+    target_block_id: int | None,
+    admin_id: int | None,
+) -> tuple[ORBlockInstance, list[str]]:
+    """Edit the card line the phone and the website are showing."""
+    from .schedule_activity_normalization import _identity, active_surgical_lines, resolve_schedule_card
+
+    dest_id = int(target_block_id) if target_block_id is not None else source.id
+    dest = source if dest_id == source.id else _block_with_case_relations(db, dest_id)
+    if not dest:
+        raise ValueError("Destination block not found")
+    next_surgeon = int(surgeon_id) if surgeon_id is not None else activity.surgeon_id
+    if not next_surgeon:
+        raise ValueError("Surgeon is required")
+    next_start = start_time if start_time is not None else activity.start_time
+    next_end = end_time if end_time is not None else activity.end_time
+    if next_start is None:
+        raise ValueError("Case start is required")
+    if next_start < dest.start_time or next_start >= dest.end_time:
+        next_start = dest.start_time
+    if next_end is not None and next_end <= next_start:
+        next_end = None
+    if next_surgeon not in _assigned_surgeon_ids(dest):
+        raise ValueError("Place the surgeon on this AM or PM block before adding patients.")
+    if any(
+        row.start_time == next_start and row.id != activity.id
+        for row in active_surgical_lines(db, surgeon_id=next_surgeon, day=dest.date)
+    ):
+        raise ValueError("Schedule collision: this surgeon already has a case at that time.")
+
+    bucket = _session_bucket(dest)
+    preferred = bucket if bucket in {"am", "pm"} else None
+    card = resolve_schedule_card(
+        db,
+        surgeon_id=next_surgeon,
+        day=dest.date,
+        location_id=dest.location_id,
+        start_time=next_start,
+        preferred_session=preferred,
+    )
+    if card is None:
+        raise ValueError("This surgeon has no card for that half-day.")
+    activity.schedule_card_id = card.id
+    activity.surgeon_id = card.surgeon_id
+    activity.activity_date = card.date
+    activity.session = card.session
+    activity.location_id = dest.location_id
+    activity.start_time = next_start
+    if end_time is not None:
+        activity.end_time = next_end
+    if procedure is not None:
+        activity.procedure = procedure.strip() or activity.procedure or ""
+    if patient_name is not None:
+        activity.patient_name = patient_name.strip() or activity.patient_name or "Patient"
+    if dest.room_text and not (activity.room_text or "").strip():
+        activity.room_text = dest.room_text
+    activity.or_block_instance_id = dest.id
+    activity.identity_key = _identity(activity.patient_name, activity.start_time, activity.activity_type or "surgical")
+    db.flush()
+
+    warnings: list[str] = []
+    try:
+        from .scheduling_guardrails_service import surgical_case_warning_messages
+
+        warnings = surgical_case_warning_messages(
+            db,
+            next_surgeon,
+            dest.date,
+            activity.start_time,
+            activity.end_time,
+            dest.location_id,
+            exclude_activity_id=activity.id,
+            or_block_instance_id=dest.id,
+        ) or []
+    except Exception:
+        warnings = []
+    moved = dest.id != source.id
+    log_schedule_change(
+        db,
+        event_type="surgical_case_moved" if moved else "surgical_case_updated",
+        surgeon_id=next_surgeon,
+        admin_user_id=admin_id,
+        event_date=activity.activity_date,
+        title="Case moved to another Block OR" if moved else "Case updated on Block OR",
+        body=f"{activity.start_time.strftime('%H:%M')} · {(activity.procedure or 'Case').strip()}",
+        payload={
+            "blockId": source.id,
+            "targetBlockId": dest.id,
+            "caseId": activity.id,
+            "fromDate": source.date.isoformat(),
+            "toDate": dest.date.isoformat(),
+        },
+    )
+    db.commit()
+    source = _block_with_case_relations(db, source.id)
+    return source, [scheduler_safe_warning(w) for w in warnings if w]
 
 
 def update_block_case(
@@ -1352,104 +1505,23 @@ def update_block_case(
     source = _block_with_case_relations(db, block_id)
     if not source:
         raise ValueError("Block not found")
-    case = next((row for row in _active_block_cases(source) if row.id == case_id), None)
-    if not case:
-        raise ValueError("Case not found on this block")
+    from .models import ScheduleCardActivity
 
-    dest_id = int(target_block_id) if target_block_id is not None else block_id
-    dest = source if dest_id == block_id else _block_with_case_relations(db, dest_id)
-    if not dest:
-        raise ValueError("Destination block not found")
-
-    next_surgeon = int(surgeon_id) if surgeon_id is not None else case.surgeon_id
-    if not next_surgeon:
-        raise ValueError("Surgeon is required")
-    next_start = start_time if start_time is not None else case.start_time
-    next_end = end_time if end_time is not None else case.end_time
-    if next_start is None:
-        raise ValueError("Case start is required")
-    # Cross-day reschedule is allowed (insurance / illness). Snap into dest window if needed.
-    if next_start < dest.start_time or next_start >= dest.end_time:
-        next_start = dest.start_time
-    if next_end is not None and next_end <= next_start:
-        next_end = None
-
-    if next_surgeon not in _assigned_surgeon_ids(dest):
-        raise ValueError("Place the surgeon on this AM or PM block before adding patients.")
-    duplicate_case = (
-        db.query(SurgicalCase)
-        .filter(
-            SurgicalCase.id != case.id,
-            SurgicalCase.surgeon_id == next_surgeon,
-            SurgicalCase.date == dest.date,
-            SurgicalCase.status != "cancelled",
-            SurgicalCase.start_time == next_start,
-        )
-        .first()
-    )
-    if duplicate_case:
-        raise ValueError("Schedule collision: this surgeon already has a case at that time.")
-
-    case.surgeon_id = next_surgeon
-    case.or_block_instance_id = dest.id
-    case.location_id = dest.location_id
-    case.date = dest.date
-    case.start_time = next_start
-    if end_time is not None:
-        case.end_time = end_time
-    if procedure is not None:
-        case.procedure = procedure.strip() or case.procedure or "Scheduled case"
-    if patient_name is not None:
-        case.patient_name = patient_name.strip() or case.patient_name or "TBD"
-    if dest.room_text and not (case.room_text or "").strip():
-        case.room_text = dest.room_text
-    db.flush()
-    db.expire(source, ["cases", "assignments"])
-    db.expire(dest, ["cases", "assignments"])
-    source = _block_with_case_relations(db, block_id)
-    dest = _block_with_case_relations(db, dest.id)
-    if source:
-        _sync_assignment_case_counts_from_cases(db, source)
-    if dest and (not source or dest.id != source.id):
-        _sync_assignment_case_counts_from_cases(db, dest)
-
-    warnings = []
-    try:
-        from .scheduling_guardrails_service import surgical_case_warning_messages
-
-        warnings = surgical_case_warning_messages(
+    activity = db.get(ScheduleCardActivity, case_id)
+    if _line_belongs_to_block(activity, source):
+        return _save_block_line(
             db,
-            next_surgeon,
-            dest.date if dest else case.date,
-            case.start_time,
-            case.end_time,
-            dest.location_id if dest else case.location_id,
-            exclude_case_id=case.id,
-        ) or []
-    except Exception:
-        warnings = []
-
-    moved = dest is not None and dest.id != block_id
-    log_schedule_change(
-        db,
-        event_type="surgical_case_moved" if moved else "surgical_case_updated",
-        surgeon_id=next_surgeon,
-        admin_user_id=admin_id,
-        event_date=case.date,
-        title="Case moved to another Block OR" if moved else "Case updated on Block OR",
-        body=f"{case.start_time.strftime('%H:%M')} · {(case.procedure or 'Case').strip()}",
-        payload={
-            "blockId": block_id,
-            "targetBlockId": dest.id if dest else block_id,
-            "caseId": case.id,
-            "fromDate": source.date.isoformat() if source else None,
-            "toDate": dest.date.isoformat() if dest else None,
-        },
-    )
-    db.commit()
-    # Always return the source block so the open editor stays on the same sheet.
-    source = _block_with_case_relations(db, block_id)
-    return source, [scheduler_safe_warning(w) for w in warnings if w]
+            source,
+            activity,
+            start_time=start_time,
+            end_time=end_time,
+            procedure=procedure,
+            patient_name=patient_name,
+            surgeon_id=surgeon_id,
+            target_block_id=target_block_id,
+            admin_id=admin_id,
+        )
+    raise ValueError("Case not found on this block")
 
 
 def copy_or_block_capacity(
@@ -1962,7 +2034,6 @@ def remove_block_assignment(
         db.query(ORBlockInstance)
         .options(
             joinedload(ORBlockInstance.assignments).joinedload(ORBlockAssignment.surgeon),
-            joinedload(ORBlockInstance.cases),
         )
         .filter(ORBlockInstance.id == block_id)
         .first()
@@ -1973,9 +2044,9 @@ def remove_block_assignment(
     if not assignment:
         raise ValueError("Assignment not found")
     linked = [
-        case
-        for case in _active_block_cases(block)
-        if case.surgeon_id == assignment.surgeon_id
+        row
+        for row in _lines_on_block(db, block)
+        if row.surgeon_id == assignment.surgeon_id
     ]
     if linked:
         raise ValueError(
@@ -2024,19 +2095,13 @@ def clear_block_assignment(db: Session, block_id: int, admin_id: int | None = No
         db.query(ORBlockInstance)
         .options(
             joinedload(ORBlockInstance.assignments),
-            joinedload(ORBlockInstance.cases),
         )
         .filter(ORBlockInstance.id == block_id)
         .first()
     )
     if not block:
         raise ValueError("Block not found")
-    active_cases = [
-        case
-        for case in list(block.cases or [])
-        if (case.status or "").lower() != "cancelled"
-    ]
-    if active_cases:
+    if _lines_on_block(db, block):
         raise ValueError(
             "This block still has linked surgical cases. Reschedule those cases before clearing surgeons."
         )

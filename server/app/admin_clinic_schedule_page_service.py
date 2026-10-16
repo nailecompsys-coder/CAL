@@ -5,7 +5,8 @@ from datetime import date, time, timedelta
 
 from sqlalchemy.orm import Session, joinedload
 
-from .models import ClinicSchedule, Location, SurgicalCase
+from .clinic_schedule_card_guard import present_card
+from .models import Location, ScheduleCard, ScheduleCardActivity
 from .practice_time import practice_today
 from .or_block_service import (
     block_instances_for_range,
@@ -84,9 +85,9 @@ def parse_clinic_fax_visit_segments(notes: str) -> list[dict]:
 
 
 def clinic_fax_overlay_from_notes(
-    schedule: ClinicSchedule,
+    schedule: ScheduleCard,
 ) -> dict | None:
-    """Build a clinic pill overlay from fax times stored in ClinicSchedule.notes."""
+    """Build a clinic pill overlay from fax times stored on the card."""
     if (schedule.assignment_type or "").lower() != "assigned":
         return None
     loc = schedule.location
@@ -340,7 +341,7 @@ def enforce_two_card_daily_limit(
     kept_schedule_ids: set[int] = set()
     for surgeon_id, by_day in sched_map.items():
         for day, schedules in by_day.items():
-            groups: dict[str, list[ClinicSchedule]] = {}
+            groups: dict[str, list[ScheduleCard]] = {}
             for schedule in schedules:
                 raw_session = (schedule.session or "am").lower()
                 session = raw_session if raw_session in {"am", "pm"} else "am"
@@ -415,7 +416,7 @@ def enforce_two_card_daily_limit(
 
 
 def _entry_display_rank(
-    schedule: ClinicSchedule,
+    schedule: ScheduleCard,
     or_block_overlays: dict[int, dict],
     clinic_fax_overlays: dict[int, dict],
 ) -> tuple[int, int, int, int]:
@@ -432,7 +433,7 @@ def _entry_display_rank(
     )
 
 
-def _slot_schedule_candidates(schedules: list[ClinicSchedule], session: str) -> list[ClinicSchedule]:
+def _slot_schedule_candidates(schedules: list[ScheduleCard], session: str) -> list[ScheduleCard]:
     candidates = [
         schedule for schedule in schedules
         if (schedule.session or "am").lower() == session
@@ -503,8 +504,8 @@ def _sessions_compatible(schedule_session: str | None, block_session: str | None
     return sched == block
 
 
-def _enrich_or_block_with_live_cases(block: dict, cases: list[SurgicalCase]) -> dict:
-    """Replace assignment caseCount/segments with real SurgicalCase rows for the pill."""
+def _enrich_or_block_with_live_cases(block: dict, cases: list[ScheduleCardActivity]) -> dict:
+    """Replace assignment caseCount/segments with the card lines for the pill."""
     loc_id = block.get("locationId")
     session = _block_display_session(block)
     matching = [
@@ -606,7 +607,7 @@ def build_hospital_case_overlays(
     sched_map: dict,
     surgical_map: dict,
 ) -> dict[int, dict]:
-    """Show live OR case counts on existing hospital ClinicSchedule cards.
+    """Show live OR case counts on existing hospital cards.
 
     The Clinic / OR grid has two fixed surgeon/day slots. If the master card
     already says AL-OR/WG-OR/etc., fax/Epic cases should fill that card, not
@@ -648,7 +649,7 @@ def build_hospital_case_overlays(
     return out
 
 
-def _case_display_session(case: SurgicalCase) -> str:
+def _case_display_session(case: ScheduleCardActivity) -> str:
     start = case.start_time or time(7, 0)
     return "am" if start < time(12, 0) else "pm"
 
@@ -658,7 +659,7 @@ def merge_or_blocks_into_clinic_grid(
     assigned_or_blocks: dict,
 ) -> tuple[dict[int, dict], dict]:
     """
-    Append Block OR start/cases onto the ClinicSchedule hospital pill (SSOT grid).
+    Append Block OR start/cases onto the hospital card pill.
     Drop the duplicate Block OR pill when location+session already exists on the grid.
     """
     overlays: dict[int, dict] = {}
@@ -696,7 +697,7 @@ def merge_or_blocks_into_clinic_grid(
     return overlays, remaining
 
 
-def clinic_schedule_sort_key(schedule: ClinicSchedule) -> tuple[int, int]:
+def clinic_schedule_sort_key(schedule: ScheduleCard) -> tuple[int, int]:
     return (
         SESSION_SORT_ORDER.get((schedule.session or "full").lower(), 9),
         schedule.id or 0,
@@ -709,29 +710,38 @@ def week_days_for_offset(week_offset: int) -> tuple[date, list[date]]:
     return today, [week_start + timedelta(days=i) for i in range(5)]
 
 
-def surgical_case_json(cases: list[SurgicalCase]) -> list[dict]:
-    return [
-        {
+def surgical_case_json(cases: list) -> list[dict]:
+    rows = []
+    for case in cases:
+        day = getattr(case, "activity_date", None) or case.date
+        active = getattr(case, "is_active", None)
+        if active is True:
+            status = "scheduled"
+        elif active is False:
+            status = "cancelled"
+        else:
+            status = getattr(case, "status", None) or "scheduled"
+        assisting = getattr(case, "assisting_surgeon", None)
+        rows.append({
             "id": case.id,
             "surgeon_id": case.surgeon_id,
-            "date": case.date.isoformat(),
+            "date": day.isoformat(),
             "start": case.start_time.strftime("%H:%M") if case.start_time else "08:00",
             "end": case.end_time.strftime("%H:%M") if case.end_time else None,
             "patient": case.patient_name or "",
-            "patient_dob": case.patient_dob or "",
-            "patient_phone": case.patient_phone or "",
+            "patient_dob": getattr(case, "patient_dob", "") or "",
+            "patient_phone": getattr(case, "patient_phone", "") or "",
             "procedure": case.procedure or "",
             "procedure_short": (case.procedure or "")[:80],
             "location_id": case.location_id or "",
             "room": (case.location.name if case.location else None) or case.room_text or "",
             "room_text": case.room_text or "",
-            "status": case.status or "scheduled",
-            "notes": case.notes or "",
-            "assisting_surgeon_id": case.assisting_surgeon_id or "",
-            "assisting_surgeon": case.assisting_surgeon.full_name if case.assisting_surgeon else "",
-        }
-        for case in cases
-    ]
+            "status": status,
+            "notes": getattr(case, "notes", "") or "",
+            "assisting_surgeon_id": getattr(case, "assisting_surgeon_id", "") or "",
+            "assisting_surgeon": assisting.full_name if assisting else "",
+        })
+    return rows
 
 
 def _hour_label(hhmm: str | None) -> str:
@@ -845,32 +855,45 @@ def page_data(db: Session, week_offset: int) -> dict:
         Location.is_active == True,
     ).order_by(Location.location_type, Location.name).all()
     schedules = (
-        db.query(ClinicSchedule)
-        .options(joinedload(ClinicSchedule.location))
+        db.query(ScheduleCard)
+        .options(joinedload(ScheduleCard.effective_location))
         .filter(
-            ClinicSchedule.date >= week_days[0],
-            ClinicSchedule.date <= week_end,
+            ScheduleCard.date >= week_days[0],
+            ScheduleCard.date <= week_end,
+            ScheduleCard.effective_state.in_(("assigned", "off")),
         )
         .all()
     )
+    for schedule in schedules:
+        present_card(schedule)
     sched_map = {}
     for schedule in sorted(schedules, key=clinic_schedule_sort_key):
         sched_map.setdefault(schedule.surgeon_id, {}).setdefault(schedule.date, []).append(schedule)
 
-    surgical_cases = (
-        db.query(SurgicalCase)
-        .options(joinedload(SurgicalCase.location))
+    surgical_lines = (
+        db.query(ScheduleCardActivity)
+        .options(joinedload(ScheduleCardActivity.location))
         .filter(
-            SurgicalCase.date >= week_days[0],
-            SurgicalCase.date <= week_end,
-            SurgicalCase.status != "cancelled",
+            ScheduleCardActivity.activity_date >= week_days[0],
+            ScheduleCardActivity.activity_date <= week_end,
+            ScheduleCardActivity.activity_type == "surgical",
+            ScheduleCardActivity.is_active == True,  # noqa: E712
         )
-        .order_by(SurgicalCase.date, SurgicalCase.start_time)
+        .order_by(
+            ScheduleCardActivity.activity_date,
+            ScheduleCardActivity.start_time,
+            ScheduleCardActivity.id,
+        )
         .all()
     )
     surgical_map = {}
-    for case in surgical_cases:
-        surgical_map.setdefault(case.surgeon_id, {}).setdefault(case.date, []).append(case)
+    seen_lines = set()
+    for case in surgical_lines:
+        key = (case.surgeon_id, case.activity_date, case.identity_key)
+        if key in seen_lines:
+            continue
+        seen_lines.add(key)
+        surgical_map.setdefault(case.surgeon_id, {}).setdefault(case.activity_date, []).append(case)
 
     surgical_cases_json = {}
     for surgeon_id, day_cases in surgical_map.items():

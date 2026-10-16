@@ -8,7 +8,7 @@ from datetime import date, time
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session, joinedload
 
-from .models import ClinicSchedule, DayOff, DayOffScheduleCard, ScheduleCard, ScheduleCardActivity, Surgeon
+from .models import DayOff, DayOffScheduleCard, ScheduleCard, ScheduleCardActivity, Surgeon
 from .surgeon_visibility import surgeon_is_visible
 
 
@@ -62,7 +62,12 @@ def day_off_status_map(
     rows = (
         db.query(DayOff, ScheduleCard)
         .join(DayOffScheduleCard, DayOffScheduleCard.day_off_id == DayOff.id)
-        .join(ScheduleCard, ScheduleCard.id == DayOffScheduleCard.schedule_card_id)
+        .join(
+            ScheduleCard,
+            (ScheduleCard.id == DayOffScheduleCard.schedule_card_id)
+            & (ScheduleCard.surgeon_id == DayOff.surgeon_id)
+            & (ScheduleCard.surgeon_id == DayOffScheduleCard.surgeon_id),
+        )
         .options(joinedload(DayOff.surgeon))
         .filter(
             ScheduleCard.date >= start_date,
@@ -119,7 +124,7 @@ def day_off_sessions(segment: dict | None) -> set[str]:
     return sessions or {"am", "pm"}
 
 
-def schedule_matches_off_session(schedule: ClinicSchedule, off_info: dict | None) -> bool:
+def schedule_matches_off_session(schedule, off_info: dict | None) -> bool:
     if not off_info:
         return False
     sessions = set(off_info.get("sessions") or {"am", "pm"})

@@ -14,15 +14,16 @@ from app.models import (
     CallGroup,
     CallGroupLocation,
     CallRotation,
-    ClinicSchedule,
     DayOff,
     Location,
     ORBlockAuditEvent,
     ORBlockAssignment,
     ORBlockInstance,
+    ScheduleCard,
+    ScheduleCardActivity,
+    ScheduleCardWeek,
     ScheduleChangeEvent,
     Surgeon,
-    SurgicalCase,
 )
 from app.or_block_service import (
     BlockORCreateInput,
@@ -499,18 +500,17 @@ class ORBlockServiceTest(unittest.TestCase):
                 end_time=time(12, 0),
                 recurrence="once",
             ))["instance_ids"][0]
+            week_start = block_day - timedelta(days=block_day.weekday())
+            week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=week_start, master_revision="test")
+            db.add(week)
+            db.flush()
             db.add_all([
-                ClinicSchedule(surgeon_id=surgeon.id, location_id=clinic.id, date=block_day, session="am"),
-                DayOff(surgeon_id=surgeon.id, start_date=block_day, end_date=block_day, status="approved"),
-                SurgicalCase(
-                    surgeon_id=surgeon.id,
-                    date=block_day,
-                    start_time=time(8, 0),
-                    end_time=time(9, 0),
-                    patient_name="Hidden Patient",
-                    procedure="Hidden procedure",
-                    location_id=hospital.id,
+                ScheduleCard(
+                    week_id=week.id, surgeon_id=surgeon.id, date=block_day, session="am",
+                    baseline_state="assigned", effective_state="assigned",
+                    baseline_location_id=clinic.id, effective_location_id=clinic.id,
                 ),
+                DayOff(surgeon_id=surgeon.id, start_date=block_day, end_date=block_day, status="approved"),
             ])
             db.commit()
 
@@ -522,6 +522,114 @@ class ORBlockServiceTest(unittest.TestCase):
             # Surgical cases belong inside Block OR capacity — not flagged as conflicts here.
             self.assertFalse(any("Overlaps another surgical case" in row for row in warnings))
             self.assertNotIn("Hidden Patient", " ".join(warnings))
+        finally:
+            db.close()
+
+    def test_conflict_check_reads_card_line_not_old_case_list(self):
+        db = self.Session()
+        try:
+            from app.rules_engine.overlap_checkers import check_overlap_surgery
+
+            surgeon = self._surgeon(db, "Chris", "Johnson")
+            hospital = self._location(db, "Advent Winter Garden", "WG")
+            clinic = self._location(db, "Winter Garden Clinic", "WGC", "clinic")
+            day = date.today() + timedelta(days=14)
+            while day.weekday() != 2:
+                day += timedelta(days=1)
+            db.commit()
+            target = {
+                "type": "meeting",
+                "date": day,
+                "start_time": time(8, 0),
+                "end_time": time(9, 0),
+                "location_id": hospital.id,
+            }
+            ignored = list(check_overlap_surgery(surgeon.id, day, day, db, {}, target_entity=target))
+            self.assertEqual(ignored, [])
+
+            week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=day)
+            db.add(week)
+            db.flush()
+            card = ScheduleCard(
+                week_id=week.id,
+                surgeon_id=surgeon.id,
+                date=day,
+                session="am",
+                baseline_state="assigned",
+                effective_state="assigned",
+                baseline_location_id=clinic.id,
+                effective_location_id=clinic.id,
+            )
+            db.add(card)
+            db.flush()
+            db.add(ScheduleCardActivity(
+                schedule_card_id=card.id,
+                surgeon_id=surgeon.id,
+                location_id=clinic.id,
+                activity_date=day,
+                session="am",
+                activity_type="surgical",
+                start_time=time(8, 0),
+                end_time=time(9, 0),
+                patient_name="Card Patient",
+                procedure="Real",
+                source_system="fax",
+                source_record_key="conflict-line",
+                identity_key="conflict-line",
+            ))
+            db.commit()
+            found = list(check_overlap_surgery(surgeon.id, day, day, db, {}, target_entity=target))
+            self.assertEqual(len(found), 1)
+            self.assertIn("Card Patient", found[0].message)
+            self.assertNotIn("Old List Patient", found[0].message)
+        finally:
+            db.close()
+
+    def test_patient_lookup_reads_card_line_not_old_case_list(self):
+        db = self.Session()
+        try:
+            from app.grok_ask_intent import patient_from_question
+
+            surgeon = self._surgeon(db, "Lucy", "Woodley")
+            hospital = self._location(db, "Advent Winter Garden", "WG")
+            day = date.today() + timedelta(days=3)
+            db.commit()
+            self.assertIsNone(patient_from_question(db, "where is Oldlist"))
+
+            week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=day)
+            db.add(week)
+            db.flush()
+            card = ScheduleCard(
+                week_id=week.id,
+                surgeon_id=surgeon.id,
+                date=day,
+                session="am",
+                baseline_state="assigned",
+                effective_state="assigned",
+                baseline_location_id=hospital.id,
+                effective_location_id=hospital.id,
+            )
+            db.add(card)
+            db.flush()
+            db.add(ScheduleCardActivity(
+                schedule_card_id=card.id,
+                surgeon_id=surgeon.id,
+                location_id=hospital.id,
+                activity_date=day,
+                session="am",
+                activity_type="surgical",
+                start_time=time(9, 30),
+                patient_name="Cardline, Pat",
+                procedure="Real",
+                source_system="fax",
+                source_record_key="lookup-line",
+                identity_key="lookup-line",
+            ))
+            db.commit()
+            found = patient_from_question(db, "where is Cardline")
+            self.assertIsNotNone(found)
+            self.assertEqual(found["title"], "Cardline, Pat")
+            self.assertIsNone(patient_from_question(db, "where is Oldlist"))
         finally:
             db.close()
 
@@ -546,21 +654,14 @@ class ORBlockServiceTest(unittest.TestCase):
                 end_time=time(12, 0),
                 recurrence="once",
             ))["instance_ids"][0]
-            db.add(ClinicSchedule(
-                surgeon_id=surgeon.id,
-                location_id=clinic.id,
-                date=block_day,
-                session="pm",
-            ))
-            db.add(SurgicalCase(
-                surgeon_id=surgeon.id,
-                date=block_day,
-                start_time=time(11, 30),
-                end_time=time(12, 30),
-                patient_name="Late AM case",
-                procedure="Hernia",
-                location_id=hospital.id,
-                or_block_instance_id=block_id,
+            week_start = block_day - timedelta(days=block_day.weekday())
+            week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=week_start, master_revision="test")
+            db.add(week)
+            db.flush()
+            db.add(ScheduleCard(
+                week_id=week.id, surgeon_id=surgeon.id, date=block_day, session="pm",
+                baseline_state="assigned", effective_state="assigned",
+                baseline_location_id=clinic.id, effective_location_id=clinic.id,
             ))
             db.commit()
 
@@ -642,6 +743,20 @@ class ORBlockServiceTest(unittest.TestCase):
                 )
             with patch("app.or_block_service.send_push_to_surgeon"):
                 assign_block(db, block_id, surgeon.id, case_count=0, notify=False)
+            week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=block_day)
+            db.add(week)
+            db.flush()
+            db.add(ScheduleCard(
+                week_id=week.id,
+                surgeon_id=surgeon.id,
+                date=block_day,
+                session="am",
+                baseline_state="assigned",
+                effective_state="assigned",
+                baseline_location_id=hospital.id,
+                effective_location_id=hospital.id,
+            ))
+            db.commit()
             block, warnings = add_case_to_block(
                 db,
                 block_id,
@@ -650,7 +765,14 @@ class ORBlockServiceTest(unittest.TestCase):
                 procedure="Hernia",
                 patient_name="Test Patient",
             )
-            self.assertEqual(len([c for c in (block.cases or []) if (c.status or "") != "cancelled"]), 1)
+            from app.schedule_activity_normalization import active_surgical_lines
+            lines = active_surgical_lines(db, surgeon_id=surgeon.id, day=block_day)
+            self.assertEqual(len(lines), 1)
+            self.assertEqual(lines[0].or_block_instance_id, block_id)
+            self.assertEqual(
+                db.query(ScheduleCardActivity).filter_by(source_system="block_or").count(),
+                1,
+            )
             self.assertFalse(any("on call" in row.lower() for row in warnings))
             with self.assertRaisesRegex(ValueError, "already has a case"):
                 add_case_to_block(
@@ -682,9 +804,11 @@ class ORBlockServiceTest(unittest.TestCase):
                 recurrence="once",
             ))["instance_ids"][0]
             assign_block(db, block_id, surgeon.id, case_count=0, notify=False)
+            self._am_card(db, surgeon, hospital, block_day)
             add_case_to_block(db, block_id, surgeon.id, time(7, 15), patient_name="First")
-            block, _warnings = add_case_to_block(db, block_id, surgeon.id, time(9, 15), patient_name="Second")
-            second = next(case for case in block.cases if case.patient_name == "Second")
+            add_case_to_block(db, block_id, surgeon.id, time(9, 15), patient_name="Second")
+            from app.schedule_activity_normalization import active_surgical_lines
+            second = next(row for row in active_surgical_lines(db, surgeon_id=surgeon.id, day=block_day) if row.patient_name == "Second")
             with self.assertRaisesRegex(ValueError, "already has a case"):
                 update_block_case(
                     db,
@@ -722,6 +846,7 @@ class ORBlockServiceTest(unittest.TestCase):
                 recurrence="once",
             ))["instance_ids"][0]
             assign_block(db, block_id, surgeon.id, case_count=0, notify=False)
+            self._am_card(db, surgeon, hospital, block_day)
             _, warnings = add_case_to_block(
                 db,
                 block_id,
@@ -1036,18 +1161,6 @@ class ORBlockServiceTest(unittest.TestCase):
                 recurrence="once",
             ))["instance_ids"][0]
             assign_block(db, block_id, surgeon.id)
-            db.add(SurgicalCase(
-                surgeon_id=surgeon.id,
-                or_block_instance_id=block_id,
-                date=block_day,
-                start_time=time(7, 30),
-                end_time=time(8, 30),
-                patient_name="Do Not Show",
-                patient_dob="1/1/1960",
-                patient_phone="4075550100",
-                procedure="Private procedure",
-                location_id=hospital.id,
-            ))
             db.commit()
 
             payload = scheduler_native_home(db, block_day, block_day)
@@ -1168,28 +1281,8 @@ class ORBlockServiceTest(unittest.TestCase):
                 start_time=time(12, 30),
                 case_count=2,
             ))
-            db.add(SurgicalCase(
-                surgeon_id=cj.id,
-                date=day,
-                start_time=time(7, 15),
-                patient_name="AM Patient",
-                procedure="AM case",
-                location_id=hospital.id,
-                or_block_instance_id=block.id,
-                room_text="APK S05",
-                status="scheduled",
-            ))
-            db.add(SurgicalCase(
-                surgeon_id=lw.id,
-                date=day,
-                start_time=time(12, 30),
-                patient_name="PM Patient",
-                procedure="PM case",
-                location_id=hospital.id,
-                or_block_instance_id=block.id,
-                room_text="APK S03",
-                status="scheduled",
-            ))
+            self._room_line(db, cj, hospital, day, time(7, 15), block.id, "AM Patient", "APK S05")
+            self._room_line(db, lw, hospital, day, time(12, 30), block.id, "PM Patient", "APK S03")
             db.commit()
 
             ensure_am_pm_split_for_range(db, day, day)
@@ -1238,16 +1331,7 @@ class ORBlockServiceTest(unittest.TestCase):
                 start_time=time(12, 30),
                 case_count=1,
             ))
-            db.add(SurgicalCase(
-                surgeon_id=nadia.id,
-                date=day,
-                start_time=time(12, 30),
-                patient_name="Fax Patient",
-                procedure="Hernia",
-                location_id=hospital.id,
-                or_block_instance_id=sliver.id,
-                status="scheduled",
-            ))
+            self._room_line(db, nadia, hospital, day, time(12, 30), sliver.id, "Fax Patient", "")
             db.commit()
 
             result = collapse_extra_am_pm_cards(db, start=day, end=day)
@@ -1261,10 +1345,70 @@ class ORBlockServiceTest(unittest.TestCase):
             assignment = db.query(ORBlockAssignment).one()
             self.assertEqual(assignment.block_instance_id, host.id)
             self.assertEqual(assignment.surgeon_id, nadia.id)
-            case = db.query(SurgicalCase).one()
+            case = db.query(ScheduleCardActivity).one()
             self.assertEqual(case.or_block_instance_id, host.id)
         finally:
             db.close()
+
+    def _room_line(self, db, surgeon, hospital, day, start, block_id, patient, room):
+        session = "pm" if start >= time(12, 0) else "am"
+        monday = day - timedelta(days=day.weekday())
+        week = db.query(ScheduleCardWeek).filter_by(surgeon_id=surgeon.id, week_start=monday).one_or_none()
+        if week is None:
+            week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=monday, master_revision="test")
+            db.add(week)
+            db.flush()
+        card = db.query(ScheduleCard).filter_by(surgeon_id=surgeon.id, date=day, session=session).one_or_none()
+        if card is None:
+            card = ScheduleCard(
+                week_id=week.id,
+                surgeon_id=surgeon.id,
+                date=day,
+                session=session,
+                baseline_state="assigned",
+                effective_state="assigned",
+                baseline_location_id=hospital.id,
+                effective_location_id=hospital.id,
+            )
+            db.add(card)
+            db.flush()
+        line = ScheduleCardActivity(
+            schedule_card_id=card.id,
+            surgeon_id=surgeon.id,
+            location_id=hospital.id,
+            activity_date=day,
+            session=session,
+            activity_type="surgical",
+            start_time=start,
+            patient_name=patient,
+            procedure="Case",
+            room_text=room or None,
+            source_system="fax",
+            source_record_key=f"{surgeon.id}-{start.strftime('%H%M')}-{patient}",
+            identity_key=f"{patient}-{start.strftime('%H%M')}",
+            or_block_instance_id=block_id,
+            is_active=True,
+        )
+        db.add(line)
+        return line
+
+    def _am_card(self, db, surgeon, hospital, day):
+        week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=day)
+        db.add(week)
+        db.flush()
+        card = ScheduleCard(
+            week_id=week.id,
+            surgeon_id=surgeon.id,
+            date=day,
+            session="am",
+            baseline_state="assigned",
+            effective_state="assigned",
+            baseline_location_id=hospital.id,
+            effective_location_id=hospital.id,
+        )
+        db.add(card)
+        db.commit()
+        return card
 
     def _surgeon(self, db, first_name, last_name):
         row = Surgeon(

@@ -7,13 +7,12 @@ from sqlalchemy import Date, DateTime, Time, inspect, text
 from sqlalchemy.orm import Session
 
 from .models import (
-    ClinicSchedule,
     ORBlockAssignment,
     ORBlockAuditEvent,
     ORBlockInstance,
     ScheduleCard,
     ScheduleBuildBackup,
-    SurgicalCase,
+    ScheduleCardActivity,
 )
 
 
@@ -86,12 +85,18 @@ def create_schedule_build_backup(
     payload = {
         "version": SNAPSHOT_VERSION,
         "range": {"start": start.isoformat(), "end": end.isoformat()},
-        "clinic_schedules": [
-            _row_payload(row)
+        "schedule_card_places": [
+            {
+                "id": row.id,
+                "baseline_state": row.baseline_state,
+                "effective_state": row.effective_state,
+                "baseline_location_id": row.baseline_location_id,
+                "effective_location_id": row.effective_location_id,
+            }
             for row in (
-                db.query(ClinicSchedule)
-                .filter(ClinicSchedule.date >= start, ClinicSchedule.date <= end)
-                .order_by(ClinicSchedule.id)
+                db.query(ScheduleCard)
+                .filter(ScheduleCard.date >= start, ScheduleCard.date <= end)
+                .order_by(ScheduleCard.id)
                 .all()
             )
         ],
@@ -120,21 +125,25 @@ def create_schedule_build_backup(
         ],
         # Build Cards may attach existing parked cases to a newly available
         # master OR card. Keep only the scheduling linkage, never patient data.
-        "surgical_case_links": [
+        "card_line_links": [
             {
                 "id": row.id,
                 "surgeon_id": row.surgeon_id,
-                "date": _dump_value(row.date),
+                "date": _dump_value(row.activity_date),
                 "start_time": _dump_value(row.start_time),
                 "location_id": row.location_id,
                 "or_block_instance_id": row.or_block_instance_id,
                 "room_text": row.room_text,
-                "status": row.status,
+                "is_active": row.is_active,
             }
             for row in (
-                db.query(SurgicalCase)
-                .filter(SurgicalCase.date >= start, SurgicalCase.date <= end)
-                .order_by(SurgicalCase.id)
+                db.query(ScheduleCardActivity)
+                .filter(
+                    ScheduleCardActivity.activity_date >= start,
+                    ScheduleCardActivity.activity_date <= end,
+                    ScheduleCardActivity.activity_type == "surgical",
+                )
+                .order_by(ScheduleCardActivity.id)
                 .all()
             )
         ],
@@ -173,19 +182,12 @@ def create_fax_snapshot_backup(
                 ScheduleCard.date <= end,
             ).order_by(ScheduleCard.id).all()
         ],
-        "clinic_schedules": [
+        "card_lines": [
             _row_payload(row)
-            for row in db.query(ClinicSchedule).filter(
-                ClinicSchedule.date >= start,
-                ClinicSchedule.date <= end,
-            ).order_by(ClinicSchedule.id).all()
-        ],
-        "surgical_cases": [
-            _row_payload(row)
-            for row in db.query(SurgicalCase).filter(
-                SurgicalCase.date >= start,
-                SurgicalCase.date <= end,
-            ).order_by(SurgicalCase.id).all()
+            for row in db.query(ScheduleCardActivity).filter(
+                ScheduleCardActivity.activity_date >= start,
+                ScheduleCardActivity.activity_date <= end,
+            ).order_by(ScheduleCardActivity.id).all()
         ],
     }
     backup = ScheduleBuildBackup(
@@ -217,30 +219,15 @@ def _revert_fax_snapshot(db: Session, backup: ScheduleBuildBackup, payload: dict
                 continue
             setattr(card, column.key, _load_value(column, saved[column.key]))
 
-    db.query(ClinicSchedule).filter(
-        ClinicSchedule.date >= start,
-        ClinicSchedule.date <= end,
-    ).delete(synchronize_session="fetch")
-    db.query(SurgicalCase).filter(
-        SurgicalCase.date >= start,
-        SurgicalCase.date <= end,
-    ).delete(synchronize_session="fetch")
-    for row in payload.get("clinic_schedules", []):
-        db.add(_model_from_payload(ClinicSchedule, row))
-    for row in payload.get("surgical_cases", []):
-        db.add(_model_from_payload(SurgicalCase, row))
-
     backup.reverted_at = datetime.now(UTC).replace(tzinfo=None)
-    _bump_pg_sequence(db, "clinic_schedules")
-    _bump_pg_sequence(db, "surgical_cases")
     db.commit()
     return {
         "ok": True,
         "from": start.isoformat(),
         "to": end.isoformat(),
         "cards": len(card_payloads),
-        "clinic": len(payload.get("clinic_schedules", [])),
-        "cases": len(payload.get("surgical_cases", [])),
+        "clinic": len(card_payloads),
+        "cases": len(payload.get("card_lines", [])),
     }
 
 
@@ -268,10 +255,11 @@ def revert_schedule_build_backup(
     if payload.get("kind") == "fax_snapshot":
         backup.reverted_by_admin_id = admin_id
         return _revert_fax_snapshot(db, backup, payload)
-    case_links = {row["id"]: row for row in payload.get("surgical_case_links", [])}
-    if current_block_ids and "surgical_case_links" not in payload:
-        linked_cases = db.query(SurgicalCase).filter(
-            SurgicalCase.or_block_instance_id.in_(current_block_ids)
+    case_links = {row["id"]: row for row in payload.get("card_line_links", [])}
+    if current_block_ids and "card_line_links" not in payload and "surgical_case_links" not in payload:
+        linked_cases = db.query(ScheduleCardActivity).filter(
+            ScheduleCardActivity.or_block_instance_id.in_(current_block_ids),
+            ScheduleCardActivity.is_active == True,  # noqa: E712
         ).count()
         if linked_cases:
             return {
@@ -281,8 +269,9 @@ def revert_schedule_build_backup(
     if current_block_ids:
         post_backup_case = next(
             (
-                row for row in db.query(SurgicalCase).filter(
-                    SurgicalCase.or_block_instance_id.in_(current_block_ids)
+                row for row in db.query(ScheduleCardActivity).filter(
+                    ScheduleCardActivity.or_block_instance_id.in_(current_block_ids),
+                    ScheduleCardActivity.is_active == True,  # noqa: E712
                 ).all()
                 if row.id not in case_links
             ),
@@ -293,16 +282,20 @@ def revert_schedule_build_backup(
                 "ok": False,
                 "reason": "Revert blocked because surgical cases were added after this build.",
             }
-    db.query(ClinicSchedule).filter(
-        ClinicSchedule.date >= start,
-        ClinicSchedule.date <= end,
-    ).delete(synchronize_session=False)
+    for saved in payload.get("schedule_card_places", []):
+        card = db.get(ScheduleCard, saved.get("id"))
+        if card is None:
+            continue
+        card.baseline_state = saved.get("baseline_state") or card.baseline_state
+        card.effective_state = saved.get("effective_state") or card.effective_state
+        card.baseline_location_id = saved.get("baseline_location_id")
+        card.effective_location_id = saved.get("effective_location_id")
 
     if current_block_ids:
         # Preserve cases while restoring their pre-build linkage after the
         # replacement block instances have been recreated below.
-        for case in db.query(SurgicalCase).filter(
-            SurgicalCase.or_block_instance_id.in_(current_block_ids)
+        for case in db.query(ScheduleCardActivity).filter(
+            ScheduleCardActivity.or_block_instance_id.in_(current_block_ids)
         ).all():
             case.or_block_instance_id = None
         db.query(ORBlockAuditEvent).filter(
@@ -315,8 +308,6 @@ def revert_schedule_build_backup(
             ORBlockInstance.id.in_(current_block_ids)
         ).delete(synchronize_session=False)
 
-    for row in payload.get("clinic_schedules", []):
-        db.add(_model_from_payload(ClinicSchedule, row))
     for row in payload.get("or_block_instances", []):
         db.add(_model_from_payload(ORBlockInstance, row))
     db.flush()
@@ -326,20 +317,17 @@ def revert_schedule_build_backup(
         db.add(_model_from_payload(ORBlockAuditEvent, row))
 
     for case_id, link in case_links.items():
-        case = db.get(SurgicalCase, case_id)
+        case = db.get(ScheduleCardActivity, case_id)
         if case is None:
             continue
-        case.surgeon_id = link.get("surgeon_id")
-        case.date = date.fromisoformat(link["date"])
-        case.start_time = time.fromisoformat(link["start_time"]) if link.get("start_time") else None
-        case.location_id = link.get("location_id")
         case.or_block_instance_id = link.get("or_block_instance_id")
+        case.location_id = link.get("location_id")
         case.room_text = link.get("room_text")
-        case.status = link.get("status")
+        if "is_active" in link:
+            case.is_active = bool(link.get("is_active"))
 
     backup.reverted_at = datetime.now(UTC).replace(tzinfo=None)
     backup.reverted_by_admin_id = admin_id
-    _bump_pg_sequence(db, "clinic_schedules")
     _bump_pg_sequence(db, "or_block_instances")
     _bump_pg_sequence(db, "or_block_assignments")
     _bump_pg_sequence(db, "or_block_audit_events")
@@ -348,6 +336,6 @@ def revert_schedule_build_backup(
         "ok": True,
         "from": start.isoformat(),
         "to": end.isoformat(),
-        "clinic": len(payload.get("clinic_schedules", [])),
+        "clinic": len(payload.get("schedule_card_places", [])),
         "blocks": len(payload.get("or_block_instances", [])),
     }

@@ -10,7 +10,7 @@ from .models import DayOff, Surgeon
 from .or_block_service import log_schedule_change
 from .practice_time import practice_today
 from .push import clear_dayoff_request_notifications, send_push_to_surgeon
-from .scheduling_gate_service import day_off_overlap_advisory
+from .scheduling_gate_service import day_off_overlap_advisory, find_exact_live_day_off
 from .scheduling_guardrails_service import (
     decode_findings,
     finding_dicts,
@@ -355,6 +355,10 @@ def add_approved_dayoff(
     notes: str,
     approved_by: int,
 ) -> list[str]:
+    already = find_exact_live_day_off(db, surgeon_id, start, end, reason)
+    if already:
+        return ["That day off is already filed."]
+
     advisories: list[str] = []
     overlap_note = day_off_overlap_advisory(db, surgeon_id, start, end)
     if overlap_note:

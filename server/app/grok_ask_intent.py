@@ -14,7 +14,7 @@ from datetime import date, timedelta
 from sqlalchemy.orm import Session, joinedload
 
 from .ingest_resolve import resolve_surgeon
-from .models import Location, Surgeon, SurgicalCase
+from .models import Location, ScheduleCardActivity, Surgeon
 from .surgeon_visibility import surgeon_is_visible
 
 _MONTHS = {name.lower(): i for i, name in enumerate(calendar.month_name) if name}
@@ -432,10 +432,13 @@ def patient_from_question(db: Session, question: str) -> dict | None:
         return None
     needle = cleaned.lower()
     rows = (
-        db.query(SurgicalCase)
-        .options(joinedload(SurgicalCase.surgeon), joinedload(SurgicalCase.location))
-        .filter(SurgicalCase.status != "cancelled")
-        .order_by(SurgicalCase.date.desc())
+        db.query(ScheduleCardActivity)
+        .options(joinedload(ScheduleCardActivity.surgeon), joinedload(ScheduleCardActivity.location))
+        .filter(
+            ScheduleCardActivity.is_active == True,  # noqa: E712
+            ScheduleCardActivity.activity_type == "surgical",
+        )
+        .order_by(ScheduleCardActivity.activity_date.desc(), ScheduleCardActivity.id.desc())
         .limit(400)
         .all()
     )
@@ -450,7 +453,7 @@ def patient_from_question(db: Session, question: str) -> dict | None:
     row = hits[0]
     lines = [
         f"{row.surgeon.full_name if row.surgeon else 'unassigned'}'s board",
-        row.date.strftime("%b %-d, %Y"),
+        row.activity_date.strftime("%b %-d, %Y"),
         row.start_time.strftime("%H:%M") if row.start_time else "no start time yet",
     ]
     if row.location:

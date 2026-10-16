@@ -1,6 +1,6 @@
 import os
 import unittest
-from datetime import date, time
+from datetime import date, time, timedelta
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("SECRET_KEY", "test-secret")
@@ -16,14 +16,15 @@ from app.admin_clinic_schedule_page_service import page_data
 from app.admin_surgical_schedule_service import week_offset_for_date
 from app.models import (
     Base,
-    ClinicSchedule,
     DayOff,
     Location,
     ORBlockAssignment,
     ORBlockInstance,
+    ScheduleCard,
+    ScheduleCardActivity,
+    ScheduleCardWeek,
     Surgeon,
     SurgeonLocationSchedule,
-    SurgicalCase,
 )
 from app.master_schedule_build_service import build_missing_master_cards
 from app.paper_block_schedule import (
@@ -38,6 +39,34 @@ from app.schedule_build_backup_service import (
     create_schedule_build_backup,
     revert_schedule_build_backup,
 )
+
+
+def _ensure_card(db, surgeon, day, session, location=None, state="na"):
+    week_start = day - timedelta(days=day.weekday())
+    week = db.query(ScheduleCardWeek).filter_by(
+        surgeon_id=surgeon.id, week_start=week_start,
+    ).one_or_none()
+    if week is None:
+        week = ScheduleCardWeek(surgeon_id=surgeon.id, week_start=week_start, master_revision="test")
+        db.add(week)
+        db.flush()
+    card = db.query(ScheduleCard).filter_by(
+        surgeon_id=surgeon.id, date=day, session=session,
+    ).one_or_none()
+    if card is None:
+        card = ScheduleCard(
+            week_id=week.id,
+            surgeon_id=surgeon.id,
+            date=day,
+            session=session,
+            baseline_state=state,
+            effective_state=state,
+            baseline_location_id=location.id if location and state == "assigned" else None,
+            effective_location_id=location.id if location and state == "assigned" else None,
+        )
+        db.add(card)
+        db.flush()
+    return card
 
 
 def _loc(db, abbrev, name, loc_type):
@@ -136,6 +165,7 @@ class PaperBlockScheduleTest(unittest.TestCase):
         alex = self.db.query(Surgeon).filter_by(last_name="Schroeder").one()
         wg = self.db.query(Location).filter_by(abbreviation="WG-OR").one()
         save_template_cell_value(self.db, alex.id, 0, "am", wg.id, "assigned", "1,3,5")
+        _ensure_card(self.db, alex, date(2026, 9, 21), "am")
 
         result = apply_clinic_schedule_templates(
             self.db,
@@ -147,9 +177,9 @@ class PaperBlockScheduleTest(unittest.TestCase):
         )
         self.assertEqual(result["created"], 1)
         rows = (
-            self.db.query(ClinicSchedule)
-            .filter_by(surgeon_id=alex.id, session="am")
-            .order_by(ClinicSchedule.date)
+            self.db.query(ScheduleCard)
+            .filter_by(surgeon_id=alex.id, session="am", effective_state="assigned")
+            .order_by(ScheduleCard.date)
             .all()
         )
         self.assertEqual([row.date for row in rows], [date(2026, 9, 21)])
@@ -172,6 +202,9 @@ class PaperBlockScheduleTest(unittest.TestCase):
             reason="CME / Conference",
         ))
         self.db.commit()
+        jorge = self.db.query(Surgeon).filter_by(last_name="Florin").one()
+        _ensure_card(self.db, jorge, date(2026, 9, 14), "am")
+        _ensure_card(self.db, jorge, date(2026, 9, 14), "pm")
 
         result = apply_paper_block_schedule(
             self.db,
@@ -183,18 +216,16 @@ class PaperBlockScheduleTest(unittest.TestCase):
         )
         self.assertTrue(result["ok"])
         self.assertGreater(result["skippedOff"], 0)
-
-        jorge = self.db.query(Surgeon).filter_by(last_name="Florin").one()
         mon = (
-            self.db.query(ClinicSchedule)
+            self.db.query(ScheduleCard)
             .filter_by(surgeon_id=jorge.id, date=date(2026, 9, 14), session="am")
             .one()
         )
-        self.assertEqual(mon.location.abbreviation, "AP-OR")
+        self.assertEqual(mon.effective_location.abbreviation, "AP-OR")
 
         alex_mon = (
-            self.db.query(ClinicSchedule)
-            .filter_by(surgeon_id=alex.id, date=date(2026, 9, 14))
+            self.db.query(ScheduleCard)
+            .filter_by(surgeon_id=alex.id, date=date(2026, 9, 14), effective_state="assigned")
             .all()
         )
         self.assertEqual(alex_mon, [])
@@ -206,27 +237,20 @@ class PaperBlockScheduleTest(unittest.TestCase):
         day = date(2026, 9, 14)
         save_template_cell_value(self.db, jorge.id, 0, "am", ap.id, "assigned", "all")
         save_template_cell_value(self.db, jorge.id, 0, "pm", ap.id, "assigned", "all")
-        self.db.add(ClinicSchedule(
-            surgeon_id=jorge.id,
-            location_id=wg.id,
-            date=day,
-            session="am",
-            assignment_type="assigned",
-            notes="Keep this scheduled card exactly as entered.",
-        ))
+        _ensure_card(self.db, jorge, day, "am", wg, "assigned")
+        _ensure_card(self.db, jorge, day, "pm")
         self.db.commit()
 
         result = build_missing_master_cards(self.db, start=day, end=day)
 
-        am = self.db.query(ClinicSchedule).filter_by(
+        am = self.db.query(ScheduleCard).filter_by(
             surgeon_id=jorge.id, date=day, session="am"
         ).one()
-        pm = self.db.query(ClinicSchedule).filter_by(
+        pm = self.db.query(ScheduleCard).filter_by(
             surgeon_id=jorge.id, date=day, session="pm"
         ).one()
-        self.assertEqual(am.location_id, wg.id)
-        self.assertEqual(am.notes, "Keep this scheduled card exactly as entered.")
-        self.assertEqual(pm.location_id, ap.id)
+        self.assertEqual(am.effective_location_id, wg.id)
+        self.assertEqual(pm.effective_location_id, ap.id)
         # The remaining unassigned weekday sessions are materialized as NA
         # capacity instead of being left without a dated card.
         self.assertGreaterEqual(result["clinicCreated"], 1)
@@ -234,33 +258,43 @@ class PaperBlockScheduleTest(unittest.TestCase):
         self.assertEqual(result["cardsFolded"], 0)
         self.assertEqual(result["blocksPruned"], 0)
 
-    def test_master_builder_materializes_blank_sessions_as_na_cards(self):
+    def test_master_builder_leaves_blank_cards_as_na(self):
         jorge = self.db.query(Surgeon).filter_by(last_name="Florin").one()
         day = date(2026, 9, 14)
+        _ensure_card(self.db, jorge, day, "am")
+        _ensure_card(self.db, jorge, day, "pm")
 
         result = build_missing_master_cards(self.db, start=day, end=day)
 
-        cards = self.db.query(ClinicSchedule).filter_by(
+        cards = self.db.query(ScheduleCard).filter_by(
             surgeon_id=jorge.id, date=day,
-        ).order_by(ClinicSchedule.session).all()
+        ).order_by(ScheduleCard.session).all()
         self.assertEqual([card.session for card in cards], ["am", "pm"])
-        self.assertEqual([card.assignment_type for card in cards], ["na", "na"])
-        self.assertEqual([card.location_id for card in cards], [None, None])
-        self.assertGreaterEqual(result["clinicCreated"], 2)
+        self.assertEqual([card.effective_state for card in cards], ["na", "na"])
+        self.assertEqual([card.effective_location_id for card in cards], [None, None])
+        self.assertEqual(result["clinicCreated"], 0)
 
     def test_master_builder_attaches_exact_parked_case_after_creating_card(self):
         jorge = self.db.query(Surgeon).filter_by(last_name="Florin").one()
         ap_or = self.db.query(Location).filter_by(abbreviation="AP-OR").one()
         day = date(2026, 9, 14)
         save_template_cell_value(self.db, jorge.id, 0, "am", ap_or.id, "assigned", "all")
-        case = SurgicalCase(
-            surgeon_id=jorge.id,
-            date=day,
-            start_time=time(7, 15),
-            patient_name="PARKED, CASE",
-            procedure="Test procedure",
-            location_id=ap_or.id,
-            status="scheduled",
+        week = ScheduleCardWeek(surgeon_id=jorge.id, week_start=day, master_revision="test")
+        self.db.add(week)
+        self.db.flush()
+        card = ScheduleCard(
+            week_id=week.id, surgeon_id=jorge.id, date=day, session="am",
+            baseline_state="assigned", effective_state="assigned",
+            baseline_location_id=ap_or.id, effective_location_id=ap_or.id,
+        )
+        self.db.add(card)
+        self.db.flush()
+        case = ScheduleCardActivity(
+            schedule_card_id=card.id, surgeon_id=jorge.id, location_id=ap_or.id,
+            activity_date=day, session="am", activity_type="surgical",
+            start_time=time(7, 15), patient_name="PARKED, CASE", procedure="Test procedure",
+            source_system="fax", source_record_key="parked", identity_key="parked",
+            is_active=True,
         )
         self.db.add(case)
         self.db.commit()
@@ -274,8 +308,8 @@ class PaperBlockScheduleTest(unittest.TestCase):
 
         chris = self.db.query(Surgeon).filter_by(last_name="Johnson").one()
         fri = (
-            self.db.query(ClinicSchedule)
-            .filter_by(surgeon_id=chris.id, date=date(2026, 9, 18))
+            self.db.query(ScheduleCard)
+            .filter_by(surgeon_id=chris.id, date=date(2026, 9, 18), effective_state="assigned")
             .all()
         )
         self.assertEqual(fri, [])
@@ -332,8 +366,8 @@ class PaperBlockScheduleTest(unittest.TestCase):
         self.assertGreater(result["blocksAssigned"], 0)
 
         clinic = (
-            self.db.query(ClinicSchedule)
-            .filter_by(surgeon_id=chris.id, date=day)
+            self.db.query(ScheduleCard)
+            .filter_by(surgeon_id=chris.id, date=day, effective_state="assigned")
             .all()
         )
         self.assertEqual(clinic, [])
@@ -474,13 +508,7 @@ class PaperBlockScheduleTest(unittest.TestCase):
         ap = self.db.query(Location).filter_by(abbreviation="AP-OR").one()
         wg = self.db.query(Location).filter_by(abbreviation="WG-OR").one()
         day = date(2026, 9, 14)
-        clinic = ClinicSchedule(
-            surgeon_id=jorge.id,
-            location_id=ap.id,
-            date=day,
-            session="am",
-            assignment_type="assigned",
-        )
+        clinic = _ensure_card(self.db, jorge, day, "am", ap, "assigned")
         block = ORBlockInstance(
             location_id=ap.id,
             date=day,
@@ -489,7 +517,7 @@ class PaperBlockScheduleTest(unittest.TestCase):
             end_time=time(12, 0),
             status="assigned",
         )
-        self.db.add_all([clinic, block])
+        self.db.add(block)
         self.db.flush()
         self.db.add(ORBlockAssignment(
             block_instance_id=block.id,
@@ -500,15 +528,16 @@ class PaperBlockScheduleTest(unittest.TestCase):
         self.db.commit()
 
         backup = create_schedule_build_backup(self.db, admin_id=None, start=day, end=day)
-        clinic.location_id = wg.id
+        clinic.baseline_location_id = wg.id
+        clinic.effective_location_id = wg.id
         self.db.query(ORBlockAssignment).delete()
         self.db.query(ORBlockInstance).delete()
         self.db.commit()
 
         result = revert_schedule_build_backup(self.db, backup_id=backup.id, admin_id=None)
         self.assertTrue(result["ok"])
-        restored_clinic = self.db.query(ClinicSchedule).filter_by(surgeon_id=jorge.id, date=day).one()
-        self.assertEqual(restored_clinic.location_id, ap.id)
+        restored_clinic = self.db.query(ScheduleCard).filter_by(surgeon_id=jorge.id, date=day).one()
+        self.assertEqual(restored_clinic.effective_location_id, ap.id)
         restored_block = self.db.query(ORBlockInstance).filter_by(location_id=ap.id, date=day).one()
         self.assertEqual(restored_block.assignments[0].surgeon_id, jorge.id)
 
@@ -527,14 +556,22 @@ class PaperBlockScheduleTest(unittest.TestCase):
         self.db.add(block)
         self.db.flush()
         backup = create_schedule_build_backup(self.db, admin_id=None, start=day, end=day)
-        self.db.add(SurgicalCase(
-            surgeon_id=jorge.id,
-            date=day,
-            start_time=time(7, 15),
-            patient_name="Test Patient",
-            procedure="Test",
-            location_id=ap.id,
-            or_block_instance_id=block.id,
+        week = ScheduleCardWeek(surgeon_id=jorge.id, week_start=day, master_revision="test")
+        self.db.add(week)
+        self.db.flush()
+        card = ScheduleCard(
+            week_id=week.id, surgeon_id=jorge.id, date=day, session="am",
+            baseline_state="assigned", effective_state="assigned",
+            baseline_location_id=ap.id, effective_location_id=ap.id,
+        )
+        self.db.add(card)
+        self.db.flush()
+        self.db.add(ScheduleCardActivity(
+            schedule_card_id=card.id, surgeon_id=jorge.id, location_id=ap.id,
+            activity_date=day, session="am", activity_type="surgical",
+            start_time=time(7, 15), patient_name="Test Patient", procedure="Test",
+            source_system="fax", source_record_key="linked", identity_key="linked",
+            or_block_instance_id=block.id, is_active=True,
         ))
         self.db.commit()
 
@@ -544,6 +581,9 @@ class PaperBlockScheduleTest(unittest.TestCase):
 
     def test_clinic_grid_keeps_master_or_and_clinic_same_day(self):
         day = date(2027, 1, 4)
+        jorge = self.db.query(Surgeon).filter_by(last_name="Florin").one()
+        _ensure_card(self.db, jorge, day, "am")
+        _ensure_card(self.db, jorge, day, "pm")
         result = apply_paper_block_schedule(
             self.db,
             start=day,
@@ -553,7 +593,6 @@ class PaperBlockScheduleTest(unittest.TestCase):
             write_blocks=True,
         )
         self.assertTrue(result["ok"])
-        jorge = self.db.query(Surgeon).filter_by(last_name="Florin").one()
         data = page_data(self.db, week_offset_for_date(day))
         rows = data["sched_map"][jorge.id][day]
         labels = sorted(row.location.abbreviation for row in rows)

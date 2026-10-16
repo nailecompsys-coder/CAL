@@ -21,7 +21,6 @@ from .models import (
     ScheduleCard,
     ScheduleCardActivity,
     Surgeon,
-    SurgicalCase,
 )
 
 
@@ -40,6 +39,58 @@ def _identity(patient_name: str | None, start_time: time | None, activity_type: 
     return "|".join((_key(patient_name), start_time.isoformat() if start_time else "", activity_type))
 
 
+def active_surgical_lines(
+    db: Session,
+    *,
+    surgeon_id: int | None = None,
+    surgeon_ids: list[int] | None = None,
+    start: date | None = None,
+    end: date | None = None,
+    day: date | None = None,
+    session: str | None = None,
+    exclude_activity_id: int | None = None,
+) -> list[ScheduleCardActivity]:
+    """One row per surgeon, day, and identity. Phones and the website read this list."""
+    if surgeon_ids is not None and not surgeon_ids:
+        return []
+    query = db.query(ScheduleCardActivity).filter(
+        ScheduleCardActivity.is_active == True,  # noqa: E712
+        ScheduleCardActivity.activity_type == "surgical",
+    )
+    if surgeon_id is not None:
+        query = query.filter(ScheduleCardActivity.surgeon_id == surgeon_id)
+    if surgeon_ids is not None:
+        query = query.filter(ScheduleCardActivity.surgeon_id.in_(surgeon_ids))
+    if day is not None:
+        query = query.filter(ScheduleCardActivity.activity_date == day)
+    else:
+        if start is not None:
+            query = query.filter(ScheduleCardActivity.activity_date >= start)
+        if end is not None:
+            query = query.filter(ScheduleCardActivity.activity_date <= end)
+    if session in {"am", "pm"}:
+        query = query.filter(ScheduleCardActivity.session == session)
+    if exclude_activity_id is not None:
+        query = query.filter(ScheduleCardActivity.id != exclude_activity_id)
+    rows = query.order_by(
+        ScheduleCardActivity.activity_date,
+        ScheduleCardActivity.start_time,
+        ScheduleCardActivity.id,
+    ).all()
+    seen: set[tuple] = set()
+    kept: list[ScheduleCardActivity] = []
+    for row in rows:
+        key = (row.surgeon_id, row.activity_date, row.identity_key)
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(row)
+    return kept
+
+
+_LEAVE_BLOCK = object()
+
+
 def _upsert_activity(
     db: Session,
     *,
@@ -54,9 +105,9 @@ def _upsert_activity(
     room_text: str | None = None,
     location_id: int | None = None,
     is_active: bool = True,
-    surgical_case_id: int | None = None,
     fax_ingest_row_id: int | None = None,
     aprima_appointment_id: str | None = None,
+    or_block_instance_id: int | None | object = _LEAVE_BLOCK,
 ) -> ScheduleCardActivity:
     row = db.query(ScheduleCardActivity).filter(
         ScheduleCardActivity.source_system == source_system,
@@ -78,9 +129,10 @@ def _upsert_activity(
     row.room_text = (room_text or "").strip() or None
     row.identity_key = _identity(row.patient_name, start_time, activity_type)
     row.is_active = is_active
-    row.surgical_case_id = surgical_case_id
     row.fax_ingest_row_id = fax_ingest_row_id
     row.aprima_appointment_id = aprima_appointment_id
+    if or_block_instance_id is not _LEAVE_BLOCK:
+        row.or_block_instance_id = or_block_instance_id
     return row
 
 
@@ -109,49 +161,6 @@ def resolve_schedule_card(
     if session not in {"am", "pm"}:
         session = "pm" if start_time and start_time >= time(12, 0) else "am"
     return next((row for row in candidates if row.session == session), None)
-
-
-def normalize_surgical_case_card(db: Session, case: SurgicalCase) -> ScheduleCard | None:
-    if case.id is None:
-        db.flush()
-    card = db.get(ScheduleCard, case.schedule_card_id) if case.schedule_card_id else None
-    if card and (card.surgeon_id != case.surgeon_id or card.date != case.date):
-        card = None
-    if card is None:
-        card = resolve_schedule_card(
-            db,
-            surgeon_id=case.surgeon_id,
-            day=case.date,
-            location_id=case.location_id,
-            start_time=case.start_time,
-        )
-    case.schedule_card_id = card.id if card else None
-    if card:
-        _upsert_activity(
-            db,
-            source_system="surgical_case",
-            source_record_key=str(case.id),
-            card=card,
-            activity_type="surgical",
-            start_time=case.start_time,
-            end_time=case.end_time,
-            patient_name=case.patient_name,
-            procedure=case.procedure,
-            room_text=case.room_text,
-            location_id=case.location_id,
-            is_active=(case.status or "scheduled") != "cancelled",
-            surgical_case_id=case.id,
-        )
-    else:
-        deactivate_surgical_case_activity(db, case.id)
-    return card
-
-
-def deactivate_surgical_case_activity(db: Session, case_id: int) -> None:
-    db.query(ScheduleCardActivity).filter(
-        ScheduleCardActivity.source_system == "surgical_case",
-        ScheduleCardActivity.source_record_key == str(case_id),
-    ).update({ScheduleCardActivity.is_active: False}, synchronize_session=False)
 
 
 def normalize_aprima_payload(
@@ -272,7 +281,11 @@ def sync_applied_fax_clinic_activities(db: Session, run: FaxIngestRun) -> int:
 
 
 def reconcile_applied_fax_versions(db: Session) -> int:
-    """Make only the newest applied fax rows for each date active; past dates stay as they were."""
+    """Make only the newest applied fax rows for each date active; past dates stay as they were.
+
+    When the scratch reading is already gone, the card line is the schedule.
+    An empty reading must not turn those lines off.
+    """
     db.flush()
     today = datetime.now(ZoneInfo(PRACTICE_TIMEZONE)).date()
     ranked = (
@@ -293,25 +306,21 @@ def reconcile_applied_fax_versions(db: Session) -> int:
         .subquery()
     )
     newest_ids = [row_id for (row_id,) in db.query(ranked.c.row_id).filter(ranked.c.revision_rank == 1).all()]
+    if not newest_ids:
+        return 0
     db.query(ScheduleCardActivity).filter(
         ScheduleCardActivity.source_system == "fax_clinic",
         ScheduleCardActivity.activity_date >= today,
     ).update({ScheduleCardActivity.is_active: False}, synchronize_session=False)
-    if newest_ids:
-        updated = db.query(ScheduleCardActivity).filter(
-            ScheduleCardActivity.fax_ingest_row_id.in_(newest_ids),
-        ).update({ScheduleCardActivity.is_active: True}, synchronize_session=False)
-        db.expire_all()
-        return updated
+    updated = db.query(ScheduleCardActivity).filter(
+        ScheduleCardActivity.fax_ingest_row_id.in_(newest_ids),
+    ).update({ScheduleCardActivity.is_active: True}, synchronize_session=False)
     db.expire_all()
-    return 0
+    return updated
 
 
 def backfill_normalized_schedule_activity(db: Session) -> dict[str, int]:
     surgical = aprima = 0
-    for case in db.query(SurgicalCase).all():
-        if normalize_surgical_case_card(db, case):
-            surgical += 1
     for cached in db.query(AprimaCachedAppointment).filter(
         AprimaCachedAppointment.activity_type.is_(None),
     ).all():

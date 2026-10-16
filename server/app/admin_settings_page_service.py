@@ -215,7 +215,6 @@ def reconcile_ingest_correction_notifications(
     """Drop fixed / junk / duplicate ingest cards. Keep unplaced cases for drag-save."""
     from .ingest_date_rules import parse_iso_date, plausible_schedule_date
     from .ingest_resolve import resolve_clinic_location
-    from .models import SurgicalCase
     from .practice_time import practice_today
 
     today = practice_today()
@@ -267,8 +266,9 @@ def reconcile_ingest_correction_notifications(
                 continue
         case_id = payload.get("caseId")
         if case_id:
-            case = db.get(SurgicalCase, int(case_id))
-            if case is None or (case.status or "") == "cancelled":
+            from .models import ScheduleCardActivity
+            case = db.get(ScheduleCardActivity, int(case_id))
+            if case is None or not case.is_active:
                 db.delete(row)
                 removed += 1
                 continue
@@ -294,18 +294,19 @@ def reconcile_ingest_correction_notifications(
 
 def _timed_case_already_on_board(db: Session, day, patient: str) -> bool:
     from .ingest_date_rules import patient_name_key
-    from .models import SurgicalCase
+    from .models import ScheduleCardActivity
 
     last = patient_name_key((patient or "").split(",")[0])
     first = patient_name_key(",".join((patient or "").split(",")[1:]))
     if not last:
         return False
     rows = (
-        db.query(SurgicalCase)
+        db.query(ScheduleCardActivity)
         .filter(
-            SurgicalCase.date == day,
-            SurgicalCase.status != "cancelled",
-            SurgicalCase.start_time.isnot(None),
+            ScheduleCardActivity.activity_date == day,
+            ScheduleCardActivity.is_active == True,  # noqa: E712
+            ScheduleCardActivity.activity_type == "surgical",
+            ScheduleCardActivity.start_time.isnot(None),
         )
         .all()
     )
@@ -320,69 +321,9 @@ def _timed_case_already_on_board(db: Session, day, patient: str) -> bool:
 
 
 def reconcile_desk_fax_outlier_cases(db: Session) -> int:
-    """Cancel desk-sourced cases whose dates are DOBs or OCR years, or snap them into the fax week."""
-    from .ingest_date_rules import (
-        date_allowed_for_fax,
-        desk_fax_id_from_notes,
-        plausible_schedule_date,
-    )
-    from .models import SurgicalCase
-    from .practice_time import practice_today
-
-    today = practice_today()
-    rows = (
-        db.query(SurgicalCase)
-        .filter(
-            SurgicalCase.status != "cancelled",
-            SurgicalCase.notes.isnot(None),
-        )
-        .all()
-    )
-    by_fax: dict[int, list] = {}
-    for row in rows:
-        fax_id = desk_fax_id_from_notes(row.notes)
-        if not fax_id:
-            continue
-        by_fax.setdefault(fax_id, []).append(row)
-
-    changed = 0
-    changed_cases = []
-    for _fax_id, cases in by_fax.items():
-        in_window = [c.date for c in cases if c.date and plausible_schedule_date(c.date, today)]
-        window = (min(in_window), max(in_window)) if in_window else None
-        for case in cases:
-            allowed = date_allowed_for_fax(case.date, window, today=today)
-            if allowed == case.date:
-                continue
-            if allowed is None:
-                case.status = "cancelled"
-                changed += 1
-                changed_cases.append(case)
-                continue
-            clash = next(
-                (
-                    other
-                    for other in cases
-                    if other.id != case.id
-                    and other.date == allowed
-                    and (other.status or "") != "cancelled"
-                    and (other.patient_name or "").strip().lower()
-                    == (case.patient_name or "").strip().lower()
-                ),
-                None,
-            )
-            if clash:
-                case.status = "cancelled"
-            else:
-                case.date = allowed
-            changed += 1
-            changed_cases.append(case)
-    if changed:
-        from .schedule_activity_normalization import normalize_surgical_case_card
-        for case in changed_cases:
-            normalize_surgical_case_card(db, case)
-        db.commit()
-    return changed
+    """The old surgery list kept fax notes. Those rows are gone."""
+    del db
+    return 0
 
 
 def _reconcile_stale_desk_or_schedule_flag_events(db: Session) -> int:

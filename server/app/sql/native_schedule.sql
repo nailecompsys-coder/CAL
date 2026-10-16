@@ -1,5 +1,5 @@
--- The permanent master card and source cases are read together. SQL owns
--- membership, conflict detection, deduplication, and ordering.
+-- Card lines are the schedule. SQL owns membership, conflict detection,
+-- deduplication, and ordering. A surgery shows only as an active card line.
 WITH RECURSIVE
 calendar_days(day) AS (
     SELECT CAST(:start_date AS DATE_SQL)
@@ -30,8 +30,9 @@ card_activity AS (
             PARTITION BY a.schedule_card_id, a.identity_key ORDER BY a.id
         ) AS duplicate_rank
         FROM schedule_card_activities a
-        WHERE a.surgeon_id = :surgeon_id AND a.is_active = TRUE
-          AND a.activity_date BETWEEN :start_date AND :end_date
+        JOIN schedule_cards card ON card.id = a.schedule_card_id
+        WHERE card.surgeon_id = :surgeon_id AND a.is_active = TRUE
+          AND card.date BETWEEN :start_date AND :end_date
     ) a
     WHERE a.duplicate_rank = 1
     GROUP BY a.schedule_card_id
@@ -64,28 +65,6 @@ cards AS (
       AND c.date BETWEEN :start_date AND :end_date
       AND WEEKDAY_CARD
 ),
-source_cases AS (
-    SELECT sc.*, CASE WHEN sc.surgeon_id = :surgeon_id THEN 0 ELSE 1 END AS assisting,
-           c.id AS card_id,
-           c.baseline_state AS card_state, c.baseline_location_id AS card_location_id,
-           c.is_off AS card_is_off, c.baseline_label AS card_label,
-           l.name AS location_name, l.color AS location_color,
-           assistant.first_name || ' ' || assistant.last_name AS assisting_name
-    FROM surgical_cases sc
-    -- The case's stored card for its own surgeon; otherwise (assisting, or no stored card)
-    -- this surgeon's card for the case's half-day.
-    LEFT JOIN cards c ON c.id = CASE
-        WHEN sc.surgeon_id = :surgeon_id AND EXISTS (SELECT 1 FROM cards x WHERE x.id = sc.schedule_card_id)
-            THEN sc.schedule_card_id
-        ELSE (SELECT x.id FROM cards x WHERE x.date = sc.date AND x.session = CASE
-                WHEN substr(CAST(sc.start_time AS TEXT), 1, 5) < '12:00' THEN 'am' ELSE 'pm' END)
-    END
-    LEFT JOIN locations l ON l.id = sc.location_id
-    LEFT JOIN surgeons assistant ON assistant.id = sc.assisting_surgeon_id
-    WHERE (sc.surgeon_id = :surgeon_id OR sc.assisting_surgeon_id = :surgeon_id)
-      AND sc.date BETWEEN :start_date AND :end_date
-      AND coalesce(sc.status, 'scheduled') <> 'cancelled'
-),
 items AS (
     SELECT 'card-' || CAST(c.id AS TEXT) AS item_id, c.date AS item_date,
            CASE WHEN c.is_off = 0 AND c.location_type = 'hospital'
@@ -100,12 +79,7 @@ items AS (
            CASE WHEN c.session = 'am' THEN '12:00' ELSE '17:00' END AS end_time,
            c.location_name AS location, CAST(NULL AS TEXT) AS room,
            CAST(NULL AS TEXT) AS notes, 'master' AS source,
-           CASE WHEN (c.is_off = 1 AND (c.cases > 0 OR c.visits > 0 OR EXISTS (
-                    SELECT 1 FROM surgical_cases sc
-                    WHERE (sc.surgeon_id = :surgeon_id OR sc.assisting_surgeon_id = :surgeon_id)
-                      AND sc.date = c.date AND coalesce(sc.status, 'scheduled') <> 'cancelled'
-                      AND CASE WHEN substr(CAST(sc.start_time AS TEXT),1,5) < '12:00' THEN 'am' ELSE 'pm' END = c.session
-                ))) OR (c.baseline_state = 'assigned' AND EXISTS (
+           CASE WHEN (c.is_off = 1 AND (c.cases > 0 OR c.visits > 0)) OR (c.baseline_state = 'assigned' AND EXISTS (
                     SELECT 1 FROM schedule_card_activities a
                     WHERE a.schedule_card_id = c.id AND a.is_active = TRUE
                       AND a.location_id IS NOT NULL AND a.location_id <> c.baseline_location_id
@@ -114,51 +88,36 @@ items AS (
            CAST(NULL AS TEXT) AS status, CAST(NULL AS TEXT) AS surgeon_notes,
            CAST(NULL AS TEXT) AS assisting_surgeon, 0 AS assisting,
            CASE WHEN c.session = 'am' THEN 0 ELSE 2 END AS sort_rank,
-           (SELECT count(*) FROM source_cases sc WHERE sc.card_id = c.id) AS case_count,
+           c.cases AS case_count,
            c.visits AS visit_count, c.id AS card_id
     FROM cards c
     UNION ALL
-    SELECT 'surg-' || CAST(sc.id AS TEXT) || CASE WHEN sc.assisting = 1 THEN '-assist' ELSE '' END,
-           sc.date, 'surgery', coalesce(nullif(sc.patient_name, ''), 'Surgery'),
-           CASE WHEN sc.assisting = 1 THEN 'Assisting · ' || coalesce(sc.procedure, '') ELSE coalesce(sc.procedure, '') END,
-           coalesce(substr(CAST(sc.start_time AS TEXT), 1, 5), '08:00'),
-           substr(CAST(sc.end_time AS TEXT), 1, 5),
-           coalesce(sc.location_name, sc.room_text, ''), coalesce(sc.room_text, ''),
-           coalesce(sc.notes, ''), 'surgical_case',
-           CASE WHEN sc.card_is_off = 1 OR (
-                sc.card_state = 'assigned' AND sc.location_id IS NOT NULL
-                AND sc.card_location_id <> sc.location_id) OR EXISTS (
-                SELECT 1 FROM leave_segments d WHERE d.day = sc.date
-                  AND (d.start_time IS NULL OR (
-                      sc.start_time IS NOT NULL AND d.end_time IS NOT NULL
-                      AND substr(CAST(sc.start_time AS TEXT),1,5) < substr(d.end_time,1,5)
-                      AND substr(CAST(coalesce(sc.end_time, sc.start_time) AS TEXT),1,5) > substr(d.start_time,1,5)
-                  ))
-           ) THEN 1 ELSE 0 END,
-           sc.id, coalesce(sc.location_color, '#e0f2fe'), sc.status,
-           CASE WHEN sc.assisting = 1 THEN '' ELSE coalesce(sc.surgeon_notes, '') END,
-           coalesce(sc.assisting_name, ''), sc.assisting, 1, 0, 0, sc.card_id
-    FROM source_cases sc
-),
-legacy_clinic AS (
-    SELECT 'clinic-' || CAST(cl.id AS TEXT) AS item_id, cl.date AS item_date,
-           'clinic' AS item_type,
-           CASE WHEN cl.assignment_type = 'off' THEN 'OFF' ELSE coalesce(l.abbreviation, l.name, 'Clinic') END AS title,
-           upper(cl.session) AS subtitle,
-           CASE WHEN cl.session = 'am' THEN '08:00' WHEN cl.session = 'pm' THEN '13:00' ELSE '08:00' END AS start_time,
-           CASE WHEN cl.session = 'am' THEN '12:00' WHEN cl.session = 'pm' THEN '17:00' ELSE '17:00' END AS end_time,
-           coalesce(l.name, '') AS location, CAST(NULL AS TEXT) AS room,
-           coalesce(cl.notes, '') AS notes, 'clinic_schedule' AS source,
-           0 AS needs_review, CAST(NULL AS INTEGER) AS raw_id,
-           coalesce(l.color, '#0ea5e9') AS color,
-           CAST(NULL AS TEXT) AS status, CAST(NULL AS TEXT) AS surgeon_notes,
-           CAST(NULL AS TEXT) AS assisting_surgeon, 0 AS assisting, 0 AS sort_rank,
-           0 AS case_count, 0 AS visit_count, CAST(NULL AS INTEGER) AS card_id
-    FROM clinic_schedules cl LEFT JOIN locations l ON l.id = cl.location_id
-    WHERE cl.surgeon_id = :surgeon_id AND cl.date BETWEEN :start_date AND :end_date
-      AND NOT EXISTS (SELECT 1 FROM cards c WHERE c.date = cl.date AND (c.session = cl.session OR cl.session = 'full'))
+    SELECT 'act-' || CAST(a.id AS TEXT),
+           c.date, 'surgery', coalesce(nullif(a.patient_name, ''), 'Surgery'),
+           coalesce(a.procedure, ''),
+           coalesce(substr(CAST(a.start_time AS TEXT), 1, 5), '08:00'),
+           substr(CAST(a.end_time AS TEXT), 1, 5),
+           coalesce(l.name, a.room_text, ''), coalesce(a.room_text, ''),
+           '', a.source_system,
+           CASE WHEN c.is_off = 1 OR (
+                c.baseline_state = 'assigned' AND a.location_id IS NOT NULL
+                AND c.baseline_location_id <> a.location_id) THEN 1 ELSE 0 END,
+           CAST(NULL AS INTEGER), coalesce(l.color, '#e0f2fe'),
+           CAST(NULL AS TEXT), CAST(NULL AS TEXT), CAST(NULL AS TEXT), 0,
+           1, 0, 0, c.id
+    FROM (
+        SELECT a.*, row_number() OVER (
+            PARTITION BY a.schedule_card_id, a.identity_key ORDER BY a.id
+        ) AS duplicate_rank
+        FROM schedule_card_activities a
+        JOIN schedule_cards card ON card.id = a.schedule_card_id
+        WHERE card.surgeon_id = :surgeon_id
+          AND a.activity_type = 'surgical' AND a.is_active = TRUE
+          AND card.date BETWEEN :start_date AND :end_date
+    ) a
+    JOIN cards c ON c.id = a.schedule_card_id
+    LEFT JOIN locations l ON l.id = a.location_id
+    WHERE a.duplicate_rank = 1
 )
-SELECT * FROM (
-    SELECT * FROM items UNION ALL SELECT * FROM legacy_clinic
-) feed
+SELECT * FROM items
 ORDER BY item_date, start_time, sort_rank, item_id

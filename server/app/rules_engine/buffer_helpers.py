@@ -7,13 +7,16 @@ from sqlalchemy.orm import Session
 
 
 def clinic_rows_for_surgeon(db: Session, surgeon_id: int, start_date, end_date):
-    from ..models import ClinicSchedule
+    from ..clinic_schedule_card_guard import place_cards
+    from ..models import ScheduleCard
 
-    return db.query(ClinicSchedule).filter(
-        ClinicSchedule.surgeon_id == surgeon_id,
-        ClinicSchedule.date >= start_date,
-        ClinicSchedule.date <= end_date,
-    ).all()
+    return place_cards(
+        db,
+        ScheduleCard.surgeon_id == surgeon_id,
+        ScheduleCard.date >= start_date,
+        ScheduleCard.date <= end_date,
+        ScheduleCard.effective_state.in_(("assigned", "off")),
+    )
 
 
 def surgery_rows_for_surgeon(
@@ -23,17 +26,20 @@ def surgery_rows_for_surgeon(
     end_date,
     exclude_entity: Optional[tuple[str, int]] = None,
 ):
-    from ..models import SurgicalCase
+    from ..schedule_activity_normalization import active_surgical_lines
 
-    surgeries = db.query(SurgicalCase).filter(
-        SurgicalCase.surgeon_id == surgeon_id,
-        SurgicalCase.date >= start_date,
-        SurgicalCase.date <= end_date,
-        SurgicalCase.status != "cancelled",
+    exclude_activity_id = (
+        exclude_entity[1]
+        if exclude_entity and exclude_entity[0] in {"surgical_case", "schedule_card_activity"}
+        else None
     )
-    if exclude_entity and exclude_entity[0] == "surgical_case":
-        surgeries = surgeries.filter(SurgicalCase.id != exclude_entity[1])
-    return surgeries.all()
+    return active_surgical_lines(
+        db,
+        surgeon_id=surgeon_id,
+        start=start_date,
+        end=end_date,
+        exclude_activity_id=exclude_activity_id,
+    )
 
 
 def clinic_and_surgery_rows(

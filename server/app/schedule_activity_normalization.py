@@ -281,7 +281,11 @@ def sync_applied_fax_clinic_activities(db: Session, run: FaxIngestRun) -> int:
 
 
 def reconcile_applied_fax_versions(db: Session) -> int:
-    """Make only the newest applied fax rows for each date active; past dates stay as they were."""
+    """Make only the newest applied fax rows for each date active; past dates stay as they were.
+
+    When the scratch reading is already gone, the card line is the schedule.
+    An empty reading must not turn those lines off.
+    """
     db.flush()
     today = datetime.now(ZoneInfo(PRACTICE_TIMEZONE)).date()
     ranked = (
@@ -302,18 +306,17 @@ def reconcile_applied_fax_versions(db: Session) -> int:
         .subquery()
     )
     newest_ids = [row_id for (row_id,) in db.query(ranked.c.row_id).filter(ranked.c.revision_rank == 1).all()]
+    if not newest_ids:
+        return 0
     db.query(ScheduleCardActivity).filter(
         ScheduleCardActivity.source_system == "fax_clinic",
         ScheduleCardActivity.activity_date >= today,
     ).update({ScheduleCardActivity.is_active: False}, synchronize_session=False)
-    if newest_ids:
-        updated = db.query(ScheduleCardActivity).filter(
-            ScheduleCardActivity.fax_ingest_row_id.in_(newest_ids),
-        ).update({ScheduleCardActivity.is_active: True}, synchronize_session=False)
-        db.expire_all()
-        return updated
+    updated = db.query(ScheduleCardActivity).filter(
+        ScheduleCardActivity.fax_ingest_row_id.in_(newest_ids),
+    ).update({ScheduleCardActivity.is_active: True}, synchronize_session=False)
     db.expire_all()
-    return 0
+    return updated
 
 
 def backfill_normalized_schedule_activity(db: Session) -> dict[str, int]:

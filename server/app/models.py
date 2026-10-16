@@ -692,8 +692,10 @@ class ScheduleCardActivity(Base):
     procedure = Column(Text, nullable=False, default="")
     room_text = Column(String(128))
     source_system = Column(String(32), nullable=False)
-    source_record_key = Column(String(128), nullable=False)
+    source_record_key = Column(String(640), nullable=False)
     # Pointers back to a source row. The card is the only parent that deletes the line.
+    # source_fax_id is the fax that wrote this line. It stays after the scratch reading is deleted.
+    source_fax_id = Column(Integer, nullable=True, index=True)
     fax_ingest_row_id = Column(Integer, ForeignKey("fax_ingest_rows.id", ondelete="SET NULL"), nullable=True, index=True)
     aprima_appointment_id = Column(String(36), ForeignKey("aprima_cached_appointments.appointment_id", ondelete="SET NULL"), nullable=True, index=True)
     or_block_instance_id = Column(Integer, ForeignKey("or_block_instances.id", ondelete="SET NULL"), nullable=True, index=True)
@@ -763,7 +765,7 @@ class FaxIngestRun(Base):
 
 
 class FaxIngestRow(Base):
-    """One reviewed Desk extraction row. This table never creates cards."""
+    """Scratch reading of one fax line. Send to Calendar copies it onto the card, then deletes it."""
     __tablename__ = "fax_ingest_rows"
     __table_args__ = (
         UniqueConstraint("run_id", "normalized_key"),
@@ -860,9 +862,10 @@ class FaxRestoreLine(Base):
     procedure = Column(Text, nullable=False, default="")
     room_text = Column(String(128))
     source_system = Column(String(32), nullable=False)
-    source_record_key = Column(String(128), nullable=False)
+    source_record_key = Column(String(640), nullable=False)
     identity_key = Column(String(512), nullable=False)
     fax_ingest_row_id = Column(Integer)
+    source_fax_id = Column(Integer)
     aprima_appointment_id = Column(String(36))
     is_active = Column(Boolean, nullable=False)
 

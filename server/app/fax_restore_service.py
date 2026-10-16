@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session
 
 from .models import (
     FaxDocument,
-    FaxIngestRow,
     FaxIngestRun,
     FaxRestoreLine,
     FaxRestoreSet,
@@ -40,20 +39,10 @@ _COPIED_FIELDS = (
     "source_record_key",
     "identity_key",
     "fax_ingest_row_id",
+    "source_fax_id",
     "aprima_appointment_id",
     "is_active",
 )
-
-
-def _fax_row_ids(db: Session, source_fax_id: int) -> set[int]:
-    return {
-        row_id
-        for (row_id,) in db.query(FaxIngestRow.id).join(
-            FaxIngestRun, FaxIngestRow.run_id == FaxIngestRun.id
-        ).join(
-            FaxDocument, FaxIngestRun.fax_document_id == FaxDocument.id
-        ).filter(FaxDocument.external_fax_id == source_fax_id)
-    }
 
 
 def save_fax_line_photo(
@@ -81,12 +70,11 @@ def save_fax_line_photo(
     }
     if not covered:
         return photo
-    written_by_this_fax = _fax_row_ids(db, source_fax_id)
     activities = db.query(ScheduleCardActivity).filter(
         tuple_(ScheduleCardActivity.surgeon_id, ScheduleCardActivity.activity_date).in_(list(covered))
     ).all()
     for activity in activities:
-        if activity.id in saved_ids or activity.fax_ingest_row_id in written_by_this_fax:
+        if activity.id in saved_ids or activity.source_fax_id == source_fax_id:
             continue
         db.add(FaxRestoreLine(
             restore_set_id=photo.id,
@@ -158,16 +146,13 @@ def restore_fax_snapshot(db: Session, *, source_fax_id: int) -> dict:
         restored += 1
     db.flush()
 
-    row_ids = list(_fax_row_ids(db, source_fax_id))
-    turned_off = 0
-    if row_ids:
-        query = db.query(ScheduleCardActivity).filter(
-            ScheduleCardActivity.fax_ingest_row_id.in_(row_ids),
-            ScheduleCardActivity.is_active == True,  # noqa: E712
-        )
-        if saved_ids:
-            query = query.filter(ScheduleCardActivity.id.notin_(saved_ids))
-        turned_off = query.update({ScheduleCardActivity.is_active: False}, synchronize_session=False)
+    query = db.query(ScheduleCardActivity).filter(
+        ScheduleCardActivity.source_fax_id == source_fax_id,
+        ScheduleCardActivity.is_active == True,  # noqa: E712
+    )
+    if saved_ids:
+        query = query.filter(ScheduleCardActivity.id.notin_(saved_ids))
+    turned_off = query.update({ScheduleCardActivity.is_active: False}, synchronize_session=False)
 
     photo.restored_at = datetime.now(UTC).replace(tzinfo=None)
     document.status = "restored"

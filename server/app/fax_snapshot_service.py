@@ -15,8 +15,10 @@ from .models import (
     FaxDocument,
     FaxIngestRow,
     FaxIngestRun,
+    FaxRowDecision,
     Location,
     ScheduleCard,
+    ScheduleCardActivity,
     ScheduleChangeEvent,
     Surgeon,
 )
@@ -27,6 +29,24 @@ from .fax_pdf_intake import cleanup_fax_derivatives, prune_immutable_fax_sources
 from .schedule_build_backup_service import create_fax_snapshot_backup
 
 logger = logging.getLogger(__name__)
+
+
+def discard_applied_scratch_rows(db: Session, run_id: int) -> int:
+    """The card line remembers the fax. This send's scratch reading can go."""
+    rows = db.query(FaxIngestRow).filter(FaxIngestRow.run_id == run_id).all()
+    if not rows:
+        return 0
+    row_ids = [row.id for row in rows]
+    db.query(ScheduleCardActivity).filter(
+        ScheduleCardActivity.fax_ingest_row_id.in_(row_ids)
+    ).update({ScheduleCardActivity.fax_ingest_row_id: None}, synchronize_session=False)
+    db.query(FaxRowDecision).filter(
+        FaxRowDecision.fax_row_id.in_(row_ids)
+    ).delete(synchronize_session=False)
+    db.query(FaxIngestRow).filter(FaxIngestRow.id.in_(row_ids)).delete(synchronize_session=False)
+    for row in rows:
+        db.expunge(row)
+    return len(row_ids)
 
 
 def _surgeon_initials(surgeon: Surgeon) -> str:
@@ -217,6 +237,7 @@ def apply_staged_snapshot(
 
     run.status = "applied"
     document.status = "applied"
+    discard_applied_scratch_rows(db, run.id)
     db.add(ScheduleChangeEvent(
         event_type="fax_daily_snapshot_applied",
         surgeon_id=None,

@@ -188,7 +188,10 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.assertEqual(activities["clinic"].patient_name, "Clinic, Patient")
         self.assertEqual(activities["surgical"].schedule_card_id, pm.id)
         self.assertEqual(activities["surgical"].patient_name, "Case, Patient")
-        self.assertEqual(activities["surgical"].fax_ingest_row_id is not None, True)
+        self.assertEqual(activities["surgical"].source_fax_id, 191)
+        self.assertEqual(activities["clinic"].source_fax_id, 191)
+        self.assertTrue(activities["surgical"].source_record_key.startswith("191|"))
+        self.assertEqual(self.db.query(FaxIngestRow).filter_by(run_id=staged["runId"]).count(), 0)
         backup = self.db.query(ScheduleBuildBackup).one()
         payload = json.loads(backup.payload_json)
         self.assertEqual(payload["kind"], "fax_snapshot")
@@ -412,19 +415,21 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         )
         self.db.commit()
         apply_staged_snapshot(self.db, source_fax_id=191, run_id=first["runId"])
+        self.assertEqual(self.db.query(FaxIngestRow).filter_by(run_id=first["runId"]).count(), 0)
 
         second = stage_reviewed_rows(
             self.db, external_fax_id=191, source_label="test", surgeon_scope=["JF"],
             rows=[self._row("Kept, Patient")],
         )
         self.db.commit()
+        self.assertGreater(self.db.query(FaxIngestRow).filter_by(run_id=second["runId"]).count(), 0)
         apply_staged_snapshot(self.db, source_fax_id=191, run_id=second["runId"])
 
-        active = {
-            row.patient_name: row.is_active
-            for row in self.db.query(ScheduleCardActivity).filter_by(activity_type="surgical")
-        }
+        lines = self.db.query(ScheduleCardActivity).filter_by(activity_type="surgical").all()
+        active = {row.patient_name: row.is_active for row in lines}
         self.assertEqual(active, {"Kept, Patient": True, "Misread, Patient": False})
+        self.assertEqual({row.source_fax_id for row in lines}, {191})
+        self.assertEqual(self.db.query(FaxIngestRow).filter_by(run_id=second["runId"]).count(), 0)
 
     def test_older_fax_cannot_be_applied_after_a_newer_one(self):
         newer = stage_reviewed_rows(

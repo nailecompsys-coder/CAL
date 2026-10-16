@@ -1,0 +1,1102 @@
+// Picture of the tables in server/app/models.py at commit c275ca7.
+// The running app uses SQLAlchemy. This file is here so the joins can be seen.
+// Open it with Prisma. A relation line is a foreign key.
+//
+// The card line joins its card on schedule_card_id, and again on
+// schedule_card_id + surgeon_id + activity_date + session.
+// source_fax_id on a card line is a fax number. It is not a foreign key.
+//
+// Extra tables still in this file: call_daily_assignments,
+// aprima_cached_appointments, aprima_sync_state, fax_ingest_rows,
+// fax_row_decisions, co_surgeon_pairs, surgical_blocks, meeting_attendees.
+// The local database still has clinic_schedules and surgical_cases.
+// Those two are not in this file. This branch drops them when it starts.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model admin_users {
+  id                      Int       @id @default(autoincrement())
+  username                String    @unique @db.VarChar(64)
+  first_name              String?   @db.VarChar(64)
+  last_name               String?   @db.VarChar(64)
+  email                   String    @unique @db.VarChar(255)
+  phone                   String?   @db.VarChar(32)
+  password_hash           String    @db.VarChar(255)
+  role                    String?   @default("admin") @db.VarChar(32)
+  notify_day_off_requests Boolean?  @default(true)
+  notify_schedule_changes Boolean?  @default(true)
+  sms_fallback_enabled    Boolean?  @default(false)
+  can_call_builder        Boolean   @default(false)
+  is_active               Boolean?  @default(true)
+  created_at              DateTime? @default(now()) @db.Timestamp(6)
+
+  otp_challenges         admin_otp_challenges[]
+  preview_grants         native_support_preview_grants[]
+  approved_days_off      days_off[]                      @relation("DayOffApprover")
+  meetings_created       meetings[]                      @relation("MeetingCreator")
+  call_drafts_updated    call_draft_assignments[]        @relation("DraftUpdatedByAdmin")
+  call_audits            call_schedule_audit_logs[]      @relation("AuditActorAdmin")
+  or_series_created      or_block_series[]               @relation("SeriesCreatedBy")
+  or_instances_assigned  or_block_instances[]            @relation("InstanceAssignedBy")
+  or_instances_released  or_block_instances[]            @relation("InstanceReleasedBy")
+  or_assignments_made    or_block_assignments[]          @relation("AssignmentAssignedBy")
+  or_audit_events        or_block_audit_events[]
+  backups_created        schedule_build_backups[]        @relation("BackupCreatedBy")
+  backups_reverted       schedule_build_backups[]        @relation("BackupRevertedBy")
+  schedule_change_events schedule_change_events[]
+  notifications          admin_notifications[]
+}
+
+model admin_otp_challenges {
+  id            Int       @id @default(autoincrement())
+  admin_user_id Int
+  token_hash    String    @db.VarChar(255)
+  expires_at    DateTime  @db.Timestamp(6)
+  used_at       DateTime? @db.Timestamp(6)
+  created_at    DateTime? @default(now()) @db.Timestamp(6)
+
+  admin_user admin_users @relation(fields: [admin_user_id], references: [id])
+}
+
+model native_support_preview_grants {
+  id            Int       @id @default(autoincrement())
+  admin_user_id Int
+  surgeon_id    Int
+  code_hash     String    @unique @db.VarChar(64)
+  expires_at    DateTime  @db.Timestamptz(6)
+  redeemed_at   DateTime? @db.Timestamptz(6)
+  redeemed_ip   String?   @db.VarChar(64)
+  created_at    DateTime  @default(now()) @db.Timestamptz(6)
+
+  admin_user admin_users @relation(fields: [admin_user_id], references: [id])
+  surgeon    surgeons    @relation(fields: [surgeon_id], references: [id])
+}
+
+model site_settings {
+  id                             Int       @id @default(autoincrement())
+  practice_name                  String?   @default("Mid Florida Surgical") @db.VarChar(128)
+  practice_address               String?   @db.VarChar(255)
+  practice_city                  String?   @db.VarChar(64)
+  practice_state                 String?   @db.VarChar(32)
+  practice_zip                   String?   @db.VarChar(16)
+  practice_phone                 String?   @db.VarChar(32)
+  practice_email                 String?   @db.VarChar(255)
+  logo_filename                  String?   @db.VarChar(255)
+  show_or_patient_procedure_form Boolean?  @default(false)
+  updated_at                     DateTime? @default(now()) @db.Timestamp(6)
+}
+
+model scheduling_rule_config {
+  id         Int       @id @default(autoincrement())
+  rule_id    String    @unique @db.VarChar(64)
+  enabled    Boolean   @default(true)
+  config     String?   @db.Text
+  updated_at DateTime? @default(now()) @db.Timestamp(6)
+}
+
+model grok_bot_rules {
+  id          Int       @id @default(autoincrement())
+  rule_id     String    @unique @db.VarChar(64)
+  title       String    @db.VarChar(128)
+  instruction String    @db.Text
+  handler     String?   @default("") @db.VarChar(64)
+  enabled     Boolean   @default(true)
+  is_builtin  Boolean   @default(false)
+  sort_order  Int       @default(100)
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+  updated_at  DateTime? @default(now()) @db.Timestamp(6)
+}
+
+model locations {
+  id             Int      @id @default(autoincrement())
+  name           String   @db.VarChar(128)
+  abbreviation   String   @default("LOC") @db.VarChar(12)
+  address        String?  @db.VarChar(255)
+  city           String?  @db.VarChar(64)
+  phone          String?  @db.VarChar(32)
+  location_type  String?  @default("clinic") @db.VarChar(16)
+  color          String?  @default("#0ea5e9") @db.VarChar(16)
+  is_active      Boolean? @default(true)
+  block_group_id Int?
+
+  block_group                call_groups?                 @relation(fields: [block_group_id], references: [id], onDelete: SetNull)
+  surgeon_location_schedules surgeon_location_schedules[]
+  location_overrides         location_overrides[]
+  call_group_locations       call_group_locations[]
+  call_daily_assignments     call_daily_assignments[]
+  meetings                   meetings[]
+  baseline_cards             schedule_cards[]             @relation("CardBaseline")
+  effective_cards            schedule_cards[]             @relation("CardEffective")
+  schedule_card_activities   schedule_card_activities[]
+  fax_ingest_rows            fax_ingest_rows[]
+  clinic_group_locations     clinic_group_locations[]
+  surgical_blocks            surgical_blocks[]
+  or_block_instances         or_block_instances[]
+  aprima_cached_appointments aprima_cached_appointments[]
+}
+
+model surgeons {
+  id               Int       @id @default(autoincrement())
+  first_name       String    @db.VarChar(64)
+  last_name        String    @db.VarChar(64)
+  specialty        String?   @db.VarChar(128)
+  suffix           String?   @db.VarChar(32)
+  staff_type       String?   @default("physician") @db.VarChar(16)
+  email            String?   @unique @db.VarChar(255)
+  phone            String?   @db.VarChar(32)
+  color            String?   @default("#ffffff") @db.VarChar(16)
+  sort_order       Int?      @default(0)
+  can_call_builder Boolean   @default(false)
+  push_sound       String?   @db.VarChar(64)
+  is_active        Boolean?  @default(true)
+  created_at       DateTime? @default(now()) @db.Timestamp(6)
+
+  preview_grants             native_support_preview_grants[]
+  ocr_aliases                surgeon_ocr_aliases[]
+  magic_links                magic_links[]
+  otp_audit_logs             surgeon_otp_audit_logs[]
+  devices                    surgeon_devices[]
+  location_schedules         surgeon_location_schedules[]
+  call_rotation_templates    call_rotation_templates[]
+  location_overrides         location_overrides[]
+  call_rotations             call_rotations[]
+  coverages_as_original      call_coverages[]                @relation("CoverageOriginal")
+  coverages_as_covering      call_coverages[]                @relation("CoverageCovering")
+  coverages_requested        call_coverages[]                @relation("CoverageRequested")
+  call_backups               call_backups[]
+  daily_assignments          call_daily_assignments[]        @relation("DailySurgeon")
+  daily_assignments_original call_daily_assignments[]        @relation("DailyOriginal")
+  call_drafts                call_draft_assignments[]        @relation("DraftSurgeon")
+  call_drafts_updated        call_draft_assignments[]        @relation("DraftUpdatedBySurgeon")
+  audits_from                call_schedule_audit_logs[]      @relation("AuditFrom")
+  audits_to                  call_schedule_audit_logs[]      @relation("AuditTo")
+  audits_acted               call_schedule_audit_logs[]      @relation("AuditActorSurgeon")
+  availability               availability[]
+  days_off                   days_off[]
+  day_items                  surgeon_day_items[]
+  meeting_attendees          meeting_attendees[]
+  schedule_card_weeks        schedule_card_weeks[]
+  schedule_cards             schedule_cards[]
+  schedule_card_activities   schedule_card_activities[]
+  fax_ingest_rows            fax_ingest_rows[]
+  pairs_as_primary           co_surgeon_pairs[]              @relation("CoPrimary")
+  pairs_as_assisting         co_surgeon_pairs[]              @relation("CoAssisting")
+  clinic_group_members       clinic_group_members[]
+  surgical_blocks            surgical_blocks[]
+  owned_or_series            or_block_series[]               @relation("SeriesOwner")
+  assigned_or_instances      or_block_instances[]            @relation("InstanceAssigned")
+  or_block_assignments       or_block_assignments[]
+  schedule_change_events     schedule_change_events[]
+  push_subscriptions         push_subscriptions[]
+  native_push_tokens         native_push_tokens[]
+  native_schedule_alerts     native_schedule_alerts[]
+  aprima_cached_appointments aprima_cached_appointments[]
+}
+
+model surgeon_ocr_aliases {
+  id         Int       @id @default(autoincrement())
+  token      String    @unique @db.VarChar(64)
+  surgeon_id Int
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+  updated_at DateTime? @default(now()) @db.Timestamp(6)
+
+  surgeon surgeons @relation(fields: [surgeon_id], references: [id])
+}
+
+model magic_links {
+  id         Int       @id @default(autoincrement())
+  surgeon_id Int
+  token_hash String    @unique @db.VarChar(255)
+  expires_at DateTime  @db.Timestamp(6)
+  used_at    DateTime? @db.Timestamp(6)
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+
+  surgeon surgeons @relation(fields: [surgeon_id], references: [id])
+}
+
+model surgeon_otp_audit_logs {
+  id               Int       @id @default(autoincrement())
+  action           String    @db.VarChar(16)
+  submitted_email  String    @db.VarChar(255)
+  surgeon_id       Int?
+  matched          Boolean   @default(false)
+  delivery_channel String?   @db.VarChar(16)
+  delivery_success Boolean?
+  result           String    @db.VarChar(32)
+  failure_reason   String?   @db.Text
+  client_ip        String?   @db.VarChar(64)
+  user_agent       String?   @db.Text
+  created_at       DateTime? @default(now()) @db.Timestamp(6)
+
+  surgeon surgeons? @relation(fields: [surgeon_id], references: [id])
+}
+
+model surgeon_devices {
+  id            Int       @id @default(autoincrement())
+  surgeon_id    Int
+  device_name   String?   @db.VarChar(128)
+  user_agent    String?   @db.Text
+  token_hash    String    @unique @db.VarChar(255)
+  registered_at DateTime? @default(now()) @db.Timestamp(6)
+  last_seen     DateTime? @db.Timestamp(6)
+  is_active     Boolean?  @default(true)
+
+  surgeon            surgeons             @relation(fields: [surgeon_id], references: [id])
+  push_subscriptions push_subscriptions[]
+  native_push_tokens native_push_tokens[]
+}
+
+/// Master week row. It builds the permanent cards.
+model surgeon_location_schedules {
+  id              Int    @id @default(autoincrement())
+  surgeon_id      Int
+  location_id     Int?
+  day_of_week     Int
+  session         String @default("am") @db.VarChar(4)
+  assignment_type String @default("assigned") @db.VarChar(16)
+  week_pattern    String @default("all") @db.VarChar(16)
+
+  surgeon        surgeons         @relation(fields: [surgeon_id], references: [id])
+  location       locations?       @relation(fields: [location_id], references: [id])
+  schedule_cards schedule_cards[]
+
+  @@unique([surgeon_id, day_of_week, session])
+}
+
+model call_rotation_templates {
+  id            Int @id @default(autoincrement())
+  call_group_id Int
+  surgeon_id    Int
+  position      Int
+
+  call_group call_groups @relation(fields: [call_group_id], references: [id])
+  surgeon    surgeons    @relation(fields: [surgeon_id], references: [id])
+
+  @@unique([call_group_id, surgeon_id])
+  @@unique([call_group_id, position])
+}
+
+model location_overrides {
+  id          Int      @id @default(autoincrement())
+  surgeon_id  Int
+  location_id Int?
+  date        DateTime @db.Date
+  notes       String?  @db.Text
+
+  surgeon  surgeons   @relation(fields: [surgeon_id], references: [id])
+  location locations? @relation(fields: [location_id], references: [id])
+}
+
+model call_groups {
+  id         Int    @id @default(autoincrement())
+  name       String @db.VarChar(128)
+  sort_order Int?   @default(0)
+
+  locations         locations[]
+  templates         call_rotation_templates[]
+  group_locations   call_group_locations[]
+  rotations         call_rotations[]
+  daily_assignments call_daily_assignments[]
+  drafts            call_draft_assignments[]
+  audit_logs        call_schedule_audit_logs[]
+}
+
+model call_group_locations {
+  id            Int @id @default(autoincrement())
+  call_group_id Int
+  location_id   Int
+
+  call_group call_groups @relation(fields: [call_group_id], references: [id])
+  location   locations   @relation(fields: [location_id], references: [id])
+
+  @@unique([call_group_id, location_id])
+}
+
+/// The call list. One row is one date and one group. Empty surgeon_id means nobody is on call.
+model call_rotations {
+  id            Int       @id @default(autoincrement())
+  call_group_id Int
+  surgeon_id    Int?
+  date          DateTime  @db.Date
+  rotation_type String?   @default("primary") @db.VarChar(16)
+  notes         String?   @db.Text
+  created_at    DateTime? @default(now()) @db.Timestamp(6)
+
+  call_group        call_groups              @relation(fields: [call_group_id], references: [id])
+  surgeon           surgeons?                @relation(fields: [surgeon_id], references: [id])
+  coverages         call_coverages[]
+  backup            call_backups?
+  daily_assignments call_daily_assignments[]
+
+  @@unique([date, call_group_id])
+}
+
+model call_coverages {
+  id                      Int       @id @default(autoincrement())
+  call_rotation_id        Int
+  original_surgeon_id     Int?
+  covering_surgeon_id     Int
+  requested_by_surgeon_id Int?
+  status                  String?   @default("active") @db.VarChar(16)
+  notes                   String?   @db.Text
+  created_at              DateTime? @default(now()) @db.Timestamp(6)
+  canceled_at             DateTime? @db.Timestamp(6)
+
+  rotation          call_rotations           @relation(fields: [call_rotation_id], references: [id])
+  original_surgeon  surgeons?                @relation("CoverageOriginal", fields: [original_surgeon_id], references: [id])
+  covering_surgeon  surgeons                 @relation("CoverageCovering", fields: [covering_surgeon_id], references: [id])
+  requested_by      surgeons?                @relation("CoverageRequested", fields: [requested_by_surgeon_id], references: [id])
+  daily_assignments call_daily_assignments[]
+}
+
+model call_backups {
+  id               Int       @id @default(autoincrement())
+  call_rotation_id Int       @unique
+  surgeon_id       Int
+  note             String?   @db.Text
+  created_at       DateTime? @default(now()) @db.Timestamp(6)
+  updated_at       DateTime? @default(now()) @db.Timestamp(6)
+
+  rotation call_rotations @relation(fields: [call_rotation_id], references: [id], onDelete: Cascade)
+  surgeon  surgeons       @relation(fields: [surgeon_id], references: [id])
+}
+
+/// Extra. Old copy, one row per hospital. Screens read call_rotations.
+model call_daily_assignments {
+  id                  Int       @id @default(autoincrement())
+  date                DateTime  @db.Date
+  location_id         Int
+  surgeon_id          Int
+  call_group_id       Int
+  call_rotation_id    Int
+  call_coverage_id    Int?
+  original_surgeon_id Int?
+  created_at          DateTime? @default(now()) @db.Timestamp(6)
+  updated_at          DateTime? @default(now()) @db.Timestamp(6)
+
+  location         locations       @relation(fields: [location_id], references: [id])
+  surgeon          surgeons        @relation("DailySurgeon", fields: [surgeon_id], references: [id])
+  original_surgeon surgeons?       @relation("DailyOriginal", fields: [original_surgeon_id], references: [id])
+  call_group       call_groups     @relation(fields: [call_group_id], references: [id])
+  call_rotation    call_rotations  @relation(fields: [call_rotation_id], references: [id], onDelete: Cascade)
+  call_coverage    call_coverages? @relation(fields: [call_coverage_id], references: [id], onDelete: SetNull)
+
+  @@unique([date, location_id])
+  @@index([date])
+  @@index([location_id])
+  @@index([surgeon_id])
+  @@index([call_group_id])
+  @@index([call_rotation_id])
+  @@index([call_coverage_id])
+}
+
+model holidays {
+  id   Int      @id @default(autoincrement())
+  date DateTime @db.Date
+  name String   @db.VarChar(64)
+
+  @@unique([date])
+}
+
+/// Call Builder list. It stays until Publish copies it onto call_rotations.
+model call_draft_assignments {
+  id                    Int       @id @default(autoincrement())
+  date                  DateTime  @db.Date
+  call_group_id         Int
+  surgeon_id            Int?
+  updated_by_admin_id   Int?
+  updated_by_surgeon_id Int?
+  updated_at            DateTime? @default(now()) @db.Timestamp(6)
+
+  call_group         call_groups  @relation(fields: [call_group_id], references: [id])
+  surgeon            surgeons?    @relation("DraftSurgeon", fields: [surgeon_id], references: [id])
+  updated_by_admin   admin_users? @relation("DraftUpdatedByAdmin", fields: [updated_by_admin_id], references: [id])
+  updated_by_surgeon surgeons?    @relation("DraftUpdatedBySurgeon", fields: [updated_by_surgeon_id], references: [id])
+
+  @@unique([date, call_group_id])
+  @@index([date])
+}
+
+model call_schedule_audit_logs {
+  id               Int       @id @default(autoincrement())
+  action           String    @db.VarChar(32)
+  source           String    @default("portal") @db.VarChar(16)
+  event_date       DateTime  @db.Date
+  call_group_id    Int?
+  call_group_name  String?   @db.VarChar(128)
+  /// Stored number. Not a foreign key.
+  rotation_id      Int?
+  /// Stored number. Not a foreign key.
+  coverage_id      Int?
+  from_surgeon_id  Int?
+  to_surgeon_id    Int?
+  actor_admin_id   Int?
+  actor_surgeon_id Int?
+  actor_label      String    @default("unknown") @db.VarChar(255)
+  notes            String?   @db.Text
+  created_at       DateTime? @default(now()) @db.Timestamp(6)
+
+  call_group    call_groups? @relation(fields: [call_group_id], references: [id])
+  from_surgeon  surgeons?    @relation("AuditFrom", fields: [from_surgeon_id], references: [id])
+  to_surgeon    surgeons?    @relation("AuditTo", fields: [to_surgeon_id], references: [id])
+  actor_admin   admin_users? @relation("AuditActorAdmin", fields: [actor_admin_id], references: [id])
+  actor_surgeon surgeons?    @relation("AuditActorSurgeon", fields: [actor_surgeon_id], references: [id])
+}
+
+model availability {
+  id           Int       @id @default(autoincrement())
+  surgeon_id   Int
+  date         DateTime  @db.Date
+  is_available Boolean?  @default(true)
+  start_time   DateTime? @db.Time(6)
+  end_time     DateTime? @db.Time(6)
+  notes        String?   @db.Text
+
+  surgeon surgeons @relation(fields: [surgeon_id], references: [id])
+}
+
+/// One live request for a surgeon and those exact dates. No Call can sit beside it.
+/// Check ck_days_off_start_before_end: start_date <= end_date.
+/// Unique uq_days_off_live_leave: one pending or approved leave for the same surgeon and dates.
+/// Unique uq_days_off_live_no_call: one pending or approved No Call for the same surgeon and dates.
+model days_off {
+  id              Int       @id @default(autoincrement())
+  surgeon_id      Int
+  start_date      DateTime  @db.Date
+  end_date        DateTime  @db.Date
+  reason          String?   @db.VarChar(255)
+  start_time      DateTime? @db.Time(6)
+  end_time        DateTime? @db.Time(6)
+  is_full_day     Boolean?  @default(true)
+  segments        String?   @db.Text
+  status          String?   @default("pending") @db.VarChar(16)
+  notes           String?   @db.Text
+  admin_note      String?   @db.Text
+  review_findings String?   @db.Text
+  approved_by     Int?
+  created_at      DateTime? @default(now()) @db.Timestamp(6)
+  updated_at      DateTime? @db.Timestamp(6)
+
+  surgeon             surgeons                 @relation(fields: [surgeon_id], references: [id])
+  approver            admin_users?             @relation("DayOffApprover", fields: [approved_by], references: [id])
+  schedule_card_links day_off_schedule_cards[]
+
+  @@unique([id, surgeon_id], map: "uq_days_off_id_surgeon")
+}
+
+model surgeon_day_items {
+  id         Int       @id @default(autoincrement())
+  surgeon_id Int
+  date       DateTime  @db.Date
+  start_time DateTime? @db.Time(6)
+  end_time   DateTime? @db.Time(6)
+  title      String    @db.VarChar(255)
+  notes      String?   @db.Text
+  sort_order Int?      @default(0)
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+  updated_at DateTime? @db.Timestamp(6)
+
+  surgeon surgeons @relation(fields: [surgeon_id], references: [id])
+}
+
+model meetings {
+  id              Int       @id @default(autoincrement())
+  title           String    @db.VarChar(255)
+  date            DateTime  @db.Date
+  start_time      DateTime? @db.Time(6)
+  end_time        DateTime? @db.Time(6)
+  location_id     Int?
+  location_text   String?   @db.VarChar(255)
+  recurrence_rule String?   @db.VarChar(64)
+  notes           String?   @db.Text
+  created_by      Int?
+  created_at      DateTime? @default(now()) @db.Timestamp(6)
+
+  location  locations?          @relation(fields: [location_id], references: [id])
+  creator   admin_users?        @relation("MeetingCreator", fields: [created_by], references: [id])
+  attendees meeting_attendees[]
+}
+
+/// Extra. The same person can be stored twice. There is no unique key on meeting + surgeon.
+model meeting_attendees {
+  id         Int     @id @default(autoincrement())
+  meeting_id Int
+  surgeon_id Int
+  status     String? @default("invited") @db.VarChar(16)
+
+  meeting meetings @relation(fields: [meeting_id], references: [id])
+  surgeon surgeons @relation(fields: [surgeon_id], references: [id])
+}
+
+model schedule_card_weeks {
+  id              Int       @id @default(autoincrement())
+  surgeon_id      Int
+  week_start      DateTime  @db.Date
+  master_revision String    @default("master-v1") @db.VarChar(64)
+  created_at      DateTime? @default(now()) @db.Timestamp(6)
+  updated_at      DateTime? @default(now()) @db.Timestamp(6)
+
+  surgeon surgeons         @relation(fields: [surgeon_id], references: [id])
+  cards   schedule_cards[]
+
+  @@unique([surgeon_id, week_start])
+}
+
+/// Permanent morning and afternoon cards.
+/// Check: session is am or pm. State is assigned, na, or off.
+/// Assigned requires a location.
+model schedule_cards {
+  id                    Int       @id @default(autoincrement())
+  week_id               Int
+  surgeon_id            Int
+  date                  DateTime  @db.Date
+  session               String    @db.VarChar(2)
+  baseline_state        String    @db.VarChar(16)
+  effective_state       String    @db.VarChar(16)
+  baseline_location_id  Int?
+  effective_location_id Int?
+  master_template_id    Int?
+  master_week_pattern   String    @default("all") @db.VarChar(16)
+  source                String    @default("master") @db.VarChar(32)
+  version               Int       @default(1)
+  created_at            DateTime? @default(now()) @db.Timestamp(6)
+  updated_at            DateTime? @default(now()) @db.Timestamp(6)
+
+  week               schedule_card_weeks          @relation(fields: [week_id], references: [id], onDelete: Cascade)
+  surgeon            surgeons                     @relation(fields: [surgeon_id], references: [id])
+  baseline_location  locations?                   @relation("CardBaseline", fields: [baseline_location_id], references: [id])
+  effective_location locations?                   @relation("CardEffective", fields: [effective_location_id], references: [id])
+  master_template    surgeon_location_schedules?  @relation(fields: [master_template_id], references: [id])
+  lines              schedule_card_activities[]   @relation("CardParent")
+  identity_lines     schedule_card_activities[]   @relation("CardIdentity")
+  day_off_links      day_off_schedule_cards[]
+  fax_row_decisions  fax_row_decisions[]
+  warnings           schedule_warnings[]
+  aprima_rows        aprima_cached_appointments[]
+
+  @@unique([surgeon_id, date, session])
+  @@unique([id, surgeon_id], map: "uq_schedule_cards_id_surgeon")
+  @@unique([id, surgeon_id, date, session], map: "uq_schedule_cards_identity")
+}
+
+/// The request points at that same surgeon's card.
+/// day_off_id + surgeon_id must match days_off.
+/// schedule_card_id + surgeon_id must match schedule_cards.
+model day_off_schedule_cards {
+  id               Int       @id @default(autoincrement())
+  day_off_id       Int
+  schedule_card_id Int
+  surgeon_id       Int
+  created_at       DateTime? @default(now()) @db.Timestamp(6)
+
+  day_off       days_off       @relation(fields: [day_off_id, surgeon_id], references: [id, surgeon_id], onDelete: Cascade, onUpdate: Cascade, map: "fk_day_off_schedule_cards_day_off_surgeon")
+  schedule_card schedule_cards @relation(fields: [schedule_card_id, surgeon_id], references: [id, surgeon_id], onDelete: Cascade, onUpdate: Cascade, map: "fk_day_off_schedule_cards_card_surgeon")
+
+  @@unique([day_off_id, schedule_card_id])
+  @@index([day_off_id])
+  @@index([schedule_card_id])
+}
+
+/// One line on one card.
+/// card_parent: schedule_card_id -> schedule_cards.id. Delete the card, the line goes.
+/// card_identity: schedule_card_id + surgeon_id + activity_date + session
+///   must equal the card id + surgeon + date + half-day.
+/// source_fax_id remembers the fax and is not a foreign key.
+/// Check: session is am or pm. activity_type is surgical or clinic.
+model schedule_card_activities {
+  id                    Int       @id @default(autoincrement())
+  schedule_card_id      Int
+  surgeon_id            Int
+  location_id           Int?
+  activity_date         DateTime  @db.Date
+  session               String    @db.VarChar(2)
+  activity_type         String    @db.VarChar(16)
+  start_time            DateTime? @db.Time(6)
+  end_time              DateTime? @db.Time(6)
+  patient_name          String    @db.VarChar(255)
+  procedure             String    @default("") @db.Text
+  room_text             String?   @db.VarChar(128)
+  source_system         String    @db.VarChar(32)
+  source_record_key     String    @db.VarChar(640)
+  /// Fax number only. No foreign key.
+  source_fax_id         Int?
+  fax_ingest_row_id     Int?
+  aprima_appointment_id String?   @db.VarChar(36)
+  or_block_instance_id  Int?
+  identity_key          String    @db.VarChar(512)
+  is_active             Boolean   @default(true)
+  created_at            DateTime? @default(now()) @db.Timestamp(6)
+  updated_at            DateTime? @default(now()) @db.Timestamp(6)
+
+  card_parent       schedule_cards              @relation("CardParent", fields: [schedule_card_id], references: [id], onDelete: Cascade, map: "schedule_card_activities_schedule_card_id_fkey")
+  card_identity     schedule_cards              @relation("CardIdentity", fields: [schedule_card_id, surgeon_id, activity_date, session], references: [id, surgeon_id, date, session], onDelete: Cascade, onUpdate: Cascade, map: "fk_schedule_card_activities_card_identity")
+  surgeon           surgeons                    @relation(fields: [surgeon_id], references: [id])
+  location          locations?                  @relation(fields: [location_id], references: [id])
+  fax_ingest_row    fax_ingest_rows?            @relation(fields: [fax_ingest_row_id], references: [id], onDelete: SetNull)
+  aprima_row        aprima_cached_appointments? @relation(fields: [aprima_appointment_id], references: [appointment_id], onDelete: SetNull)
+  or_block_instance or_block_instances?         @relation(fields: [or_block_instance_id], references: [id], onDelete: SetNull)
+  restore_lines     fax_restore_lines[]
+
+  @@unique([source_system, source_record_key])
+  @@index([schedule_card_id])
+  @@index([surgeon_id])
+  @@index([location_id])
+  @@index([activity_date])
+  @@index([source_fax_id])
+  @@index([fax_ingest_row_id])
+  @@index([aprima_appointment_id])
+  @@index([or_block_instance_id])
+  @@index([identity_key])
+  @@index([is_active])
+}
+
+model fax_documents {
+  id                Int       @id @default(autoincrement())
+  external_fax_id   Int       @unique
+  source_label      String    @default("Desk LlamaParse extraction") @db.VarChar(255)
+  source_sha256     String?   @db.VarChar(64)
+  original_filename String?   @db.VarChar(255)
+  source_path       String?   @db.Text
+  page_count        Int?
+  status            String    @default("staged") @db.VarChar(32)
+  created_at        DateTime? @default(now()) @db.Timestamp(6)
+
+  pages       fax_pages[]
+  runs        fax_ingest_runs[]
+  restore_set fax_restore_sets?
+  warnings    schedule_warnings[]
+}
+
+model fax_pages {
+  id              Int       @id @default(autoincrement())
+  fax_document_id Int
+  page_number     Int
+  image_path      String    @db.Text
+  image_sha256    String    @db.VarChar(64)
+  ocr_text_path   String    @db.Text
+  ocr_text_sha256 String    @db.VarChar(64)
+  created_at      DateTime? @default(now()) @db.Timestamp(6)
+
+  document fax_documents @relation(fields: [fax_document_id], references: [id], onDelete: Cascade)
+
+  @@unique([fax_document_id, page_number])
+}
+
+model fax_ingest_runs {
+  id                 Int       @id @default(autoincrement())
+  fax_document_id    Int
+  engine_version     String    @db.VarChar(64)
+  status             String    @default("staged") @db.VarChar(32)
+  surgeon_scope_json String    @default("[]") @db.Text
+  created_at         DateTime? @default(now()) @db.Timestamp(6)
+
+  document     fax_documents      @relation(fields: [fax_document_id], references: [id])
+  rows         fax_ingest_rows[]
+  restore_sets fax_restore_sets[]
+}
+
+/// Extra. Scratch reading. Send to Calendar copies the line, then deletes this row.
+model fax_ingest_rows {
+  id                 Int       @id @default(autoincrement())
+  run_id             Int
+  page_number        Int
+  surgeon_id         Int?
+  surgeon_initials   String    @db.VarChar(8)
+  case_date          DateTime  @db.Date
+  start_time         DateTime? @db.Time(6)
+  session            String    @db.VarChar(2)
+  row_type           String    @db.VarChar(16)
+  room_text          String    @default("") @db.VarChar(64)
+  patient_name       String    @db.VarChar(255)
+  procedure          String    @default("") @db.Text
+  source_location_id Int?
+  normalized_key     String    @db.VarChar(512)
+  extraction_flags   String?   @db.Text
+  created_at         DateTime? @default(now()) @db.Timestamp(6)
+
+  run             fax_ingest_runs            @relation(fields: [run_id], references: [id], onDelete: Cascade)
+  surgeon         surgeons?                  @relation(fields: [surgeon_id], references: [id])
+  source_location locations?                 @relation(fields: [source_location_id], references: [id])
+  decision        fax_row_decisions?
+  card_lines      schedule_card_activities[]
+
+  @@unique([run_id, normalized_key])
+}
+
+/// Extra. Where a scratch line was going to land. It goes away with that scratch line.
+model fax_row_decisions {
+  id               Int       @id @default(autoincrement())
+  fax_row_id       Int       @unique
+  schedule_card_id Int?
+  status           String    @db.VarChar(32)
+  reason_code      String    @db.VarChar(64)
+  detail           String    @default("") @db.Text
+  created_at       DateTime? @default(now()) @db.Timestamp(6)
+
+  fax_row       fax_ingest_rows @relation(fields: [fax_row_id], references: [id], onDelete: Cascade)
+  schedule_card schedule_cards? @relation(fields: [schedule_card_id], references: [id])
+}
+
+/// Photo taken before Send to Calendar writes.
+model fax_restore_sets {
+  id            Int       @id @default(autoincrement())
+  source_fax_id Int       @unique
+  run_id        Int?
+  created_at    DateTime? @default(now()) @db.Timestamp(6)
+  restored_at   DateTime? @db.Timestamp(6)
+
+  fax_document fax_documents       @relation(fields: [source_fax_id], references: [external_fax_id], onDelete: Cascade)
+  run          fax_ingest_runs?    @relation(fields: [run_id], references: [id], onDelete: SetNull)
+  lines        fax_restore_lines[]
+
+  @@index([run_id])
+}
+
+/// One saved card line inside the photo.
+/// schedule_card_id, surgeon_id, location_id, fax_ingest_row_id, source_fax_id,
+/// and aprima_appointment_id are stored numbers. They are not foreign keys.
+model fax_restore_lines {
+  id                        Int       @id @default(autoincrement())
+  restore_set_id            Int
+  schedule_card_activity_id Int
+  schedule_card_id          Int
+  surgeon_id                Int
+  location_id               Int?
+  activity_date             DateTime  @db.Date
+  session                   String    @db.VarChar(2)
+  activity_type             String    @db.VarChar(16)
+  start_time                DateTime? @db.Time(6)
+  end_time                  DateTime? @db.Time(6)
+  patient_name              String    @db.VarChar(255)
+  procedure                 String    @default("") @db.Text
+  room_text                 String?   @db.VarChar(128)
+  source_system             String    @db.VarChar(32)
+  source_record_key         String    @db.VarChar(640)
+  identity_key              String    @db.VarChar(512)
+  fax_ingest_row_id         Int?
+  /// Fax number only. No foreign key.
+  source_fax_id             Int?
+  aprima_appointment_id     String?   @db.VarChar(36)
+  is_active                 Boolean
+
+  restore_set fax_restore_sets         @relation(fields: [restore_set_id], references: [id], onDelete: Cascade)
+  activity    schedule_card_activities @relation(fields: [schedule_card_activity_id], references: [id], onDelete: Cascade)
+
+  @@unique([restore_set_id, schedule_card_activity_id])
+  @@index([restore_set_id])
+  @@index([schedule_card_activity_id])
+}
+
+/// Extra. A saved pair. Fax send does not read this table.
+model co_surgeon_pairs {
+  id                   Int       @id @default(autoincrement())
+  primary_surgeon_id   Int
+  assisting_surgeon_id Int
+  is_active            Boolean   @default(true)
+  note                 String?   @db.Text
+  created_at           DateTime? @default(now()) @db.Timestamp(6)
+
+  primary_surgeon   surgeons @relation("CoPrimary", fields: [primary_surgeon_id], references: [id], onDelete: Cascade)
+  assisting_surgeon surgeons @relation("CoAssisting", fields: [assisting_surgeon_id], references: [id], onDelete: Cascade)
+
+  @@unique([primary_surgeon_id, assisting_surgeon_id])
+}
+
+model clinic_groups {
+  id                       Int       @id @default(autoincrement())
+  name                     String    @unique @db.VarChar(128)
+  abbreviation             String    @db.VarChar(12)
+  group_type               String    @default("people") @db.VarChar(16)
+  enforce_day_off_limit    Boolean   @default(false)
+  max_approved_off_per_day Int       @default(1)
+  is_active                Boolean   @default(true)
+  created_at               DateTime? @default(now()) @db.Timestamp(6)
+
+  members   clinic_group_members[]
+  locations clinic_group_locations[]
+}
+
+model clinic_group_members {
+  id              Int @id @default(autoincrement())
+  clinic_group_id Int
+  surgeon_id      Int
+
+  clinic_group clinic_groups @relation(fields: [clinic_group_id], references: [id], onDelete: Cascade)
+  surgeon      surgeons      @relation(fields: [surgeon_id], references: [id], onDelete: Cascade)
+
+  @@unique([clinic_group_id, surgeon_id])
+}
+
+model clinic_group_locations {
+  id              Int @id @default(autoincrement())
+  clinic_group_id Int
+  location_id     Int
+
+  clinic_group clinic_groups @relation(fields: [clinic_group_id], references: [id], onDelete: Cascade)
+  location     locations     @relation(fields: [location_id], references: [id], onDelete: Cascade)
+
+  @@unique([clinic_group_id, location_id])
+}
+
+/// Extra. Older block list. Block OR rooms live on or_block_instances.
+model surgical_blocks {
+  id          Int       @id @default(autoincrement())
+  surgeon_id  Int
+  location_id Int?
+  day_of_week Int?
+  block_date  DateTime? @db.Date
+  start_time  DateTime  @db.Time(6)
+  end_time    DateTime  @db.Time(6)
+  recurrence  String?   @default("weekly") @db.VarChar(16)
+  is_active   Boolean   @default(true)
+  notes       String?   @db.Text
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+
+  surgeon  surgeons   @relation(fields: [surgeon_id], references: [id])
+  location locations? @relation(fields: [location_id], references: [id])
+}
+
+model or_block_series {
+  id                  Int       @id @default(autoincrement())
+  name                String    @db.VarChar(128)
+  recurrence          String?   @default("weekly") @db.VarChar(16)
+  weekday             Int?
+  start_date          DateTime  @db.Date
+  end_date            DateTime  @db.Date
+  session             String?   @default("am") @db.VarChar(16)
+  start_time          DateTime  @db.Time(6)
+  end_time            DateTime  @db.Time(6)
+  owner_type          String?   @default("practice") @db.VarChar(16)
+  owner_surgeon_id    Int?
+  release_policy_days Int?      @default(3)
+  is_active           Boolean   @default(true)
+  notes               String?   @db.Text
+  created_by_admin_id Int?
+  created_at          DateTime? @default(now()) @db.Timestamp(6)
+  updated_at          DateTime? @db.Timestamp(6)
+
+  owner_surgeon surgeons?            @relation("SeriesOwner", fields: [owner_surgeon_id], references: [id])
+  created_by    admin_users?         @relation("SeriesCreatedBy", fields: [created_by_admin_id], references: [id])
+  instances     or_block_instances[]
+}
+
+model or_block_instances {
+  id                   Int       @id @default(autoincrement())
+  series_id            Int?
+  location_id          Int
+  date                 DateTime  @db.Date
+  session              String?   @default("am") @db.VarChar(16)
+  start_time           DateTime  @db.Time(6)
+  end_time             DateTime  @db.Time(6)
+  room_text            String?   @db.VarChar(64)
+  status               String?   @default("open") @db.VarChar(24)
+  assigned_surgeon_id  Int?
+  assigned_by_admin_id Int?
+  assigned_at          DateTime? @db.Timestamp(6)
+  assigned_start_time  DateTime? @db.Time(6)
+  assigned_case_count  Int?
+  assignment_note      String?   @db.Text
+  release_deadline     DateTime? @db.Timestamp(6)
+  released_at          DateTime? @db.Timestamp(6)
+  released_by_admin_id Int?
+  release_reason       String?   @db.Text
+  advent_report_status String?   @default("not_sent") @db.VarChar(24)
+  notes                String?   @db.Text
+  created_at           DateTime? @default(now()) @db.Timestamp(6)
+  updated_at           DateTime? @db.Timestamp(6)
+
+  series           or_block_series?           @relation(fields: [series_id], references: [id])
+  location         locations                  @relation(fields: [location_id], references: [id])
+  assigned_surgeon surgeons?                  @relation("InstanceAssigned", fields: [assigned_surgeon_id], references: [id])
+  assigned_by      admin_users?               @relation("InstanceAssignedBy", fields: [assigned_by_admin_id], references: [id])
+  released_by      admin_users?               @relation("InstanceReleasedBy", fields: [released_by_admin_id], references: [id])
+  assignments      or_block_assignments[]
+  audit_events     or_block_audit_events[]
+  card_lines       schedule_card_activities[]
+}
+
+model or_block_assignments {
+  id                   Int       @id @default(autoincrement())
+  block_instance_id    Int
+  surgeon_id           Int
+  assigned_by_admin_id Int?
+  start_time           DateTime  @db.Time(6)
+  case_count           Int?      @default(1)
+  note                 String?   @db.Text
+  created_at           DateTime? @default(now()) @db.Timestamp(6)
+  updated_at           DateTime? @db.Timestamp(6)
+
+  block_instance or_block_instances @relation(fields: [block_instance_id], references: [id])
+  surgeon        surgeons           @relation(fields: [surgeon_id], references: [id])
+  assigned_by    admin_users?       @relation("AssignmentAssignedBy", fields: [assigned_by_admin_id], references: [id])
+}
+
+model or_block_audit_events {
+  id                Int       @id @default(autoincrement())
+  block_instance_id Int
+  admin_user_id     Int?
+  event_type        String    @db.VarChar(32)
+  detail            String?   @db.Text
+  created_at        DateTime? @default(now()) @db.Timestamp(6)
+
+  block_instance or_block_instances @relation(fields: [block_instance_id], references: [id])
+  admin_user     admin_users?       @relation(fields: [admin_user_id], references: [id])
+}
+
+model schedule_build_backups {
+  id                   Int       @id @default(autoincrement())
+  start_date           DateTime  @db.Date
+  end_date             DateTime  @db.Date
+  payload_json         String    @db.Text
+  created_by_admin_id  Int?
+  created_at           DateTime? @default(now()) @db.Timestamp(6)
+  reverted_by_admin_id Int?
+  reverted_at          DateTime? @db.Timestamp(6)
+  note                 String?   @db.Text
+
+  created_by  admin_users? @relation("BackupCreatedBy", fields: [created_by_admin_id], references: [id])
+  reverted_by admin_users? @relation("BackupRevertedBy", fields: [reverted_by_admin_id], references: [id])
+}
+
+model schedule_change_events {
+  id            Int       @id @default(autoincrement())
+  event_type    String    @db.VarChar(64)
+  surgeon_id    Int?
+  admin_user_id Int?
+  date          DateTime? @db.Date
+  title         String    @db.VarChar(255)
+  body          String?   @db.Text
+  payload       String?   @db.Text
+  created_at    DateTime? @default(now()) @db.Timestamp(6)
+
+  surgeon    surgeons?    @relation(fields: [surgeon_id], references: [id])
+  admin_user admin_users? @relation(fields: [admin_user_id], references: [id])
+}
+
+/// A warning belongs to the card. source_fax_id joins the fax number.
+model schedule_warnings {
+  id               Int       @id @default(autoincrement())
+  warning_code     String    @db.VarChar(64)
+  schedule_card_id Int
+  source_fax_id    Int
+  detail           String?   @db.Text
+  created_at       DateTime? @default(now()) @db.Timestamp(6)
+
+  schedule_card schedule_cards @relation(fields: [schedule_card_id], references: [id], onDelete: Cascade)
+  fax_document  fax_documents  @relation(fields: [source_fax_id], references: [external_fax_id], onDelete: Cascade)
+
+  @@unique([source_fax_id, schedule_card_id, warning_code])
+  @@index([schedule_card_id])
+  @@index([source_fax_id])
+}
+
+model push_subscriptions {
+  id         Int       @id @default(autoincrement())
+  surgeon_id Int
+  device_id  Int?
+  endpoint   String    @db.Text
+  p256dh     String    @db.Text
+  auth_key   String    @db.Text
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+
+  surgeon surgeons         @relation(fields: [surgeon_id], references: [id])
+  device  surgeon_devices? @relation(fields: [device_id], references: [id])
+}
+
+model native_push_tokens {
+  id          Int       @id @default(autoincrement())
+  surgeon_id  Int
+  device_id   Int?
+  token       String    @unique @db.Text
+  platform    String?   @default("ios") @db.VarChar(32)
+  provider    String?   @default("expo") @db.VarChar(32)
+  device_name String?   @db.VarChar(128)
+  is_active   Boolean?  @default(true)
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+  updated_at  DateTime? @db.Timestamp(6)
+
+  surgeon surgeons         @relation(fields: [surgeon_id], references: [id])
+  device  surgeon_devices? @relation(fields: [device_id], references: [id])
+}
+
+model native_schedule_alerts {
+  id         Int       @id @default(autoincrement())
+  surgeon_id Int
+  title      String    @db.VarChar(255)
+  body       String    @db.Text
+  kind       String?   @default("schedule") @db.VarChar(64)
+  payload    String?   @db.Text
+  read_at    DateTime? @db.Timestamp(6)
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+
+  surgeon surgeons @relation(fields: [surgeon_id], references: [id])
+}
+
+model admin_notifications {
+  id            Int       @id @default(autoincrement())
+  admin_user_id Int
+  title         String    @db.VarChar(255)
+  body          String    @db.Text
+  kind          String?   @default("schedule") @db.VarChar(64)
+  payload       String?   @db.Text
+  read_at       DateTime? @db.Timestamp(6)
+  created_at    DateTime? @default(now()) @db.Timestamp(6)
+
+  admin_user admin_users @relation(fields: [admin_user_id], references: [id])
+}
+
+/// Extra. Aprima cache. The next fix copies the real rows, then this table can go.
+model aprima_cached_appointments {
+  appointment_id   String    @id @db.VarChar(36)
+  kind             String    @db.VarChar(16)
+  date             DateTime  @db.Date
+  surgeon_initials String?   @db.VarChar(16)
+  surgeon_id       Int?
+  location_id      Int?
+  schedule_card_id Int?
+  session          String?   @db.VarChar(2)
+  start_time       DateTime? @db.Time(6)
+  end_time         DateTime? @db.Time(6)
+  patient_name     String?   @db.VarChar(255)
+  activity_type    String?   @db.VarChar(16)
+  room_text        String?   @db.VarChar(128)
+  service_site     String?   @db.VarChar(255)
+  appointment_type String?   @db.VarChar(255)
+  reason_text      String?   @db.Text
+  content_hash     String    @db.VarChar(64)
+  payload_json     String    @db.Text
+  synced_at        DateTime  @default(now()) @db.Timestamp(6)
+
+  surgeon       surgeons?                  @relation(fields: [surgeon_id], references: [id])
+  location      locations?                 @relation(fields: [location_id], references: [id])
+  schedule_card schedule_cards?            @relation(fields: [schedule_card_id], references: [id])
+  card_lines    schedule_card_activities[]
+
+  @@index([kind])
+  @@index([date])
+  @@index([surgeon_initials])
+  @@index([surgeon_id])
+  @@index([location_id])
+  @@index([schedule_card_id])
+}
+
+/// Extra. The last Aprima sync. It belongs with the cache.
+model aprima_sync_state {
+  id                  Int       @id @default(autoincrement())
+  last_started_at     DateTime? @db.Timestamp(6)
+  last_finished_at    DateTime? @db.Timestamp(6)
+  last_status         String?   @default("never") @db.VarChar(32)
+  last_error          String?   @db.Text
+  patient_count       Int?      @default(0)
+  meeting_count       Int?      @default(0)
+  window_start        DateTime? @db.Date
+  window_end          DateTime? @db.Date
+  content_fingerprint String?   @default("") @db.VarChar(64)
+}

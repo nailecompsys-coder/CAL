@@ -1,16 +1,17 @@
-// Picture of the tables in server/app/models.py at commit c275ca7.
+// Picture of the tables in server/app/models.py.
 // The running app uses SQLAlchemy. This file is here so the joins can be seen.
 // Open it with Prisma. A relation line is a foreign key.
 //
 // The card line joins its card on schedule_card_id, and again on
 // schedule_card_id + surgeon_id + activity_date + session.
 // source_fax_id on a card line is a fax number. It is not a foreign key.
+// A card's surgeon matches its week: week_id + surgeon_id.
+// One meeting stores each person once.
+// One Block OR room is location + date + half-day + room, and a blank room counts.
 //
 // Extra tables still in this file: call_daily_assignments,
 // aprima_cached_appointments, aprima_sync_state, fax_ingest_rows,
-// fax_row_decisions, co_surgeon_pairs, surgical_blocks, meeting_attendees.
-// The local database still has clinic_schedules and surgical_cases.
-// Those two are not in this file. This branch drops them when it starts.
+// fax_row_decisions, co_surgeon_pairs, surgical_blocks.
 
 generator client {
   provider = "prisma-client-js"
@@ -524,7 +525,7 @@ model meetings {
   attendees meeting_attendees[]
 }
 
-/// Extra. The same person can be stored twice. There is no unique key on meeting + surgeon.
+/// One row per meeting and person.
 model meeting_attendees {
   id         Int     @id @default(autoincrement())
   meeting_id Int
@@ -533,6 +534,8 @@ model meeting_attendees {
 
   meeting meetings @relation(fields: [meeting_id], references: [id])
   surgeon surgeons @relation(fields: [surgeon_id], references: [id])
+
+  @@unique([meeting_id, surgeon_id], map: "uq_meeting_attendees_meeting_surgeon")
 }
 
 model schedule_card_weeks {
@@ -543,10 +546,12 @@ model schedule_card_weeks {
   created_at      DateTime? @default(now()) @db.Timestamp(6)
   updated_at      DateTime? @default(now()) @db.Timestamp(6)
 
-  surgeon surgeons         @relation(fields: [surgeon_id], references: [id])
-  cards   schedule_cards[]
+  surgeon       surgeons         @relation(fields: [surgeon_id], references: [id])
+  cards         schedule_cards[] @relation("WeekParent")
+  surgeon_cards schedule_cards[] @relation("WeekSurgeon")
 
   @@unique([surgeon_id, week_start])
+  @@unique([id, surgeon_id], map: "uq_schedule_card_weeks_id_surgeon")
 }
 
 /// Permanent morning and afternoon cards.
@@ -569,7 +574,8 @@ model schedule_cards {
   created_at            DateTime? @default(now()) @db.Timestamp(6)
   updated_at            DateTime? @default(now()) @db.Timestamp(6)
 
-  week               schedule_card_weeks          @relation(fields: [week_id], references: [id], onDelete: Cascade)
+  week               schedule_card_weeks          @relation("WeekParent", fields: [week_id], references: [id], onDelete: Cascade)
+  week_surgeon       schedule_card_weeks          @relation("WeekSurgeon", fields: [week_id, surgeon_id], references: [id, surgeon_id], onUpdate: Cascade, onDelete: Cascade, map: "fk_schedule_cards_week_surgeon")
   surgeon            surgeons                     @relation(fields: [surgeon_id], references: [id])
   baseline_location  locations?                   @relation("CardBaseline", fields: [baseline_location_id], references: [id])
   effective_location locations?                   @relation("CardEffective", fields: [effective_location_id], references: [id])
@@ -920,6 +926,11 @@ model or_block_instances {
   assignments      or_block_assignments[]
   audit_events     or_block_audit_events[]
   card_lines       schedule_card_activities[]
+
+  // One hospital, date, half-day, and room. Postgres stores this as
+  // uq_or_block_instances_location_date_session_room on
+  // (location_id, date, COALESCE(session, ''), COALESCE(room_text, '')).
+  // A blank room is part of that key. Prisma has no expression index, so the line is here.
 }
 
 model or_block_assignments {

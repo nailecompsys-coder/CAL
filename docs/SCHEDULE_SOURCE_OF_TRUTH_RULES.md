@@ -20,6 +20,9 @@ This is Don's current scheduling rule set for the master calendar, the surgeon a
 - A clinic place lives on the morning card and the afternoon card. A whole day fills both cards. The surgeon website, the office, the master build, and the phone read those cards. The old clinic list is gone.
 - One card has many lines. Each line belongs to that one card. The phone reads the card and its lines.
 - A line takes its surgeon, date, and morning or afternoon from that card. The database refuses a line that names a different surgeon, date, or half-day.
+- A card names the same surgeon as its week. The database refuses a card that names someone else.
+- A meeting stores each person once.
+- One Block OR room is one hospital, one date, one half-day, and one room. A blank room counts. A different room is a second block.
 - A day-off request points at that same surgeon's morning and afternoon cards. The database refuses a link to another surgeon's card.
 - One live day-off request is kept for a surgeon and those dates. No Call can sit beside that request. The start date is on or before the end date. A denied request can be filed again.
 - The card is the only parent that removes a line. Removing a fax row or an Aprima row leaves the line on the card.

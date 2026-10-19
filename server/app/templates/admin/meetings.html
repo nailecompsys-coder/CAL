@@ -154,7 +154,7 @@
 </div>
 
 <!-- Day overflow / detail -->
-<div id="detail-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden" onclick="if (event.target === this) closeDetailModal()">
+<div id="detail-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden" onclick="if (event.target === this) closeDetailFromBackdrop()">
   <div class="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-5 max-h-[85vh] overflow-y-auto">
     <div class="flex items-center justify-between mb-4 gap-3">
       <div class="min-w-0">
@@ -286,8 +286,19 @@ function openCreateForDate(isoDate) {
   document.getElementById('create-modal').classList.remove('hidden');
 }
 
+let detailGuardUntil = 0;
+
+function armDetailGuard() {
+  detailGuardUntil = Date.now() + 400;
+}
+
 function closeDetailModal() {
   document.getElementById('detail-modal').classList.add('hidden');
+}
+
+function closeDetailFromBackdrop() {
+  if (Date.now() < detailGuardUntil) return;
+  closeDetailModal();
 }
 
 function closeEditModal() {
@@ -363,6 +374,7 @@ function openMeetingDetail(event) {
     actions.innerHTML = '';
   }
 
+  armDetailGuard();
   document.getElementById('detail-modal').classList.remove('hidden');
 }
 
@@ -399,6 +411,7 @@ function openDayOverflow(isoDate, label) {
     openCreateForDate(isoDate);
   });
   actions.appendChild(scheduleBtn);
+  armDetailGuard();
   document.getElementById('detail-modal').classList.remove('hidden');
 }
 

@@ -71,6 +71,19 @@ class AdminMeetingsCalendarTest(unittest.TestCase):
         self.assertIn(24, offsets)
         self.assertEqual(len(far), 26)
 
+    def test_meeting_script_json_is_not_html_escaped(self):
+        from app.jinja_env import templates
+
+        html = templates.env.from_string(
+            "<script>const MEETING_EVENTS = {{ events|tojson }};</script>"
+        ).render(events={"2026-10-20": [{"title": "O'Brien </script> & co"}]})
+        script = html.split("<script>", 1)[1].split("</script>", 1)[0]
+        self.assertIn('"2026-10-20"', script)
+        self.assertNotIn("&#34;", script)
+        self.assertNotIn("</script>", script)
+        self.assertIn("\\u003c/script\\u003e", script)
+        self.assertIn("\\u0027", script)
+
     def test_calendar_events_merge_cal_and_aprima_by_day(self):
         day = date(2026, 7, 15)
         cal = SimpleNamespace(

@@ -5,6 +5,7 @@ from datetime import timezone as _timezone
 from urllib.parse import quote as _url_quote
 from zoneinfo import ZoneInfo as _ZoneInfo
 
+import markupsafe
 from fastapi.templating import Jinja2Templates
 
 from .admin_notification_href import admin_notification_href
@@ -55,9 +56,28 @@ def _format_bytes(value) -> str:
     return f"{size:.1f} {unit}"
 
 
+def _tojson(value):
+    """JSON for a <script> block or a quoted attribute.
+
+    A plain json.dumps string gets HTML-escaped, so quotes become &#34;
+    inside <script> and the Meetings page script never runs. Markup keeps
+    the quotes, and the replacements keep <script> and apostrophes from
+    breaking out of the page.
+    """
+    raw = _json.dumps(value, separators=(",", ":"), default=str)
+    return markupsafe.Markup(
+        raw.replace("&", "\\u0026")
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("'", "\\u0027")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
+
+
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.filters["from_json"] = _json.loads
-templates.env.filters["tojson"] = lambda value: _json.dumps(value, separators=(",", ":"), default=str)
+templates.env.filters["tojson"] = _tojson
 templates.env.filters["urlquote"] = lambda s: _url_quote(str(s or ""), safe="")
 templates.env.filters["eastern_time"] = _eastern_time
 templates.env.filters["us_datetime"] = format_us_datetime

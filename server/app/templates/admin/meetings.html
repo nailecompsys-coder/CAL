@@ -134,13 +134,17 @@
               +{{ day_events|length - 4 }} more
             </button>
             {% elif not day_events %}
-            <div class="text-slate-300 text-xs text-center py-2 group-hover/cell:text-slate-400">
+            <button type="button"
+              class="w-full text-slate-300 text-xs text-center py-2 group-hover/cell:text-slate-400"
+              onclick="event.stopPropagation(); openCreateForDate('{{ day_key }}')">
               <i class="fa-solid fa-plus"></i>
-            </div>
+            </button>
             {% else %}
-            <div class="text-slate-300 text-[10px] text-center group-hover/cell:text-slate-400">
+            <button type="button"
+              class="w-full text-slate-300 text-[10px] text-center group-hover/cell:text-slate-400"
+              onclick="event.stopPropagation(); openCreateForDate('{{ day_key }}')">
               <i class="fa-solid fa-plus text-[8px]"></i> add
-            </div>
+            </button>
             {% endif %}
           </div>
         </td>
@@ -154,7 +158,7 @@
 </div>
 
 <!-- Day overflow / detail -->
-<div id="detail-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden" onclick="if (event.target === this) closeDetailFromBackdrop()">
+<div id="detail-modal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 hidden" onclick="if (event.target === this) closeDetailFromBackdrop(event)">
   <div class="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4 p-5 max-h-[85vh] overflow-y-auto">
     <div class="flex items-center justify-between mb-4 gap-3">
       <div class="min-w-0">
@@ -289,15 +293,16 @@ function openCreateForDate(isoDate) {
 let detailGuardUntil = 0;
 
 function armDetailGuard() {
-  detailGuardUntil = Date.now() + 400;
+  detailGuardUntil = Date.now() + 1000;
 }
 
 function closeDetailModal() {
   document.getElementById('detail-modal').classList.add('hidden');
 }
 
-function closeDetailFromBackdrop() {
+function closeDetailFromBackdrop(domEvent) {
   if (Date.now() < detailGuardUntil) return;
+  if (domEvent && domEvent.detail > 1) return;
   closeDetailModal();
 }
 

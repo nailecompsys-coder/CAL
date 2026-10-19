@@ -87,7 +87,10 @@
             <td class="px-4 py-3 font-medium text-slate-800">{{ b.timestamp|us_datetime }}</td>
             <td class="px-4 py-3 text-slate-600">{{ b.total_bytes|bytes }}</td>
             <td class="px-4 py-3 text-right">
-              <button type="button" onclick="openRestoreModal('{{ db_file.key|e }}', {{ b.timestamp|us_datetime|tojson }})"
+              <button type="button"
+                data-restore-key="{{ db_file.key }}"
+                data-restore-label="{{ b.timestamp|us_datetime }}"
+                onclick="openRestoreModal(this.dataset.restoreKey, this.dataset.restoreLabel)"
                 class="text-rose-600 hover:text-rose-800 text-xs font-medium">Restore</button>
             </td>
           </tr>

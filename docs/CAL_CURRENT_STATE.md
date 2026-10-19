@@ -1,9 +1,10 @@
-# CAL current state — 2026-10-14
+# CAL current state — 2026-10-19
 
 This tracked file records verified production facts and unfinished work. Update it with each release. Local `memory.md` may provide extra session context but is Git-ignored and is not a shared source of truth.
 
 ## Production
 
+- October 19: production `/opt/cal` runs `478853c` on `cursor/fax-shared-case-code-e6b2` (includes the rehearsed card-line commit `c275ca7`); `/health` ok, version 2.0. Pre-deploy backup `/root/cal-backups/20261019-card-lines/cal_prod.dump` (581M); rollback image `cal_api:rollback-20261019-pre-card-lines`. First start kept 11,560 cards and 4,283 card lines, removed the old surgery and clinic lists, wrote a fax number on 3,959 fax clinic lines, deleted scratch rows for applied faxes, and kept 3,184 scratch rows for staged faxes. Johnson October 20: morning card has 3 surgery lines on the office and on the native home. The afternoon card has 20 clinic lines on the office; the native home reports that count and does not list each visit. The 302 surgery lines and 22 Aprima lines have no fax number. No TestFlight build. The public health check returned version 2.0.
 - October 14: TestFlight **2.0 (29)** uploaded (delivery UUID `230ea9b1-ac6a-42ef-8c22-9df382f02c4a`) — Week cards keep meetings/extra places off the AM/PM schedule line.
 - October 14: Call Builder holidays — work list drops Halloween (still emoji on iPhone/portal calendar); adds Presidents Day, Easter, Mother’s Day, Father’s Day for 2025–2027. Flyover uses minimize (no X); holiday grid scrolls; doctor roster stays preferred. Weekend counts Fri–Sun; pen highlights WG/ALT slots only.
 - October 14: Who’s Out Gantt — half-day OFF light blue; timed AM left / PM right half-cell; reason-only Partial Day full-width blue. Meetings-table rows serialize as `type=meeting`.

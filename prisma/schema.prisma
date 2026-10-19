@@ -9,9 +9,10 @@
 // One meeting stores each person once.
 // One Block OR room is location + date + half-day + room, and a blank room counts.
 //
-// Extra tables still in this file: call_daily_assignments,
-// aprima_cached_appointments, aprima_sync_state, fax_ingest_rows,
-// fax_row_decisions, co_surgeon_pairs, surgical_blocks.
+// Aprima meetings are rows in meetings. Surgery One patients are card lines.
+// aprima_appointment_id is an appointment number, not a foreign key.
+// Extra tables still in this file: call_daily_assignments, aprima_sync_state,
+// fax_ingest_rows, fax_row_decisions, co_surgeon_pairs, surgical_blocks.
 
 generator client {
   provider = "prisma-client-js"
@@ -140,7 +141,6 @@ model locations {
   clinic_group_locations     clinic_group_locations[]
   surgical_blocks            surgical_blocks[]
   or_block_instances         or_block_instances[]
-  aprima_cached_appointments aprima_cached_appointments[]
 }
 
 model surgeons {
@@ -198,7 +198,6 @@ model surgeons {
   push_subscriptions         push_subscriptions[]
   native_push_tokens         native_push_tokens[]
   native_schedule_alerts     native_schedule_alerts[]
-  aprima_cached_appointments aprima_cached_appointments[]
 }
 
 model surgeon_ocr_aliases {
@@ -517,12 +516,16 @@ model meetings {
   location_text   String?   @db.VarChar(255)
   recurrence_rule String?   @db.VarChar(64)
   notes           String?   @db.Text
-  created_by      Int?
-  created_at      DateTime? @default(now()) @db.Timestamp(6)
+  created_by        Int?
+  created_at        DateTime? @default(now()) @db.Timestamp(6)
+  source_system     String?   @db.VarChar(32)
+  source_record_key String?   @db.VarChar(640)
 
   location  locations?          @relation(fields: [location_id], references: [id])
   creator   admin_users?        @relation("MeetingCreator", fields: [created_by], references: [id])
   attendees meeting_attendees[]
+
+  @@unique([source_system, source_record_key], map: "uq_meetings_source_record")
 }
 
 /// One row per meeting and person.
@@ -585,7 +588,6 @@ model schedule_cards {
   day_off_links      day_off_schedule_cards[]
   fax_row_decisions  fax_row_decisions[]
   warnings           schedule_warnings[]
-  aprima_rows        aprima_cached_appointments[]
 
   @@unique([surgeon_id, date, session])
   @@unique([id, surgeon_id], map: "uq_schedule_cards_id_surgeon")
@@ -634,6 +636,7 @@ model schedule_card_activities {
   /// Fax number only. No foreign key.
   source_fax_id         Int?
   fax_ingest_row_id     Int?
+  /// Aprima appointment number. No foreign key.
   aprima_appointment_id String?   @db.VarChar(36)
   or_block_instance_id  Int?
   identity_key          String    @db.VarChar(512)
@@ -646,7 +649,6 @@ model schedule_card_activities {
   surgeon           surgeons                    @relation(fields: [surgeon_id], references: [id])
   location          locations?                  @relation(fields: [location_id], references: [id])
   fax_ingest_row    fax_ingest_rows?            @relation(fields: [fax_ingest_row_id], references: [id], onDelete: SetNull)
-  aprima_row        aprima_cached_appointments? @relation(fields: [aprima_appointment_id], references: [appointment_id], onDelete: SetNull)
   or_block_instance or_block_instances?         @relation(fields: [or_block_instance_id], references: [id], onDelete: SetNull)
   restore_lines     fax_restore_lines[]
 
@@ -1063,42 +1065,7 @@ model admin_notifications {
   admin_user admin_users @relation(fields: [admin_user_id], references: [id])
 }
 
-/// Extra. Aprima cache. The next fix copies the real rows, then this table can go.
-model aprima_cached_appointments {
-  appointment_id   String    @id @db.VarChar(36)
-  kind             String    @db.VarChar(16)
-  date             DateTime  @db.Date
-  surgeon_initials String?   @db.VarChar(16)
-  surgeon_id       Int?
-  location_id      Int?
-  schedule_card_id Int?
-  session          String?   @db.VarChar(2)
-  start_time       DateTime? @db.Time(6)
-  end_time         DateTime? @db.Time(6)
-  patient_name     String?   @db.VarChar(255)
-  activity_type    String?   @db.VarChar(16)
-  room_text        String?   @db.VarChar(128)
-  service_site     String?   @db.VarChar(255)
-  appointment_type String?   @db.VarChar(255)
-  reason_text      String?   @db.Text
-  content_hash     String    @db.VarChar(64)
-  payload_json     String    @db.Text
-  synced_at        DateTime  @default(now()) @db.Timestamp(6)
-
-  surgeon       surgeons?                  @relation(fields: [surgeon_id], references: [id])
-  location      locations?                 @relation(fields: [location_id], references: [id])
-  schedule_card schedule_cards?            @relation(fields: [schedule_card_id], references: [id])
-  card_lines    schedule_card_activities[]
-
-  @@index([kind])
-  @@index([date])
-  @@index([surgeon_initials])
-  @@index([surgeon_id])
-  @@index([location_id])
-  @@index([schedule_card_id])
-}
-
-/// Extra. The last Aprima sync. It belongs with the cache.
+/// Last Aprima pull. It is the clock for the sync button, not the schedule.
 model aprima_sync_state {
   id                  Int       @id @default(autoincrement())
   last_started_at     DateTime? @db.Timestamp(6)

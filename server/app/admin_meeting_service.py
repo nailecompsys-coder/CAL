@@ -23,10 +23,11 @@ def cal_meetings_in_range(
     *,
     limit: int | None = None,
 ) -> list[Meeting]:
-    """Return all admin-entered meetings in a date range."""
+    """Return Shannon's meetings in a date range. Aprima meetings are read separately."""
     query = db.query(Meeting).filter(
         Meeting.date >= start_date,
         Meeting.date <= end_date,
+        Meeting.source_system.is_distinct_from("aprima"),
     ).order_by(Meeting.date, Meeting.start_time)
     if limit is not None:
         query = query.limit(limit)

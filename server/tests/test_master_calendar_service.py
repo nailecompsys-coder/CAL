@@ -12,7 +12,7 @@ os.environ.setdefault('SECRET_KEY', 'test-only')
 from app.api_calendar_admin_service import build_admin_calendar_events
 from app.models import (Base, Surgeon, Meeting, MeetingAttendee, DayOff, CallGroup, CallRotation,
                         CallCoverage, Location, SurgeonLocationSchedule,
-                        AprimaCachedAppointment, SurgeonDayItem, ScheduleCardActivity)
+                        SurgeonDayItem, ScheduleCardActivity)
 from app.schedule_card_service import materialize_master_schedule_cards
 from app.schedule_activity_normalization import backfill_normalized_schedule_activity
 
@@ -156,7 +156,6 @@ class MasterCalendarTest(unittest.TestCase):
 
     def test_normalized_aprima_is_not_repeated_as_a_cached_appointment(self):
         materialize_master_schedule_cards(self.db,start=date(2026,9,28),end=date(2026,10,2))
-        self.cached('patient','visit',self.fid,'Office visit',activity_type='clinic')
         from app.models import ScheduleCard
         card=self.db.query(ScheduleCard).filter_by(surgeon_id=self.fid,date=self.day,session='pm').one()
         self.db.add(ScheduleCardActivity(schedule_card_id=card.id,surgeon_id=self.fid,activity_date=self.day,
@@ -169,20 +168,24 @@ class MasterCalendarTest(unittest.TestCase):
         self.assertEqual(entry['extendedProps']['count_label'],'1 visit')
         self.assertEqual(len(entry['extendedProps']['roster']),1)
 
-    def cached(self,kind,key,sid,reason,**kw):
-        self.db.add(AprimaCachedAppointment(appointment_id=key,kind=kind,date=self.day,surgeon_id=sid,
-            start_time=time(15),end_time=time(16),reason_text=reason,content_hash=key,payload_json='{}',**kw));self.db.commit()
-
-    def test_unattached_cases_cached_appointments_and_personal_items_do_not_vanish(self):
+    def test_aprima_meetings_follow_the_attendee_and_personal_items_stay(self):
         materialize_master_schedule_cards(self.db,start=date(2026,9,28),end=date(2026,10,2))
-        self.cached('patient','visit',self.fid,'Visit',activity_type='clinic')
-        self.cached('meeting','mine',self.fid,'Florin Aprima meeting')
-        self.cached('meeting','other',self.oid,'Other Aprima meeting')
-        self.db.add(SurgeonDayItem(surgeon_id=self.fid,date=self.day,title='Florin reminder'));self.db.commit()
+        mine = Meeting(title='Florin Aprima meeting', date=self.day, start_time=time(15), end_time=time(16),
+                       source_system='aprima', source_record_key='mine')
+        other = Meeting(title='Other Aprima meeting', date=self.day, start_time=time(15), end_time=time(16),
+                        source_system='aprima', source_record_key='other')
+        self.db.add_all([mine, other])
+        self.db.flush()
+        self.db.add_all([
+            MeetingAttendee(meeting_id=mine.id, surgeon_id=self.fid),
+            MeetingAttendee(meeting_id=other.id, surgeon_id=self.oid),
+            SurgeonDayItem(surgeon_id=self.fid, date=self.day, title='Florin reminder'),
+        ])
+        self.db.commit()
         result=self.feed(self.fid)
         self.assertFalse(any(e['id'].startswith('surg-') for e in result))
+        self.assertFalse(any(e['id'].startswith('aprima-') for e in result))
         self.assertNotIn('Unattached',json.dumps(result))
-        self.assertTrue(any(e['id']=='aprima-visit' for e in result))
         self.assertIn('Florin Aprima meeting',{e['title'] for e in result})
         self.assertNotIn('Other Aprima meeting',{e['title'] for e in result})
         self.assertIn('Florin reminder',{e['title'] for e in result})

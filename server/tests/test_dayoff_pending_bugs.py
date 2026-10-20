@@ -229,6 +229,30 @@ class DayOffPendingBugsTest(unittest.TestCase):
         rows = recent_admin_notifications(self.db, self.admin.id, limit=8)
         self.assertEqual([r for r in rows if r.kind == "day_off_request"], [])
 
+    def test_dashboard_feed_clears_orphaned_pending_and_keeps_cancel_notice(self):
+        pending = AdminNotification(
+            admin_user_id=self.admin.id,
+            title="Pending Request",
+            body="Nadia Froehling requested Dec 10 to Dec 10.",
+            kind="day_off_request",
+            payload=json.dumps({"dayOffId": 306, "surgeonId": 21}),
+        )
+        canceled = AdminNotification(
+            admin_user_id=self.admin.id,
+            title="Time off canceled",
+            body="Nadia Froehling canceled Dec 10 to Dec 10.",
+            kind="day_off_request",
+            payload=json.dumps({"dayOffId": 306, "surgeonId": 21, "status": "canceled"}),
+        )
+        self.db.add_all([pending, canceled])
+        self.db.commit()
+        pending_id, canceled_id = pending.id, canceled.id
+
+        rows = recent_admin_notifications(self.db, self.admin.id, limit=8)
+        self.assertIsNone(self.db.get(AdminNotification, pending_id))
+        self.assertIsNotNone(self.db.get(AdminNotification, canceled_id))
+        self.assertEqual([r.id for r in rows if r.kind == "day_off_request"], [canceled_id])
+
     def test_approve_removes_pending_notification_cards(self):
         dayoff = DayOff(
             surgeon_id=self.surgeon.id,

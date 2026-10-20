@@ -76,12 +76,34 @@ def reconcile_bot_chatter_notifications(
     return removed
 
 
+def _day_off_request_is_closed(db: Session, row: AdminNotification) -> bool:
+    """True when the linked day-off is gone or no longer pending."""
+    if (row.kind or "").strip().lower() != "day_off_request":
+        return False
+    try:
+        payload = json.loads(row.payload or "{}") if row.payload else {}
+    except (TypeError, ValueError):
+        payload = {}
+    if not isinstance(payload, dict):
+        return True
+    raw = payload.get("dayOffId")
+    if raw is None or raw == "":
+        return True
+    try:
+        dayoff_id = int(raw)
+    except (TypeError, ValueError):
+        return True
+    from .models import DayOff
+    dayoff = db.get(DayOff, dayoff_id)
+    return dayoff is None or (dayoff.status or "") != "pending"
+
+
 def ack_informational_notification(
     db: Session,
     admin_user_id: int,
     notification_id: int,
 ) -> str:
-    """Delete an informational card and return where to send the admin next."""
+    """Delete a dismissable card and return where to send the admin next."""
     row = db.get(AdminNotification, notification_id)
     if row is None or row.admin_user_id != admin_user_id:
         return "/admin/dashboard"
@@ -92,7 +114,9 @@ def ack_informational_notification(
     if not isinstance(payload, dict):
         payload = {}
     href = admin_notification_href(row.kind, payload) or "/admin/dashboard"
-    if notification_is_informational(row):
+    closed_dayoff = _day_off_request_is_closed(db, row)
+    if notification_is_informational(row) or closed_dayoff:
         db.delete(row)
         db.commit()
+        return "/admin/dashboard" if closed_dayoff else href
     return href

@@ -75,6 +75,32 @@ class NotificationAckTest(unittest.TestCase):
             db.close()
             engine.dispose()
 
+    def test_ack_clears_orphaned_pending_day_off_card(self):
+        engine = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(engine)
+        db = sessionmaker(bind=engine)()
+        try:
+            admin = AdminUser(username="shannon", email="shannon@example.com", password_hash="x", is_active=True)
+            db.add(admin)
+            db.commit()
+            db.refresh(admin)
+            note = AdminNotification(
+                admin_user_id=admin.id,
+                title="Pending Request",
+                body="Nadia Froehling requested Dec 10 to Dec 10.",
+                kind="day_off_request",
+                payload=json.dumps({"dayOffId": 306, "surgeonId": 21}),
+            )
+            db.add(note)
+            db.commit()
+            note_id = note.id
+            href = ack_informational_notification(db, admin.id, note_id)
+            self.assertEqual(href, "/admin/dashboard")
+            self.assertIsNone(db.get(AdminNotification, note_id))
+        finally:
+            db.close()
+            engine.dispose()
+
     def test_ack_does_not_delete_a_real_conflict_card(self):
         engine = create_engine("sqlite:///:memory:")
         Base.metadata.create_all(engine)

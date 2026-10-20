@@ -245,6 +245,8 @@ def cancel_native_request_off(db: Session, surgeon: Surgeon, dayoff_id: int) -> 
         title="Time off canceled",
         body=f"{surgeon.initials}: {start_date.strftime('%b %-d')} to {end_date.strftime('%b %-d')}",
     )
+    from .push import clear_dayoff_request_notifications
+    clear_dayoff_request_notifications(db, dayoff_id)
     db.delete(row)
     db.commit()
     notify_admins(

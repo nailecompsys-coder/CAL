@@ -277,6 +277,33 @@ class CallBuilderTest(unittest.TestCase):
         finally:
             db.close()
 
+    def test_publish_alerts_only_when_one_on_call_person_replaces_another(self):
+        db = self.Session()
+        try:
+            admin, _, chris, alex, _, wg, _alt = self._seed(db)
+            day = date(2026, 12, 12)
+            month = (date(2026, 12, 1), date(2026, 12, 31))
+            upsert_draft(db, day=day, call_group_id=wg.id, surgeon_id=chris.id, admin=admin)
+            with patch("app.admin_call_schedule_action_service.send_push_to_surgeon") as push:
+                publish_draft(db, start=month[0], end=month[1], admin=admin)
+            push.assert_not_called()
+
+            upsert_draft(db, day=day, call_group_id=wg.id, surgeon_id=alex.id, admin=admin)
+            with patch("app.admin_call_schedule_action_service.send_push_to_surgeon") as push:
+                publish_draft(db, start=month[0], end=month[1], admin=admin)
+            self.assertEqual(push.call_count, 2)
+            notified = {call.args[0] for call in push.call_args_list}
+            self.assertEqual(notified, {chris.id, alex.id})
+
+            upsert_draft(db, day=day, call_group_id=wg.id, surgeon_id=None, admin=admin)
+            with patch("app.admin_call_schedule_action_service.send_push_to_surgeon") as push:
+                publish_draft(db, start=month[0], end=month[1], admin=admin)
+            push.assert_not_called()
+            live = db.query(CallRotation).filter(CallRotation.date == day, CallRotation.call_group_id == wg.id).one()
+            self.assertIsNone(live.surgeon_id)
+        finally:
+            db.close()
+
     def test_live_call_change_shows_in_the_builder(self):
         db = self.Session()
         try:

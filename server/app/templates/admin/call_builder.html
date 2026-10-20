@@ -526,7 +526,7 @@
       <h3 class="font-bold text-slate-800">Publish to Call Schedule</h3>
       <button type="button" onclick="document.getElementById('publish-modal').classList.add('hidden')" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
     </div>
-    <p class="text-sm text-slate-600 mb-3">These draft cells write through the same path as the Call Schedule page (change log, No Call exceptions, pushes).</p>
+    <p class="text-sm text-slate-600 mb-3">These draft cells write through the same path as the Call Schedule page. Surgeons are alerted only when one on-call person is replaced by another.</p>
     <ul id="publish-list" class="space-y-1 text-sm text-slate-700 mb-4 max-h-64 overflow-y-auto"></ul>
     <form method="post" action="/admin/call-builder/publish" class="flex gap-2">
       <input type="hidden" name="month_offset" value="{{ month_offset }}" />

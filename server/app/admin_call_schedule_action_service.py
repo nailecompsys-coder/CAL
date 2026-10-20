@@ -14,6 +14,34 @@ from .push import send_push_to_surgeon
 _UNCHANGED_BACKUP = object()
 
 
+def _notify_on_call_replacement(
+    db: Session,
+    assignment_date: date,
+    from_surgeon_id: int | None,
+    to_surgeon_id: int | None,
+) -> None:
+    """Alert both people only when one on-call person replaces another.
+
+    Filling an empty day and clearing a day stay quiet. Call Builder publish
+    uses this same assignment path.
+    """
+    if not from_surgeon_id or not to_surgeon_id or from_surgeon_id == to_surgeon_id:
+        return
+    label = assignment_date.strftime("%b %d")
+    send_push_to_surgeon(
+        from_surgeon_id,
+        "Schedule Update",
+        f"Your on-call on {label} was changed",
+        db,
+    )
+    send_push_to_surgeon(
+        to_surgeon_id,
+        "Schedule Update",
+        f"You've been assigned on-call on {label}",
+        db,
+    )
+
+
 def rotation_query_for_assignment(db: Session, assignment_date: date, call_group_id: int | None):
     query = db.query(CallRotation).filter(CallRotation.date == assignment_date)
     if call_group_id is not None:
@@ -97,22 +125,9 @@ def assign_rotation(
         )
     db.commit()
 
-    if from_surgeon_id and from_surgeon_id != surgeon_id:
-        send_push_to_surgeon(
-            from_surgeon_id,
-            "Schedule Update",
-            f"Your on-call on {assignment_date.strftime('%b %d')} was removed",
-            db,
-        )
+    _notify_on_call_replacement(db, assignment_date, from_surgeon_id, surgeon_id)
 
     surgeon = db.get(Surgeon, surgeon_id) if surgeon_id else None
-    if surgeon and from_surgeon_id != surgeon_id:
-        send_push_to_surgeon(
-            surgeon_id,
-            "Schedule Update",
-            f"You've been assigned on-call on {assignment_date.strftime('%b %d')}",
-            db,
-        )
 
     if not surgeon or not surgeon_id:
         return []
@@ -214,10 +229,3 @@ def clear_rotation(
             previous_surgeon_id=from_surgeon_id,
         )
     db.commit()
-    if from_surgeon_id:
-        send_push_to_surgeon(
-            from_surgeon_id,
-            "Schedule Update",
-            f"Your on-call on {assignment_date.strftime('%b %d')} was removed",
-            db,
-        )

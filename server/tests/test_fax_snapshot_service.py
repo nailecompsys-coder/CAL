@@ -1,7 +1,7 @@
 import json
 import os
 import unittest
-from datetime import date, time
+from datetime import date, datetime, time
 from unittest.mock import patch
 
 from sqlalchemy.exc import IntegrityError
@@ -460,6 +460,26 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.db.commit()
         with self.assertRaisesRegex(ValueError, "newer fax was already applied"):
             apply_staged_snapshot(self.db, source_fax_id=191, run_id=older["runId"])
+
+    def test_source_received_time_not_desk_id_controls_fax_order(self):
+        self._assign_block(self.wg_or, time(12, 0), time(17, 0))
+        older = stage_reviewed_rows(
+            self.db, external_fax_id=319, source_label="test", surgeon_scope=["JF"],
+            source_received_at=datetime(2026, 10, 14, 20, 59),
+            rows=[self._row("Old, Patient")],
+        )
+        self.db.commit()
+        apply_staged_snapshot(self.db, source_fax_id=319, run_id=older["runId"])
+        newer = stage_reviewed_rows(
+            self.db, external_fax_id=316, source_label="test", surgeon_scope=["JF"],
+            source_received_at=datetime(2026, 10, 15, 21, 26),
+            rows=[self._row("New, Patient")],
+        )
+        self.db.commit()
+
+        result = apply_staged_snapshot(self.db, source_fax_id=316, run_id=newer["runId"])
+
+        self.assertTrue(result["ok"])
 
     def test_older_fax_is_allowed_when_newer_coverage_does_not_overlap(self):
         self._assign_block(self.wg_or, time(12, 0), time(17, 0))

@@ -129,8 +129,10 @@ POSTGRES_RULES = [
         JOIN fax_documents cd ON cd.id = cr.fax_document_id
         WHERE pr.status = 'applied'
           AND pr.id <> cr.id
-          AND pd.external_fax_id < cd.external_fax_id
-        ORDER BY pd.external_fax_id DESC, pr.id DESC
+          AND (COALESCE(pd.source_received_at, pd.created_at), pd.external_fax_id, pr.id)
+              < (COALESCE(cd.source_received_at, cd.created_at), cd.external_fax_id, cr.id)
+        ORDER BY COALESCE(pd.source_received_at, pd.created_at) DESC,
+                 pd.external_fax_id DESC, pr.id DESC
         LIMIT 1;
         IF prev_run IS NULL
            OR NOT EXISTS (
@@ -269,6 +271,8 @@ def run_migration() -> None:
         conn.execute(text("ALTER TABLE fax_documents ADD COLUMN IF NOT EXISTS original_filename VARCHAR(255)"))
         conn.execute(text("ALTER TABLE fax_documents ADD COLUMN IF NOT EXISTS source_path TEXT"))
         conn.execute(text("ALTER TABLE fax_documents ADD COLUMN IF NOT EXISTS page_count INTEGER"))
+        conn.execute(text("ALTER TABLE fax_documents ADD COLUMN IF NOT EXISTS source_received_at TIMESTAMPTZ"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_fax_documents_source_received_at ON fax_documents(source_received_at)"))
         conn.execute(text("ALTER TABLE fax_ingest_runs ADD COLUMN IF NOT EXISTS surgeon_scope_json TEXT NOT NULL DEFAULT '[]'"))
         conn.execute(text("ALTER TABLE fax_ingest_runs ADD COLUMN IF NOT EXISTS extractor_name VARCHAR(64) NOT NULL DEFAULT 'structured_extract'"))
         conn.execute(text("ALTER TABLE fax_ingest_runs ADD COLUMN IF NOT EXISTS extractor_version VARCHAR(64)"))

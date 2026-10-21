@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import subprocess
-from datetime import date, time
+from datetime import date, datetime, time
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
@@ -65,6 +65,7 @@ class FaxCoverageIn(BaseModel):
 
 class VisualScheduleBatch(BaseModel):
     source_fax_id: int
+    source_received_at: datetime | None = None
     source_label: str = "Desk structured fax extraction"
     extractor_name: str = "structured_extract"
     extractor_version: str | None = None
@@ -225,6 +226,7 @@ def ingest_visual_schedule_route(
             extractor_name=body.extractor_name,
             extractor_version=body.extractor_version,
             extractor_request_id=body.extractor_request_id,
+            source_received_at=body.source_received_at,
             coverage=[
                 (item.surgeon_initials, _parse_day(item.case_date))
                 for item in body.coverage

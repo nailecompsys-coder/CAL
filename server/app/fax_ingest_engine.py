@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from datetime import date, time
+from datetime import date, datetime, time
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -121,6 +121,7 @@ def stage_reviewed_rows(
     extractor_name: str = "structured_extract",
     extractor_version: str | None = None,
     extractor_request_id: str | None = None,
+    source_received_at: datetime | None = None,
     coverage: list[tuple[str, date]] | None = None,
 ) -> dict:
     """Record extractor candidates and materialize SQL-owned decisions."""
@@ -134,9 +135,15 @@ def stage_reviewed_rows(
     mark_fax_ingest_transaction(db)
     document = db.query(FaxDocument).filter(FaxDocument.external_fax_id == external_fax_id).one_or_none()
     if document is None:
-        document = FaxDocument(external_fax_id=external_fax_id, source_label=_text(source_label) or "Structured fax extraction")
+        document = FaxDocument(
+            external_fax_id=external_fax_id,
+            source_label=_text(source_label) or "Structured fax extraction",
+            source_received_at=source_received_at,
+        )
         db.add(document)
         db.flush()
+    elif source_received_at is not None:
+        document.source_received_at = source_received_at
     scope = sorted({value.strip().upper() for value in (surgeon_scope or []) if value.strip()})
     if not scope:
         scope = sorted({_text(row.surgeon_initials).upper() for row in rows if _text(row.surgeon_initials)})

@@ -7,7 +7,7 @@ import logging
 from datetime import date
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from .models import (
@@ -74,7 +74,15 @@ def apply_staged_snapshot(
         SELECT newer_document.id
         FROM fax_documents newer_document
         JOIN fax_ingest_runs newer_run ON newer_run.fax_document_id = newer_document.id
-        WHERE newer_document.external_fax_id > :source_fax_id
+        JOIN fax_documents current_document ON current_document.id = :document_id
+        WHERE newer_document.id <> current_document.id
+          AND (
+                COALESCE(newer_document.source_received_at, newer_document.created_at),
+                newer_document.external_fax_id
+              ) > (
+                COALESCE(current_document.source_received_at, current_document.created_at),
+                current_document.external_fax_id
+              )
           AND newer_document.status = 'applied'
           AND (
               NOT EXISTS (SELECT 1 FROM fax_ingest_coverage newer_any WHERE newer_any.run_id = newer_run.id)
@@ -89,7 +97,7 @@ def apply_staged_snapshot(
               )
           )
         LIMIT 1
-    """), {"source_fax_id": source_fax_id, "run_id": run.id}).first()
+    """), {"document_id": document.id, "run_id": run.id}).first()
     if newer_applied:
         raise ValueError("A newer fax was already applied; older snapshots cannot replace it.")
     if run.status == "applied":
@@ -241,8 +249,9 @@ def apply_staged_snapshot(
     db.commit()
     cleanup = {"files": 0, "bytes": 0}
     cleanup_errors: list[str] = []
+    current_order = document.source_received_at or document.created_at
     superseded_documents = db.query(FaxDocument).filter(
-        FaxDocument.external_fax_id <= source_fax_id,
+        func.coalesce(FaxDocument.source_received_at, FaxDocument.created_at) <= current_order,
     ).all()
     for fax_document in superseded_documents:
         try:

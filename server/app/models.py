@@ -742,6 +742,7 @@ class FaxDocument(Base):
     original_filename = Column(String(255))
     source_path = Column(Text)
     page_count = Column(Integer)
+    source_received_at = Column(DateTime(timezone=True), index=True)
     status = Column(String(32), nullable=False, default="staged")
     created_at = Column(DateTime, server_default=func.now())
 

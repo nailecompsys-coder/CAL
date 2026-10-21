@@ -1,5 +1,6 @@
 import os
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
@@ -50,6 +51,7 @@ class ApiIngestVisualTest(unittest.TestCase):
     def test_visual_schedule_endpoint_stages_reviewed_rows_without_backup_or_apply(self):
         body = VisualScheduleBatch(
             source_fax_id=162,
+            source_received_at=datetime(2026, 10, 15, 21, 26, tzinfo=timezone.utc),
             rows=[
                 VisualFaxRowIn(
                     fax_id=162,
@@ -72,6 +74,7 @@ class ApiIngestVisualTest(unittest.TestCase):
         args, kwargs = stage.call_args
         self.assertIs(args[0], db)
         self.assertEqual(kwargs["external_fax_id"], 162)
+        self.assertEqual(kwargs["source_received_at"], body.source_received_at)
         self.assertEqual(kwargs["rows"][0].surgeon_initials, "JF")
         self.assertEqual(kwargs["rows"][0].start_time.strftime("%H:%M"), "07:15")
         self.assertEqual(result["result"], {"writeMode": "staging_only", "skippedPast": 0})

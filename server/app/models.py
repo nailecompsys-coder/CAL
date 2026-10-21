@@ -715,13 +715,29 @@ class ScheduleCardActivity(Base):
     or_block_instance = relationship("ORBlockInstance")
 
 
+class FaxLineAbsence(Base):
+    """One safe, covering fax that omitted an otherwise active fax line."""
+    __tablename__ = "fax_line_absences"
+    __table_args__ = (UniqueConstraint("schedule_card_activity_id", "run_id"),)
+
+    id = Column(Integer, primary_key=True)
+    schedule_card_activity_id = Column(
+        Integer,
+        ForeignKey("schedule_card_activities.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    run_id = Column(Integer, ForeignKey("fax_ingest_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+
 class FaxDocument(Base):
     """Immutable source record for one received Advent/Kno2 fax."""
     __tablename__ = "fax_documents"
 
     id = Column(Integer, primary_key=True)
     external_fax_id = Column(Integer, nullable=False, unique=True)
-    source_label = Column(String(255), nullable=False, default="Desk LlamaParse extraction")
+    source_label = Column(String(255), nullable=False, default="Desk structured fax extraction")
     source_sha256 = Column(String(64))
     original_filename = Column(String(255))
     source_path = Column(Text)
@@ -758,24 +774,67 @@ class FaxIngestRun(Base):
     engine_version = Column(String(64), nullable=False)
     status = Column(String(32), nullable=False, default="staged")
     surgeon_scope_json = Column(Text, nullable=False, default="[]", server_default="[]")
+    extractor_name = Column(String(64), nullable=False, default="structured_extract", server_default="structured_extract")
+    extractor_version = Column(String(64))
+    extractor_request_id = Column(String(255))
     created_at = Column(DateTime, server_default=func.now())
 
     document = relationship("FaxDocument")
     rows = relationship("FaxIngestRow", back_populates="run", cascade="all, delete-orphan")
 
 
+class FaxIngestCandidate(Base):
+    """Immutable structured row handed back by Desk's configured extractor."""
+    __tablename__ = "fax_ingest_candidates"
+    __table_args__ = (
+        UniqueConstraint("run_id", "page_number", "source_row_number"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    run_id = Column(Integer, ForeignKey("fax_ingest_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    page_number = Column(Integer, nullable=False)
+    source_row_number = Column(Integer, nullable=False)
+    surgeon_initials_raw = Column(String(32), nullable=False, default="")
+    surgeon_name_raw = Column(String(255))
+    case_date_raw = Column(String(32), nullable=False)
+    start_time_raw = Column(String(32))
+    row_type_raw = Column(String(32), nullable=False)
+    room_raw = Column(String(255), nullable=False, default="")
+    patient_name_raw = Column(String(255), nullable=False, default="")
+    procedure_raw = Column(Text, nullable=False, default="")
+    extraction_flags = Column(Text)
+    evidence_ref = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+
+
+class FaxIngestCoverage(Base):
+    """Surgeon/day scope that one fax snapshot is authoritative for."""
+    __tablename__ = "fax_ingest_coverage"
+    __table_args__ = (
+        UniqueConstraint("run_id", "surgeon_id", "case_date"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    run_id = Column(Integer, ForeignKey("fax_ingest_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=False, index=True)
+    case_date = Column(Date, nullable=False, index=True)
+    created_at = Column(DateTime, server_default=func.now())
+
+
 class FaxIngestRow(Base):
     """Scratch reading of one fax line. Send to Calendar copies it onto the card, then deletes it."""
     __tablename__ = "fax_ingest_rows"
     __table_args__ = (
-        UniqueConstraint("run_id", "normalized_key"),
+        UniqueConstraint("run_id", "page_number", "source_row_number"),
         CheckConstraint("row_type IN ('surgical', 'clinic')", name="ck_fax_ingest_rows_type"),
         CheckConstraint("session IN ('am', 'pm')", name="ck_fax_ingest_rows_session"),
     )
 
     id = Column(Integer, primary_key=True)
     run_id = Column(Integer, ForeignKey("fax_ingest_runs.id", ondelete="CASCADE"), nullable=False)
+    candidate_id = Column(Integer, ForeignKey("fax_ingest_candidates.id", ondelete="CASCADE"), nullable=True, unique=True)
     page_number = Column(Integer, nullable=False)
+    source_row_number = Column(Integer, nullable=False, default=0, server_default="0")
     surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=True)
     surgeon_initials = Column(String(8), nullable=False)
     case_date = Column(Date, nullable=False)

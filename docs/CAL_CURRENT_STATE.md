@@ -2,6 +2,10 @@
 
 This tracked file records verified production facts and unfinished work. Update it with each release. Local `memory.md` may provide extra session context but is Git-ignored and is not a shared source of truth.
 
+## Implemented locally, not released
+
+- October 21: the fax handoff was consolidated around immutable extractor candidates and SQL-owned resolution/application. The extractor may use local or hosted OCR/vision but must return structured rows; CAL does not require a LlamaParse key. SQL now owns surgeon, AM/PM, facility/card resolution, applicable-row selection, explicit surgeon/date coverage, overlap protection, duplicate identity, and two-covering-fax omission cancellation before writing only `schedule_card_activities`. Unresolved rows remain staged while independent clean rows can apply. Thirty-five focused tests and temporary-PostgreSQL migration/behavior checks passed. The broad suite has the same eight failures and three errors as clean `origin/main`. This is **not pushed or deployed**; production facts below are unchanged. The old `ingest_desk_fax.py` reconciler is not the supported new handoff, and the standalone extractor caller/6 PM automation still must be connected and verified.
+
 ## Production
 
 - October 20 (evening): production `/opt/cal` runs `a982e1d` on `main`. Admin notification cleanup is back on the dashboard load: orphaned “Pending Request” cards for canceled/deleted day-offs drop automatically, and “Time off canceled” cards dismiss on tap. Shannon’s stuck Nadia Dec 10–13 pending cards were cleared on first feed load; two cancel notices remain for her to tap away. `/health` ok, version 2.0. Rollback image `cal_api:rollback-20261020-pre-notif-clear`. No TestFlight build.
@@ -36,7 +40,7 @@ This tracked file records verified production facts and unfinished work. Update 
 
 ## Still unfinished
 
-- The 6 PM daily automation still must use the repeatable ingest command or report a missed CAL handoff. Desk classification alone is not an ingest. Surgeon-home clinic visit detail is still incomplete; the scheduler feed has timed visit rows, but the surgeon home route currently sends a clinic block without those per-visit details.
+- The 6 PM daily automation still must call the structured extractor → `/api/ingest/visual-schedule` → reviewed apply flow or report a missed CAL handoff. Do not wire it to the legacy `ingest_desk_fax.py` reconciler. Desk classification alone is not an ingest. Surgeon-home clinic visit detail is still incomplete; the scheduler feed has timed visit rows, but the surgeon home route currently sends a clinic block without those per-visit details.
 - The surgeon-facing native home/day projection is **not** fully SQL-owned yet. `server/app/sql/native_schedule.sql` covers master cards, stored cases, and legacy clinic fallback. `native_home_service.py` still adds leave, call, meetings, Aprima, and personal items through separate paths. The new scheduler-specific SQL feed includes clinic times/counts but does not complete the surgeon home projection or group OR capacity display. Do not tell Don that whole requirement is complete.
 - The newly clarified **No Call is a visible boundary, not a hard block** rule is recorded in the scheduling contract. Existing code distinguishes a No Call request from time off, but the swap-list label and exception flag for attempted or actual call coverage have not been verified end to end. Do not claim that behavior is working until it is checked in the app.
 - Build 24 adds the Scheduler week → day → surgeon view and read-only **Backup** label and is available to the internal **Cal Beta** group. An installed-device check of build 24 still needs verification. The exact time-off reason/AM-PM presentation and a personal tentative-call month template remain unfinished. No new AI screens are desired; improve existing views.

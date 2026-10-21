@@ -76,7 +76,7 @@ class ApiIngestVisualTest(unittest.TestCase):
         self.assertEqual(kwargs["rows"][0].start_time.strftime("%H:%M"), "07:15")
         self.assertEqual(result["result"], {"writeMode": "staging_only", "skippedPast": 0})
 
-    def test_rows_whose_date_has_passed_are_dropped_before_staging(self):
+    def test_past_rows_are_handed_to_sql_for_auditable_resolution(self):
         body = VisualScheduleBatch(
             source_fax_id=162,
             rows=[
@@ -88,19 +88,22 @@ class ApiIngestVisualTest(unittest.TestCase):
         )
         with patch("app.routers.api_ingest.stage_reviewed_rows", return_value={"writeMode": "staging_only"}) as stage:
             result = ingest_visual_schedule_route(body, db=Mock())
-        self.assertEqual([row.patient_name for row in stage.call_args.kwargs["rows"]], ["Future, Patient"])
-        self.assertEqual(result["result"]["skippedPast"], 1)
+        self.assertEqual(
+            [row.patient_name for row in stage.call_args.kwargs["rows"]],
+            ["Past, Patient", "Future, Patient"],
+        )
+        self.assertEqual(result["result"]["skippedPast"], 0)
 
-    def test_all_past_rows_stage_nothing(self):
+    def test_all_past_rows_still_reach_sql_staging(self):
         body = VisualScheduleBatch(
             source_fax_id=162,
             rows=[VisualFaxRowIn(surgeon_initials="JF", case_date="2020-01-02", row_type="clinic",
                                  room="CLMMFLGS", patient_name="Past, Patient")],
         )
-        with patch("app.routers.api_ingest.stage_reviewed_rows") as stage:
+        with patch("app.routers.api_ingest.stage_reviewed_rows", return_value={"writeMode": "staging_only"}) as stage:
             result = ingest_visual_schedule_route(body, db=Mock())
-        stage.assert_not_called()
-        self.assertEqual(result["result"]["skippedPast"], 1)
+        stage.assert_called_once()
+        self.assertEqual(result["result"]["skippedPast"], 0)
 
     def test_visual_schedule_endpoint_refuses_invalid_row_type(self):
         body = VisualScheduleBatch(

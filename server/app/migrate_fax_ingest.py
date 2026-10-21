@@ -10,6 +10,8 @@ or visits. Past-day cards and line items can never be deleted by anyone;
 the portal admin may still correct them.
 """
 
+from pathlib import Path
+
 from sqlalchemy import text
 
 from .database import engine
@@ -19,11 +21,13 @@ PRACTICE_TIMEZONE = "America/New_York"
 APPLICABLE_VIEW_SELECT = """
     SELECT r.id AS fax_row_id, r.run_id
     FROM fax_ingest_rows r
+    JOIN fax_row_decisions d ON d.fax_row_id = r.id
     JOIN schedule_cards c
       ON c.surgeon_id = r.surgeon_id
      AND c.date = r.case_date
      AND c.session = r.session
     WHERE COALESCE(r.extraction_flags, '') = ''
+      AND d.status IN ('ready', 'ready_with_warning')
 """
 
 # Anything on a fax whose date/time has already passed is ignored.
@@ -243,7 +247,19 @@ POSTGRES_RULES = [
 
 def create_applicable_view(conn) -> None:
     """SQLite (tests) gets the view without the passed-time rule; Postgres creates the full view in run_migration."""
+    resolution = Path(__file__).with_name("sql").joinpath("resolve_fax_candidates.sqlite.sql").read_text()
+    conn.execute(text(f"CREATE VIEW IF NOT EXISTS fax_ingest_candidate_resolutions AS {resolution}"))
     conn.execute(text(f"CREATE VIEW IF NOT EXISTS fax_ingest_rows_applicable AS {APPLICABLE_VIEW_SELECT}"))
+    conn.execute(text("""
+        CREATE TRIGGER IF NOT EXISTS fax_ingest_candidates_immutable_update
+        BEFORE UPDATE ON fax_ingest_candidates
+        BEGIN SELECT RAISE(ABORT, 'fax ingest candidates are immutable'); END
+    """))
+    conn.execute(text("""
+        CREATE TRIGGER IF NOT EXISTS fax_ingest_candidates_immutable_delete
+        BEFORE DELETE ON fax_ingest_candidates
+        BEGIN SELECT RAISE(ABORT, 'fax ingest candidates are immutable'); END
+    """))
 
 
 def run_migration() -> None:
@@ -254,6 +270,92 @@ def run_migration() -> None:
         conn.execute(text("ALTER TABLE fax_documents ADD COLUMN IF NOT EXISTS source_path TEXT"))
         conn.execute(text("ALTER TABLE fax_documents ADD COLUMN IF NOT EXISTS page_count INTEGER"))
         conn.execute(text("ALTER TABLE fax_ingest_runs ADD COLUMN IF NOT EXISTS surgeon_scope_json TEXT NOT NULL DEFAULT '[]'"))
+        conn.execute(text("ALTER TABLE fax_ingest_runs ADD COLUMN IF NOT EXISTS extractor_name VARCHAR(64) NOT NULL DEFAULT 'structured_extract'"))
+        conn.execute(text("ALTER TABLE fax_ingest_runs ADD COLUMN IF NOT EXISTS extractor_version VARCHAR(64)"))
+        conn.execute(text("ALTER TABLE fax_ingest_runs ADD COLUMN IF NOT EXISTS extractor_request_id VARCHAR(255)"))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fax_ingest_candidates (
+                id SERIAL PRIMARY KEY,
+                run_id INTEGER NOT NULL REFERENCES fax_ingest_runs(id) ON DELETE CASCADE,
+                page_number INTEGER NOT NULL,
+                source_row_number INTEGER NOT NULL,
+                surgeon_initials_raw VARCHAR(32) NOT NULL DEFAULT '',
+                surgeon_name_raw VARCHAR(255),
+                case_date_raw VARCHAR(32) NOT NULL,
+                start_time_raw VARCHAR(32),
+                row_type_raw VARCHAR(32) NOT NULL,
+                room_raw VARCHAR(255) NOT NULL DEFAULT '',
+                patient_name_raw VARCHAR(255) NOT NULL DEFAULT '',
+                procedure_raw TEXT NOT NULL DEFAULT '',
+                extraction_flags TEXT,
+                evidence_ref TEXT,
+                created_at TIMESTAMP DEFAULT now(),
+                UNIQUE (run_id, page_number, source_row_number)
+            )
+        """))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_fax_ingest_candidates_run_id ON fax_ingest_candidates(run_id)"))
+        conn.execute(text("""
+            CREATE OR REPLACE FUNCTION cal_fax_candidates_immutable() RETURNS trigger AS $$
+            BEGIN
+              RAISE EXCEPTION 'fax ingest candidates are immutable';
+            END
+            $$ LANGUAGE plpgsql
+        """))
+        conn.execute(text("DROP TRIGGER IF EXISTS fax_ingest_candidates_immutable ON fax_ingest_candidates"))
+        conn.execute(text("""
+            CREATE TRIGGER fax_ingest_candidates_immutable
+            BEFORE UPDATE OR DELETE ON fax_ingest_candidates
+            FOR EACH ROW EXECUTE FUNCTION cal_fax_candidates_immutable()
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fax_ingest_coverage (
+                id SERIAL PRIMARY KEY,
+                run_id INTEGER NOT NULL REFERENCES fax_ingest_runs(id) ON DELETE CASCADE,
+                surgeon_id INTEGER NOT NULL REFERENCES surgeons(id),
+                case_date DATE NOT NULL,
+                created_at TIMESTAMP DEFAULT now(),
+                UNIQUE (run_id, surgeon_id, case_date)
+            )
+        """))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_fax_ingest_coverage_run_id ON fax_ingest_coverage(run_id)"))
+        conn.execute(text("ALTER TABLE fax_ingest_rows ADD COLUMN IF NOT EXISTS candidate_id INTEGER REFERENCES fax_ingest_candidates(id) ON DELETE CASCADE"))
+        conn.execute(text("ALTER TABLE fax_ingest_rows ADD COLUMN IF NOT EXISTS source_row_number INTEGER NOT NULL DEFAULT 0"))
+        conn.execute(text("""
+            WITH numbered AS (
+                SELECT id,
+                       row_number() OVER (
+                           PARTITION BY run_id, page_number
+                           ORDER BY id
+                       ) AS source_row_number
+                FROM fax_ingest_rows
+            )
+            UPDATE fax_ingest_rows row
+            SET source_row_number = numbered.source_row_number
+            FROM numbered
+            WHERE numbered.id = row.id
+              AND row.source_row_number = 0
+        """))
+        conn.execute(text("""
+            DO $$
+            DECLARE constraint_name text;
+            BEGIN
+              FOR constraint_name IN
+                SELECT con.conname
+                FROM pg_constraint con
+                JOIN pg_class rel ON rel.oid = con.conrelid
+                WHERE rel.relname = 'fax_ingest_rows'
+                  AND con.contype = 'u'
+                  AND pg_get_constraintdef(con.oid) LIKE '%(run_id, normalized_key)%'
+              LOOP
+                EXECUTE format('ALTER TABLE fax_ingest_rows DROP CONSTRAINT %I', constraint_name);
+              END LOOP;
+            END $$
+        """))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_fax_ingest_rows_candidate_id ON fax_ingest_rows(candidate_id) WHERE candidate_id IS NOT NULL"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_fax_ingest_rows_source_row ON fax_ingest_rows(run_id, page_number, source_row_number)"))
+        resolution = Path(__file__).with_name("sql").joinpath("resolve_fax_candidates.postgresql.sql").read_text()
+        conn.execute(text("DROP VIEW IF EXISTS fax_ingest_candidate_resolutions"))
+        conn.execute(text(f"CREATE VIEW fax_ingest_candidate_resolutions AS {resolution}"))
         old_list = conn.execute(text("SELECT to_regclass('public.surgical_cases')")).scalar()
         clinic_list = conn.execute(text("SELECT to_regclass('public.clinic_schedules')")).scalar()
         for statement in POSTGRES_RULES:

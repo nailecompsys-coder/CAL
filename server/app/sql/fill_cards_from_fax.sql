@@ -6,18 +6,79 @@
 -- It does not choose a lead or edit schedule_cards.
 -- Statements are split on a line that is exactly: -- @@
 
+DELETE FROM fax_line_absences
+WHERE schedule_card_activity_id IN (
+    SELECT activity.id
+    FROM schedule_card_activities activity
+    JOIN fax_ingest_coverage coverage
+      ON coverage.run_id = :run_id
+     AND coverage.surgeon_id = activity.surgeon_id
+     AND coverage.case_date = activity.activity_date
+    WHERE activity.source_system IN ('fax', 'fax_clinic')
+      AND (
+       EXISTS (
+          SELECT 1
+          FROM fax_ingest_rows_applicable applicable
+          JOIN fax_ingest_rows fax_row ON fax_row.id = applicable.fax_row_id
+          WHERE applicable.run_id = :run_id
+            AND fax_row.surgeon_id = activity.surgeon_id
+            AND fax_row.case_date = activity.activity_date
+            AND activity.identity_key = LOWER(COALESCE(fax_row.patient_name, '')) || '|' ||
+                CASE WHEN fax_row.start_time IS NULL THEN '' ELSE SUBSTR(CAST(fax_row.start_time AS TEXT), 1, 8) END ||
+                '|' || fax_row.row_type
+       )
+       OR EXISTS (
+          SELECT 1
+          FROM fax_ingest_rows unresolved
+          JOIN fax_row_decisions decision ON decision.fax_row_id = unresolved.id
+          WHERE unresolved.run_id = :run_id
+            AND unresolved.surgeon_id = activity.surgeon_id
+            AND unresolved.case_date = activity.activity_date
+            AND decision.status = 'unresolved'
+       )
+      )
+)
+-- @@
+INSERT INTO fax_line_absences (schedule_card_activity_id, run_id)
+SELECT activity.id, :run_id
+FROM schedule_card_activities activity
+JOIN fax_ingest_coverage coverage
+  ON coverage.run_id = :run_id
+ AND coverage.surgeon_id = activity.surgeon_id
+ AND coverage.case_date = activity.activity_date
+WHERE activity.source_system IN ('fax', 'fax_clinic')
+  AND activity.is_active = TRUE
+  AND NOT EXISTS (
+      SELECT 1
+      FROM fax_ingest_rows unresolved
+      JOIN fax_row_decisions decision ON decision.fax_row_id = unresolved.id
+      WHERE unresolved.run_id = :run_id
+        AND unresolved.surgeon_id = coverage.surgeon_id
+        AND unresolved.case_date = coverage.case_date
+        AND decision.status = 'unresolved'
+  )
+  AND NOT EXISTS (
+      SELECT 1
+      FROM fax_ingest_rows_applicable applicable
+      JOIN fax_ingest_rows fax_row ON fax_row.id = applicable.fax_row_id
+      WHERE applicable.run_id = :run_id
+        AND fax_row.surgeon_id = activity.surgeon_id
+        AND fax_row.case_date = activity.activity_date
+        AND activity.identity_key = LOWER(COALESCE(fax_row.patient_name, '')) || '|' ||
+            CASE WHEN fax_row.start_time IS NULL THEN '' ELSE SUBSTR(CAST(fax_row.start_time AS TEXT), 1, 8) END ||
+            '|' || fax_row.row_type
+  )
+ON CONFLICT (schedule_card_activity_id, run_id) DO NOTHING
+-- @@
 UPDATE schedule_card_activities
 SET is_active = FALSE
 WHERE source_system IN ('fax', 'fax_clinic')
   AND is_active = TRUE
   AND EXISTS (
-      SELECT 1
-      FROM fax_ingest_rows_applicable applicable
-      JOIN fax_ingest_rows covered ON covered.id = applicable.fax_row_id
-      JOIN schedule_cards card ON card.id = schedule_card_activities.schedule_card_id
-      WHERE applicable.run_id = :run_id
-        AND covered.surgeon_id = card.surgeon_id
-        AND covered.case_date = card.date
+      SELECT 1 FROM fax_ingest_coverage coverage
+      WHERE coverage.run_id = :run_id
+        AND coverage.surgeon_id = schedule_card_activities.surgeon_id
+        AND coverage.case_date = schedule_card_activities.activity_date
   )
   AND source_record_key NOT IN (
       SELECT CAST(document.external_fax_id AS TEXT) || '|' || fax_row.normalized_key
@@ -26,6 +87,23 @@ WHERE source_system IN ('fax', 'fax_clinic')
       JOIN fax_ingest_runs run ON run.id = fax_row.run_id
       JOIN fax_documents document ON document.id = run.fax_document_id
       WHERE applicable.run_id = :run_id
+  )
+  AND (
+      EXISTS (
+          SELECT 1
+          FROM fax_ingest_rows_applicable applicable
+          JOIN fax_ingest_rows fax_row ON fax_row.id = applicable.fax_row_id
+          WHERE applicable.run_id = :run_id
+            AND fax_row.surgeon_id = schedule_card_activities.surgeon_id
+            AND fax_row.case_date = schedule_card_activities.activity_date
+            AND schedule_card_activities.identity_key = LOWER(COALESCE(fax_row.patient_name, '')) || '|' ||
+                CASE WHEN fax_row.start_time IS NULL THEN '' ELSE SUBSTR(CAST(fax_row.start_time AS TEXT), 1, 8) END ||
+                '|' || fax_row.row_type
+      )
+      OR 2 <= (
+          SELECT count(*) FROM fax_line_absences absence
+          WHERE absence.schedule_card_activity_id = schedule_card_activities.id
+      )
   )
 RETURNING activity_type
 -- @@

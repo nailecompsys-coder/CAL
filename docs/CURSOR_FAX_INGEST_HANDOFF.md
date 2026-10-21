@@ -1,174 +1,32 @@
-# Cursor Handoff: Fax Schedule Ingest
+# Cursor handoff: fax schedule ingest
 
-Updated October 14, 2026.
+Updated October 21, 2026. This replaces the October 14 LlamaParse/OpenDocRouter handoff.
 
-## Current decision
+## Decision that must survive agent changes
 
-There is one supported Desk→CAL handoff. Schedule extraction stays in Desk as
-PDF → markdown tables → structured rows:
+CAL does not require a LlamaParse key and does not depend on an agent remembering how to read a fax. A standalone extractor owns PDF/PNG/OCR or vision work and must hand structured rows back to CAL. The extractor may call local or hosted AI, but it may not write schedule facts directly.
 
-```text
-Kno2 native fax PDF
-  -> Desk
-  -> MD table parser (LlamaParse default; OpenDocRouter optional behind flag)
-  -> existing Desk MD→row builder
-  -> surgeon-grouped surgical and clinic rows
-  -> CAL SQL Stage 1 staging (/api/ingest/visual-schedule)
-  -> separate reviewed AM/PM card matching step
-```
+CAL records each extractor row's normalized transport fields in immutable `fax_ingest_candidates`. SQL then owns surgeon matching, AM/PM placement, location and permanent-card selection, unresolved decisions, coverage, newest-fax protection, duplicate handling, two-covering-fax cancellation, counts, ordering, and the authoritative write to `schedule_card_activities`.
 
-- **Default:** `DESK_SCHEDULE_PARSER=llamaparse` (production until explicit cutover).
-- **Optional:** `DESK_SCHEDULE_PARSER=opendocrouter` uses OpenDocRouter
-  (`OPEN_DOC_ROUTER_API_KEY`, `layout: true`) and the **same** MD→row path.
-  Falls back to LlamaParse when OpenDocRouter is thin/failed.
-- Side-by-side: `node src/scripts/compare-opendoc-llamaparse.js <faxId>`
-  (row counts / surgeon initials only — no PHI in logs).
+There is no secondary `surgical_cases`, `clinic_schedules`, or `clinic_slots` schedule. Do not recreate one.
 
-Do not restore a second CAL OCR, OpenAI vision, Claude, or Python extraction
-pipeline. Do not add an OpenDocRouter client inside CAL. CAL consumes structured
-Desk rows; it does not reinterpret the fax.
+## Current implementation
 
-## Repositories and commits
+- API handoff and apply: `server/app/routers/api_ingest.py`
+- immutable candidate staging: `server/app/fax_ingest_engine.py`
+- PostgreSQL resolution: `server/app/sql/resolve_fax_candidates.postgresql.sql`
+- SQLite test resolution: `server/app/sql/resolve_fax_candidates.sqlite.sql`
+- canonical card apply and omission memory: `server/app/sql/fill_cards_from_fax.sql`
+- coverage/newer-fax/backup transaction: `server/app/fax_snapshot_service.py`
+- schema and guardrails: `server/app/migrate_fax_ingest.py`, `server/app/migrate_fax_line_memory.py`
+- operating contract: `docs/FAX_VISUAL_INGEST_PROCEDURE.md`
 
-Desk repository:
+`server/scripts/ingest_desk_fax.py` still imports `app/fax_candidate_reconciler.py`. That is legacy historical preprocessing and is not the new SQL-owned standalone path. Do not wire the 6 PM automation to it. Retiring that code and connecting the actual extractor caller are separate release work.
 
-```text
-/Users/donnaile/dev/Fax Injest/Kno2 intake
-```
+## Unreleased verification
 
-Relevant Desk commits:
+The October 21 SQL-owned slice passed 35 focused fax tests, Python compilation, diff checks, PostgreSQL migrations on a temporary database, and a PostgreSQL stage/apply/two-omission behavior test. The broad suite has the same eight failures and three errors on this slice and on a clean `origin/main` baseline; no new failure name was introduced. No production database, deployment, push, or TestFlight build was changed.
 
-- `39828dc` — preserved the working Desk extraction code before cleanup.
-- `0d7ea87` — made LlamaParse primary, added the SQL exporter, changed the CAL
-  handoff to `/api/ingest/visual-schedule`, and removed Claude/manual repair code.
-- `422a284` — removed obsolete handoff naming.
+## Remaining integration boundary
 
-CAL repository:
-
-```text
-/Users/donnaile/dev/CAL
-```
-
-Relevant CAL cleanup commits:
-
-- `0ac11d3` — removed duplicate CAL fax extraction implementations and rewrote
-  the ingest procedure around Desk/LlamaParse.
-- `b63aa71` — removed remaining CAL PDF/OCR preparation and OpenAI-key wiring.
-
-Earlier October 5 commits `67923d6`, `aa6535f`, `f4cb545`, and `2ec2063` remain
-in Git history as rollback evidence, but their experimental Stage 1 files and
-OpenAI wiring have been removed by the cleanup commits above.
-
-## Primary implementation
-
-Desk extraction:
-
-```text
-/Users/donnaile/dev/Fax Injest/Kno2 intake/src/services/visionSchedule.js
-/Users/donnaile/dev/Fax Injest/Kno2 intake/src/services/openDocRouterParse.js
-/Users/donnaile/dev/Fax Injest/Kno2 intake/src/services/processFax.js
-/Users/donnaile/dev/Fax Injest/Kno2 intake/src/scripts/compare-opendoc-llamaparse.js
-```
-
-Desk-to-CAL staging handoff:
-
-```text
-/Users/donnaile/dev/Fax Injest/Kno2 intake/src/services/handoff.js
-/Users/donnaile/dev/Fax Injest/Kno2 intake/src/services/calClient.js
-```
-
-Reusable SQL exporter:
-
-```text
-/Users/donnaile/dev/Fax Injest/Kno2 intake/src/scripts/export-fax-stage1-sql.js
-```
-
-CAL staging endpoint and schema:
-
-```text
-/Users/donnaile/dev/CAL/server/app/routers/api_ingest.py
-/Users/donnaile/dev/CAL/server/app/fax_ingest_engine.py
-/Users/donnaile/dev/CAL/server/app/models.py
-```
-
-Operating procedure:
-
-```text
-/Users/donnaile/dev/CAL/docs/FAX_VISUAL_INGEST_PROCEDURE.md
-```
-
-## OpenDocRouter spike (Desk, October 14, 2026)
-
-Implemented in Desk (no CAL extract client):
-
-- `src/services/openDocRouterParse.js` — upload/inline PDF → `POST /v1/parse` with
-  `layout: true`; writes `opendocrouter.md` + optional layout JSON.
-- `DESK_SCHEDULE_PARSER=opendocrouter|llamaparse` (default **llamaparse**) with
-  LlamaParse fallback when OpenDocRouter is thin/failed.
-- `src/scripts/compare-opendoc-llamaparse.js` — counts-only side-by-side.
-- Synthetic OpenDocRouter-style MD fixtures pass `test-vision-rows.js`.
-
-Local LlamaParse baseline on saved fax **151** MD (no PHI): **358** rows
-(53 OR / 305 clinic); surgeon initials present for AS, JF, LN, NF, JB, LW, OK,
-CJ, GY, JP. Live OpenDocRouter parse requires `OPEN_DOC_ROUTER_API_KEY` on the
-Desk host; do not cut production over until compare on a known problem fax is
-equal-or-better, then set `DESK_SCHEDULE_PARSER=opendocrouter` explicitly.
-
-## Fax 245 artifact
-
-The live Desk-rendered LlamaParse result was exported to:
-
-```text
-/Users/donnaile/dev/CAL/.tmp/fax-245-llamaparse-stage1.sql
-```
-
-Verified totals:
-
-- 303 rows total
-- 52 surgical rows
-- 251 clinic rows
-
-The file is mode `600`, contains protected patient data, and is ignored by Git.
-It has not been run against production.
-
-The SQL transaction writes only:
-
-- `fax_documents`
-- `fax_ingest_runs`
-- `fax_ingest_rows`
-
-It deliberately does not insert `fax_row_decisions`, match permanent AM/PM
-cards, or write schedule cards, surgical cases, or clinic schedules.
-
-## Duplicate and unresolved behavior
-
-- Daily faxes overlap by several days. Preserve each fax ingest run.
-- Do not overwrite previous fax rows merely because the new fax repeats them.
-- Exact duplicates inside one run are suppressed by the run/key constraint.
-- Missing entries on a later fax are not automatically cancellations.
-- Damaged fields may later be inferred from patient, procedure, surgeon, date,
-  time, location, prior fax evidence, and existing card data.
-- If evidence is insufficient, retain and flag the unresolved row.
-
-## Verification already completed
-
-- Desk classification tests passed.
-- Desk surgeon-roster and normalization tests passed.
-- Modified Desk JavaScript passed syntax checks.
-- Ten CAL fax staging/API tests passed.
-- Fax 245 SQL was checked for forbidden production-schedule inserts; none were
-  present.
-
-## Deployment state
-
-The code and cleanup are committed locally. They have not been deployed, and
-the Fax 245 SQL has not been loaded into the production database.
-
-Before deployment, review both repositories' commits and test the Desk
-`/api/ingest/visual-schedule` request against a non-production CAL database.
-Do not deploy the ignored `.tmp` SQL artifact with application source.
-
-## Unrelated files
-
-The untracked CAL files `clippy_fax153.py` and `clippy_notify.py` predate this
-cleanup and were intentionally left untouched.
+The extractor caller must send all rows, extractor metadata, and explicit zero-row surgeon/date coverage to `/api/ingest/visual-schedule`, receive the staged decisions, and separately request apply after review. The API currently rejects malformed date/time transport values instead of retaining those particular values as unresolved candidates. Do not claim the standalone extractor integration is complete until that caller is connected and exercised without patient data in logs.

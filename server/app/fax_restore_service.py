@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from .models import (
     FaxDocument,
     FaxIngestRun,
+    FaxLineAbsence,
     FaxRestoreLine,
     FaxRestoreSet,
     ScheduleCard,
@@ -145,6 +146,10 @@ def restore_fax_snapshot(db: Session, *, source_fax_id: int) -> dict:
         saved_ids.append(activity.id)
         restored += 1
     db.flush()
+    if saved_ids:
+        db.query(FaxLineAbsence).filter(
+            FaxLineAbsence.schedule_card_activity_id.in_(saved_ids)
+        ).delete(synchronize_session=False)
 
     query = db.query(ScheduleCardActivity).filter(
         ScheduleCardActivity.source_fax_id == source_fax_id,

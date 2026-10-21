@@ -1,28 +1,33 @@
-# Fax schedule ingest: current production path and older CLI
+# Fax schedule ingest
 
-The latest **applied** fax is authoritative for the surgeon/dates it covers. An older fax is historical evidence, not another source of current appointments. The AM/PM cards are permanent; a fax only fills them with line-item detail.
+The latest **successfully applied** fax is authoritative for the surgeon/dates it covers. An older fax is history. Fax processing fills line-item detail on CAL's permanent weekday AM/PM cards; it never rebuilds the master schedule and never creates a secondary surgery or clinic list.
 
-## Current Desk → CAL production path (verified 2026-10-02)
+## Required standalone flow
 
-1. CAL accepts the raw PDF, renders page PNGs, and records OCR text with page hashes (`server/app/fax_pdf_intake.py`). Desk sends reviewed visual rows to `/api/ingest/visual-schedule`. This stage records proposed rows and placement decisions; it does **not** change the live schedule (`server/app/routers/api_ingest.py`, `server/app/fax_ingest_engine.py`).
-2. The separate `/api/ingest/fax/{source_fax_id}/apply-snapshot` step requires an explicit authoritative-snapshot flag. CAL validates surgeon scope, dates, permanent cards, and locations, and creates a backup before applying. Failure stops the write (`server/app/fax_snapshot_service.py`). Review flags and differences from a fixed master block remain visible for review rather than being silently erased.
-3. Apply fills existing AM/PM cards with case and clinic line items only. The detail lines are already stored on the staged fax. Apply makes one SQL call that attaches every applicable line to the existing card for that surgeon, date, and session. SQL triggers refuse any fax write that adds, changes, or deletes an AM/PM card or clinic slot; only an admin in the portal changes cards. Rows that are flagged, have no matching AM/PM card, or whose date/time has passed (Eastern) are skipped. A case missing from a fax is cancelled only when the previous applied fax covering that date also lacked it. Past days cannot be deleted by anyone. CAL does not choose a lead. Two printed lines stay two lines; fax apply does not turn the other named surgeon into an assistant.
-4. After apply, generated PNG/OCR files are removed. Source PDFs are pruned to the newest three for audit/rollback. Database fax records remain as history. The phone, the office calendar, and the scheduler read the saved card lines, not the fax and not the older surgery list (`server/app/fax_pdf_intake.py`).
+1. Retain the original Kno2 PDF and its Desk ID.
+2. Render every PDF page to PNG. The extractor may use local OCR, Ollama, OpenAI, Claude, or another vision service. CAL does not require a particular vendor or a LlamaParse key. The extractor must return structured rows to the caller; an agent must not manually transcribe or silently repair the fax.
+3. Submit the extractor handback to `POST /api/ingest/visual-schedule`. Include extractor name/version/request ID, page and printed-row identity, surgeon text, date, time, row type, room, patient, procedure, and any extraction flag. Include explicit surgeon/date `coverage` when the fax covers a day with zero printed rows.
+4. CAL stores that handback in immutable `fax_ingest_candidates`. SQL views resolve the unique surgeon, AM/PM session, source location, permanent card, and decision status. SQL also owns applicable-row selection, ordering, deduplication, coverage, newest-fax overlap protection, and counts.
+5. Review the returned decisions. `ready` and `ready_with_warning` rows may apply. `unresolved` rows remain staged and do not prevent independent clean rows from applying. An OFF overlap or fixed-master/source-location difference remains visible as a warning only after the source location is resolved. An uncertain surgeon, time, facility, card, weekend row, or extractor-flagged row stays unresolved.
+6. Call `POST /api/ingest/fax/{source_fax_id}/apply-snapshot` with the staged run ID and the explicit authoritative-snapshot confirmation. CAL makes a backup, then one SQL transaction writes applicable rows to `schedule_card_activities` on existing cards. An apply failure leaves the prior live schedule intact.
+7. Verify counts and current facts in SQL, then verify the authenticated native API response. This is database/API verification, not proof of what appeared on an installed phone. Archive the fax in Desk only after CAL apply and verification succeed.
 
-## Repeatable ingest command (implemented for fax #245)
+## Repeat faxes and cancellations
 
-`server/scripts/ingest_desk_fax.py` is the supported single command when Desk has produced its structured extract. Run it on the CAL host with the original Desk PDF and Desk extract JSON:
+Daily faxes overlap several days. Stable page/printed-row identity preserves two genuinely duplicated printed lines. Applying a new fax does not overwrite a line merely because the new fax repeats it.
 
-```bash
-python scripts/ingest_desk_fax.py --fax-id 245 --pdf /secure/245.pdf --desk-extract /secure/245-extract.json --apply
-```
+Coverage is surgeon/date-specific. A missing line survives the first consecutive successfully applied covering fax that omits it. SQL deactivates it only after the second safe consecutive covering omission. Reappearance or an unresolved row resets the omission chain. A newer fax blocks only overlapping surgeon/date coverage, not unrelated dates or surgeons.
 
-If the identical PDF is already prepared in CAL, omit `--pdf`. Omit `--apply` to stage and report without changing the live schedule. The command renders every PDF page to PNG at 300 DPI, OCRs every page, carries each printed surgeon header through continuation pages, reconciles the Desk rows to those pages, corrects office visits mislabeled as OR only when same-day clinic rows corroborate them, checks all SQL placement decisions, creates the existing snapshot backup, and applies the newest fax. It stops on an unreadable header, row without page evidence, duplicate, unresolved placement, mismatched fax ID, or older/already-applied fax. No surgeon notification is sent. After apply, verify saved SQL rows and the authenticated native response before marking the fax complete; only then archive it in Desk.
+## Boundaries
 
-The `/api/ingest/visual-schedule` staging route and `/api/ingest/fax/{source_fax_id}/apply-snapshot` route independently enforce printed-page ownership. A previously staged run with `page=0` cannot be applied. Desk's `processed` flag remains separate from CAL applied state.
+- Desk `processed` means Desk classified or extracted the fax; it does not mean CAL staged or applied it.
+- `/api/ingest/visual-schedule` is staging only. It cannot write live cards or send notifications.
+- Fax apply cannot add, delete, or change permanent AM/PM cards.
+- Past rows and weekend schedule rows do not apply. Past card detail cannot be deleted.
+- Routine fax ingest sends no surgeon or scheduler notification.
+- Logs, receipts, and documentation must not contain patient details.
+- `server/scripts/ingest_desk_fax.py` and `app/fax_candidate_reconciler.py` are a legacy historical preprocessor, not the supported SQL-owned handoff. Do not connect automation to them or describe them as production proof.
 
-Production evidence on 2026-10-02: fax **#234** (333 reviewed rows, dates September 30–October 7) was applied October 1 at 18:07 Eastern. Its placement decisions were 317 ordinary rows and 16 source-location differences marked for overlay. For October 2–16, the latest applied fax rows for each surgeon/day yielded 27 OR rows; all 27 had active stored cases in the correct AM/PM card, time, and facility and appeared in the surgeon API. All 151 latest clinic rows in that range had active clinic activities; zero older clinic rows were active. These are point-in-time checks, not a standing guarantee for future faxes.
+## Release state
 
-No fax schedule cleanup sends a surgeon notification blast. Do not publish patient details in audit summaries or documentation.
-
-Future scheduler-conflict alerts require a separate reviewed step. Before sending anything, compare the proposed alert with the original fax image and the latest applied row, verify surgeon/date/time/location and its AM/PM card, and confirm the approved-leave overlap. Hold uncertain OCR or placement for review. The recipient must be the maintained scheduler group for that surgeon; a fax must not invent recipients. Preserve the review evidence until the alert decision is recorded.
+The immutable-candidate and SQL-resolution flow is implemented and tested locally as an unreleased slice dated 2026-10-21. Until it is explicitly pushed and released, production remains on the deployed behavior recorded in `docs/CAL_CURRENT_STATE.md`. A healthy endpoint or Desk status does not prove this slice is live.

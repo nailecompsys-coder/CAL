@@ -112,9 +112,9 @@ class FaxPreviewTest(unittest.TestCase):
         labels = {row["patient_name"]: (row["label"], row["reason_code"]) for row in result["rows"]}
         self.assertEqual(labels["Already, There"][0], "match")
         self.assertEqual(labels["Fills, NA"][0], "addition")
-        self.assertEqual(labels["On, Off"], ("fail", "off_collision"))
-        self.assertEqual(labels["Wrong, Facility"], ("fail", "epic_override"))
-        self.assertEqual(labels["Weekend, Misread"], ("fail", "missing_scaffold"))
+        self.assertEqual(labels["On, Off"], ("fail", "no_block_for_facility"))
+        self.assertEqual(labels["Wrong, Facility"], ("addition", "epic_override"))
+        self.assertEqual(labels["Weekend, Misread"], ("fail", "weekend_schedule"))
         self.assertEqual(labels["Agrees, WithCard"], ("addition", "epic_override"))
         self.assertEqual([row["patient_name"] for row in result["calOnly"]], ["Not, OnFax"])
         self.assertEqual(self.db.query(FaxIngestRow).count(), 0)

@@ -129,6 +129,7 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.engine.dispose()
 
     def test_daily_snapshot_fills_existing_cards_and_never_creates_cards(self):
+        self._assign_block(self.wg_or, time(11, 30), time(17, 0))
         staged = stage_reviewed_rows(
             self.db,
             external_fax_id=191,
@@ -391,6 +392,7 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         )
 
     def test_flagged_row_is_skipped_and_the_rest_applies(self):
+        self._assign_block(self.wg_or, time(12, 0), time(17, 0))
         staged = stage_reviewed_rows(
             self.db,
             external_fax_id=191,
@@ -408,7 +410,8 @@ class FaxSnapshotServiceTest(unittest.TestCase):
             ["Clean, Patient"],
         )
 
-    def test_corrected_rerun_of_the_latest_applied_fax_moves_and_cancels_its_cases(self):
+    def test_two_consecutive_covering_omissions_are_required_to_cancel(self):
+        self._assign_block(self.wg_or, time(12, 0), time(17, 0))
         first = stage_reviewed_rows(
             self.db, external_fax_id=191, source_label="test", surgeon_scope=["JF"],
             rows=[self._row("Kept, Patient"), self._row("Misread, Patient")],
@@ -425,13 +428,27 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.assertGreater(self.db.query(FaxIngestRow).filter_by(run_id=second["runId"]).count(), 0)
         apply_staged_snapshot(self.db, source_fax_id=191, run_id=second["runId"])
 
+        active_after_first_omission = {
+            row.patient_name: row.is_active
+            for row in self.db.query(ScheduleCardActivity).filter_by(activity_type="surgical").all()
+        }
+        self.assertTrue(active_after_first_omission["Misread, Patient"])
+
+        third = stage_reviewed_rows(
+            self.db, external_fax_id=191, source_label="test", surgeon_scope=["JF"],
+            rows=[self._row("Kept, Patient")],
+        )
+        self.db.commit()
+        apply_staged_snapshot(self.db, source_fax_id=191, run_id=third["runId"])
+
         lines = self.db.query(ScheduleCardActivity).filter_by(activity_type="surgical").all()
         active = {row.patient_name: row.is_active for row in lines}
         self.assertEqual(active, {"Kept, Patient": True, "Misread, Patient": False})
         self.assertEqual({row.source_fax_id for row in lines}, {191})
-        self.assertEqual(self.db.query(FaxIngestRow).filter_by(run_id=second["runId"]).count(), 0)
+        self.assertEqual(self.db.query(FaxIngestRow).filter_by(run_id=third["runId"]).count(), 0)
 
     def test_older_fax_cannot_be_applied_after_a_newer_one(self):
+        self._assign_block(self.wg_or, time(12, 0), time(17, 0))
         newer = stage_reviewed_rows(
             self.db, external_fax_id=192, source_label="test", surgeon_scope=["JF"], rows=[self._row("New, Patient")],
         )
@@ -444,7 +461,38 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "newer fax was already applied"):
             apply_staged_snapshot(self.db, source_fax_id=191, run_id=older["runId"])
 
+    def test_older_fax_is_allowed_when_newer_coverage_does_not_overlap(self):
+        self._assign_block(self.wg_or, time(12, 0), time(17, 0))
+        newer = stage_reviewed_rows(
+            self.db, external_fax_id=192, source_label="test", surgeon_scope=["JF"],
+            rows=[self._row("Newer Day, Patient")],
+        )
+        self.db.commit()
+        apply_staged_snapshot(self.db, source_fax_id=192, run_id=newer["runId"])
+
+        am = self.db.query(ScheduleCard).filter_by(session="am").one()
+        self.db.add(ScheduleCard(
+            week_id=am.week_id,
+            surgeon_id=self.surgeon.id,
+            date=date(2026, 9, 23),
+            session="pm",
+            baseline_state="na",
+            effective_state="na",
+            source="master",
+        ))
+        self.db.commit()
+        self._assign_block(self.wg_or, time(12, 0), time(17, 0), day=date(2026, 9, 23))
+        older = stage_reviewed_rows(
+            self.db, external_fax_id=191, source_label="test", surgeon_scope=["JF"],
+            rows=[self._row("Older Nonoverlap, Patient", day=date(2026, 9, 23))],
+        )
+        self.db.commit()
+
+        result = apply_staged_snapshot(self.db, source_fax_id=191, run_id=older["runId"])
+        self.assertTrue(result["ok"])
+
     def test_row_without_existing_am_pm_slot_is_skipped_not_fatal(self):
+        self._assign_block(self.wg_or, time(12, 0), time(17, 0))
         staged = stage_reviewed_rows(
             self.db,
             external_fax_id=191,
@@ -505,6 +553,7 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         return assistant
 
     def _stage_shared_case(self):
+        self._assign_block(self.wg_or, time(12, 0), time(17, 0))
         staged = stage_reviewed_rows(
             self.db,
             external_fax_id=193,
@@ -564,6 +613,7 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.assertEqual(self.db.query(CoSurgeonPair).count(), 1)
 
     def test_phone_reads_the_same_card_line_as_the_portal(self):
+        self._assign_block(self.wg_or, time(12, 0), time(17, 0))
         staged = stage_reviewed_rows(
             self.db,
             external_fax_id=191,
@@ -596,6 +646,7 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.assertEqual({card.baseline_state for card in na_cards}, {"na"})
 
     def test_send_saves_the_line_photo_and_restore_puts_it_back(self):
+        self._assign_block(self.wg_or, time(12, 0), time(17, 0))
         prior_fax = FaxDocument(external_fax_id=190, source_label="test", status="applied")
         self.db.add(prior_fax)
         self.db.flush()
@@ -658,8 +709,8 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         self.assertEqual(saved.patient_name, "Before, Line")
         self.assertTrue(saved.is_active)
         self.db.refresh(prior)
-        self.assertFalse(prior.is_active)
-        self.assertEqual(self.db.query(ScheduleCardActivity).filter_by(is_active=True).count(), 1)
+        self.assertTrue(prior.is_active)
+        self.assertEqual(self.db.query(ScheduleCardActivity).filter_by(is_active=True).count(), 2)
 
         second = stage_reviewed_rows(
             self.db, external_fax_id=191, source_label="test", surgeon_scope=["JF"],

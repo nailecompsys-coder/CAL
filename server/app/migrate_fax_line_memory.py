@@ -59,6 +59,18 @@ def apply(conn) -> None:
         ON schedule_card_activities(source_fax_id)
     """))
     conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS fax_line_absences (
+            id SERIAL PRIMARY KEY,
+            schedule_card_activity_id INTEGER NOT NULL
+                REFERENCES schedule_card_activities(id) ON DELETE CASCADE,
+            run_id INTEGER NOT NULL REFERENCES fax_ingest_runs(id) ON DELETE CASCADE,
+            created_at TIMESTAMP DEFAULT now(),
+            UNIQUE (schedule_card_activity_id, run_id)
+        )
+    """))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_fax_line_absences_activity_id ON fax_line_absences(schedule_card_activity_id)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_fax_line_absences_run_id ON fax_line_absences(run_id)"))
+    conn.execute(text("""
         UPDATE schedule_card_activities AS activity
         SET source_fax_id = document.external_fax_id
         FROM fax_ingest_rows AS fax_row

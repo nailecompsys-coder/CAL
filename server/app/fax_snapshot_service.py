@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-from collections import defaultdict
 from datetime import date
 from typing import Any
 
@@ -16,11 +15,9 @@ from .models import (
     FaxIngestRow,
     FaxIngestRun,
     FaxRowDecision,
-    Location,
     ScheduleCard,
     ScheduleCardActivity,
     ScheduleChangeEvent,
-    Surgeon,
 )
 from .fax_card_fill import fill_cards_from_fax_lines
 from .fax_ingest_engine import mark_fax_ingest_transaction
@@ -49,17 +46,6 @@ def discard_applied_scratch_rows(db: Session, run_id: int) -> int:
     return len(row_ids)
 
 
-def _surgeon_initials(surgeon: Surgeon) -> str:
-    return f"{(surgeon.first_name or '')[:1]}{(surgeon.last_name or '')[:1]}".upper()
-
-
-def _is_hospital(location: Location) -> bool:
-    return (
-        (location.location_type or "").lower() in {"hospital", "or"}
-        or (location.abbreviation or "").upper().endswith("-OR")
-    )
-
-
 def _applicable_row_ids(db: Session, run_id: int) -> set[int]:
     return {
         row_id
@@ -68,44 +54,6 @@ def _applicable_row_ids(db: Session, run_id: int) -> set[int]:
             {"run_id": run_id},
         )
     }
-
-
-def _scope_surgeons(db: Session, run: FaxIngestRun) -> dict[str, Surgeon]:
-    try:
-        scope = {str(value).strip().upper() for value in json.loads(run.surgeon_scope_json or "[]")}
-    except (TypeError, ValueError):
-        scope = set()
-    surgeons = db.query(Surgeon).filter(Surgeon.is_active == True).all()  # noqa: E712
-    by_initials: dict[str, list[Surgeon]] = defaultdict(list)
-    for surgeon in surgeons:
-        by_initials[_surgeon_initials(surgeon)].append(surgeon)
-    resolved: dict[str, Surgeon] = {}
-    for initials in scope:
-        matches = by_initials.get(initials, [])
-        if len(matches) != 1:
-            raise ValueError(f"Fax surgeon scope is not unique in CAL: {initials}")
-        resolved[initials] = matches[0]
-    return resolved
-
-
-def _card_location(card: ScheduleCard, rows: list[FaxIngestRow]) -> int | None:
-    """Choose a display anchor without discarding row-level facilities.
-
-    A permanent AM/PM card may contain sequential activity at more than one
-    facility. Prefer the immutable master location when it appears in the fax;
-    otherwise use the first scheduled row. Individual activities retain their
-    own source_location_id.
-    """
-    explicit_ids = {row.source_location_id for row in rows if row.source_location_id}
-    if card.baseline_location_id in explicit_ids:
-        return card.baseline_location_id
-    if card.effective_location_id in explicit_ids:
-        return card.effective_location_id
-    explicit_rows = [row for row in rows if row.source_location_id]
-    if explicit_rows:
-        first = min(explicit_rows, key=lambda row: (row.start_time is None, row.start_time, row.id))
-        return first.source_location_id
-    return card.effective_location_id or card.baseline_location_id
 
 
 def apply_staged_snapshot(
@@ -122,10 +70,26 @@ def apply_staged_snapshot(
     document = db.get(FaxDocument, run.fax_document_id)
     if not document or document.external_fax_id != source_fax_id:
         raise ValueError("Fax ingest run does not belong to this fax.")
-    newer_applied = db.query(FaxDocument.id).filter(
-        FaxDocument.external_fax_id > source_fax_id,
-        FaxDocument.status == "applied",
-    ).first()
+    newer_applied = db.execute(text("""
+        SELECT newer_document.id
+        FROM fax_documents newer_document
+        JOIN fax_ingest_runs newer_run ON newer_run.fax_document_id = newer_document.id
+        WHERE newer_document.external_fax_id > :source_fax_id
+          AND newer_document.status = 'applied'
+          AND (
+              NOT EXISTS (SELECT 1 FROM fax_ingest_coverage newer_any WHERE newer_any.run_id = newer_run.id)
+              OR EXISTS (
+                  SELECT 1
+                  FROM fax_ingest_coverage current_coverage
+                  JOIN fax_ingest_coverage newer_coverage
+                    ON newer_coverage.run_id = newer_run.id
+                   AND newer_coverage.surgeon_id = current_coverage.surgeon_id
+                   AND newer_coverage.case_date = current_coverage.case_date
+                  WHERE current_coverage.run_id = :run_id
+              )
+          )
+        LIMIT 1
+    """), {"source_fax_id": source_fax_id, "run_id": run.id}).first()
     if newer_applied:
         raise ValueError("A newer fax was already applied; older snapshots cannot replace it.")
     if run.status == "applied":
@@ -138,15 +102,28 @@ def apply_staged_snapshot(
     skipped_rows = len(all_rows) - len(rows)
     if not rows:
         raise ValueError("Fax ingest run has no applicable rows.")
-    start = min(row.case_date for row in rows)
-    end = max(row.case_date for row in rows)
+    bounds = db.execute(text("""
+        SELECT min(case_date) AS start_date, max(case_date) AS end_date
+        FROM fax_ingest_coverage WHERE run_id = :run_id
+    """), {"run_id": run.id}).one()
+    start, end = bounds.start_date, bounds.end_date
+    if start is None or end is None:
+        raise ValueError("Fax ingest run has no SQL coverage.")
+    if isinstance(start, str):
+        start = date.fromisoformat(start)
+    if isinstance(end, str):
+        end = date.fromisoformat(end)
     if (end - start).days > 7:
         raise ValueError("Fax snapshot spans more than eight calendar days.")
 
-    scope = _scope_surgeons(db, run)
-    if not scope:
+    scope_ids = {
+        surgeon_id for (surgeon_id,) in db.execute(
+            text("SELECT DISTINCT surgeon_id FROM fax_ingest_coverage WHERE run_id = :run_id ORDER BY surgeon_id"),
+            {"run_id": run.id},
+        )
+    }
+    if not scope_ids:
         raise ValueError("Fax ingest run has no surgeon scope.")
-    scope_ids = {surgeon.id for surgeon in scope.values()}
     row_surgeon_ids = {row.surgeon_id for row in rows if row.surgeon_id}
     if not row_surgeon_ids.issubset(scope_ids):
         raise ValueError("Fax rows include a surgeon outside the reviewed fax scope.")
@@ -158,19 +135,6 @@ def apply_staged_snapshot(
     ).all()
     cards = {(card.surgeon_id, card.date, card.session): card for card in cards_list}
 
-    activity: dict[tuple[int, date, str], list[FaxIngestRow]] = defaultdict(list)
-    for row in rows:
-        activity[(row.surgeon_id, row.case_date, row.session)].append(row)
-    effective_locations: dict[tuple[int, date, str], int | None] = {}
-    mixed_location_ids: dict[tuple[int, date, str], list[int]] = {}
-    for key, group in activity.items():
-        card = cards[key]
-        explicit = {row.source_location_id for row in group if row.source_location_id}
-        location_id = _card_location(card, group)
-        effective_locations[key] = location_id
-        if len(explicit) > 1:
-            mixed_location_ids[key] = sorted(explicit)
-
     backup = create_fax_snapshot_backup(
         db,
         admin_id=admin_id,
@@ -181,42 +145,52 @@ def apply_staged_snapshot(
     # The backup commits, which clears transaction-local settings.
     mark_fax_ingest_transaction(db, run.id)
 
-    conflicts: list[dict[str, Any]] = []
-    for key, location_id in effective_locations.items():
-        card = cards[key]
-        if card.effective_state == "off":
-            conflicts.append({
-                "code": "off_collision",
-                "surgeonId": card.surgeon_id,
-                "date": card.date.isoformat(),
-                "session": card.session,
-                "faxLocationId": location_id,
-            })
-            continue
-        if card.baseline_state == "assigned" and card.baseline_location_id != location_id:
-            conflicts.append({
-                "code": "baseline_changed_by_epic",
-                "surgeonId": card.surgeon_id,
-                "date": card.date.isoformat(),
-                "session": card.session,
-                "baselineLocationId": card.baseline_location_id,
-                "faxLocationId": location_id,
-            })
-        if key in mixed_location_ids:
-            conflicts.append({
-                "code": "mixed_facilities_in_session",
-                "surgeonId": card.surgeon_id,
-                "date": card.date.isoformat(),
-                "session": card.session,
-                "cardLocationId": location_id,
-                "faxLocationIds": mixed_location_ids[key],
-            })
+    conflicts = [dict(row) for row in db.execute(text("""
+        SELECT CASE WHEN decision.reason_code = 'epic_override'
+                    THEN 'baseline_changed_by_epic'
+                    ELSE decision.reason_code END AS code,
+               fax_row.surgeon_id AS "surgeonId",
+               fax_row.case_date AS date,
+               fax_row.session,
+               card.baseline_location_id AS "baselineLocationId",
+               fax_row.source_location_id AS "faxLocationId"
+        FROM fax_ingest_rows fax_row
+        JOIN fax_row_decisions decision ON decision.fax_row_id = fax_row.id
+        JOIN schedule_cards card ON card.id = decision.schedule_card_id
+        WHERE fax_row.run_id = :run_id
+          AND decision.status = 'ready_with_warning'
+        ORDER BY fax_row.surgeon_id, fax_row.case_date, fax_row.session, fax_row.id
+    """), {"run_id": run.id}).mappings()]
+    for conflict in conflicts:
+        conflict["date"] = conflict["date"].isoformat() if hasattr(conflict["date"], "isoformat") else str(conflict["date"])
+    mixed = db.execute(text("""
+        SELECT fax_row.surgeon_id AS "surgeonId", fax_row.case_date AS date, fax_row.session
+        FROM fax_ingest_rows_applicable applicable
+        JOIN fax_ingest_rows fax_row ON fax_row.id = applicable.fax_row_id
+        WHERE applicable.run_id = :run_id AND fax_row.source_location_id IS NOT NULL
+        GROUP BY fax_row.surgeon_id, fax_row.case_date, fax_row.session
+        HAVING count(DISTINCT fax_row.source_location_id) > 1
+        ORDER BY fax_row.surgeon_id, fax_row.case_date, fax_row.session
+    """), {"run_id": run.id}).mappings()
+    for row in mixed:
+        conflict = dict(row)
+        conflict["code"] = "mixed_facilities_in_session"
+        conflict["date"] = conflict["date"].isoformat() if hasattr(conflict["date"], "isoformat") else str(conflict["date"])
+        conflicts.append(conflict)
 
     photo = save_fax_line_photo(
         db,
         source_fax_id=source_fax_id,
         run_id=run.id,
-        covered={(row.surgeon_id, row.case_date) for row in rows if row.surgeon_id},
+        covered={
+            (surgeon_id, case_date)
+            for surgeon_id, case_date in db.execute(text("""
+                SELECT surgeon_id, case_date
+                FROM fax_ingest_coverage
+                WHERE run_id = :run_id
+                ORDER BY surgeon_id, case_date
+            """), {"run_id": run.id})
+        },
     )
     warning_count = replace_fax_warnings(
         db,
@@ -225,9 +199,14 @@ def apply_staged_snapshot(
         cards=cards,
     )
 
-    clinic_sessions = len({
-        (row.surgeon_id, row.case_date, row.session) for row in rows if row.row_type == "clinic"
-    })
+    clinic_sessions = int(db.execute(text("""
+        SELECT count(*) FROM (
+            SELECT DISTINCT fax_row.surgeon_id, fax_row.case_date, fax_row.session
+            FROM fax_ingest_rows_applicable applicable
+            JOIN fax_ingest_rows fax_row ON fax_row.id = applicable.fax_row_id
+            WHERE applicable.run_id = :run_id AND fax_row.row_type = 'clinic'
+        ) clinic_groups
+    """), {"run_id": run.id}).scalar() or 0)
 
     filled = fill_cards_from_fax_lines(db, run_id=run.id)
     created = filled["surgicalCreated"]

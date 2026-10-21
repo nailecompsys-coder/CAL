@@ -1,4 +1,4 @@
-"""Service-to-service staging for reviewed Desk/LlamaParse schedule rows.
+"""Service-to-service staging for structured Desk extractor schedule rows.
 
 Auth: Authorization: Bearer <CAL_INGEST_TOKEN> (or CAL_API_TOKEN).
 Desk must send reviewed structured rows. Legacy parser payloads are retired and
@@ -9,9 +9,8 @@ from __future__ import annotations
 
 import os
 import subprocess
-from datetime import date, datetime, time
+from datetime import date, time
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
 from pydantic import BaseModel, Field
@@ -23,7 +22,6 @@ from ..fax_pdf_intake import prepare_fax_pdf
 from ..fax_preview import preview_reviewed_rows
 from ..fax_restore_service import restore_fax_snapshot
 from ..fax_snapshot_service import apply_staged_snapshot
-from ..migrate_fax_ingest import PRACTICE_TIMEZONE
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 
@@ -46,6 +44,7 @@ def require_ingest_token(authorization: str | None = Header(default=None)) -> No
 class VisualFaxRowIn(BaseModel):
     fax_id: int | None = None
     page: int = 0
+    source_row_number: int | None = None
     surgeon_initials: str
     surgeon_name: str | None = None
     case_date: str
@@ -59,11 +58,20 @@ class VisualFaxRowIn(BaseModel):
     notes: str = ""
 
 
+class FaxCoverageIn(BaseModel):
+    surgeon_initials: str
+    case_date: str
+
+
 class VisualScheduleBatch(BaseModel):
     source_fax_id: int
-    source_label: str = "Desk LlamaParse extraction"
+    source_label: str = "Desk structured fax extraction"
+    extractor_name: str = "structured_extract"
+    extractor_version: str | None = None
+    extractor_request_id: str | None = None
     backup_label: str | None = None
     surgeon_scope: list[str] = Field(default_factory=list)
+    coverage: list[FaxCoverageIn] = Field(default_factory=list)
     rows: list[VisualFaxRowIn] = Field(default_factory=list)
 
 
@@ -143,6 +151,7 @@ def _visual_row(item: VisualFaxRowIn) -> ReviewedFaxRow:
         patient_name=item.patient_name.strip(),
         procedure=item.procedure or "",
         extraction_flags=((item.notes or "").strip() or "flagged") if item.visual_confidence == "flagged" else None,
+        source_row_number=item.source_row_number,
     )
 
 
@@ -154,10 +163,8 @@ def _upcoming_rows(body: VisualScheduleBatch) -> tuple[list[ReviewedFaxRow], int
     fax_ids = {item.fax_id or body.source_fax_id for item in body.rows}
     if fax_ids != {body.source_fax_id}:
         raise HTTPException(400, "all rows must match source_fax_id")
-    now = datetime.now(ZoneInfo(PRACTICE_TIMEZONE)).replace(tzinfo=None)
     parsed = [_visual_row(item) for item in body.rows]
-    rows = [row for row in parsed if datetime.combine(row.case_date, row.start_time or time.min) > now]
-    return rows, len(parsed) - len(rows)
+    return parsed, 0
 
 
 @router.post("/preview")
@@ -183,7 +190,7 @@ def ingest_visual_schedule_route(
     db: Session = Depends(get_db),
     _: None = Depends(require_ingest_token),
 ) -> dict[str, Any]:
-    """Desk reviewed LlamaParse-row staging path.
+    """Desk structured-extractor staging path.
 
     This route deliberately cannot write schedule cards, legacy schedules, or
     notifications. It records facts and returns placement decisions only.
@@ -198,6 +205,13 @@ def ingest_visual_schedule_route(
             source_label=body.source_label,
             rows=rows,
             surgeon_scope=body.surgeon_scope,
+            extractor_name=body.extractor_name,
+            extractor_version=body.extractor_version,
+            extractor_request_id=body.extractor_request_id,
+            coverage=[
+                (item.surgeon_initials, _parse_day(item.case_date))
+                for item in body.coverage
+            ],
         )
         db.commit()
     except ValueError as exc:
@@ -250,7 +264,7 @@ def restore_fax_snapshot_route(
 def retired_surgical_cases_route(_: None = Depends(require_ingest_token)) -> None:
     raise HTTPException(
         410,
-        "Retired. Desk must use /api/ingest/visual-schedule with reviewed LlamaParse rows.",
+        "Retired. Desk must use /api/ingest/visual-schedule with structured extractor rows.",
     )
 
 
@@ -258,5 +272,5 @@ def retired_surgical_cases_route(_: None = Depends(require_ingest_token)) -> Non
 def retired_surgeon_schedule_route(_: None = Depends(require_ingest_token)) -> None:
     raise HTTPException(
         410,
-        "Retired. Desk must use /api/ingest/visual-schedule with reviewed LlamaParse rows.",
+        "Retired. Desk must use /api/ingest/visual-schedule with structured extractor rows.",
     )

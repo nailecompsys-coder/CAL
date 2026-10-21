@@ -93,7 +93,7 @@ class FaxIngestEngineTest(unittest.TestCase):
         result = stage_reviewed_rows(self.db, external_fax_id=169, source_label="Fax 169", rows=[self.row(start_time=time(13, 30), room="AHMGGENSRG")])
         self.db.commit()
         decision = self.db.query(FaxRowDecision).one()
-        self.assertEqual(result["decisions"], {"needs_review": 1})
+        self.assertEqual(result["decisions"], {"unresolved": 1})
         self.assertEqual(decision.reason_code, "no_block_for_facility")
         self.assertIsNone(decision.schedule_card.effective_location_id)
 
@@ -128,7 +128,7 @@ class FaxIngestEngineTest(unittest.TestCase):
         )
         self.db.commit()
         decision = self.db.query(FaxRowDecision).one()
-        self.assertEqual(result["decisions"], {"ready": 1})
+        self.assertEqual(result["decisions"], {"ready_with_warning": 1})
         self.assertEqual(decision.reason_code, "epic_override")
 
     def test_generic_rows_follow_explicit_same_session_epic_location(self):
@@ -157,6 +157,25 @@ class FaxIngestEngineTest(unittest.TestCase):
         self.assertEqual(decision.reason_code, "off_collision")
         self.assertEqual(self.db.query(ScheduleCard).count(), 10)
 
+    def test_off_does_not_make_an_unresolved_location_safe_to_apply(self):
+        card = self.db.query(ScheduleCard).filter_by(
+            surgeon_id=self.surgeon.id, date=date(2026, 9, 16), session="pm"
+        ).one()
+        card.effective_state = "off"
+        self.db.commit()
+
+        result = stage_reviewed_rows(
+            self.db,
+            external_fax_id=176,
+            source_label="Fax 176",
+            rows=[self.row(start_time=time(13, 30), room="AHMGGENSRG")],
+        )
+        self.db.commit()
+
+        decision = self.db.query(FaxRowDecision).one()
+        self.assertEqual(result["decisions"], {"unresolved": 1})
+        self.assertEqual(decision.reason_code, "no_block_for_facility")
+
     def test_unknown_room_takes_location_and_type_from_assigned_card(self):
         stage_reviewed_rows(self.db, external_fax_id=170, source_label="Fax 170", rows=[self.row(room="ZZNEWROOM", row_type="clinic")])
         self.db.commit()
@@ -182,6 +201,18 @@ class FaxIngestEngineTest(unittest.TestCase):
         decision = self.db.query(FaxRowDecision).one()
         self.assertIsNone(staged.source_location_id)
         self.assertEqual(decision.reason_code, "block_facility_unclear")
+
+    def test_two_identical_printed_rows_keep_distinct_source_identity(self):
+        rows = [self.row(), self.row()]
+        result = stage_reviewed_rows(
+            self.db, external_fax_id=175, source_label="Fax 175", rows=rows,
+        )
+        self.db.commit()
+
+        staged = self.db.query(FaxIngestRow).order_by(FaxIngestRow.source_row_number).all()
+        self.assertEqual(result["materializedRows"], 2)
+        self.assertEqual([row.source_row_number for row in staged], [1, 2])
+        self.assertEqual(len({row.normalized_key for row in staged}), 2)
 
 
 if __name__ == "__main__":

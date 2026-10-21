@@ -17,7 +17,10 @@ SAME_ITEM = """
     AND a.activity_date = r.case_date
     AND a.activity_type = r.row_type
     AND lower(trim(a.patient_name)) = lower(trim(r.patient_name))
-    AND (a.start_time = r.start_time OR (a.start_time IS NULL AND r.start_time IS NULL))
+    AND (
+        substr(CAST(a.start_time AS TEXT), 1, 8) = substr(CAST(r.start_time AS TEXT), 1, 8)
+        OR (a.start_time IS NULL AND r.start_time IS NULL)
+    )
 """
 
 FAX_ROWS_SQL = f"""
@@ -27,9 +30,7 @@ SELECT r.page_number AS page, r.surgeon_initials, r.case_date, r.start_time, r.s
        c.effective_state AS card_state, cl.abbreviation AS card_location,
        fl.abbreviation AS fax_location,
        CASE
-           WHEN d.status <> 'ready' THEN 'fail'
-           WHEN d.reason_code = 'epic_override'
-                AND r.source_location_id IS DISTINCT FROM COALESCE(c.effective_location_id, c.baseline_location_id) THEN 'fail'
+           WHEN d.status = 'unresolved' THEN 'fail'
            WHEN EXISTS (SELECT 1 FROM schedule_card_activities a WHERE {SAME_ITEM}) THEN 'match'
            ELSE 'addition'
        END AS label
@@ -50,7 +51,7 @@ FROM schedule_card_activities a
 JOIN surgeons s ON s.id = a.surgeon_id
 LEFT JOIN locations l ON l.id = a.location_id
 WHERE a.is_active
-  AND a.source_system IN ('surgical_case', 'fax_clinic')
+  AND a.source_system IN ('fax', 'fax_clinic', 'surgical_case')
   AND EXISTS (
       SELECT 1 FROM fax_ingest_rows r
       WHERE r.run_id = :run_id AND r.surgeon_id = a.surgeon_id AND r.case_date = a.activity_date

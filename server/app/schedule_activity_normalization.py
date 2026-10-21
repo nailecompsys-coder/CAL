@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
@@ -12,12 +11,12 @@ from sqlalchemy.orm import Session
 
 from .migrate_fax_ingest import PRACTICE_TIMEZONE
 from .models import (
-    AprimaCachedAppointment,
     FaxDocument,
     FaxIngestRow,
     FaxIngestRun,
     FaxRowDecision,
     Location,
+    Meeting,
     ScheduleCard,
     ScheduleCardActivity,
     Surgeon,
@@ -163,10 +162,48 @@ def resolve_schedule_card(
     return next((row for row in candidates if row.session == session), None)
 
 
+def _meeting_title(payload: dict) -> str:
+    raw = (payload.get("reason") or payload.get("appointmentType") or "Meeting").strip()
+    title = re.sub(r"(?i)^meeting\s*[-:]?\s*", "", raw).strip() or "Meeting"
+    return title[:255]
+
+
+def _upsert_aprima_meeting(
+    db: Session,
+    payload: dict,
+    *,
+    day: date,
+    surgeon: Surgeon | None,
+    start_time: time | None,
+    end_time: time | None,
+) -> None:
+    from .admin_meeting_service import sync_meeting_attendees
+
+    key = str(payload.get("id") or "").strip()
+    if not key:
+        return
+    meeting = db.query(Meeting).filter(
+        Meeting.source_system == "aprima",
+        Meeting.source_record_key == key,
+    ).one_or_none()
+    if meeting is None:
+        meeting = Meeting(source_system="aprima", source_record_key=key, title=_meeting_title(payload), date=day)
+        db.add(meeting)
+        db.flush()
+    meeting.title = _meeting_title(payload)
+    meeting.date = day
+    meeting.start_time = start_time
+    meeting.end_time = end_time
+    meeting.location_text = ((payload.get("serviceSite") or payload.get("room") or "").strip() or None)
+    meeting.notes = (payload.get("reason") or "").strip() or None
+    sync_meeting_attendees(db, meeting, [surgeon.id] if surgeon else [])
+
+
 def normalize_aprima_payload(
     db: Session,
-    cached: AprimaCachedAppointment,
     payload: dict,
+    *,
+    kind: str,
 ) -> None:
     from .aprima_schedule_service import (
         appointment_belongs_to_surgeon,
@@ -174,10 +211,17 @@ def normalize_aprima_payload(
         resolve_aprima_facility_name,
     )
 
+    appointment_id = str(payload.get("id") or "").strip()
+    if not appointment_id:
+        return
+    try:
+        day = date.fromisoformat(str(payload.get("date") or ""))
+    except ValueError:
+        return
     clock = _clock(payload.get("start"))
     surgeons = db.query(Surgeon).filter(Surgeon.is_active == True).all()  # noqa: E712
     surgeon = next((row for row in surgeons if appointment_belongs_to_surgeon(payload, row)), None)
-    is_meeting = cached.kind == "meeting"
+    is_meeting = kind == "meeting"
     is_surgery = bool(not is_meeting and is_surgery_appointment(payload))
     facility = resolve_aprima_facility_name(
         payload.get("serviceSite") or "",
@@ -196,45 +240,50 @@ def normalize_aprima_payload(
         location_map[_key("Clermont Business Office")] = cbo
     location = location_map.get(_key(facility)) or location_map.get(_key(payload.get("serviceSite")))
     session = "pm" if clock and clock >= time(12, 0) else "am"
+    end_time = _clock(payload.get("end"))
+    if is_meeting:
+        _upsert_aprima_meeting(
+            db,
+            payload,
+            day=day,
+            surgeon=surgeon,
+            start_time=clock,
+            end_time=end_time,
+        )
+        db.query(ScheduleCardActivity).filter(
+            ScheduleCardActivity.source_system == "aprima",
+            ScheduleCardActivity.source_record_key == appointment_id,
+        ).update({ScheduleCardActivity.is_active: False}, synchronize_session=False)
+        return
     card = resolve_schedule_card(
         db,
         surgeon_id=surgeon.id if surgeon else None,
-        day=cached.date,
+        day=day,
         location_id=location.id if location else None,
         start_time=clock,
         preferred_session=session,
     )
-    cached.surgeon_id = surgeon.id if surgeon else None
-    cached.location_id = location.id if location else None
-    cached.schedule_card_id = card.id if card else None
-    cached.session = session if not is_meeting else None
-    cached.start_time = clock
-    cached.end_time = _clock(payload.get("end"))
-    cached.patient_name = (payload.get("patientName") or "").strip() or None
-    cached.activity_type = "meeting" if is_meeting else ("surgical" if is_surgery else "clinic")
-    cached.room_text = (payload.get("room") or payload.get("serviceSite") or "").strip() or None
-    cached.service_site = (payload.get("serviceSite") or "").strip() or None
-    cached.appointment_type = (payload.get("appointmentType") or "").strip() or None
-    cached.reason_text = (payload.get("reason") or "").strip() or None
-    if card and not is_meeting:
+    room_text = (payload.get("room") or payload.get("serviceSite") or "").strip() or None
+    patient_name = (payload.get("patientName") or "").strip() or None
+    if card:
         _upsert_activity(
             db,
             source_system="aprima",
-            source_record_key=cached.appointment_id,
+            source_record_key=appointment_id,
             card=card,
             activity_type="surgical" if is_surgery else "clinic",
             start_time=clock,
-            end_time=cached.end_time,
-            patient_name=cached.patient_name or "Patient",
+            end_time=end_time,
+            patient_name=patient_name or "Patient",
             procedure=(payload.get("appointmentType") or payload.get("procedure") or "").strip(),
-            room_text=cached.room_text,
-            location_id=cached.location_id,
-            aprima_appointment_id=cached.appointment_id,
+            room_text=room_text,
+            location_id=location.id if location else None,
+            aprima_appointment_id=appointment_id[:36],
         )
     else:
         db.query(ScheduleCardActivity).filter(
             ScheduleCardActivity.source_system == "aprima",
-            ScheduleCardActivity.source_record_key == cached.appointment_id,
+            ScheduleCardActivity.source_record_key == appointment_id,
         ).update({ScheduleCardActivity.is_active: False}, synchronize_session=False)
 
 
@@ -320,25 +369,14 @@ def reconcile_applied_fax_versions(db: Session) -> int:
 
 
 def backfill_normalized_schedule_activity(db: Session) -> dict[str, int]:
-    surgical = aprima = 0
-    for cached in db.query(AprimaCachedAppointment).filter(
-        AprimaCachedAppointment.activity_type.is_(None),
-    ).all():
-        try:
-            payload = json.loads(cached.payload_json or "{}")
-        except (TypeError, ValueError):
-            payload = {}
-        if not isinstance(payload, dict):
-            payload = {}
-        normalize_aprima_payload(db, cached, payload)
-        if cached.schedule_card_id or cached.activity_type == "meeting":
-            aprima += 1
-    for activity in db.query(ScheduleCardActivity).filter(
+    surgical = 0
+    missing = db.query(ScheduleCardActivity).filter(
         ScheduleCardActivity.source_system == "aprima",
         ScheduleCardActivity.aprima_appointment_id.is_(None),
-    ).all():
-        if db.get(AprimaCachedAppointment, activity.source_record_key):
-            activity.aprima_appointment_id = activity.source_record_key
+    ).all()
+    for activity in missing:
+        activity.aprima_appointment_id = (activity.source_record_key or "")[:36] or None
+    aprima = len(missing)
     fax = 0
     applied_runs = (
         db.query(FaxIngestRun)

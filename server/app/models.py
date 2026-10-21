@@ -531,6 +531,13 @@ class Meeting(Base):
     notes = Column(Text)
     created_by = Column(Integer, ForeignKey("admin_users.id"))
     created_at = Column(DateTime, server_default=func.now())
+    # Shannon's meetings leave both empty. Aprima fills both, and that pair is unique.
+    source_system = Column(String(32))
+    source_record_key = Column(String(640))
+
+    __table_args__ = (
+        UniqueConstraint("source_system", "source_record_key", name="uq_meetings_source_record"),
+    )
 
     attendees = relationship("MeetingAttendee", back_populates="meeting", cascade="all, delete-orphan")
     location = relationship("Location")
@@ -538,6 +545,10 @@ class Meeting(Base):
 
 class MeetingAttendee(Base):
     __tablename__ = "meeting_attendees"
+    __table_args__ = (
+        UniqueConstraint("meeting_id", "surgeon_id", name="uq_meeting_attendees_meeting_surgeon"),
+    )
+
     id = Column(Integer, primary_key=True)
     meeting_id = Column(Integer, ForeignKey("meetings.id"), nullable=False)
     surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=False)
@@ -550,7 +561,10 @@ class MeetingAttendee(Base):
 class ScheduleCardWeek(Base):
     """One materialized Monday-Friday card set for one surgeon."""
     __tablename__ = "schedule_card_weeks"
-    __table_args__ = (UniqueConstraint("surgeon_id", "week_start"),)
+    __table_args__ = (
+        UniqueConstraint("surgeon_id", "week_start"),
+        UniqueConstraint("id", "surgeon_id", name="uq_schedule_card_weeks_id_surgeon"),
+    )
 
     id = Column(Integer, primary_key=True)
     surgeon_id = Column(Integer, ForeignKey("surgeons.id"), nullable=False)
@@ -560,7 +574,12 @@ class ScheduleCardWeek(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     surgeon = relationship("Surgeon")
-    cards = relationship("ScheduleCard", back_populates="week", cascade="all, delete-orphan")
+    cards = relationship(
+        "ScheduleCard",
+        back_populates="week",
+        cascade="all, delete-orphan",
+        foreign_keys="ScheduleCard.week_id",
+    )
 
 
 class ScheduleCard(Base):
@@ -587,6 +606,13 @@ class ScheduleCard(Base):
             "effective_state <> 'assigned' OR effective_location_id IS NOT NULL",
             name="ck_schedule_cards_effective_location",
         ),
+        ForeignKeyConstraint(
+            ["week_id", "surgeon_id"],
+            ["schedule_card_weeks.id", "schedule_card_weeks.surgeon_id"],
+            name="fk_schedule_cards_week_surgeon",
+            onupdate="CASCADE",
+            ondelete="CASCADE",
+        ),
     )
 
     id = Column(Integer, primary_key=True)
@@ -605,7 +631,11 @@ class ScheduleCard(Base):
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    week = relationship("ScheduleCardWeek", back_populates="cards")
+    week = relationship(
+        "ScheduleCardWeek",
+        back_populates="cards",
+        foreign_keys=[week_id],
+    )
     surgeon = relationship("Surgeon")
     activities = relationship(
         "ScheduleCardActivity",
@@ -697,7 +727,8 @@ class ScheduleCardActivity(Base):
     # source_fax_id is the fax that wrote this line. It stays after the scratch reading is deleted.
     source_fax_id = Column(Integer, nullable=True, index=True)
     fax_ingest_row_id = Column(Integer, ForeignKey("fax_ingest_rows.id", ondelete="SET NULL"), nullable=True, index=True)
-    aprima_appointment_id = Column(String(36), ForeignKey("aprima_cached_appointments.appointment_id", ondelete="SET NULL"), nullable=True, index=True)
+    # Aprima appointment number. It stays after the scratch list is deleted.
+    aprima_appointment_id = Column(String(36), nullable=True, index=True)
     or_block_instance_id = Column(Integer, ForeignKey("or_block_instances.id", ondelete="SET NULL"), nullable=True, index=True)
     identity_key = Column(String(512), nullable=False, index=True)
     is_active = Column(Boolean, nullable=False, default=True, server_default="true", index=True)
@@ -990,7 +1021,8 @@ class ORBlockInstance(Base):
     start_time = Column(Time, nullable=False)
     end_time = Column(Time, nullable=False)
     # OR room within the hospital (e.g. S03 / S08). Blank allowed but flagged immediately.
-    # Same day+location+overlapping time+same room (or both blank) = duplicate; different rooms = dual capacity OK.
+    # One hospital, date, half-day, and room. A blank room counts, so two blank rooms collide.
+    # A different room at the same hospital is a second block.
     room_text = Column(String(64))
     status = Column(String(24), default="open", server_default="open")  # open | assigned
     assigned_surgeon_id = Column(Integer, ForeignKey("surgeons.id"))
@@ -1007,6 +1039,17 @@ class ORBlockInstance(Base):
     notes = Column(Text)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
+
+    __table_args__ = (
+        Index(
+            "uq_or_block_instances_location_date_session_room",
+            location_id,
+            date,
+            func.coalesce(session, ""),
+            func.coalesce(room_text, ""),
+            unique=True,
+        ),
+    )
 
     series = relationship("ORBlockSeries", back_populates="instances")
     location = relationship("Location")
@@ -1159,34 +1202,6 @@ class AdminNotification(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     admin_user = relationship("AdminUser")
-
-
-class AprimaCachedAppointment(Base):
-    """Snapshot of an Aprima appointment row (patient or meeting). Read-only from Aprima."""
-    __tablename__ = "aprima_cached_appointments"
-    appointment_id = Column(String(36), primary_key=True)
-    kind = Column(String(16), nullable=False, index=True)  # patient | meeting
-    date = Column(Date, nullable=False, index=True)
-    surgeon_initials = Column(String(16), index=True)
-    surgeon_id = Column(Integer, ForeignKey("surgeons.id"), index=True)
-    location_id = Column(Integer, ForeignKey("locations.id"), index=True)
-    schedule_card_id = Column(Integer, ForeignKey("schedule_cards.id"), index=True)
-    session = Column(String(2))
-    start_time = Column(Time)
-    end_time = Column(Time)
-    patient_name = Column(String(255))
-    activity_type = Column(String(16))  # clinic | surgical | meeting
-    room_text = Column(String(128))
-    service_site = Column(String(255))
-    appointment_type = Column(String(255))
-    reason_text = Column(Text)
-    content_hash = Column(String(64), nullable=False)
-    payload_json = Column(Text, nullable=False)
-    synced_at = Column(DateTime, nullable=False, server_default=func.now())
-
-    surgeon = relationship("Surgeon")
-    location = relationship("Location")
-    schedule_card = relationship("ScheduleCard")
 
 
 class AprimaSyncState(Base):

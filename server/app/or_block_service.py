@@ -304,38 +304,29 @@ def log_schedule_change(
     ))
 
 
-def _overlapping_upsert_target(
+def _block_for_room(
     db: Session,
     *,
     block_date: date,
     location_id: int,
-    start_time: time,
-    end_time: time,
+    session: str,
     room_text: str | None,
 ) -> ORBlockInstance | None:
-    """One existing same-room window can take the new times. Two+ is a real collision."""
-    overlaps = overlapping_or_blocks(
-        db,
-        block_date=block_date,
-        location_id=location_id,
-        start_time=start_time,
-        end_time=end_time,
-        room_text=room_text,
-    )
-    if not overlaps:
-        return None
-    if len(overlaps) == 1:
-        return overlaps[0]
-    raise ValueError(
-        "Duplicate Block OR time: " + " ".join(
-            f"{(row.location.name if row.location else 'OR')} "
-            f"{normalize_room_text(row.room_text) or 'shared window'} already has "
-            f"{row.status.replace('_', ' ')} block time "
-            f"{block_date.strftime('%a %-m/%-d')} "
-            f"{row.start_time.strftime('%H:%M')}-{row.end_time.strftime('%H:%M')}."
-            for row in overlaps[:3]
+    """The one block for this hospital, date, half-day, and room. A blank room counts."""
+    room = normalize_room_text(room_text) or ""
+    session_key = session or ""
+    rows = (
+        db.query(ORBlockInstance)
+        .filter(
+            ORBlockInstance.location_id == location_id,
+            ORBlockInstance.date == block_date,
         )
+        .all()
     )
+    for row in rows:
+        if (row.session or "") == session_key and (normalize_room_text(row.room_text) or "") == room:
+            return row
+    return None
 
 
 def create_or_blocks(db: Session, payload: BlockORCreateInput, admin_id: int | None = None) -> dict:
@@ -385,12 +376,11 @@ def create_or_blocks(db: Session, payload: BlockORCreateInput, admin_id: int | N
             continue
         for location_id in location_ids:
             for session_label, win_start, win_end in windows:
-                existing = _overlapping_upsert_target(
+                existing = _block_for_room(
                     db,
                     block_date=block_date,
                     location_id=location_id,
-                    start_time=win_start,
-                    end_time=win_end,
+                    session=session_label,
                     room_text=room,
                 )
                 if existing is not None:

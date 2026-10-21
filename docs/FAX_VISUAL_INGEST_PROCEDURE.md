@@ -30,4 +30,4 @@ Coverage is surgeon/date-specific. A missing line survives the first consecutive
 
 ## Release state
 
-The immutable-candidate and SQL-resolution flow is implemented and tested locally as an unreleased slice dated 2026-10-21. Until it is explicitly pushed and released, production remains on the deployed behavior recorded in `docs/CAL_CURRENT_STATE.md`. A healthy endpoint or Desk status does not prove this slice is live.
+The immutable-candidate and SQL-resolution flow is CAL commit `61a0dcf`. The standalone native-PDF → 300-DPI PNG → OpenAI structured extraction → CAL stage/apply caller is Desk commit `4c31a9a`. Desk's scheduled 6:30 PM Eastern poll sends only newly copied surgical schedules through that path. These commits are not a production release until both applications are explicitly deployed and verified. Production remains on the deployed behavior recorded in `docs/CAL_CURRENT_STATE.md`.

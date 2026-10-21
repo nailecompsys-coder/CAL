@@ -2,6 +2,8 @@
 
 Updated October 21, 2026. This replaces the October 14 LlamaParse/OpenDocRouter handoff.
 
+The completed local SQL-owned backend slice is CAL commit `61a0dcf`. It is not pushed or deployed.
+
 ## Decision that must survive agent changes
 
 CAL does not require a LlamaParse key and does not depend on an agent remembering how to read a fax. A standalone extractor owns PDF/PNG/OCR or vision work and must hand structured rows back to CAL. The extractor may call local or hosted AI, but it may not write schedule facts directly.

@@ -1,10 +1,10 @@
-# CAL current state — 2026-10-20
+# CAL current state — 2026-10-21
 
 This tracked file records verified production facts and unfinished work. Update it with each release. Local `memory.md` may provide extra session context but is Git-ignored and is not a shared source of truth.
 
 ## Implemented locally, not released
 
-- October 21: the fax handoff was consolidated around immutable extractor candidates and SQL-owned resolution/application. The extractor may use local or hosted OCR/vision but must return structured rows; CAL does not require a LlamaParse key. SQL now owns surgeon, AM/PM, facility/card resolution, applicable-row selection, explicit surgeon/date coverage, overlap protection, duplicate identity, and two-covering-fax omission cancellation before writing only `schedule_card_activities`. Unresolved rows remain staged while independent clean rows can apply. Thirty-five focused tests and temporary-PostgreSQL migration/behavior checks passed. The broad suite has the same eight failures and three errors as clean `origin/main`. This is **not pushed or deployed**; production facts below are unchanged. The old `ingest_desk_fax.py` reconciler is not the supported new handoff, and the standalone extractor caller/6 PM automation still must be connected and verified.
+- October 21: commit `61a0dcf` consolidates the fax handoff around immutable extractor candidates and SQL-owned resolution/application. The extractor may use local or hosted OCR/vision but must return structured rows; CAL does not require a LlamaParse key. SQL now owns surgeon, AM/PM, facility/card resolution, applicable-row selection, explicit surgeon/date coverage, overlap protection, duplicate identity, and two-covering-fax omission cancellation before writing only `schedule_card_activities`. Unresolved rows remain staged while independent clean rows can apply. Thirty-five focused tests and temporary-PostgreSQL migration/behavior checks passed. The broad suite has the same eight failures and three errors as clean `origin/main`. This is **not pushed or deployed**; production facts below are unchanged. The old `ingest_desk_fax.py` reconciler is not the supported new handoff, and the standalone extractor caller/6 PM automation still must be connected and verified.
 
 ## Production
 

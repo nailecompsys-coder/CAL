@@ -107,6 +107,7 @@ FROM fax_ingest_candidate_resolutions resolution
 WHERE resolution.run_id = :run_id
   AND resolution.surgeon_id IS NOT NULL
   AND resolution.case_date IS NOT NULL
+  AND resolution.decision_status IN ('ready', 'ready_with_warning')
 ON CONFLICT (run_id, surgeon_id, case_date) DO NOTHING
 """
 
@@ -183,31 +184,10 @@ def stage_reviewed_rows(
     db.flush()
     db.execute(text(_MATERIALIZE_ROWS), {"run_id": run.id})
     db.execute(text(_MATERIALIZE_DECISIONS), {"run_id": run.id})
-    if coverage:
-        expected_coverage = {(_text(initials).upper(), covered_day) for initials, covered_day in coverage}
-        for initials, covered_day in coverage:
-            db.execute(text("""
-                INSERT INTO fax_ingest_coverage (run_id, surgeon_id, case_date)
-                SELECT :run_id, min(surgeon.id), :case_date
-                FROM surgeons surgeon
-                WHERE surgeon.is_active = TRUE
-                  AND upper(substr(COALESCE(surgeon.first_name, ''), 1, 1) ||
-                            substr(COALESCE(surgeon.last_name, ''), 1, 1)) = :initials
-                HAVING count(surgeon.id) = 1
-                ON CONFLICT (run_id, surgeon_id, case_date) DO NOTHING
-            """), {
-                "run_id": run.id,
-                "case_date": covered_day,
-                "initials": _text(initials).upper(),
-            })
-        saved_coverage = int(db.execute(
-            text("SELECT count(*) FROM fax_ingest_coverage WHERE run_id = :run_id"),
-            {"run_id": run.id},
-        ).scalar() or 0)
-        if saved_coverage != len(expected_coverage):
-            raise ValueError("Fax coverage contains an unknown or ambiguous surgeon.")
-    else:
-        db.execute(text(_DERIVE_COVERAGE), {"run_id": run.id})
+    # SQL owns authoritative coverage. A Desk/OCR header may contain a validly
+    # formatted but wrong date, so only dates with at least one SQL-resolved row
+    # may govern the live snapshot. Unresolved dates remain staged for review.
+    db.execute(text(_DERIVE_COVERAGE), {"run_id": run.id})
     counts = {
         status: count
         for status, count in db.execute(text("""

@@ -14,6 +14,7 @@ from app.models import (
     Base,
     FaxIngestRow,
     FaxIngestCandidate,
+    FaxIngestCoverage,
     FaxRowDecision,
     Location,
     ORBlockAssignment,
@@ -104,6 +105,25 @@ class FaxIngestEngineTest(unittest.TestCase):
         self.assertEqual(result["decisions"], {"unresolved": 1})
         self.assertEqual(self.db.query(FaxIngestCandidate).count(), 1)
         self.assertEqual(self.db.query(FaxIngestRow).count(), 0)
+
+    def test_unresolved_ocr_date_does_not_expand_authoritative_coverage(self):
+        result = stage_reviewed_rows(
+            self.db,
+            external_fax_id=169,
+            source_label="Fax 169",
+            coverage=[("JF", date(2026, 9, 16)), ("JF", date(2034, 5, 21))],
+            rows=[
+                self.row(),
+                self.row(case_date=date(2034, 5, 21), patient_name="Bad Date", extraction_flags="bad_date"),
+            ],
+        )
+        self.db.commit()
+
+        self.assertEqual(result["decisions"], {"ready": 1, "unresolved": 1})
+        self.assertEqual(
+            [(row.surgeon_id, row.case_date) for row in self.db.query(FaxIngestCoverage).all()],
+            [(self.surgeon.id, date(2026, 9, 16))],
+        )
 
     def test_generic_room_on_na_is_reviewed_not_assigned(self):
         result = stage_reviewed_rows(self.db, external_fax_id=169, source_label="Fax 169", rows=[self.row(start_time=time(13, 30), room="AHMGGENSRG")])

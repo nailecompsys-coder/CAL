@@ -24,8 +24,8 @@ class ReviewedFaxRow:
     page: int
     surgeon_initials: str
     surgeon_name: str | None
-    case_date: date
-    start_time: time | None
+    case_date: date | str
+    start_time: time | str | None
     row_type: str
     room: str
     patient_name: str
@@ -45,6 +45,16 @@ def mark_fax_ingest_transaction(db: Session, run_id: int | None = None) -> None:
 
 def _text(value: str | None) -> str:
     return re.sub(r"\s+", " ", value or "").strip()
+
+
+def _raw_date(value: date | str) -> str:
+    return value.isoformat() if isinstance(value, date) else _text(value)
+
+
+def _raw_time(value: time | str | None) -> str | None:
+    if isinstance(value, time):
+        return value.isoformat()
+    return _text(value) or None
 
 
 _MATERIALIZE_ROWS = """
@@ -154,8 +164,8 @@ def stage_reviewed_rows(
             source_row_number=source_row_number,
             surgeon_initials_raw=_text(row.surgeon_initials).upper(),
             surgeon_name_raw=_text(row.surgeon_name) or None,
-            case_date_raw=row.case_date.isoformat(),
-            start_time_raw=row.start_time.isoformat() if row.start_time else None,
+            case_date_raw=_raw_date(row.case_date),
+            start_time_raw=_raw_time(row.start_time),
             row_type_raw=_text(row.row_type).lower(),
             room_raw=_text(row.room),
             patient_name_raw=_text(row.patient_name),
@@ -194,20 +204,17 @@ def stage_reviewed_rows(
     counts = {
         status: count
         for status, count in db.execute(text("""
-            SELECT decision.status, count(*)
-            FROM fax_row_decisions decision
-            JOIN fax_ingest_rows row ON row.id = decision.fax_row_id
-            WHERE row.run_id = :run_id
-            GROUP BY decision.status
-            ORDER BY decision.status
+            SELECT resolution.decision_status, count(*)
+            FROM fax_ingest_candidate_resolutions resolution
+            WHERE resolution.run_id = :run_id
+            GROUP BY resolution.decision_status
+            ORDER BY resolution.decision_status
         """), {"run_id": run.id})
     }
     materialized = int(db.execute(
         text("SELECT count(*) FROM fax_ingest_rows WHERE run_id = :run_id"),
         {"run_id": run.id},
     ).scalar() or 0)
-    if materialized != len(rows):
-        raise ValueError("SQL could not materialize every extractor row; check date and row type values.")
     return {
         "faxDocumentId": document.id,
         "runId": run.id,

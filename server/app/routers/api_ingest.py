@@ -47,7 +47,7 @@ class VisualFaxRowIn(BaseModel):
     source_row_number: int | None = None
     surgeon_initials: str
     surgeon_name: str | None = None
-    case_date: str
+    case_date: str | None = None
     start_time: str | None = None
     row_type: str
     room: str = ""
@@ -136,16 +136,31 @@ def _parse_clock(raw: str | None) -> time | None:
     raise HTTPException(400, f"Invalid start_time: {raw}")
 
 
-def _visual_row(item: VisualFaxRowIn) -> ReviewedFaxRow:
+def _visual_row(item: VisualFaxRowIn, *, allow_unresolved: bool = False) -> ReviewedFaxRow:
     row_type = (item.row_type or "").strip().lower()
     if row_type not in {"surgical", "clinic"}:
         raise HTTPException(400, "row_type must be surgical or clinic")
+    case_date: date | str
+    start_time: time | str | None
+    if allow_unresolved:
+        raw_day = str(item.case_date or "").strip()
+        try:
+            case_date = _parse_day(raw_day)
+        except HTTPException:
+            case_date = raw_day
+        try:
+            start_time = _parse_clock(item.start_time)
+        except HTTPException:
+            start_time = str(item.start_time or "").strip() or None
+    else:
+        case_date = _parse_day(item.case_date or "")
+        start_time = _parse_clock(item.start_time)
     return ReviewedFaxRow(
         page=item.page,
         surgeon_initials=item.surgeon_initials.strip().upper(),
         surgeon_name=(item.surgeon_name or "").strip() or None,
-        case_date=_parse_day(item.case_date),
-        start_time=_parse_clock(item.start_time),
+        case_date=case_date,
+        start_time=start_time,
         row_type=row_type,
         room=item.room or "",
         patient_name=item.patient_name.strip(),
@@ -155,7 +170,9 @@ def _visual_row(item: VisualFaxRowIn) -> ReviewedFaxRow:
     )
 
 
-def _upcoming_rows(body: VisualScheduleBatch) -> tuple[list[ReviewedFaxRow], int]:
+def _upcoming_rows(
+    body: VisualScheduleBatch, *, allow_unresolved: bool = False
+) -> tuple[list[ReviewedFaxRow], int]:
     if not body.rows:
         raise HTTPException(400, "rows required")
     if len(body.rows) > 1000:
@@ -163,7 +180,7 @@ def _upcoming_rows(body: VisualScheduleBatch) -> tuple[list[ReviewedFaxRow], int
     fax_ids = {item.fax_id or body.source_fax_id for item in body.rows}
     if fax_ids != {body.source_fax_id}:
         raise HTTPException(400, "all rows must match source_fax_id")
-    parsed = [_visual_row(item) for item in body.rows]
+    parsed = [_visual_row(item, allow_unresolved=allow_unresolved) for item in body.rows]
     return parsed, 0
 
 
@@ -195,7 +212,7 @@ def ingest_visual_schedule_route(
     This route deliberately cannot write schedule cards, legacy schedules, or
     notifications. It records facts and returns placement decisions only.
     """
-    rows, skipped_past = _upcoming_rows(body)
+    rows, skipped_past = _upcoming_rows(body, allow_unresolved=True)
     if not rows:
         return {"ok": True, "result": {"rows": 0, "skippedPast": skipped_past, "writeMode": "staging_only"}}
     try:

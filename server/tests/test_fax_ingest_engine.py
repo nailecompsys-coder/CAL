@@ -13,6 +13,7 @@ from app.migrate_fax_ingest import create_applicable_view
 from app.models import (
     Base,
     FaxIngestRow,
+    FaxIngestCandidate,
     FaxRowDecision,
     Location,
     ORBlockAssignment,
@@ -88,6 +89,21 @@ class FaxIngestEngineTest(unittest.TestCase):
         self.assertEqual(decision.reason_code, "existing_card")
         self.assertEqual(self.db.query(FaxIngestRow).count(), 1)
         self.assertEqual(self.db.query(ScheduleCard).count(), 10)
+
+    def test_invalid_date_is_retained_as_unresolved_candidate(self):
+        result = stage_reviewed_rows(
+            self.db,
+            external_fax_id=169,
+            source_label="Fax 169",
+            rows=[self.row(case_date="", surgeon_initials="", surgeon_name=None,
+                           start_time=None, patient_name="", extraction_flags="bad_date")],
+        )
+        self.db.commit()
+        self.assertEqual(result["rows"], 1)
+        self.assertEqual(result["materializedRows"], 0)
+        self.assertEqual(result["decisions"], {"unresolved": 1})
+        self.assertEqual(self.db.query(FaxIngestCandidate).count(), 1)
+        self.assertEqual(self.db.query(FaxIngestRow).count(), 0)
 
     def test_generic_room_on_na_is_reviewed_not_assigned(self):
         result = stage_reviewed_rows(self.db, external_fax_id=169, source_label="Fax 169", rows=[self.row(start_time=time(13, 30), room="AHMGGENSRG")])

@@ -94,6 +94,18 @@ class ApiIngestVisualTest(unittest.TestCase):
         )
         self.assertEqual(result["result"]["skippedPast"], 0)
 
+    def test_unreadable_date_reaches_sql_as_an_unresolved_raw_fact(self):
+        body = VisualScheduleBatch(
+            source_fax_id=162,
+            rows=[VisualFaxRowIn(surgeon_initials="", case_date=None, row_type="clinic",
+                                 room="", patient_name="", visual_confidence="flagged")],
+        )
+        with patch("app.routers.api_ingest.stage_reviewed_rows", return_value={"writeMode": "staging_only"}) as stage:
+            ingest_visual_schedule_route(body, db=Mock())
+        staged = stage.call_args.kwargs["rows"][0]
+        self.assertEqual(staged.case_date, "")
+        self.assertEqual(staged.surgeon_initials, "")
+
     def test_all_past_rows_still_reach_sql_staging(self):
         body = VisualScheduleBatch(
             source_fax_id=162,

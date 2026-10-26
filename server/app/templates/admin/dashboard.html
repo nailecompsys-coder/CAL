@@ -176,7 +176,27 @@
       {% set notif_title = 'Pending Request' if row.title == 'CAL request pending' else row.title %}
       {% set dayoff_href = admin_notification_href(row.kind, payload) %}
       {% set card_href = '/admin/notifications/' ~ row.id ~ '/ack' if notification_is_informational(row) else dayoff_href %}
-      {% if card_href %}
+      {% if notification_is_informational(row) %}
+      <form method="post" action="/admin/notifications/{{ row.id }}/ack">
+        <button type="submit"
+          data-cal-notif=""
+          data-cal-title="{{ notif_title | e }}"
+          data-cal-body="{{ row.body | e }}"
+          data-cal-href="/admin/notifications/{{ row.id }}/ack"
+          data-cal-kind="{{ row.kind | e }}"
+          data-cal-informational="1"
+          class="rounded-lg border {% if row.read_at %}border-slate-100 bg-white/60{% else %}border-teal-100 bg-teal-50/70{% endif %} px-2.5 py-1.5 block w-full text-left hover:border-teal-300 hover:bg-teal-50 transition-colors">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-xs font-bold text-slate-800 truncate">{{ notif_title }}</p>
+            <p class="text-[10px] text-slate-400 whitespace-nowrap">{% if row.created_at %}{{ row.created_at.strftime('%b %d %H:%M') }}{% endif %}</p>
+          </div>
+          <div class="flex items-center justify-between gap-2 mt-0.5">
+            <p class="text-[11px] text-slate-600 line-clamp-1">{{ row.body }}</p>
+            <span class="text-[11px] font-bold text-blue-700 whitespace-nowrap">Dismiss</span>
+          </div>
+        </button>
+      </form>
+      {% elif card_href %}
       <a href="{{ card_href }}"
         data-cal-notif=""
         data-cal-title="{{ notif_title | e }}"

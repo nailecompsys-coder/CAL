@@ -4,6 +4,7 @@ This tracked file records verified production facts and unfinished work. Update 
 
 ## Implemented locally, not released
 
+- Admin notification dismissal now uses an explicit POST-backed **Dismiss** button on both the dashboard and Notifications page instead of relying on whole-card JavaScript navigation. The existing GET route remains for compatibility. This addresses Shannon's two orphaned October 4 `Time off canceled` notices, whose browser clicks never reached the live acknowledgment endpoint. Focused notification tests pass 18/18, both modified templates parse, and Python compilation passes. This change is committed locally but is not pushed or deployed.
 - No unreleased fax-ingest change remains. CAL `8c8dd2d` and Desk `05c4e85` are pushed and deployed as described below.
 
 ## Production

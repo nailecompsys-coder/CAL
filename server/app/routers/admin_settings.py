@@ -246,6 +246,7 @@ def notifications_page(
 
 
 @router.get("/notifications/{notification_id}/ack")
+@router.post("/notifications/{notification_id}/ack")
 def ack_notification(
     notification_id: int,
     db: Session = Depends(get_db),

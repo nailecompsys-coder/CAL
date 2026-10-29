@@ -104,7 +104,7 @@ class FaxPreviewTest(unittest.TestCase):
             _row(MONDAY, time(8, 0), "Already, There"),
             _row(MONDAY, time(13, 0), "Fills, NA"),
             _row(TUESDAY, time(8, 0), "On, Off"),
-            _row(TUESDAY, time(13, 0), "Wrong, Facility"),
+            _row(TUESDAY, time(13, 0), "Wrong, Facility", room="ZZZ S99"),
             _row(SATURDAY, time(8, 0), "Weekend, Misread"),
             _row(WEDNESDAY, time(8, 0), "Agrees, WithCard"),
         ])

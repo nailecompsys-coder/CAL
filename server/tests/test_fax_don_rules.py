@@ -348,5 +348,15 @@ class ClinicRowIgnoresOrBlockTest(DonRulesTest):
 
     def test_surgical_row_still_checks_or_block_against_clinic_card(self):
         day = self._setup_clinic_morning()
-        staged = self._stage([self._row("A, One", day=day, at=time(8, 30), room="MGALTGS")])
+        staged = self._stage([self._row("A, One", day=day, at=time(8, 30), room="ZZZ S99")])
         self.assertEqual(staged["report"]["heldByReason"].get("location_conflict"), 1)
+
+
+class PlaceholderRoomNeverConflictsTest(DonRulesTest):
+    def test_placeholder_room_surgical_row_goes_on_card(self):
+        day = DAY + timedelta(days=2)
+        self._card(day, "am", "assigned", self.ap_ov.id)
+        self._block(self.al_or, time(7, 0), time(12, 0), day=day)
+        self.db.commit()
+        staged = self._stage([self._row("A, One", day=day, at=time(8, 30), room="MGALTGS")])
+        self.assertNotIn("location_conflict", staged["report"]["heldByReason"])

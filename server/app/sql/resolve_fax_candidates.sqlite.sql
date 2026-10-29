@@ -74,6 +74,11 @@ WITH base AS (
              WHERE rc.code = upper(trim(COALESCE(r.room_raw, '')))
                AND rc.kind = 'room' AND rc.confirmed = 1
                AND rc.location_id IS NOT NULL) AS room_location_id,
+           -- Epic placeholders (e.g. MGALTGS) are not rooms: they never trigger a location conflict;
+           -- the row is placed by surgeon + date + time against the card.
+           EXISTS (SELECT 1 FROM fax_room_codes pc
+                    WHERE pc.code = upper(trim(COALESCE(r.room_raw, '')))
+                      AND pc.kind = 'placeholder') AS room_is_placeholder,
            -- Rule 8: the card's location type decides clinic vs OR.
            (SELECT loc.location_type FROM locations loc
              WHERE loc.id = COALESCE(card.effective_location_id, card.baseline_location_id)) AS card_location_type
@@ -116,7 +121,7 @@ SELECT l.*,
          WHEN block_location_count > 1 THEN 'unresolved'
          WHEN room_location_id IS NOT NULL AND block_location_count = 1 AND block_location_id <> room_location_id THEN 'unresolved'
          WHEN room_location_id IS NOT NULL AND card_location_type IS NOT NULL AND room_location_type <> card_location_type THEN 'unresolved'
-         WHEN block_location_count = 1 AND COALESCE(effective_location_id, baseline_location_id) IS NOT NULL AND block_location_id <> COALESCE(effective_location_id, baseline_location_id) THEN 'unresolved'
+         WHEN NOT room_is_placeholder AND block_location_count = 1 AND COALESCE(effective_location_id, baseline_location_id) IS NOT NULL AND block_location_id <> COALESCE(effective_location_id, baseline_location_id) THEN 'unresolved'
          WHEN source_location_id IS NULL THEN 'unresolved'
          WHEN effective_state = 'off' THEN 'ready_with_warning'
          ELSE 'ready'
@@ -131,7 +136,7 @@ SELECT l.*,
          WHEN block_location_count > 1 THEN 'block_facility_unclear'
          WHEN room_location_id IS NOT NULL AND block_location_count = 1 AND block_location_id <> room_location_id THEN 'location_conflict'
          WHEN room_location_id IS NOT NULL AND card_location_type IS NOT NULL AND room_location_type <> card_location_type THEN 'location_conflict'
-         WHEN block_location_count = 1 AND COALESCE(effective_location_id, baseline_location_id) IS NOT NULL AND block_location_id <> COALESCE(effective_location_id, baseline_location_id) THEN 'location_conflict'
+         WHEN NOT room_is_placeholder AND block_location_count = 1 AND COALESCE(effective_location_id, baseline_location_id) IS NOT NULL AND block_location_id <> COALESCE(effective_location_id, baseline_location_id) THEN 'location_conflict'
          WHEN source_location_id IS NULL THEN 'no_block_for_facility'
          WHEN effective_state = 'off' THEN 'off_collision'
          WHEN block_location_count = 1 AND effective_state = 'na' THEN 'block_location'

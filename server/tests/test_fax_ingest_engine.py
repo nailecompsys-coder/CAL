@@ -184,7 +184,7 @@ class FaxIngestEngineTest(unittest.TestCase):
             self.db,
             external_fax_id=172,
             source_label="Fax 172",
-            rows=[self.row(room="MIN S05")],
+            rows=[self.row(room="ZZZ S99")],
         )
         self.db.commit()
         decision = self.db.query(FaxRowDecision).one()

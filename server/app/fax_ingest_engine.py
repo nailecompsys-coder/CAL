@@ -160,12 +160,16 @@ def stage_reviewed_rows(
     db.add(run)
     db.flush()
 
+    # CAL owns candidate row numbers. Extractors may send a mix of explicit and
+    # missing (or duplicate) row numbers on one page; trusting them let an
+    # auto-assigned number collide with an explicit one and fail the whole fax
+    # with a unique violation. Number rows 1..n per page in arrival order and
+    # keep the extractor's original number in evidence_ref for traceability.
     page_row_numbers: dict[int, int] = {}
     for row in rows:
-        source_row_number = row.source_row_number or (page_row_numbers.get(row.page, 0) + 1)
-        if source_row_number < 1:
-            raise ValueError("source_row_number must be positive")
+        source_row_number = page_row_numbers.get(row.page, 0) + 1
         page_row_numbers[row.page] = source_row_number
+        desk_row = row.source_row_number if row.source_row_number is not None else "none"
         db.add(FaxIngestCandidate(
             run_id=run.id,
             page_number=row.page,
@@ -179,7 +183,7 @@ def stage_reviewed_rows(
             patient_name_raw=_text(row.patient_name),
             procedure_raw=_text(row.procedure),
             extraction_flags=_text(row.extraction_flags) or None,
-            evidence_ref=f"page:{row.page}:row:{source_row_number}",
+            evidence_ref=f"page:{row.page}:row:{source_row_number}:desk_row:{desk_row}",
         ))
     db.flush()
     db.execute(text(_MATERIALIZE_ROWS), {"run_id": run.id})

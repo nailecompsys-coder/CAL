@@ -91,6 +91,30 @@ class FaxIngestEngineTest(unittest.TestCase):
         self.assertEqual(self.db.query(FaxIngestRow).count(), 1)
         self.assertEqual(self.db.query(ScheduleCard).count(), 10)
 
+    def test_mixed_numbered_and_unnumbered_rows_never_collide(self):
+        # Regression: Desk faxes #334/#339/#343/#348 mixed explicit and missing
+        # row numbers on one page; the auto-number hit an explicit one and the
+        # whole fax failed with a unique violation.
+        rows = [
+            self.row(source_row_number=1, patient_name="A, One"),
+            self.row(source_row_number=None, patient_name="B, Two", start_time=time(8, 0)),
+            self.row(source_row_number=2, patient_name="C, Three", start_time=time(9, 0)),
+            self.row(source_row_number=2, patient_name="D, Four", start_time=time(10, 0)),
+            self.row(page=3, source_row_number=None, patient_name="E, Five"),
+            self.row(page=3, source_row_number=7, patient_name="F, Six", start_time=time(8, 0)),
+        ]
+        stage_reviewed_rows(self.db, external_fax_id=334, source_label="Fax 334", rows=rows)
+        self.db.commit()
+        candidates = self.db.query(FaxIngestCandidate).order_by(FaxIngestCandidate.id).all()
+        self.assertEqual([(c.page_number, c.source_row_number) for c in candidates], [(2, 1), (2, 2), (2, 3), (2, 4), (3, 1), (3, 2)])
+        self.assertEqual(
+            [c.evidence_ref for c in candidates],
+            ["page:2:row:1:desk_row:1", "page:2:row:2:desk_row:none", "page:2:row:3:desk_row:2",
+             "page:2:row:4:desk_row:2", "page:3:row:1:desk_row:none", "page:3:row:2:desk_row:7"],
+        )
+        self.assertEqual(self.db.query(FaxIngestRow).count(), 6)
+        self.assertEqual(self.db.query(ScheduleCard).count(), 10)
+
     def test_invalid_date_is_retained_as_unresolved_candidate(self):
         result = stage_reviewed_rows(
             self.db,

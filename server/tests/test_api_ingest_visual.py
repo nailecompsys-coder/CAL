@@ -79,7 +79,7 @@ class ApiIngestVisualTest(unittest.TestCase):
         self.assertEqual(kwargs["rows"][0].start_time.strftime("%H:%M"), "07:15")
         self.assertEqual(result["result"], {"writeMode": "staging_only", "skippedPast": 0})
 
-    def test_past_rows_are_handed_to_sql_for_auditable_resolution(self):
+    def test_rule3_past_rows_are_skipped_before_staging(self):
         body = VisualScheduleBatch(
             source_fax_id=162,
             rows=[
@@ -93,9 +93,9 @@ class ApiIngestVisualTest(unittest.TestCase):
             result = ingest_visual_schedule_route(body, db=Mock())
         self.assertEqual(
             [row.patient_name for row in stage.call_args.kwargs["rows"]],
-            ["Past, Patient", "Future, Patient"],
+            ["Future, Patient"],
         )
-        self.assertEqual(result["result"]["skippedPast"], 0)
+        self.assertEqual(result["result"]["skippedPast"], 1)
 
     def test_unreadable_date_reaches_sql_as_an_unresolved_raw_fact(self):
         body = VisualScheduleBatch(
@@ -109,7 +109,7 @@ class ApiIngestVisualTest(unittest.TestCase):
         self.assertEqual(staged.case_date, "")
         self.assertEqual(staged.surgeon_initials, "")
 
-    def test_all_past_rows_still_reach_sql_staging(self):
+    def test_rule3_all_past_rows_stage_nothing(self):
         body = VisualScheduleBatch(
             source_fax_id=162,
             rows=[VisualFaxRowIn(surgeon_initials="JF", case_date="2020-01-02", row_type="clinic",
@@ -117,8 +117,8 @@ class ApiIngestVisualTest(unittest.TestCase):
         )
         with patch("app.routers.api_ingest.stage_reviewed_rows", return_value={"writeMode": "staging_only"}) as stage:
             result = ingest_visual_schedule_route(body, db=Mock())
-        stage.assert_called_once()
-        self.assertEqual(result["result"]["skippedPast"], 0)
+        stage.assert_not_called()
+        self.assertEqual(result["result"]["skippedPast"], 1)
 
     def test_visual_schedule_endpoint_refuses_invalid_row_type(self):
         body = VisualScheduleBatch(

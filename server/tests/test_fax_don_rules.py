@@ -310,3 +310,21 @@ class DonRulesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ContinuationPageTest(DonRulesTest):
+    """Rule 6: an OCR-garbled heading on a continuation page inherits the prior page's surgeon."""
+
+    def test_garbled_heading_with_continuing_dates_inherits(self):
+        rows = [self._row("A, One", page=27, at=time(8, 0)),
+                self._row("B, Two", page=28, at=time(9, 0), initials="CM", surgeon="CM")]
+        staged = self._stage(rows)
+        self.assertEqual(staged["surgeonInheritedPages"], {"28": 27})
+        self.assertEqual(staged["report"]["linesHeld"], 0)
+
+    def test_page_whose_dates_restart_is_not_inherited(self):
+        rows = [self._row("A, One", page=27, day=DAY + timedelta(days=1)),
+                self._row("B, Two", page=28, day=DAY, initials="CM", surgeon="CM")]
+        staged = self._stage(rows)
+        self.assertEqual(staged["surgeonInheritedPages"], {})
+        self.assertEqual(staged["report"]["heldByReason"].get("unknown_surgeon"), 1)

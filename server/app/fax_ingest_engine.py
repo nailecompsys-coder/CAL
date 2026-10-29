@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
@@ -85,6 +85,66 @@ def surgeon_is_patient_name(row: ReviewedFaxRow, patient_keys: set[str]) -> bool
     return bool(key) and key in patient_keys
 
 
+def _roster_surgeon_id(roster: list[tuple[int, str, str]], initials: str, name: str | None) -> int | None:
+    """Python mirror of the SQL surgeon match in resolve_fax_candidates (one active match)."""
+    wanted_initials = _text(initials).upper()
+    wanted_name = _text(name).lower()
+    by_initials = [row for row in roster if row[1] == wanted_initials]
+    matches = by_initials if len(by_initials) == 1 else [row for row in by_initials if row[2] == wanted_name]
+    return matches[0][0] if len(matches) == 1 else None
+
+
+def inherit_continuation_surgeons(
+    db: Session, rows: list[ReviewedFaxRow], patient_keys: set[str],
+) -> tuple[list[ReviewedFaxRow], dict[int, int]]:
+    """Don's rule 6, continuation pages (Oct 29, 2026: fax 348 'CM' was bad OCR).
+
+    A page whose rows match no roster surgeon inherits the previous page's
+    surgeon when (a) the previous page has exactly one roster surgeon and
+    (b) the page continues that surgeon's dates (its first date is not before
+    the previous page's last date). A new surgeon's section restarts at the
+    earliest date, so it is not inherited and stays held as unknown_surgeon.
+    Returns the rows to stage and {page: page it inherited from}.
+    """
+    roster = [
+        (int(sid), (_text(first)[:1] + _text(last)[:1]).upper(), _text(f"{first or ''} {last or ''}").lower())
+        for sid, first, last in db.execute(text(
+            "SELECT id, first_name, last_name FROM surgeons WHERE is_active = :yes"), {"yes": True})
+    ]
+    pages: dict[int, dict] = {}
+    for row in rows:
+        day = _row_day(row.case_date)
+        if day is None:
+            continue
+        initials = "" if surgeon_is_patient_name(row, patient_keys) else row.surgeon_initials
+        surgeon_id = _roster_surgeon_id(roster, initials, row.surgeon_name)
+        info = pages.setdefault(row.page, {"surgeons": {}, "unknown": 0, "rows": 0, "dates": []})
+        info["rows"] += 1
+        info["dates"].append(day)
+        if surgeon_id is None:
+            info["unknown"] += 1
+        else:
+            info["surgeons"][surgeon_id] = (row.surgeon_initials, row.surgeon_name)
+    inherited: dict[int, int] = {}
+    for page in sorted(pages):
+        info, prev = pages[page], pages.get(page - 1)
+        if not prev or info["unknown"] != info["rows"] or len(prev["surgeons"]) != 1:
+            continue
+        if min(info["dates"]) < max(prev["dates"]):
+            continue
+        info["surgeons"] = dict(prev["surgeons"])
+        inherited[page] = page - 1
+    if not inherited:
+        return rows, inherited
+    out = []
+    for row in rows:
+        if row.page in inherited:
+            initials, name = next(iter(pages[row.page]["surgeons"].values()))
+            row = replace(row, surgeon_initials=initials, surgeon_name=name)
+        out.append(row)
+    return out, inherited
+
+
 def mark_fax_ingest_transaction(db: Session, run_id: int | None = None) -> None:
     if db.bind.dialect.name != "postgresql":
         return
@@ -134,7 +194,7 @@ INSERT INTO fax_row_decisions (fax_row_id, schedule_card_id, status, reason_code
 SELECT row.id, resolution.schedule_card_id,
        resolution.decision_status, resolution.reason_code,
        CASE resolution.reason_code
-         WHEN 'off_collision' THEN 'Patient on an OFF day: line entered and Shannon/Don notified.'
+         WHEN 'off_collision' THEN 'Patient on an OFF day: line entered and flagged in CAL for Shannon. No notification.'
          WHEN 'location_conflict' THEN 'Room code, block and card location disagree; held for review.'
          WHEN 'past_time' THEN 'Dated today or earlier; fax ingest never touches it.'
          WHEN 'weekend_schedule' THEN 'Epic OR/clinic work is not accepted on a weekend.'
@@ -219,6 +279,7 @@ def stage_reviewed_rows(
     # keep the extractor's original number in evidence_ref for traceability.
     page_row_numbers: dict[int, int] = {}
     patient_keys = {_name_key(row.patient_name) for row in rows if _name_key(row.patient_name)}
+    rows, inherited_pages = inherit_continuation_surgeons(db, rows, patient_keys)
     for row in rows:
         surgeon_initials = _text(row.surgeon_initials).upper()
         extraction_flags = _text(row.extraction_flags) or None
@@ -228,6 +289,8 @@ def stage_reviewed_rows(
         source_row_number = page_row_numbers.get(row.page, 0) + 1
         page_row_numbers[row.page] = source_row_number
         desk_row = row.source_row_number if row.source_row_number is not None else "none"
+        if row.page in inherited_pages:
+            desk_row = f"{desk_row}:surgeon_inherited_from_page:{inherited_pages[row.page]}"
         db.add(FaxIngestCandidate(
             run_id=run.id,
             page_number=row.page,
@@ -272,6 +335,7 @@ def stage_reviewed_rows(
         "decisions": counts,
         "report": run_report(db, run.id),
         "writeMode": "staging_only",
+        "surgeonInheritedPages": {str(page): source for page, source in inherited_pages.items()},
     }
 
 

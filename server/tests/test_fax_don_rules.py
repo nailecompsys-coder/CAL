@@ -365,11 +365,16 @@ class PlaceholderRoomNeverConflictsTest(DonRulesTest):
 
 class RoomPatternRuleTest(DonRulesTest):
     def test_pattern_classifies_rooms_and_placeholders(self):
-        from app.fax_room_codes import classify_room_code
-        self.assertEqual(classify_room_code("MIN S05"), ("room", "MN-OR"))
-        self.assertEqual(classify_room_code("wgd s08"), ("room", "WG-OR"))
-        self.assertEqual(classify_room_code("ALT OS01"), ("room", "AL-OR"))
-        self.assertEqual(classify_room_code("APK S02"), ("room", "AP-OR"))
+        from app.fax_room_codes import classify_room_code, site_location
+        self.assertEqual(classify_room_code("MIN S05"), ("room", "MIN"))
+        self.assertEqual(classify_room_code("wgd s08"), ("room", "WGD"))
+        self.assertEqual(classify_room_code("ALT OS01"), ("room", "ALT"))
+        self.assertEqual(classify_room_code("APK S02"), ("room", "APK"))
+        conn = self.db.connection()
+        self.assertEqual(site_location(conn, "ALT"), (self.al_or.id, "AL-OR"))
+        self.assertEqual(site_location(conn, "WGD"), (self.wg_or.id, "WG-OR"))
+        self.assertIsNone(site_location(conn, "APK"))  # no Apopka OR in this fixture
+        self.assertIsNone(site_location(conn, "ZZZ"))
         for code in ("MGALTGS", "AHMGGENSRG", "ALTGI", "MIN ENDO", "WGDOSOR", ""):
             self.assertEqual(classify_room_code(code)[0], "placeholder", code)
 

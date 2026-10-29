@@ -91,9 +91,8 @@ WITH base AS (
 SELECT l.*,
        (SELECT loc.location_type FROM locations loc WHERE loc.id = l.room_location_id) AS room_location_type,
        CASE card_location_type WHEN 'hospital' THEN 'surgical' WHEN 'clinic' THEN 'clinic' END AS card_row_type,
-       CASE WHEN room_location_id IS NOT NULL
-             AND NOT (block_location_count = 1 AND block_location_id <> room_location_id)
-            THEN room_location_id
+       -- Don: a real room (site + room) sets the location by itself, block or not.
+       CASE WHEN room_location_id IS NOT NULL THEN room_location_id
             WHEN block_location_count = 1 THEN block_location_id
             WHEN block_location_count = 0 AND baseline_state = 'assigned' THEN baseline_location_id
             -- Rule 10: an OFF card still takes the line (flagged off_collision) at its own location.
@@ -118,10 +117,8 @@ SELECT l.*,
          WHEN surgeon_id IS NULL THEN 'unresolved'
          WHEN start_time IS NULL THEN 'unresolved'
          WHEN schedule_card_id IS NULL THEN 'unresolved'
-         WHEN block_location_count > 1 THEN 'unresolved'
-         WHEN room_location_id IS NOT NULL AND block_location_count = 1 AND block_location_id <> room_location_id THEN 'unresolved'
-         WHEN room_location_id IS NOT NULL AND card_location_type IS NOT NULL AND room_location_type <> card_location_type THEN 'unresolved'
-         WHEN NOT room_is_placeholder AND block_location_count = 1 AND COALESCE(effective_location_id, baseline_location_id) IS NOT NULL AND block_location_id <> COALESCE(effective_location_id, baseline_location_id) THEN 'unresolved'
+         WHEN room_location_id IS NULL AND block_location_count > 1 THEN 'unresolved'
+         WHEN room_location_id IS NULL AND NOT room_is_placeholder AND block_location_count = 1 AND COALESCE(effective_location_id, baseline_location_id) IS NOT NULL AND block_location_id <> COALESCE(effective_location_id, baseline_location_id) THEN 'unresolved'
          WHEN source_location_id IS NULL THEN 'unresolved'
          WHEN effective_state = 'off' THEN 'ready_with_warning'
          ELSE 'ready'
@@ -133,10 +130,8 @@ SELECT l.*,
          WHEN surgeon_id IS NULL THEN 'unknown_surgeon'
          WHEN start_time IS NULL THEN 'missing_time'
          WHEN schedule_card_id IS NULL THEN 'missing_scaffold'
-         WHEN block_location_count > 1 THEN 'block_facility_unclear'
-         WHEN room_location_id IS NOT NULL AND block_location_count = 1 AND block_location_id <> room_location_id THEN 'location_conflict'
-         WHEN room_location_id IS NOT NULL AND card_location_type IS NOT NULL AND room_location_type <> card_location_type THEN 'location_conflict'
-         WHEN NOT room_is_placeholder AND block_location_count = 1 AND COALESCE(effective_location_id, baseline_location_id) IS NOT NULL AND block_location_id <> COALESCE(effective_location_id, baseline_location_id) THEN 'location_conflict'
+         WHEN room_location_id IS NULL AND block_location_count > 1 THEN 'block_facility_unclear'
+         WHEN room_location_id IS NULL AND NOT room_is_placeholder AND block_location_count = 1 AND COALESCE(effective_location_id, baseline_location_id) IS NOT NULL AND block_location_id <> COALESCE(effective_location_id, baseline_location_id) THEN 'location_conflict'
          WHEN source_location_id IS NULL THEN 'no_block_for_facility'
          WHEN effective_state = 'off' THEN 'off_collision'
          WHEN block_location_count = 1 AND effective_state = 'na' THEN 'block_location'

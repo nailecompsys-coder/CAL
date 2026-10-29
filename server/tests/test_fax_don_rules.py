@@ -198,10 +198,11 @@ class DonRulesTest(unittest.TestCase):
         self.assertEqual(rows["Placeholder, Room"], self.wg_or.id)
         self.assertEqual(rows["Real, Room"], self.al_or.id)
 
-    def test_rule7_room_disagreeing_with_block_is_held(self):
+    def test_rule7_real_room_beats_block(self):
+        # Don: a real room (site + room) sets the location by itself.
         self._block(self.wg_or, time(7), time(12))
         staged = self._stage([self._row("Disagree, Room", room="ALT S01")])
-        self.assertEqual(self._reasons(staged["runId"]), ["location_conflict"])
+        self.assertEqual(self._reasons(staged["runId"]), ["existing_card"])
 
     # Rule 8: the card type decides clinic vs OR.
     def test_rule8_card_type_decides_row_type(self):
@@ -360,3 +361,28 @@ class PlaceholderRoomNeverConflictsTest(DonRulesTest):
         self.db.commit()
         staged = self._stage([self._row("A, One", day=day, at=time(8, 30), room="MGALTGS")])
         self.assertNotIn("location_conflict", staged["report"]["heldByReason"])
+
+
+class RoomPatternRuleTest(DonRulesTest):
+    def test_pattern_classifies_rooms_and_placeholders(self):
+        from app.fax_room_codes import classify_room_code
+        self.assertEqual(classify_room_code("MIN S05"), ("room", "MN-OR"))
+        self.assertEqual(classify_room_code("wgd s08"), ("room", "WG-OR"))
+        self.assertEqual(classify_room_code("ALT OS01"), ("room", "AL-OR"))
+        self.assertEqual(classify_room_code("APK S02"), ("room", "AP-OR"))
+        for code in ("MGALTGS", "AHMGGENSRG", "ALTGI", "MIN ENDO", "WGDOSOR", ""):
+            self.assertEqual(classify_room_code(code)[0], "placeholder", code)
+
+    def test_real_room_sets_location_without_block_on_existing_card(self):
+        # Don, NF 11/04 WGD S07: no OR block, card off-site -> still added at the room's site.
+        staged = self._stage([self._row("A, One", room="ALT S07")])
+        self.assertEqual(staged["report"]["linesAdded"], 1)
+        self.assertEqual(staged["report"]["heldByReason"], {})
+
+    def test_real_room_matching_card_is_added(self):
+        staged = self._stage([self._row("A, One", room="WGD S07")])
+        self.assertEqual(staged["report"]["linesAdded"], 1)
+
+    def test_new_placeholder_code_falls_back_to_card(self):
+        staged = self._stage([self._row("A, One", room="MGNEWBUCKET")])
+        self.assertEqual(staged["report"]["linesAdded"], 1)

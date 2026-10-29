@@ -246,6 +246,8 @@ def stage_reviewed_rows(
         from .migrate_fax_ingest import create_applicable_view
         create_applicable_view(db.connection())
     mark_fax_ingest_transaction(db)
+    from .fax_room_codes import register_room_codes
+    register_room_codes(db.connection(), [row.room for row in rows])
     document = db.query(FaxDocument).filter(FaxDocument.external_fax_id == external_fax_id).one_or_none()
     if document is None:
         document = FaxDocument(

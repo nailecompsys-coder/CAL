@@ -338,12 +338,10 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         )
         self.db.commit()
 
-        # Rule 7: OR block location disagrees with the AP-OV clinic card -> hold, never guess.
+        # Don: real rooms (ALT S01, WGD S03) set the location themselves -> rows go on the cards.
         reasons = [d.reason_code for d in self.db.query(FaxRowDecision).order_by(FaxRowDecision.id)]
-        self.assertEqual(reasons, ["location_conflict", "location_conflict"])
-        with self.assertRaisesRegex(ValueError, "no applicable rows"):
-            apply_staged_snapshot(self.db, source_fax_id=191, run_id=staged["runId"])
-        self.assertEqual(self.db.query(ScheduleCardActivity).count(), 0)
+        self.assertEqual(reasons, ["existing_card", "existing_card"])
+        apply_staged_snapshot(self.db, source_fax_id=191, run_id=staged["runId"])
 
     def test_post_commit_cleanup_failure_does_not_report_apply_failure(self):
         staged = stage_reviewed_rows(

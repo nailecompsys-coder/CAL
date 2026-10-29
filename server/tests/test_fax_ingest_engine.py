@@ -164,7 +164,7 @@ class FaxIngestEngineTest(unittest.TestCase):
             external_fax_id=171,
             source_label="Fax 171",
             rows=[
-                self.row(start_time=time(9, 15), room="APK S03"),
+                self.row(start_time=time(9, 15), room="MIN S03"),
                 self.row(start_time=time(13, 20), room="AHMGGENSRG", patient_name="Second, Patient"),
                 self.row(start_time=time(14, 0), room="AHMGGENSRG", patient_name="Third, Patient"),
             ],
@@ -198,7 +198,7 @@ class FaxIngestEngineTest(unittest.TestCase):
             external_fax_id=173,
             source_label="Fax 173",
             rows=[
-                self.row(start_time=time(13, 10), room="MIN S99"),
+                self.row(start_time=time(13, 10), room="APK S99"),
                 self.row(start_time=time(13, 30), room="AHMGGENSRG", patient_name="Second, Patient"),
             ],
         )
@@ -255,7 +255,7 @@ class FaxIngestEngineTest(unittest.TestCase):
     def test_two_blocks_leave_the_hospital_blank(self):
         self._block(self.location, time(7, 0), time(12, 0))
         self._block(self.ap_location, time(7, 0), time(12, 0))
-        stage_reviewed_rows(self.db, external_fax_id=174, source_label="Fax 174", rows=[self.row(room="APK S03")])
+        stage_reviewed_rows(self.db, external_fax_id=174, source_label="Fax 174", rows=[self.row(room="AHMGGENSRG")])
         self.db.commit()
         staged = self.db.query(FaxIngestRow).one()
         decision = self.db.query(FaxRowDecision).one()

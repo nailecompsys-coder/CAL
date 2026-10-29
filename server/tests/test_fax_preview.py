@@ -112,7 +112,7 @@ class FaxPreviewTest(unittest.TestCase):
         labels = {row["patient_name"]: (row["label"], row["reason_code"]) for row in result["rows"]}
         self.assertEqual(labels["Already, There"][0], "match")
         self.assertEqual(labels["Fills, NA"][0], "addition")
-        self.assertEqual(labels["On, Off"], ("fail", "no_block_for_facility"))
+        self.assertEqual(labels["On, Off"], ("addition", "off_collision"))  # real room WGD S07 places it
         self.assertEqual(labels["Wrong, Facility"], ("fail", "location_conflict"))
         self.assertEqual(labels["Weekend, Misread"], ("fail", "weekend_schedule"))
         self.assertEqual(labels["Agrees, WithCard"], ("addition", "existing_card"))

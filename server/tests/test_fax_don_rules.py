@@ -29,6 +29,7 @@ from app.models import (
     ScheduleCard,
     ScheduleCardActivity,
     ScheduleCardWeek,
+    ScheduleWarning,
     Surgeon,
 )
 from app.routers.api_ingest import VisualFaxRowIn, VisualScheduleBatch, ingest_visual_schedule_route
@@ -226,29 +227,67 @@ class DonRulesTest(unittest.TestCase):
         self.assertEqual(self.db.query(AdminNotification).count(), 0)
 
     # Rule 10: OFF / approved OFF is a conflict: line entered, Shannon + Don notified.
-    def test_rule10_off_card_enters_line_and_notifies_shannon_and_don(self):
+    def _warning_codes(self):
+        return sorted(w.warning_code for w in self.db.query(ScheduleWarning).all())
+
+    # Rule 10 (amended): OFF day -> line entered + in-CAL card flag, no notification.
+    def test_rule10_off_card_enters_line_and_flags_card_in_cal(self):
         off_day = DAY + timedelta(days=1)
         self._card(off_day, "am", "off", self.wg_or.id)
         self.db.commit()
         staged = self._stage([self._row("Off, Day", day=off_day)])
         result = apply_staged_snapshot(self.db, source_fax_id=191, run_id=staged["runId"])
         self.assertEqual(self.db.query(ScheduleCardActivity).count(), 1)
-        notes = self.db.query(AdminNotification).all()
-        users = {self.db.get(AdminUser, n.admin_user_id).username for n in notes}
-        self.assertEqual(users, {"szeh", "dnaile"})
-        self.assertEqual({n.kind for n in notes}, {"ingest_day_off_conflict"})
-        self.assertNotIn("Off, Day", " ".join(n.body for n in notes))  # no patient name in the notice
+        self.assertEqual(self.db.query(AdminNotification).count(), 0)
+        self.assertEqual(self._warning_codes(), ["off_collision"])
         self.assertEqual(result["report"]["conflictsFlagged"], 1)
+        self.assertNotIn("adminConflictNotices", result)
 
-    def test_rule10_approved_day_off_on_assigned_card_notifies(self):
+    def test_rule10_approved_day_off_on_assigned_card_flags_card_in_cal(self):
         self.db.add(DayOff(surgeon_id=self.surgeon.id, start_date=DAY, end_date=DAY, status="approved",
                            is_full_day=True))
         self.db.commit()
         staged = self._stage([self._row("Approved, Off")])
         result = apply_staged_snapshot(self.db, source_fax_id=191, run_id=staged["runId"])
         self.assertEqual(self.db.query(ScheduleCardActivity).count(), 1)
-        self.assertEqual(self.db.query(AdminNotification).count(), 2)
-        self.assertEqual(result["adminConflictNotices"], 1)
+        self.assertEqual(self.db.query(AdminNotification).count(), 0)
+        self.assertEqual(self._warning_codes(), ["approved_day_off"])
+        self.assertNotIn("Approved, Off", self.db.query(ScheduleWarning).one().detail or "")
+        self.assertEqual(result["report"]["conflictsFlagged"], 1)
+
+    # Don's BIG RULE: no notification of any kind goes out during fax ingest.
+    def test_big_rule_ingest_sends_zero_notifications(self):
+        off_day = DAY + timedelta(days=1)
+        self._card(off_day, "am", "off", self.wg_or.id)
+        self.db.add(DayOff(surgeon_id=self.surgeon.id, start_date=DAY, end_date=DAY, status="approved",
+                           is_full_day=True))
+        self.db.commit()
+        with patch("app.push.create_admin_notification") as admin_note, \
+             patch("app.push.send_push_to_surgeon") as push, \
+             patch("app.push.send_push_to_all") as push_all, \
+             patch("app.sms_service.send_sms") as sms, \
+             patch("app.email_service.send_email") as email:
+            staged = self._stage([self._row("Off, Day", day=off_day), self._row("Approved, Off"),
+                                  self._row("Who", surgeon="Zed Nobody", initials="ZN"),
+                                  self._row("Smudged", at=time(9), flags="ocr_uncertain")])
+            result = apply_staged_snapshot(self.db, source_fax_id=191, run_id=staged["runId"])
+        for sender in (admin_note, push, push_all, sms, email):
+            sender.assert_not_called()
+        self.assertEqual(self.db.query(AdminNotification).count(), 0)
+        self.assertEqual(result["notificationsSent"], 0)
+        self.assertEqual(result["report"]["conflictsFlagged"], 2)
+
+    def test_big_rule_ingest_modules_import_no_senders(self):
+        import pathlib
+        app_dir = pathlib.Path(__file__).resolve().parents[1] / "app"
+        banned = ("send_email", "send_sms", "send_push", "create_admin_notification",
+                  "AdminNotification(", "send_notification_email")
+        for name in ("fax_ingest_engine.py", "fax_snapshot_service.py", "fax_card_fill.py",
+                     "fax_off_day_conflicts.py", "fax_ingest_guardrails.py", "fax_room_codes.py",
+                     "routers/api_ingest.py"):
+            source = (app_dir / name).read_text()
+            for word in banned:
+                self.assertNotIn(word, source, f"{name} must not send notifications ({word})")
 
     # Rule 11: flags are per row; one flagged row never holds the page.
     def test_rule11_flags_are_per_row(self):

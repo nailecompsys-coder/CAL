@@ -3,6 +3,9 @@
 Epic/Advent fax rows are the source for patient schedule facts. CAL overlays
 those rows onto existing CAL master cards. Fax ingest may attach or update
 case/visit details, but it may not create clinic/OR cards or invent capacity.
+
+Don's big rule (Oct 29, 2026): fax ingest sends NO notifications at all --
+no AdminNotification, SMS, email or push. Conflicts are flagged in CAL only.
 """
 
 from __future__ import annotations
@@ -10,16 +13,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import date, time
-from html import escape
-import json
 
 from sqlalchemy.orm import Session
 
-from .email_service import send_email
-from .models import AdminNotification, AdminUser, DayOff, Location, ORBlockAssignment, ORBlockInstance, ScheduleCard
+from .models import DayOff, Location, ORBlockAssignment, ORBlockInstance, ScheduleCard
 from .native_dayoff_support import segment_for_date
 from .or_block_service import ACTIVE_BLOCK_STATUSES, _host_rank, _session_bucket
-from .push import create_admin_notification
 
 
 PLACEHOLDER_CLINIC_ROOMS = frozenset({"AHMGGENSRG"})
@@ -237,23 +236,6 @@ def fax_may_update_clinic_location(card: ScheduleCard, loc: Location | None, roo
     return loc is not None and not is_placeholder_clinic_room(room)
 
 
-def create_admin_ingest_notice(
-    db: Session,
-    *,
-    title: str,
-    body: str,
-    kind: str,
-    payload: dict | None = None,
-    require_schedule_opt_in: bool = False,
-) -> None:
-    """Admin portal notice only. Fax ingest never uses SMS/email/push."""
-    admins = db.query(AdminUser).filter(AdminUser.is_active == True).all()  # noqa: E712
-    for admin in admins:
-        if require_schedule_opt_in and not admin.notify_schedule_changes:
-            continue
-        create_admin_notification(admin.id, title, body, db, kind, payload)
-
-
 def _parse_segment_clock(raw: str | None) -> time | None:
     if not raw:
         return None
@@ -309,156 +291,3 @@ def approved_day_off_for_ingest(
         if _day_off_covers(row, day, at_time=at_time, session=session):
             return row
     return None
-
-
-def _scheduler_notice_recipients(db: Session) -> list[AdminUser]:
-    return (
-        db.query(AdminUser)
-        .filter(
-            AdminUser.is_active == True,  # noqa: E712
-            AdminUser.role.in_(("scheduler", "admin", "superadmin")),
-            AdminUser.notify_schedule_changes == True,  # noqa: E712
-            AdminUser.email.isnot(None),
-            AdminUser.email != "",
-        )
-        .order_by(AdminUser.role.desc(), AdminUser.last_name, AdminUser.first_name, AdminUser.username)
-        .all()
-    )
-
-
-def _upsert_admin_day_off_notice(
-    db: Session,
-    *,
-    admin: AdminUser,
-    title: str,
-    body: str,
-    payload: dict,
-) -> bool:
-    fingerprint = payload.get("fingerprint")
-    existing = (
-        db.query(AdminNotification)
-        .filter(
-            AdminNotification.admin_user_id == admin.id,
-            AdminNotification.kind == "ingest_day_off_conflict",
-        )
-        .all()
-    )
-    for row in existing:
-        try:
-            data = json.loads(row.payload or "{}") if row.payload else {}
-        except (TypeError, ValueError):
-            data = {}
-        if data.get("fingerprint") != fingerprint:
-            continue
-        row.title = title
-        row.body = body
-        row.payload = json.dumps(payload)
-        row.read_at = None
-        db.commit()
-        return False
-    create_admin_notification(admin.id, title, body, db, "ingest_day_off_conflict", payload)
-    return True
-
-
-def _send_scheduler_day_off_email(admin: AdminUser, *, title: str, body: str, href: str) -> bool:
-    if not admin.email:
-        return False
-    html = f"""
-    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:680px;color:#0f172a">
-      <h2 style="margin:0 0 8px">{escape(title)}</h2>
-      <p style="margin:0 0 14px;color:#334155">{escape(body)}</p>
-      <p style="margin:0 0 14px;color:#64748b">
-        Epic/Advent is the schedule source, so CAL landed the row on the existing card and flagged it for scheduler review.
-        No surgeon notification was sent by CAL.
-      </p>
-      <p><a href="{escape(href)}" style="color:#0369a1;font-weight:700">Open CAL schedule review</a></p>
-    </div>
-    """
-    return bool(send_email(to_email=admin.email, subject=title, html_body=html))
-
-
-def flag_ingest_day_off_collision(
-    db: Session,
-    *,
-    surgeon_id: int,
-    surgeon_name: str,
-    day: date,
-    source_fax_id: int | None,
-    patient_name: str | None,
-    landed_kind: str,
-    href: str,
-    location_label: str | None = None,
-    start_time: time | None = None,
-    session: str | None = None,
-    case_id: int | None = None,
-    schedule_id: int | None = None,
-) -> bool:
-    """Flag Epic fax rows that landed on an approved day off.
-
-    The write still stands because Epic is the external source. The notice is
-    scheduler/admin-only and never sends to the surgeon.
-    """
-    day_off = approved_day_off_for_ingest(
-        db,
-        surgeon_id=surgeon_id,
-        day=day,
-        at_time=start_time,
-        session=session,
-    )
-    if not day_off:
-        return False
-    patient_key = (patient_name or "").strip().lower()
-    fingerprint = "|".join(
-        [
-            "ingest_day_off_conflict",
-            str(source_fax_id or ""),
-            str(surgeon_id),
-            day.isoformat(),
-            landed_kind,
-            str(case_id or schedule_id or ""),
-            patient_key,
-            (start_time.strftime("%H:%M") if start_time else session or ""),
-        ]
-    )
-    time_label = start_time.strftime("%H:%M") if start_time else (session or "").upper()
-    title = "Fax ingest hit approved OFF"
-    body = (
-        f"{surgeon_name} · {day.strftime('%m/%d/%Y')}"
-        f"{' · ' + time_label if time_label else ''}"
-        f"{' · ' + (location_label or '') if location_label else ''}"
-        f"{' · ' + (patient_name or '') if patient_name else ''}"
-        " landed from Epic/Advent while the surgeon is approved OFF."
-    )
-    payload = {
-        "flagType": "ingest_day_off_conflict",
-        "fingerprint": fingerprint,
-        "href": href,
-        "sourceFaxId": source_fax_id,
-        "surgeonId": surgeon_id,
-        "surgeonName": surgeon_name,
-        "date": day.isoformat(),
-        "patientName": patient_name,
-        "landedKind": landed_kind,
-        "location": location_label,
-        "startTime": start_time.strftime("%H:%M") if start_time else None,
-        "session": session,
-        "caseId": case_id,
-        "scheduleId": schedule_id,
-        "dayOffId": day_off.id,
-        "reason": day_off.reason,
-    }
-    recipients = _scheduler_notice_recipients(db)
-    emailed = False
-    created_any = False
-    for admin in recipients:
-        created = _upsert_admin_day_off_notice(
-            db,
-            admin=admin,
-            title=title,
-            body=body,
-            payload=payload,
-        )
-        created_any = created_any or created
-        if created:
-            emailed = _send_scheduler_day_off_email(admin, title=title, body=body, href=href) or emailed
-    return created_any or emailed

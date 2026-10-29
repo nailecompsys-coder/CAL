@@ -286,10 +286,10 @@ def run_report(db: Session, run_id: int, *, lines_added: int | None = None) -> d
             GROUP BY resolution.reason_code ORDER BY resolution.reason_code
         """), {"run_id": run_id})
     }
-    conflicts = int(db.execute(text("""
-        SELECT count(*) FROM fax_ingest_candidate_resolutions resolution
-        WHERE resolution.run_id = :run_id AND resolution.reason_code = 'off_collision'
-    """), {"run_id": run_id}).scalar() or 0)
+    from .fax_conflict_notices import off_day_conflicts  # local: avoids an import cycle
+
+    # Rule 10: OFF cards and approved days off both count as conflicts.
+    conflicts = sum(item["lines"] for item in off_day_conflicts(db, run_id))
     ready = int(db.execute(text("""
         SELECT count(*) FROM fax_ingest_candidate_resolutions resolution
         WHERE resolution.run_id = :run_id AND resolution.decision_status IN ('ready', 'ready_with_warning')

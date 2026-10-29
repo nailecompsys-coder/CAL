@@ -54,7 +54,10 @@ WITH base AS (
                AND block.status IN ('open', 'assigned')
                AND block.start_time <= r.start_time AND block.end_time > r.start_time
                AND (block.assigned_surgeon_id = r.surgeon_id OR assignment.surgeon_id = r.surgeon_id)
-               AND block.location_id IS NOT NULL) AS block_location_count,
+               AND block.location_id IS NOT NULL
+               -- Clinic visits never consult OR blocks: an assist slot on a
+               -- colleague's OR block must not override a clinic card (fax 348, NF 11/05).
+               AND r.row_type_raw = 'surgical') AS block_location_count,
            (SELECT min(block.location_id)
               FROM or_block_instances block
               LEFT JOIN or_block_assignments assignment ON assignment.block_instance_id = block.id
@@ -62,7 +65,10 @@ WITH base AS (
                AND block.status IN ('open', 'assigned')
                AND block.start_time <= r.start_time AND block.end_time > r.start_time
                AND (block.assigned_surgeon_id = r.surgeon_id OR assignment.surgeon_id = r.surgeon_id)
-               AND block.location_id IS NOT NULL) AS block_location_id,
+               AND block.location_id IS NOT NULL
+               -- Clinic visits never consult OR blocks: an assist slot on a
+               -- colleague's OR block must not override a clinic card (fax 348, NF 11/05).
+               AND r.row_type_raw = 'surgical') AS block_location_id,
            -- Rule 7: a confirmed real Epic room code names exactly one location.
            (SELECT rc.location_id FROM fax_room_codes rc
              WHERE rc.code = upper(trim(COALESCE(r.room_raw, '')))

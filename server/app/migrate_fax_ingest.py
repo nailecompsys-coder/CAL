@@ -33,7 +33,7 @@ APPLICABLE_VIEW_SELECT = """
 # Anything on a fax whose date/time has already passed is ignored.
 POSTGRES_APPLICABLE_VIEW_SELECT = (
     APPLICABLE_VIEW_SELECT
-    + f"      AND r.case_date + COALESCE(r.start_time, time '00:00') > (now() AT TIME ZONE '{PRACTICE_TIMEZONE}')\n"
+    + f"      AND r.case_date > CAST(now() AT TIME ZONE '{PRACTICE_TIMEZONE}' AS date)\n"
 )
 
 POSTGRES_RULES = [
@@ -250,6 +250,17 @@ POSTGRES_RULES = [
 def create_applicable_view(conn) -> None:
     """SQLite (tests) gets the view without the passed-time rule; Postgres creates the full view in run_migration."""
     resolution = Path(__file__).with_name("sql").joinpath("resolve_fax_candidates.sqlite.sql").read_text()
+    from .fax_room_codes import seed_fax_room_codes
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS fax_room_codes (
+            code VARCHAR(64) PRIMARY KEY,
+            location_id INTEGER REFERENCES locations(id),
+            kind VARCHAR(16) NOT NULL DEFAULT 'placeholder' CHECK (kind IN ('room', 'placeholder')),
+            confirmed BOOLEAN NOT NULL DEFAULT 0,
+            note TEXT
+        )
+    """))
+    seed_fax_room_codes(conn)
     conn.execute(text(f"CREATE VIEW IF NOT EXISTS fax_ingest_candidate_resolutions AS {resolution}"))
     conn.execute(text(f"CREATE VIEW IF NOT EXISTS fax_ingest_rows_applicable AS {APPLICABLE_VIEW_SELECT}"))
     conn.execute(text("""
@@ -357,6 +368,17 @@ def run_migration() -> None:
         """))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_fax_ingest_rows_candidate_id ON fax_ingest_rows(candidate_id) WHERE candidate_id IS NOT NULL"))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_fax_ingest_rows_source_row ON fax_ingest_rows(run_id, page_number, source_row_number)"))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS fax_room_codes (
+                code VARCHAR(64) PRIMARY KEY,
+                location_id INTEGER REFERENCES locations(id),
+                kind VARCHAR(16) NOT NULL DEFAULT 'placeholder' CHECK (kind IN ('room', 'placeholder')),
+                confirmed BOOLEAN NOT NULL DEFAULT FALSE,
+                note TEXT
+            )
+        """))
+        from .fax_room_codes import seed_fax_room_codes
+        seed_fax_room_codes(conn)
         resolution = Path(__file__).with_name("sql").joinpath("resolve_fax_candidates.postgresql.sql").read_text()
         conn.execute(text("DROP VIEW IF EXISTS fax_ingest_candidate_resolutions"))
         conn.execute(text(f"CREATE VIEW fax_ingest_candidate_resolutions AS {resolution}"))

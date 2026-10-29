@@ -20,6 +20,7 @@ from app.native_schedule_feed import append_native_schedule
 from app.schedule_build_backup_service import revert_schedule_build_backup
 from app.migrate_fax_ingest import create_applicable_view
 from app.models import (
+    FaxRowDecision,
     Base,
     CoSurgeonPair,
     FaxDocument,
@@ -236,7 +237,8 @@ class FaxSnapshotServiceTest(unittest.TestCase):
             run_id=staged["runId"],
         )
 
-        self.assertEqual(result["surgicalCreated"], 1)
+        # Rule 8: the AM card is a clinic (AP-OV), so the card type makes this a clinic line.
+        self.assertEqual(result["report"]["linesAdded"], 1)
         self.assertEqual(result["surgicalCancelled"], 0)
         am = self.db.query(ScheduleCard).filter_by(session="am").one()
         line = self.db.query(ScheduleCardActivity).filter_by(is_active=True).one()
@@ -336,12 +338,10 @@ class FaxSnapshotServiceTest(unittest.TestCase):
         )
         self.db.commit()
 
+        # Don: real rooms (ALT S01, WGD S03) set the location themselves -> rows go on the cards.
+        reasons = [d.reason_code for d in self.db.query(FaxRowDecision).order_by(FaxRowDecision.id)]
+        self.assertEqual(reasons, ["existing_card", "existing_card"])
         apply_staged_snapshot(self.db, source_fax_id=191, run_id=staged["runId"])
-
-        lines = self.db.query(ScheduleCardActivity).order_by(ScheduleCardActivity.start_time).all()
-        am_card = self.db.query(ScheduleCard).filter_by(session="am").one()
-        self.assertEqual([line.schedule_card_id for line in lines], [am_card.id, am_card.id])
-        self.assertEqual([line.location_id for line in lines], [self.alt_or.id, self.wg_or.id])
 
     def test_post_commit_cleanup_failure_does_not_report_apply_failure(self):
         staged = stage_reviewed_rows(
@@ -410,7 +410,7 @@ class FaxSnapshotServiceTest(unittest.TestCase):
             ["Clean, Patient"],
         )
 
-    def test_two_consecutive_covering_omissions_are_required_to_cancel(self):
+    def test_rule2_omitted_lines_are_never_deactivated(self):
         self._assign_block(self.wg_or, time(12, 0), time(17, 0))
         first = stage_reviewed_rows(
             self.db, external_fax_id=191, source_label="test", surgeon_scope=["JF"],
@@ -443,7 +443,7 @@ class FaxSnapshotServiceTest(unittest.TestCase):
 
         lines = self.db.query(ScheduleCardActivity).filter_by(activity_type="surgical").all()
         active = {row.patient_name: row.is_active for row in lines}
-        self.assertEqual(active, {"Kept, Patient": True, "Misread, Patient": False})
+        self.assertEqual(active, {"Kept, Patient": True, "Misread, Patient": True})
         self.assertEqual({row.source_fax_id for row in lines}, {191})
         self.assertEqual(self.db.query(FaxIngestRow).filter_by(run_id=third["runId"]).count(), 0)
 

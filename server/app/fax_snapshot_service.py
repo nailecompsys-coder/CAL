@@ -20,7 +20,8 @@ from .models import (
     ScheduleChangeEvent,
 )
 from .fax_card_fill import fill_cards_from_fax_lines
-from .fax_ingest_engine import mark_fax_ingest_transaction
+from .fax_off_day_conflicts import off_day_conflicts
+from .fax_ingest_engine import mark_fax_ingest_transaction, run_report
 from .fax_restore_service import replace_fax_warnings, save_fax_line_photo
 from .fax_pdf_intake import cleanup_fax_derivatives, prune_immutable_fax_sources
 from .schedule_build_backup_service import create_fax_snapshot_backup
@@ -121,8 +122,7 @@ def apply_staged_snapshot(
         start = date.fromisoformat(start)
     if isinstance(end, str):
         end = date.fromisoformat(end)
-    if (end - start).days > 7:
-        raise ValueError("Fax snapshot spans more than eight calendar days.")
+    # Don's rule 4: no day-span limit. Epic faxes can run a month or more out.
 
     scope_ids = {
         surgeon_id for (surgeon_id,) in db.execute(
@@ -200,6 +200,17 @@ def apply_staged_snapshot(
             """), {"run_id": run.id})
         },
     )
+    # Rule 10 + Don's big rule: OFF / approved-OFF lines are entered and flagged
+    # in CAL on the card (schedule_warnings). Ingest sends no notification at all.
+    off_conflicts = off_day_conflicts(db, run.id)
+    for item in off_conflicts:
+        if item["dayOffId"] is None:
+            continue  # OFF cards already carry the off_collision warning above
+        for session in item["sessions"]:
+            if (item["surgeonId"], date.fromisoformat(item["date"]), session) in cards:
+                conflicts.append({"code": "approved_day_off", "surgeonId": item["surgeonId"],
+                                  "date": item["date"], "session": session,
+                                  "dayOffId": item["dayOffId"], "lines": item["lines"]})
     warning_count = replace_fax_warnings(
         db,
         source_fax_id=source_fax_id,
@@ -216,6 +227,7 @@ def apply_staged_snapshot(
         ) clinic_groups
     """), {"run_id": run.id}).scalar() or 0)
 
+    report = run_report(db, run.id, lines_added=len(rows))
     filled = fill_cards_from_fax_lines(db, run_id=run.id)
     created = filled["surgicalCreated"]
     updated = filled["surgicalUpdated"]
@@ -244,6 +256,7 @@ def apply_staged_snapshot(
             "warningCount": warning_count,
             "range": {"start": start.isoformat(), "end": end.isoformat()},
             "conflicts": conflicts,
+            "report": {**report, "conflictsFlagged": sum(c["lines"] for c in off_conflicts)},
         }),
     ))
     db.commit()
@@ -289,6 +302,9 @@ def apply_staged_snapshot(
         "cardsCreated": 0,
         "cardsChanged": 0,
         "notificationsSent": 0,
+        "offDayConflicts": off_conflicts,
+        "linesDeactivated": 0,
+        "report": {**report, "conflictsFlagged": sum(c["lines"] for c in off_conflicts)},
         "derivativesRemoved": cleanup,
         "immutableSourcesRemoved": source_cleanup,
         "cleanupErrors": cleanup_errors,

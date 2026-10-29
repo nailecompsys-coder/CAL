@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..fax_ingest_engine import ReviewedFaxRow, stage_reviewed_rows
+from ..fax_ingest_engine import ReviewedFaxRow, split_future_rows, stage_reviewed_rows
 from ..fax_pdf_intake import prepare_fax_pdf
 from ..fax_preview import preview_reviewed_rows
 from ..fax_restore_service import restore_fax_snapshot
@@ -182,7 +182,8 @@ def _upcoming_rows(
     if fax_ids != {body.source_fax_id}:
         raise HTTPException(400, "all rows must match source_fax_id")
     parsed = [_visual_row(item, allow_unresolved=allow_unresolved) for item in body.rows]
-    return parsed, 0
+    # Don's rule 3: today-or-earlier rows are skipped entirely (America/New_York).
+    return split_future_rows(parsed)
 
 
 @router.post("/preview")

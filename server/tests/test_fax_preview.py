@@ -104,7 +104,7 @@ class FaxPreviewTest(unittest.TestCase):
             _row(MONDAY, time(8, 0), "Already, There"),
             _row(MONDAY, time(13, 0), "Fills, NA"),
             _row(TUESDAY, time(8, 0), "On, Off"),
-            _row(TUESDAY, time(13, 0), "Wrong, Facility"),
+            _row(TUESDAY, time(13, 0), "Wrong, Facility", room="ZZZ S99"),
             _row(SATURDAY, time(8, 0), "Weekend, Misread"),
             _row(WEDNESDAY, time(8, 0), "Agrees, WithCard"),
         ])
@@ -112,10 +112,10 @@ class FaxPreviewTest(unittest.TestCase):
         labels = {row["patient_name"]: (row["label"], row["reason_code"]) for row in result["rows"]}
         self.assertEqual(labels["Already, There"][0], "match")
         self.assertEqual(labels["Fills, NA"][0], "addition")
-        self.assertEqual(labels["On, Off"], ("fail", "no_block_for_facility"))
-        self.assertEqual(labels["Wrong, Facility"], ("addition", "epic_override"))
+        self.assertEqual(labels["On, Off"], ("addition", "off_collision"))  # real room WGD S07 places it
+        self.assertEqual(labels["Wrong, Facility"], ("fail", "location_conflict"))
         self.assertEqual(labels["Weekend, Misread"], ("fail", "weekend_schedule"))
-        self.assertEqual(labels["Agrees, WithCard"], ("addition", "epic_override"))
+        self.assertEqual(labels["Agrees, WithCard"], ("addition", "existing_card"))
         self.assertEqual([row["patient_name"] for row in result["calOnly"]], ["Not, OnFax"])
         self.assertEqual(self.db.query(FaxIngestRow).count(), 0)
         self.assertEqual(self.db.query(FaxDocument).count(), 0)

@@ -8,15 +8,17 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .models import FaxDocument, FaxIngestCandidate, FaxIngestRun
 
-ENGINE_VERSION = "fax-sql-stage-v2"
+ENGINE_VERSION = "fax-sql-stage-v3"
+PRACTICE_TZ = ZoneInfo("America/New_York")
 
 
 @dataclass(frozen=True)
@@ -32,6 +34,115 @@ class ReviewedFaxRow:
     procedure: str = ""
     extraction_flags: str | None = None
     source_row_number: int | None = None
+
+
+def practice_today() -> date:
+    return datetime.now(PRACTICE_TZ).date()
+
+
+def _row_day(value: date | str) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(_text(value)[:10])
+    except ValueError:
+        return None
+
+
+def split_future_rows(rows: list[ReviewedFaxRow], today: date | None = None) -> tuple[list[ReviewedFaxRow], int]:
+    """Don's rule 3: rows dated today or earlier are skipped entirely.
+
+    They are not staged and do not count toward coverage or absences. Rows with
+    an unreadable date are kept so SQL can hold them as invalid_date.
+    """
+    cutoff = today or practice_today()
+    kept: list[ReviewedFaxRow] = []
+    skipped = 0
+    for row in rows:
+        day = _row_day(row.case_date)
+        if day is not None and day <= cutoff:
+            skipped += 1
+            continue
+        kept.append(row)
+    return kept, skipped
+
+
+def _name_key(value: str | None) -> str:
+    raw = _text(value).lower()
+    raw = re.sub(r"\[[^\]]*\]", " ", raw)
+    raw = re.sub(r"\b(md|do|facs|pa-c|np)\b", " ", raw)
+    if "," in raw:
+        last, _, first = raw.partition(",")
+        raw = f"{first} {last}"
+    return " ".join(sorted(re.findall(r"[a-z]+", raw)))
+
+
+def surgeon_is_patient_name(row: ReviewedFaxRow, patient_keys: set[str]) -> bool:
+    """Don's rule 6: a patient name is never a surgeon."""
+    key = _name_key(row.surgeon_name)
+    return bool(key) and key in patient_keys
+
+
+def _roster_surgeon_id(roster: list[tuple[int, str, str]], initials: str, name: str | None) -> int | None:
+    """Python mirror of the SQL surgeon match in resolve_fax_candidates (one active match)."""
+    wanted_initials = _text(initials).upper()
+    wanted_name = _text(name).lower()
+    by_initials = [row for row in roster if row[1] == wanted_initials]
+    matches = by_initials if len(by_initials) == 1 else [row for row in by_initials if row[2] == wanted_name]
+    return matches[0][0] if len(matches) == 1 else None
+
+
+def inherit_continuation_surgeons(
+    db: Session, rows: list[ReviewedFaxRow], patient_keys: set[str],
+) -> tuple[list[ReviewedFaxRow], dict[int, int]]:
+    """Don's rule 6, continuation pages (Oct 29, 2026: fax 348 'CM' was bad OCR).
+
+    A page whose rows match no roster surgeon inherits the previous page's
+    surgeon when (a) the previous page has exactly one roster surgeon and
+    (b) the page continues that surgeon's dates (its first date is not before
+    the previous page's last date). A new surgeon's section restarts at the
+    earliest date, so it is not inherited and stays held as unknown_surgeon.
+    Returns the rows to stage and {page: page it inherited from}.
+    """
+    roster = [
+        (int(sid), (_text(first)[:1] + _text(last)[:1]).upper(), _text(f"{first or ''} {last or ''}").lower())
+        for sid, first, last in db.execute(text(
+            "SELECT id, first_name, last_name FROM surgeons WHERE is_active = :yes"), {"yes": True})
+    ]
+    pages: dict[int, dict] = {}
+    for row in rows:
+        day = _row_day(row.case_date)
+        if day is None:
+            continue
+        initials = "" if surgeon_is_patient_name(row, patient_keys) else row.surgeon_initials
+        surgeon_id = _roster_surgeon_id(roster, initials, row.surgeon_name)
+        info = pages.setdefault(row.page, {"surgeons": {}, "unknown": 0, "rows": 0, "dates": []})
+        info["rows"] += 1
+        info["dates"].append(day)
+        if surgeon_id is None:
+            info["unknown"] += 1
+        else:
+            info["surgeons"][surgeon_id] = (row.surgeon_initials, row.surgeon_name)
+    inherited: dict[int, int] = {}
+    for page in sorted(pages):
+        info, prev = pages[page], pages.get(page - 1)
+        if not prev or info["unknown"] != info["rows"] or len(prev["surgeons"]) != 1:
+            continue
+        if min(info["dates"]) < max(prev["dates"]):
+            continue
+        info["surgeons"] = dict(prev["surgeons"])
+        inherited[page] = page - 1
+    if not inherited:
+        return rows, inherited
+    out = []
+    for row in rows:
+        if row.page in inherited:
+            initials, name = next(iter(pages[row.page]["surgeons"].values()))
+            row = replace(row, surgeon_initials=initials, surgeon_name=name)
+        out.append(row)
+    return out, inherited
 
 
 def mark_fax_ingest_transaction(db: Session, run_id: int | None = None) -> None:
@@ -66,7 +177,7 @@ INSERT INTO fax_ingest_rows (
 SELECT
     run_id, id, page_number, source_row_number, surgeon_id,
     wanted_initials, case_date, start_time, COALESCE(resolved_session, 'pm'),
-    lower(trim(row_type_raw)), upper(trim(COALESCE(room_raw, ''))),
+    COALESCE(card_row_type, lower(trim(row_type_raw))), upper(trim(COALESCE(room_raw, ''))),
     trim(COALESCE(patient_name_raw, '')), trim(COALESCE(procedure_raw, '')),
     source_location_id,
     CAST(page_number AS TEXT) || '|' || CAST(source_row_number AS TEXT),
@@ -83,14 +194,15 @@ INSERT INTO fax_row_decisions (fax_row_id, schedule_card_id, status, reason_code
 SELECT row.id, resolution.schedule_card_id,
        resolution.decision_status, resolution.reason_code,
        CASE resolution.reason_code
-         WHEN 'off_collision' THEN 'Verified fax work overlaps OFF; preserve both and show a warning.'
-         WHEN 'epic_override' THEN 'Verified source location differs from the fixed master location; preserve both.'
+         WHEN 'off_collision' THEN 'Patient on an OFF day: line entered and flagged in CAL for Shannon. No notification.'
+         WHEN 'location_conflict' THEN 'Room code, block and card location disagree; held for review.'
+         WHEN 'past_time' THEN 'Dated today or earlier; fax ingest never touches it.'
          WHEN 'weekend_schedule' THEN 'Epic OR/clinic work is not accepted on a weekend.'
          WHEN 'unknown_surgeon' THEN 'No unique active surgeon matched the extractor handback.'
          WHEN 'missing_time' THEN 'The extractor handback has no usable start time.'
          WHEN 'missing_scaffold' THEN 'The permanent AM/PM card is missing; ingest cannot create one.'
          WHEN 'block_facility_unclear' THEN 'More than one assigned block fits this time.'
-         WHEN 'no_block_for_facility' THEN 'No assigned block or fixed card location establishes the facility.'
+         WHEN 'no_block_for_facility' THEN 'Placeholder/unknown room and no block or card location establishes the facility.'
          WHEN 'extraction_flagged' THEN 'The extractor flagged this source row for review.'
          ELSE 'SQL resolved this row to the existing permanent card.'
        END
@@ -134,6 +246,8 @@ def stage_reviewed_rows(
         from .migrate_fax_ingest import create_applicable_view
         create_applicable_view(db.connection())
     mark_fax_ingest_transaction(db)
+    from .fax_room_codes import register_room_codes
+    register_room_codes(db.connection(), [row.room for row in rows])
     document = db.query(FaxDocument).filter(FaxDocument.external_fax_id == external_fax_id).one_or_none()
     if document is None:
         document = FaxDocument(
@@ -166,15 +280,24 @@ def stage_reviewed_rows(
     # with a unique violation. Number rows 1..n per page in arrival order and
     # keep the extractor's original number in evidence_ref for traceability.
     page_row_numbers: dict[int, int] = {}
+    patient_keys = {_name_key(row.patient_name) for row in rows if _name_key(row.patient_name)}
+    rows, inherited_pages = inherit_continuation_surgeons(db, rows, patient_keys)
     for row in rows:
+        surgeon_initials = _text(row.surgeon_initials).upper()
+        extraction_flags = _text(row.extraction_flags) or None
+        if surgeon_is_patient_name(row, patient_keys):
+            # Held as unknown_surgeon; never matched by initials.
+            surgeon_initials = ""
         source_row_number = page_row_numbers.get(row.page, 0) + 1
         page_row_numbers[row.page] = source_row_number
         desk_row = row.source_row_number if row.source_row_number is not None else "none"
+        if row.page in inherited_pages:
+            desk_row = f"{desk_row}:surgeon_inherited_from_page:{inherited_pages[row.page]}"
         db.add(FaxIngestCandidate(
             run_id=run.id,
             page_number=row.page,
             source_row_number=source_row_number,
-            surgeon_initials_raw=_text(row.surgeon_initials).upper(),
+            surgeon_initials_raw=surgeon_initials,
             surgeon_name_raw=_text(row.surgeon_name) or None,
             case_date_raw=_raw_date(row.case_date),
             start_time_raw=_raw_time(row.start_time),
@@ -182,7 +305,7 @@ def stage_reviewed_rows(
             room_raw=_text(row.room),
             patient_name_raw=_text(row.patient_name),
             procedure_raw=_text(row.procedure),
-            extraction_flags=_text(row.extraction_flags) or None,
+            extraction_flags=extraction_flags,
             evidence_ref=f"page:{row.page}:row:{source_row_number}:desk_row:{desk_row}",
         ))
     db.flush()
@@ -212,5 +335,35 @@ def stage_reviewed_rows(
         "rows": len(rows),
         "materializedRows": materialized,
         "decisions": counts,
+        "report": run_report(db, run.id),
         "writeMode": "staging_only",
+        "surgeonInheritedPages": {str(page): source for page, source in inherited_pages.items()},
+    }
+
+
+def run_report(db: Session, run_id: int, *, lines_added: int | None = None) -> dict:
+    """Don's rule 12: added / held by reason / conflicts flagged / deactivated (always 0)."""
+    held = {
+        reason: int(count)
+        for reason, count in db.execute(text("""
+            SELECT resolution.reason_code, count(*)
+            FROM fax_ingest_candidate_resolutions resolution
+            WHERE resolution.run_id = :run_id AND resolution.decision_status = 'unresolved'
+            GROUP BY resolution.reason_code ORDER BY resolution.reason_code
+        """), {"run_id": run_id})
+    }
+    from .fax_off_day_conflicts import off_day_conflicts  # local: avoids an import cycle
+
+    # Rule 10: OFF cards and approved days off both count as conflicts.
+    conflicts = sum(item["lines"] for item in off_day_conflicts(db, run_id))
+    ready = int(db.execute(text("""
+        SELECT count(*) FROM fax_ingest_candidate_resolutions resolution
+        WHERE resolution.run_id = :run_id AND resolution.decision_status IN ('ready', 'ready_with_warning')
+    """), {"run_id": run_id}).scalar() or 0)
+    return {
+        "linesAdded": ready if lines_added is None else lines_added,
+        "linesHeld": sum(held.values()),
+        "heldByReason": held,
+        "conflictsFlagged": conflicts,
+        "linesDeactivated": 0,
     }

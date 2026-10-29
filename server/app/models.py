@@ -822,6 +822,21 @@ class FaxIngestCoverage(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 
+class FaxRoomCode(Base):
+    """Epic fax room/site code. kind='room' + confirmed maps to exactly one location;
+    kind='placeholder' (or an unconfirmed room) falls back to the surgeon's card."""
+    __tablename__ = "fax_room_codes"
+    __table_args__ = (
+        CheckConstraint("kind IN ('room', 'placeholder')", name="ck_fax_room_codes_kind"),
+    )
+
+    code = Column(String(64), primary_key=True)
+    location_id = Column(Integer, ForeignKey("locations.id"))
+    kind = Column(String(16), nullable=False, default="placeholder")
+    confirmed = Column(Boolean, nullable=False, default=False)
+    note = Column(Text)
+
+
 class FaxIngestRow(Base):
     """Scratch reading of one fax line. Send to Calendar copies it onto the card, then deletes it."""
     __tablename__ = "fax_ingest_rows"

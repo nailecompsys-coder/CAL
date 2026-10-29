@@ -4,108 +4,53 @@
 -- on that card. The line remembers the fax number. The same fax and the
 -- same printed line keep the same key, so a later send updates that line.
 -- It does not choose a lead or edit schedule_cards.
+-- Don's rule 2: fax ingest never deactivates a line. A line missing from a
+-- later fax stays active; there is no absence bookkeeping and no retire step.
+-- Don's rule 5: the newer fax wins for a day. An active line from an older
+-- fax with the same surgeon, day and identity (patient|time|type) is re-keyed
+-- to the newer fax's printed line so the upsert below updates it in place.
 -- Statements are split on a line that is exactly: -- @@
 
-DELETE FROM fax_line_absences
-WHERE schedule_card_activity_id IN (
-    SELECT activity.id
-    FROM schedule_card_activities activity
-    JOIN fax_ingest_coverage coverage
-      ON coverage.run_id = :run_id
-     AND coverage.surgeon_id = activity.surgeon_id
-     AND coverage.case_date = activity.activity_date
-    WHERE activity.source_system IN ('fax', 'fax_clinic')
-      AND (
-       EXISTS (
-          SELECT 1
-          FROM fax_ingest_rows_applicable applicable
-          JOIN fax_ingest_rows fax_row ON fax_row.id = applicable.fax_row_id
-          WHERE applicable.run_id = :run_id
-            AND fax_row.surgeon_id = activity.surgeon_id
-            AND fax_row.case_date = activity.activity_date
-            AND activity.identity_key = LOWER(COALESCE(fax_row.patient_name, '')) || '|' ||
-                CASE WHEN fax_row.start_time IS NULL THEN '' ELSE SUBSTR(CAST(fax_row.start_time AS TEXT), 1, 8) END ||
-                '|' || fax_row.row_type
-       )
-       OR EXISTS (
-          SELECT 1
-          FROM fax_ingest_rows unresolved
-          JOIN fax_row_decisions decision ON decision.fax_row_id = unresolved.id
-          WHERE unresolved.run_id = :run_id
-            AND unresolved.surgeon_id = activity.surgeon_id
-            AND unresolved.case_date = activity.activity_date
-            AND decision.status = 'unresolved'
-       )
-      )
-)
--- @@
-INSERT INTO fax_line_absences (schedule_card_activity_id, run_id)
-SELECT activity.id, :run_id
-FROM schedule_card_activities activity
-JOIN fax_ingest_coverage coverage
-  ON coverage.run_id = :run_id
- AND coverage.surgeon_id = activity.surgeon_id
- AND coverage.case_date = activity.activity_date
-WHERE activity.source_system IN ('fax', 'fax_clinic')
-  AND activity.is_active = TRUE
-  AND NOT EXISTS (
-      SELECT 1
-      FROM fax_ingest_rows unresolved
-      JOIN fax_row_decisions decision ON decision.fax_row_id = unresolved.id
-      WHERE unresolved.run_id = :run_id
-        AND unresolved.surgeon_id = coverage.surgeon_id
-        AND unresolved.case_date = coverage.case_date
-        AND decision.status = 'unresolved'
-  )
-  AND NOT EXISTS (
-      SELECT 1
-      FROM fax_ingest_rows_applicable applicable
-      JOIN fax_ingest_rows fax_row ON fax_row.id = applicable.fax_row_id
-      WHERE applicable.run_id = :run_id
-        AND fax_row.surgeon_id = activity.surgeon_id
-        AND fax_row.case_date = activity.activity_date
-        AND activity.identity_key = LOWER(COALESCE(fax_row.patient_name, '')) || '|' ||
-            CASE WHEN fax_row.start_time IS NULL THEN '' ELSE SUBSTR(CAST(fax_row.start_time AS TEXT), 1, 8) END ||
-            '|' || fax_row.row_type
-  )
-ON CONFLICT (schedule_card_activity_id, run_id) DO NOTHING
--- @@
 UPDATE schedule_card_activities
-SET is_active = FALSE
-WHERE source_system IN ('fax', 'fax_clinic')
-  AND is_active = TRUE
-  AND EXISTS (
-      SELECT 1 FROM fax_ingest_coverage coverage
-      WHERE coverage.run_id = :run_id
-        AND coverage.surgeon_id = schedule_card_activities.surgeon_id
-        AND coverage.case_date = schedule_card_activities.activity_date
-  )
-  AND source_record_key NOT IN (
-      SELECT CAST(document.external_fax_id AS TEXT) || '|' || fax_row.normalized_key
-      FROM fax_ingest_rows_applicable applicable
-      JOIN fax_ingest_rows fax_row ON fax_row.id = applicable.fax_row_id
-      JOIN fax_ingest_runs run ON run.id = fax_row.run_id
-      JOIN fax_documents document ON document.id = run.fax_document_id
-      WHERE applicable.run_id = :run_id
-  )
-  AND (
-      EXISTS (
-          SELECT 1
-          FROM fax_ingest_rows_applicable applicable
-          JOIN fax_ingest_rows fax_row ON fax_row.id = applicable.fax_row_id
-          WHERE applicable.run_id = :run_id
-            AND fax_row.surgeon_id = schedule_card_activities.surgeon_id
-            AND fax_row.case_date = schedule_card_activities.activity_date
-            AND schedule_card_activities.identity_key = LOWER(COALESCE(fax_row.patient_name, '')) || '|' ||
-                CASE WHEN fax_row.start_time IS NULL THEN '' ELSE SUBSTR(CAST(fax_row.start_time AS TEXT), 1, 8) END ||
-                '|' || fax_row.row_type
+SET source_record_key = (
+    SELECT CAST(document.external_fax_id AS TEXT) || '|' || fax_row.normalized_key
+    FROM fax_ingest_rows_applicable applicable
+    JOIN fax_ingest_rows fax_row ON fax_row.id = applicable.fax_row_id
+    JOIN fax_ingest_runs run ON run.id = fax_row.run_id
+    JOIN fax_documents document ON document.id = run.fax_document_id
+    WHERE applicable.run_id = :run_id
+      AND fax_row.surgeon_id = schedule_card_activities.surgeon_id
+      AND fax_row.case_date = schedule_card_activities.activity_date
+      AND schedule_card_activities.identity_key = LOWER(COALESCE(fax_row.patient_name, '')) || '|' ||
+          CASE WHEN fax_row.start_time IS NULL THEN '' ELSE SUBSTR(CAST(fax_row.start_time AS TEXT), 1, 8) END ||
+          '|' || fax_row.row_type
+    ORDER BY fax_row.id
+    LIMIT 1
+)
+WHERE id IN (
+    SELECT min(activity.id)
+    FROM schedule_card_activities activity
+    JOIN fax_ingest_rows fax_row
+      ON fax_row.surgeon_id = activity.surgeon_id
+     AND fax_row.case_date = activity.activity_date
+     AND activity.identity_key = LOWER(COALESCE(fax_row.patient_name, '')) || '|' ||
+         CASE WHEN fax_row.start_time IS NULL THEN '' ELSE SUBSTR(CAST(fax_row.start_time AS TEXT), 1, 8) END ||
+         '|' || fax_row.row_type
+    JOIN fax_ingest_rows_applicable applicable ON applicable.fax_row_id = fax_row.id
+    JOIN fax_ingest_runs run ON run.id = fax_row.run_id
+    JOIN fax_documents document ON document.id = run.fax_document_id
+    WHERE applicable.run_id = :run_id
+      AND activity.source_system = 'fax'
+      AND activity.is_active = TRUE
+      AND activity.source_fax_id IS NOT NULL
+      AND activity.source_fax_id <> document.external_fax_id
+      AND NOT EXISTS (
+          SELECT 1 FROM schedule_card_activities already
+          WHERE already.source_system = 'fax'
+            AND already.source_record_key = CAST(document.external_fax_id AS TEXT) || '|' || fax_row.normalized_key
       )
-      OR 2 <= (
-          SELECT count(*) FROM fax_line_absences absence
-          WHERE absence.schedule_card_activity_id = schedule_card_activities.id
-      )
-  )
-RETURNING activity_type
+    GROUP BY fax_row.id
+)
 -- @@
 INSERT INTO schedule_card_activities (
     schedule_card_id, surgeon_id, location_id, activity_date, session,

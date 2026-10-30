@@ -113,8 +113,8 @@ class FaxPreviewTest(unittest.TestCase):
         self.assertEqual(labels["Already, There"][0], "match")
         self.assertEqual(labels["Fills, NA"][0], "addition")
         self.assertEqual(labels["On, Off"], ("addition", "off_collision"))  # real room WGD S07 places it
-        self.assertEqual(labels["Wrong, Facility"], ("fail", "location_conflict"))
-        self.assertEqual(labels["Weekend, Misread"], ("fail", "weekend_schedule"))
+        self.assertEqual(labels["Wrong, Facility"], ("addition", "location_conflict"))
+        self.assertEqual(labels["Weekend, Misread"], ("fail", "missing_scaffold"))  # no weekend card to write to
         self.assertEqual(labels["Agrees, WithCard"], ("addition", "existing_card"))
         self.assertEqual([row["patient_name"] for row in result["calOnly"]], ["Not, OnFax"])
         self.assertEqual(self.db.query(FaxIngestRow).count(), 0)

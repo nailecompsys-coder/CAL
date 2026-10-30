@@ -92,7 +92,7 @@ SELECT l.*,
        (SELECT loc.location_type FROM locations loc WHERE loc.id = l.room_location_id) AS room_location_type,
        CASE card_location_type WHEN 'hospital' THEN 'surgical' WHEN 'clinic' THEN 'clinic' END AS card_row_type,
        -- Don: a real room (site + room) sets the location by itself, block or not.
-       CASE WHEN room_location_id IS NOT NULL THEN room_location_id
+       COALESCE(CASE WHEN room_location_id IS NOT NULL THEN room_location_id
             WHEN block_location_count = 1 THEN block_location_id
             WHEN block_location_count = 0 AND baseline_state = 'assigned' THEN baseline_location_id
             -- Rule 10: an OFF card still takes the line (flagged off_collision) at its own location.
@@ -106,34 +106,36 @@ SELECT l.*,
                   AND peer.block_location_count = 1
                 HAVING count(DISTINCT peer.block_location_id) = 1
             )
-            END AS source_location_id
+            END,
+            -- Don (Oct 29): place every row; the card's own location is the fallback facility.
+            effective_location_id, baseline_location_id) AS source_location_id
 FROM located l
 )
 SELECT l.*,
+       -- Don (Oct 29): PLACE every row. Hold only when surgeon, date or time is missing
+       -- (or there is no card to write to). Every other doubt (procedure, room, label,
+       -- OCR, weekend, block/card location) is placed and flagged: ready_with_warning.
        CASE
-         WHEN COALESCE(trim(extraction_flags), '') <> '' THEN 'unresolved'
          WHEN case_date IS NULL THEN 'unresolved'
-         WHEN CAST(strftime('%w', case_date) AS INTEGER) IN (0, 6) THEN 'unresolved'
          WHEN surgeon_id IS NULL THEN 'unresolved'
          WHEN start_time IS NULL THEN 'unresolved'
          WHEN schedule_card_id IS NULL THEN 'unresolved'
-         WHEN room_location_id IS NULL AND block_location_count > 1 THEN 'unresolved'
-         WHEN room_location_id IS NULL AND NOT room_is_placeholder AND block_location_count = 1 AND COALESCE(effective_location_id, baseline_location_id) IS NOT NULL AND block_location_id <> COALESCE(effective_location_id, baseline_location_id) THEN 'unresolved'
          WHEN source_location_id IS NULL THEN 'unresolved'
          WHEN effective_state = 'off' THEN 'ready_with_warning'
+         WHEN COALESCE(trim(extraction_flags), '') <> '' OR CAST(strftime('%w', case_date) AS INTEGER) IN (0, 6) OR (room_location_id IS NULL AND block_location_count > 1) OR (room_location_id IS NULL AND NOT room_is_placeholder AND block_location_count = 1 AND COALESCE(effective_location_id, baseline_location_id) IS NOT NULL AND block_location_id <> COALESCE(effective_location_id, baseline_location_id)) THEN 'ready_with_warning'
          ELSE 'ready'
        END AS decision_status,
        CASE
-         WHEN COALESCE(trim(extraction_flags), '') <> '' THEN 'extraction_flagged'
          WHEN case_date IS NULL THEN 'invalid_date'
-         WHEN CAST(strftime('%w', case_date) AS INTEGER) IN (0, 6) THEN 'weekend_schedule'
          WHEN surgeon_id IS NULL THEN 'unknown_surgeon'
          WHEN start_time IS NULL THEN 'missing_time'
          WHEN schedule_card_id IS NULL THEN 'missing_scaffold'
-         WHEN room_location_id IS NULL AND block_location_count > 1 THEN 'block_facility_unclear'
-         WHEN room_location_id IS NULL AND NOT room_is_placeholder AND block_location_count = 1 AND COALESCE(effective_location_id, baseline_location_id) IS NOT NULL AND block_location_id <> COALESCE(effective_location_id, baseline_location_id) THEN 'location_conflict'
          WHEN source_location_id IS NULL THEN 'no_block_for_facility'
          WHEN effective_state = 'off' THEN 'off_collision'
+         WHEN COALESCE(trim(extraction_flags), '') <> '' THEN 'extraction_flagged'
+         WHEN CAST(strftime('%w', case_date) AS INTEGER) IN (0, 6) THEN 'weekend_schedule'
+         WHEN room_location_id IS NULL AND block_location_count > 1 THEN 'block_facility_unclear'
+         WHEN room_location_id IS NULL AND NOT room_is_placeholder AND block_location_count = 1 AND COALESCE(effective_location_id, baseline_location_id) IS NOT NULL AND block_location_id <> COALESCE(effective_location_id, baseline_location_id) THEN 'location_conflict'
          WHEN block_location_count = 1 AND effective_state = 'na' THEN 'block_location'
          ELSE 'existing_card'
        END AS reason_code

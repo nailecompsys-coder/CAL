@@ -276,7 +276,7 @@ class DonRulesTest(unittest.TestCase):
             sender.assert_not_called()
         self.assertEqual(self.db.query(AdminNotification).count(), 0)
         self.assertEqual(result["notificationsSent"], 0)
-        self.assertEqual(result["report"]["conflictsFlagged"], 2)
+        self.assertEqual(result["report"]["conflictsFlagged"], 3)  # placed-and-flagged rows are flagged too
 
     def test_big_rule_ingest_modules_import_no_senders(self):
         import pathlib
@@ -290,13 +290,13 @@ class DonRulesTest(unittest.TestCase):
             for word in banned:
                 self.assertNotIn(word, source, f"{name} must not send notifications ({word})")
 
-    # Rule 11: flags are per row; one flagged row never holds the page.
+    # Rule 11 (Oct 29): a flagged row is placed and flagged, never held.
     def test_rule11_flags_are_per_row(self):
         staged = self._stage([self._row("Clean, One"), self._row("Smudged", at=time(9), flags="ocr_uncertain"),
                               self._row("Clean, Two", at=time(10))])
         self.assertEqual(self._reasons(staged["runId"]), ["existing_card", "extraction_flagged", "existing_card"])
         result = apply_staged_snapshot(self.db, source_fax_id=191, run_id=staged["runId"])
-        self.assertEqual(result["rows"], 2)
+        self.assertEqual(result["rows"], 3)
 
     # Rule 12: each run reports added / held by reason / conflicts / deactivated=0.
     def test_rule12_run_report(self):
@@ -350,7 +350,8 @@ class ClinicRowIgnoresOrBlockTest(DonRulesTest):
     def test_surgical_row_still_checks_or_block_against_clinic_card(self):
         day = self._setup_clinic_morning()
         staged = self._stage([self._row("A, One", day=day, at=time(8, 30), room="ZZZ S99")])
-        self.assertEqual(staged["report"]["heldByReason"].get("location_conflict"), 1)
+        self.assertEqual(staged["report"]["heldByReason"], {})
+        self.assertEqual(staged["report"]["linesAdded"], 1)
 
 
 class PlaceholderRoomNeverConflictsTest(DonRulesTest):

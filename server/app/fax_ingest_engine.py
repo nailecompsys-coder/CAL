@@ -195,15 +195,15 @@ SELECT row.id, resolution.schedule_card_id,
        resolution.decision_status, resolution.reason_code,
        CASE resolution.reason_code
          WHEN 'off_collision' THEN 'Patient on an OFF day: line entered and flagged in CAL for Shannon. No notification.'
-         WHEN 'location_conflict' THEN 'Room code, block and card location disagree; held for review.'
+         WHEN 'location_conflict' THEN 'Room code, block and card location disagree; placed at the block location and flagged.'
          WHEN 'past_time' THEN 'Dated today or earlier; fax ingest never touches it.'
-         WHEN 'weekend_schedule' THEN 'Epic OR/clinic work is not accepted on a weekend.'
+         WHEN 'weekend_schedule' THEN 'Weekend date on an existing card; placed and flagged.'
          WHEN 'unknown_surgeon' THEN 'No unique active surgeon matched the extractor handback.'
          WHEN 'missing_time' THEN 'The extractor handback has no usable start time.'
          WHEN 'missing_scaffold' THEN 'The permanent AM/PM card is missing; ingest cannot create one.'
-         WHEN 'block_facility_unclear' THEN 'More than one assigned block fits this time.'
-         WHEN 'no_block_for_facility' THEN 'Placeholder/unknown room and no block or card location establishes the facility.'
-         WHEN 'extraction_flagged' THEN 'The extractor flagged this source row for review.'
+         WHEN 'block_facility_unclear' THEN 'More than one assigned block fits this time; placed at the card location and flagged.'
+         WHEN 'no_block_for_facility' THEN 'No room, block or card location establishes the facility; held.'
+         WHEN 'extraction_flagged' THEN 'The extractor flagged a doubt (procedure, room, label or OCR); placed and flagged, never held.'
          ELSE 'SQL resolved this row to the existing permanent card.'
        END
 FROM fax_ingest_rows row

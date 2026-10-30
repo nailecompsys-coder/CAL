@@ -188,7 +188,7 @@ class FaxIngestEngineTest(unittest.TestCase):
         )
         self.db.commit()
         decision = self.db.query(FaxRowDecision).one()
-        self.assertEqual(result["decisions"], {"unresolved": 1})
+        self.assertEqual(result["decisions"], {"ready_with_warning": 1})  # placed and flagged
         self.assertEqual(decision.reason_code, "location_conflict")
 
     def test_generic_rows_follow_explicit_same_session_epic_location(self):
@@ -259,7 +259,8 @@ class FaxIngestEngineTest(unittest.TestCase):
         self.db.commit()
         staged = self.db.query(FaxIngestRow).one()
         decision = self.db.query(FaxRowDecision).one()
-        self.assertIsNone(staged.source_location_id)
+        self.assertIsNotNone(staged.source_location_id)  # card location; placed and flagged
+        self.assertEqual(decision.status, "ready_with_warning")
         self.assertEqual(decision.reason_code, "block_facility_unclear")
 
     def test_two_identical_printed_rows_keep_distinct_source_identity(self):

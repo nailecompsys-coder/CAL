@@ -404,10 +404,10 @@ class FaxSnapshotServiceTest(unittest.TestCase):
 
         result = apply_staged_snapshot(self.db, source_fax_id=191, run_id=staged["runId"])
 
-        self.assertEqual(result["rowsSkipped"], 1)
+        self.assertEqual(result["rowsSkipped"], 0)
         self.assertEqual(
             [line.patient_name for line in self.db.query(ScheduleCardActivity).all()],
-            ["Clean, Patient"],
+            ["Clean, Patient", "Smudged, Patient"],
         )
 
     def test_rule2_omitted_lines_are_never_deactivated(self):

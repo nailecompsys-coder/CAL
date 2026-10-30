@@ -26,8 +26,7 @@ APPLICABLE_VIEW_SELECT = """
       ON c.surgeon_id = r.surgeon_id
      AND c.date = r.case_date
      AND c.session = r.session
-    WHERE COALESCE(r.extraction_flags, '') = ''
-      AND d.status IN ('ready', 'ready_with_warning')
+    WHERE d.status IN ('ready', 'ready_with_warning')
 """
 
 # Anything on a fax whose date/time has already passed is ignored.

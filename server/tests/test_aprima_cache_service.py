@@ -18,7 +18,15 @@ from app.aprima_cache_service import (
     run_aprima_sync,
     sync_status_payload,
 )
-from app.models import AprimaCachedAppointment, AprimaSyncState, Base, Surgeon
+from app.models import (
+    AprimaSyncState,
+    Base,
+    Meeting,
+    ScheduleCard,
+    ScheduleCardActivity,
+    ScheduleCardWeek,
+    Surgeon,
+)
 
 
 def _row(appt_id: str, day: str, initials: str = "JB", site: str = "Clermont Office") -> dict:
@@ -60,6 +68,21 @@ class AprimaCacheServiceTest(unittest.TestCase):
         self.db.close()
         self.engine.dispose()
 
+    def _cards(self, days):
+        week = ScheduleCardWeek(surgeon_id=self.surgeon.id, week_start=date(2026, 6, 1))
+        self.db.add(week)
+        self.db.flush()
+        for day in days:
+            self.db.add(ScheduleCard(
+                week_id=week.id,
+                surgeon_id=self.surgeon.id,
+                date=day,
+                session="am",
+                baseline_state="na",
+                effective_state="na",
+            ))
+        self.db.commit()
+
     def test_row_content_hash_changes_when_time_moves(self):
         a = _row("1", "2026-07-10")
         b = dict(a)
@@ -74,10 +97,15 @@ class AprimaCacheServiceTest(unittest.TestCase):
         fetch_patients.return_value = [_row("a1", "2026-07-09"), _row("a2", "2026-07-10")]
         fetch_meetings.return_value = {"meetings": [], "warning": None}
 
+        self._cards([date(2026, 7, 9), date(2026, 7, 10)])
         result = run_aprima_sync(self.db, notify=True)
         self.assertTrue(result["ok"])
         self.assertEqual(result["patients"], 2)
-        self.assertEqual(self.db.query(AprimaCachedAppointment).count(), 2)
+        lines = self.db.query(ScheduleCardActivity).filter(
+            ScheduleCardActivity.source_system == "aprima",
+            ScheduleCardActivity.is_active == True,  # noqa: E712
+        ).all()
+        self.assertEqual(len(lines), 2)
         status = sync_status_payload(self.db)
         self.assertEqual(status["status"], "ok")
         self.assertTrue(cache_is_usable(self.db))
@@ -89,34 +117,34 @@ class AprimaCacheServiceTest(unittest.TestCase):
     @patch("app.aprima_cache_service.fetch_patient_appointments")
     @patch("app.aprima_cache_service.practice_today", return_value=date(2026, 7, 9))
     def test_sync_moves_cached_row_from_outside_window(self, _today, fetch_patients, fetch_meetings, push):
-        """Appointment previously cached outside the sliding window must not StaleDataError."""
-        self.db.add(
-            AprimaCachedAppointment(
-                appointment_id="moved1",
-                kind="patient",
-                date=date(2026, 6, 1),  # outside Jul 9..Jul 30 window
-                surgeon_initials="JB",
-                start_time=time(9, 0),
-                end_time=time(9, 30),
-                patient_name="Office Pt",
-                activity_type="clinic",
-                appointment_type="Office Visit",
-                service_site="Clermont Office",
-                room_text="1",
-                content_hash="old",
-                payload_json="{}",
-                synced_at=datetime.now(timezone.utc).replace(tzinfo=None),
-            )
-        )
+        """A Surgery One line follows the appointment onto the card inside the window."""
+        self._cards([date(2026, 6, 1), date(2026, 7, 10)])
+        early = self.db.query(ScheduleCard).filter_by(date=date(2026, 6, 1), session="am").one()
+        self.db.add(ScheduleCardActivity(
+            schedule_card_id=early.id,
+            surgeon_id=self.surgeon.id,
+            activity_date=early.date,
+            session="am",
+            activity_type="clinic",
+            start_time=time(9, 0),
+            end_time=time(9, 30),
+            patient_name="Office Pt",
+            procedure="Office Visit",
+            source_system="aprima",
+            source_record_key="moved1",
+            aprima_appointment_id="moved1",
+            identity_key="moved1",
+            is_active=True,
+        ))
         self.db.commit()
         fetch_patients.return_value = [_row("moved1", "2026-07-10")]
         fetch_meetings.return_value = {"meetings": [], "warning": None}
 
         result = run_aprima_sync(self.db, notify=False)
         self.assertTrue(result["ok"])
-        row = self.db.get(AprimaCachedAppointment, "moved1")
-        self.assertIsNotNone(row)
-        self.assertEqual(row.date, date(2026, 7, 10))
+        row = self.db.query(ScheduleCardActivity).filter_by(source_record_key="moved1").one()
+        self.assertEqual(row.activity_date, date(2026, 7, 10))
+        self.assertTrue(row.is_active)
         push.assert_not_called()
 
     @patch("app.aprima_cache_service.send_native_push_to_surgeon")
@@ -124,140 +152,72 @@ class AprimaCacheServiceTest(unittest.TestCase):
     @patch("app.aprima_cache_service.fetch_patient_appointments")
     @patch("app.aprima_cache_service.practice_today", return_value=date(2026, 7, 9))
     def test_sync_detects_cancel_and_notifies(self, _today, fetch_patients, fetch_meetings, push):
+        self._cards([date(2026, 7, 9)])
+        self.db.add(Meeting(title="Shannon huddle", date=date(2026, 7, 9)))
+        self.db.commit()
         fetch_patients.return_value = [_row("a1", "2026-07-09")]
-        fetch_meetings.return_value = {"meetings": [], "warning": None}
+        fetch_meetings.return_value = {"meetings": [{
+            "id": "meet-1",
+            "date": "2026-07-09",
+            "start": "12:00",
+            "end": "12:30",
+            "surgeonInitials": "JB",
+            "reason": "Aprima huddle",
+            "serviceSite": "Clermont Office",
+        }], "warning": None}
         run_aprima_sync(self.db, notify=True)
 
-        fetch_patients.return_value = []  # cancelled / removed
+        fetch_patients.return_value = []
+        fetch_meetings.return_value = {"meetings": [], "warning": None}
         result = run_aprima_sync(self.db, notify=True)
         self.assertTrue(result["ok"])
-        self.assertEqual(self.db.query(AprimaCachedAppointment).count(), 0)
+        line = self.db.query(ScheduleCardActivity).filter_by(source_record_key="a1").one()
+        self.assertFalse(line.is_active)
+        self.assertEqual(
+            self.db.query(Meeting).filter(Meeting.source_system == "aprima").count(),
+            0,
+        )
+        self.assertEqual(
+            self.db.query(Meeting).filter(Meeting.title == "Shannon huddle").count(),
+            1,
+        )
         push.assert_called()
         self.assertEqual(result["changedSurgeons"], 1)
 
     @patch("app.aprima_cache_service.fetch_patient_appointments")
     @patch("app.aprima_cache_service.practice_today", return_value=date(2026, 7, 9))
-    def test_api_prefers_fresh_cache(self, _today, fetch_patients):
-        state = AprimaSyncState(
-            last_status="ok",
-            last_finished_at=datetime.now(timezone.utc).replace(tzinfo=None),
-            patient_count=1,
-            meeting_count=0,
-            window_start=date(2026, 7, 9),
-            window_end=date(2026, 7, 30),
-            content_fingerprint="abc",
-        )
-        self.db.add(state)
-        self.db.add(
-            AprimaCachedAppointment(
-                appointment_id="c1",
-                kind="patient",
-                date=date(2026, 7, 9),
-                surgeon_initials="JB",
-                start_time=time(9, 0),
-                end_time=time(9, 30),
-                patient_name="Cached",
-                activity_type="clinic",
-                appointment_type="Office Visit",
-                service_site="Clermont Office",
-                room_text="1",
-                content_hash="x",
-                payload_json=(
-                    '{"id":"c1","date":"2026-07-09","start":"09:00","end":"09:30",'
-                    '"surgeonInitials":"JB","surgeonName":"Jorge","patientName":"Cached",'
-                    '"mrn":"1","appointmentType":"Office Visit","status":"Scheduled",'
-                    '"reason":"","serviceSite":"Clermont Office","room":"1",'
-                    '"timeZone":"America/New_York"}'
-                ),
-                synced_at=datetime.now(timezone.utc).replace(tzinfo=None),
-            )
-        )
-        self.db.commit()
-
+    def test_patients_tab_reads_aprima_live(self, _today, fetch_patients):
+        fetch_patients.return_value = [_row("c1", "2026-07-09")]
         payload = patient_appointments_for_api(
             self.db, date(2026, 7, 9), date(2026, 7, 15), surgeon=self.surgeon
         )
-        self.assertEqual(payload["source"], "cache")
+        self.assertEqual(payload["source"], "live")
         self.assertEqual(len(payload["appointments"]), 1)
-        fetch_patients.assert_not_called()
-
-        week = main_office_patients_by_weekday(self.db, date(2026, 7, 9))
-        self.assertEqual(week["total"], 1)
-        self.assertEqual(week["source"], "cache")
+        fetch_patients.assert_called()
 
     @patch("app.aprima_cache_service.fetch_patient_appointments")
     @patch("app.aprima_cache_service.practice_today", return_value=date(2026, 7, 9))
     def test_dashboard_week_includes_aprima_surgery(self, _today, fetch_patients):
-        state = AprimaSyncState(
-            last_status="ok",
-            last_finished_at=datetime.now(timezone.utc).replace(tzinfo=None),
-            patient_count=2,
-            meeting_count=0,
-            window_start=date(2026, 7, 9),
-            window_end=date(2026, 7, 30),
-            content_fingerprint="sx",
-        )
-        self.db.add(state)
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
-        self.db.add(
-            AprimaCachedAppointment(
-                appointment_id="office1",
-                kind="patient",
-                date=date(2026, 7, 9),
-                surgeon_initials="JB",
-                start_time=time(9, 0),
-                end_time=time(9, 30),
-                patient_name="Office Pt",
-                activity_type="clinic",
-                appointment_type="Office Visit",
-                service_site="Clermont Office",
-                room_text="1",
-                content_hash="o",
-                payload_json=(
-                    '{"id":"office1","date":"2026-07-09","start":"09:00","end":"09:30",'
-                    '"surgeonInitials":"JB","surgeonName":"Jorge","patientName":"Office Pt",'
-                    '"mrn":"1","appointmentType":"Office Visit","status":"Scheduled",'
-                    '"reason":"","serviceSite":"Clermont Office","room":"1",'
-                    '"timeZone":"America/New_York"}'
-                ),
-                synced_at=now,
-            )
-        )
-        self.db.add(
-            AprimaCachedAppointment(
-                appointment_id="sx1",
-                kind="patient",
-                date=date(2026, 7, 10),
-                surgeon_initials="JB",
-                start_time=time(7, 30),
-                end_time=time(9, 0),
-                patient_name="Sx Pt",
-                activity_type="surgical",
-                appointment_type="Surgery",
-                reason_text="Hernia",
-                service_site="AHWG-Outpt",
-                room_text="OR 2",
-                content_hash="s",
-                payload_json=(
-                    '{"id":"sx1","date":"2026-07-10","start":"07:30","end":"09:00",'
-                    '"surgeonInitials":"JB","surgeonName":"Jorge","patientName":"Sx Pt",'
-                    '"mrn":"2","appointmentType":"Surgery","status":"Scheduled",'
-                    '"reason":"Hernia","serviceSite":"AHWG-Outpt","room":"OR 2",'
-                    '"timeZone":"America/New_York"}'
-                ),
-                synced_at=now,
-            )
-        )
-        self.db.commit()
-
+        fetch_patients.return_value = [
+            _row("office1", "2026-07-09"),
+            {
+                **_row("sx1", "2026-07-10", site="AHWG-Outpt"),
+                "start": "07:30",
+                "end": "09:00",
+                "appointmentType": "Surgery",
+                "reason": "Hernia",
+                "room": "OR 2",
+            },
+        ]
         week = main_office_patients_by_weekday(self.db, date(2026, 7, 9))
         self.assertEqual(week["total"], 2)
+        self.assertEqual(week["source"], "live")
         # Week is Mon 7/6–Fri 7/10; office on Thu 7/9, surgery on Fri 7/10
         self.assertEqual(week["days"][3]["count"], 1)
         self.assertEqual(week["days"][3]["appointments"][0]["appointmentType"], "Office Visit")
         self.assertEqual(week["days"][4]["count"], 1)
         self.assertEqual(week["days"][4]["appointments"][0]["appointmentType"], "Surgery")
-        fetch_patients.assert_not_called()
+        fetch_patients.assert_called()
 
     def test_begin_manual_aprima_sync_marks_running_once(self):
         first = begin_manual_aprima_sync(self.db)

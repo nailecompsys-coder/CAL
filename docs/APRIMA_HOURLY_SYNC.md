@@ -12,23 +12,24 @@ Keep Surgical One office patients **and** Aprima Surgery appointments current in
 Aprima (read-only SQL)
         │
         ▼  hourly worker (:05)
-CAL Postgres cache
-  · aprima_cached_appointments
-  · aprima_sync_state (fingerprint)
+CAL tables
+  · meetings + meeting_attendees   (Aprima meetings)
+  · schedule_card_activities       (Surgery One, when that surgeon has a card)
+  · aprima_sync_state              (last pull clock and fingerprint)
         │
-        ├── Portal dashboard / Meetings  (cache-first; dashboard pills = main-office clinic + appointmentType Surgery)
-        ├── Admin calendar               (Aprima Surgery as surgery events)
-        └── Native Patients + My Schedule (cache-first; My Schedule shows Aprima Surgery items)
+        ├── Portal meetings page reads the saved Aprima meetings
+        ├── Office cards and the phone read the saved card lines
+        └── Patients tab and the Surgery One week ask Aprima live
                  │
                  ├── iOS / Android foreground + 5‑min refresh
-                 └── PHI-free push when a surgeon’s patient fingerprint changes
+                 └── PHI-free push when a surgeon’s saved Surgery One lines change
 ```
 
 **Hard rules**
 
 - CAL never writes to Aprima.
 - Worker / logs / pushes never include PHI (push copy is generic: “Clinic schedule updated”).
-- After a successful sync, phones and portal prefer CAL cache (not a live Aprima hit on every open).
+- A cancelled in-window Surgery One patient turns that card line off. The card stays. Shannon's meetings stay.
 
 ## Cron
 

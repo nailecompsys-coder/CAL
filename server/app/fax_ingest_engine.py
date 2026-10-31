@@ -125,22 +125,32 @@ def inherit_continuation_surgeons(
             info["unknown"] += 1
         else:
             info["surgeons"][surgeon_id] = (row.surgeon_initials, row.surgeon_name)
+    # Don (Oct 30, fax 370 "Joseph Mancini" was a patient on Dr. Alex's pages): a
+    # surgeon name that matches no roster surgeon is a patient name / bad OCR. The
+    # row takes the page heading's surgeon (the page's single roster surgeon), else
+    # the previous page's surgeon on a continuation page, and is placed with a flag.
+    # Dates may restart on a continuation page; that no longer blocks inheritance.
     inherited: dict[int, int] = {}
     for page in sorted(pages):
         info, prev = pages[page], pages.get(page - 1)
-        if not prev or info["unknown"] != info["rows"] or len(prev["surgeons"]) != 1:
+        if not info["unknown"]:
             continue
-        if min(info["dates"]) < max(prev["dates"]):
-            continue
-        info["surgeons"] = dict(prev["surgeons"])
-        inherited[page] = page - 1
+        if len(info["surgeons"]) == 1:
+            inherited[page] = page
+        elif not info["surgeons"] and prev and len(prev["surgeons"]) == 1:
+            info["surgeons"] = dict(prev["surgeons"])
+            inherited[page] = page - 1
     if not inherited:
         return rows, inherited
+    roster_ids = {row[0] for row in roster}
     out = []
     for row in rows:
         if row.page in inherited:
-            initials, name = next(iter(pages[row.page]["surgeons"].values()))
-            row = replace(row, surgeon_initials=initials, surgeon_name=name)
+            own = "" if surgeon_is_patient_name(row, patient_keys) else row.surgeon_initials
+            if _roster_surgeon_id(roster, own, row.surgeon_name) not in roster_ids:
+                initials, name = next(iter(pages[row.page]["surgeons"].values()))
+                flags = ",".join(f for f in (_text(row.extraction_flags), "surgeon_not_on_roster_inherited") if f)
+                row = replace(row, surgeon_initials=initials, surgeon_name=name, extraction_flags=flags)
         out.append(row)
     return out, inherited
 

@@ -276,7 +276,7 @@ class DonRulesTest(unittest.TestCase):
             sender.assert_not_called()
         self.assertEqual(self.db.query(AdminNotification).count(), 0)
         self.assertEqual(result["notificationsSent"], 0)
-        self.assertEqual(result["report"]["conflictsFlagged"], 3)  # placed-and-flagged rows are flagged too
+        self.assertEqual(result["report"]["conflictsFlagged"], 4)  # placed-and-flagged rows (incl. off-roster surgeon) are flagged too
 
     def test_big_rule_ingest_modules_import_no_senders(self):
         import pathlib
@@ -300,7 +300,7 @@ class DonRulesTest(unittest.TestCase):
 
     # Rule 12: each run reports added / held by reason / conflicts / deactivated=0.
     def test_rule12_run_report(self):
-        staged = self._stage([self._row("Ok"), self._row("Who", surgeon="Zed Nobody", initials="ZN")])
+        staged = self._stage([self._row("Ok"), self._row("Who", page=99, surgeon="Zed Nobody", initials="ZN")])  # no roster surgeon on page 98/99
         self.assertEqual(staged["report"], {"linesAdded": 1, "linesHeld": 1,
                                             "heldByReason": {"unknown_surgeon": 1},
                                             "conflictsFlagged": 0, "linesDeactivated": 0})
@@ -323,11 +323,24 @@ class ContinuationPageTest(DonRulesTest):
         self.assertEqual(staged["surgeonInheritedPages"], {"28": 27})
         self.assertEqual(staged["report"]["linesHeld"], 0)
 
-    def test_page_whose_dates_restart_is_not_inherited(self):
+    def test_page_whose_dates_restart_still_inherits(self):
+        # Fax 370: Dr. Alex's continuation pages restart at Monday; OCR read a patient as surgeon.
         rows = [self._row("A, One", page=27, day=DAY + timedelta(days=1)),
-                self._row("B, Two", page=28, day=DAY, initials="CM", surgeon="CM")]
+                self._row("B, Two", page=28, day=DAY, initials="JM", surgeon="Joseph Mancini, MD")]
         staged = self._stage(rows)
-        self.assertEqual(staged["surgeonInheritedPages"], {})
+        self.assertEqual(staged["surgeonInheritedPages"], {"28": 27})
+        self.assertIsNone(staged["report"]["heldByReason"].get("unknown_surgeon"))
+
+    def test_off_roster_name_on_a_headed_page_takes_the_page_surgeon(self):
+        rows = [self._row("A, One", page=27, at=time(8, 0)),
+                self._row("B, Two", page=27, at=time(9, 0), initials="JM", surgeon="Joseph Mancini, MD")]
+        staged = self._stage(rows)
+        self.assertEqual(staged["surgeonInheritedPages"], {"27": 27})
+        self.assertEqual(staged["report"]["heldByReason"], {})
+
+    def test_no_roster_surgeon_on_page_or_previous_page_is_held(self):
+        rows = [self._row("B, Two", page=28, initials="JM", surgeon="Joseph Mancini, MD")]
+        staged = self._stage(rows)
         self.assertEqual(staged["report"]["heldByReason"].get("unknown_surgeon"), 1)
 
 

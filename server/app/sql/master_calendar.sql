@@ -89,12 +89,6 @@ call_duties AS (
     LEFT JOIN visible_surgeons s ON s.id = r.surgeon_id LEFT JOIN call_groups cg ON cg.id = r.call_group_id
     WHERE r.date BETWEEN :start_date AND :end_date
 ),
-aprima_owners AS (
-    SELECT a.*, coalesce(a.surgeon_id, (
-        SELECT min(s.id) FROM visible_surgeons s WHERE s.initials = upper(trim(a.surgeon_initials))
-        HAVING count(*) = 1)) AS owner_id
-    FROM aprima_cached_appointments a WHERE a.date BETWEEN :start_date AND :end_date
-),
 events AS (
     SELECT 'card-' || CAST(c.id AS TEXT) AS id, CAST(c.date AS TEXT) AS day,
            CAST(NULL AS TEXT) AS start_time, CAST(NULL AS TEXT) AS end_time,
@@ -131,20 +125,8 @@ events AS (
     FROM meetings m LEFT JOIN locations l ON l.id = m.location_id
     WHERE m.date BETWEEN :start_date AND :end_date AND (CAST(:surgeon_id AS INTEGER) IS NULL OR (
         EXISTS (SELECT 1 FROM selected) AND (
-        NOT EXISTS (SELECT 1 FROM meeting_attendees ma WHERE ma.meeting_id = m.id) OR
+        (coalesce(m.source_system, '') <> 'aprima' AND NOT EXISTS (SELECT 1 FROM meeting_attendees ma WHERE ma.meeting_id = m.id)) OR
         EXISTS (SELECT 1 FROM meeting_attendees ma WHERE ma.meeting_id = m.id AND ma.surgeon_id = CAST(:surgeon_id AS INTEGER) AND coalesce(ma.status,'invited') <> 'declined'))))
-    UNION ALL
-    SELECT 'aprima-' || a.appointment_id,CAST(a.date AS TEXT),CAST(a.start_time AS TEXT),CAST(a.end_time AS TEXT),
-           CASE WHEN a.kind = 'meeting' THEN coalesce(nullif(a.reason_text,''),a.appointment_type,'Meeting')
-                WHEN a.activity_type = 'surgical' THEN 'OR case' ELSE 'Clinic appointment' END,
-           JOBJ('type',CASE WHEN a.kind = 'meeting' THEN 'meeting' WHEN a.activity_type = 'surgical' THEN 'surgery' ELSE 'clinic' END,
-                'surgeon_id',s.id,'surgeon',s.full_name,'initials',s.initials,'source','Aprima',
-                'location',a.service_site,'patient_name',CASE WHEN a.kind = 'patient' THEN a.patient_name ELSE '' END,
-                'procedure',CASE WHEN a.kind = 'patient' THEN a.reason_text ELSE '' END,'sort_key',50)
-    FROM aprima_owners a LEFT JOIN visible_surgeons s ON s.id = a.owner_id
-    WHERE (CAST(:surgeon_id AS INTEGER) IS NULL OR s.id = CAST(:surgeon_id AS INTEGER))
-      AND (a.kind = 'meeting' OR s.id IS NOT NULL)
-      AND NOT EXISTS (SELECT 1 FROM ranked_activity x WHERE x.aprima_appointment_id = a.appointment_id)
     UNION ALL
     SELECT 'personal-' || CAST(p.id AS TEXT),CAST(p.date AS TEXT),CAST(p.start_time AS TEXT),CAST(p.end_time AS TEXT),p.title,
            JOBJ('type','personal','surgeon_id',s.id,'surgeon',s.full_name,'initials',s.initials,'notes',p.notes,'sort_key',60)

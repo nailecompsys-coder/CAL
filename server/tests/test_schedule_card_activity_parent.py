@@ -10,7 +10,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from app.models import (
-    AprimaCachedAppointment,
     Base,
     FaxDocument,
     FaxIngestRow,
@@ -79,14 +78,7 @@ class CardLineParentTest(unittest.TestCase):
                 procedure="Case",
                 normalized_key="fax-line",
             )
-            visit = AprimaCachedAppointment(
-                appointment_id="visit-1",
-                kind="patient",
-                date=date(2026, 9, 14),
-                content_hash="hash",
-                payload_json="{}",
-            )
-            db.add_all([fax_row, visit])
+            db.add(fax_row)
             db.commit()
             db.add_all([
                 ScheduleCardActivity(
@@ -115,20 +107,19 @@ class CardLineParentTest(unittest.TestCase):
                     source_system="aprima",
                     source_record_key="visit-1",
                     identity_key="visit-1",
-                    aprima_appointment_id=visit.appointment_id,
+                    aprima_appointment_id="visit-1",
                 ),
             ])
             db.commit()
 
             db.delete(fax_row)
-            db.delete(visit)
             db.commit()
             db.expire_all()
 
             kept = db.query(ScheduleCardActivity).order_by(ScheduleCardActivity.id).all()
             self.assertEqual(len(kept), 2)
             self.assertEqual([line.fax_ingest_row_id for line in kept], [None, None])
-            self.assertEqual([line.aprima_appointment_id for line in kept], [None, None])
+            self.assertEqual([line.aprima_appointment_id for line in kept], [None, "visit-1"])
             self.assertEqual({line.schedule_card_id for line in kept}, {card.id})
 
             db.delete(card)
@@ -182,7 +173,9 @@ class CardLineParentTest(unittest.TestCase):
         self.assertIn("REFERENCES schedule_cards", ddl)
         self.assertIn("fk_schedule_card_activities_card_identity", ddl)
         self.assertIn("or_block_instances", ddl)
-        self.assertEqual(ddl.upper().count("ON DELETE SET NULL"), 3)
+        self.assertIn("aprima_appointment_id", ddl)
+        self.assertNotIn("aprima_cached_appointments", ddl)
+        self.assertEqual(ddl.upper().count("ON DELETE SET NULL"), 2)
         self.assertNotIn("surgical_cases", ddl)
 
 

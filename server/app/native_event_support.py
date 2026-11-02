@@ -3,7 +3,7 @@
 import json
 from datetime import date
 
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from .models import Meeting, MeetingAttendee, NativeScheduleAlert
@@ -34,7 +34,10 @@ def meetings_for_surgeon(db: Session, surgeon_id: int, start_date: date, end_dat
             Meeting.date <= end_date,
             or_(
                 MeetingAttendee.surgeon_id == surgeon_id,
-                ~Meeting.attendees.any(),
+                and_(
+                    Meeting.source_system.is_distinct_from("aprima"),
+                    ~Meeting.attendees.any(),
+                ),
             ),
         )
         .distinct()

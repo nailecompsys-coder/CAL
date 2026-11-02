@@ -994,6 +994,7 @@ class ORBlockServiceTest(unittest.TestCase):
                 session="am",
                 start_time=time(7, 0),
                 end_time=time(12, 0),
+                room_text="WG S02",
                 status="open",
             )
             different_facility = ORBlockInstance(

@@ -94,11 +94,22 @@ def append_aprima_surgery_items(
     site (Clermont → Surgery One, Lake Mary Clinic, …).
     """
     from .aprima_cache_service import patient_appointments_for_api
+    from .models import ScheduleCardActivity
 
     payload = patient_appointments_for_api(db, start_date, end_date, surgeon=surgeon)
+    saved_keys = {
+        key
+        for (key,) in db.query(ScheduleCardActivity.source_record_key).filter(
+            ScheduleCardActivity.surgeon_id == surgeon.id,
+            ScheduleCardActivity.source_system == "aprima",
+            ScheduleCardActivity.is_active == True,  # noqa: E712
+            ScheduleCardActivity.activity_date >= start_date,
+            ScheduleCardActivity.activity_date <= end_date,
+        ).all()
+    }
     for row in payload.get("appointments") or []:
         day_key = (row.get("date") or "").strip()
-        if day_key not in by_date:
+        if day_key not in by_date or str(row.get("id") or "") in saved_keys:
             continue
         by_date[day_key]["items"].append(aprima_surgery_item_payload(row))
 

@@ -28,21 +28,22 @@ def run_migration() -> None:
         if conn.execute(text("SELECT to_regclass('public.surgical_cases')")).scalar():
             conn.execute(text("ALTER TABLE surgical_cases ADD COLUMN IF NOT EXISTS schedule_card_id INTEGER REFERENCES schedule_cards(id)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_surgical_cases_schedule_card_id ON surgical_cases(schedule_card_id)"))
-        for ddl in (
-            "ALTER TABLE aprima_cached_appointments ADD COLUMN IF NOT EXISTS surgeon_id INTEGER REFERENCES surgeons(id)",
-            "ALTER TABLE aprima_cached_appointments ADD COLUMN IF NOT EXISTS location_id INTEGER REFERENCES locations(id)",
-            "ALTER TABLE aprima_cached_appointments ADD COLUMN IF NOT EXISTS schedule_card_id INTEGER REFERENCES schedule_cards(id)",
-            "ALTER TABLE aprima_cached_appointments ADD COLUMN IF NOT EXISTS session VARCHAR(2)",
-            "ALTER TABLE aprima_cached_appointments ADD COLUMN IF NOT EXISTS start_time TIME",
-            "ALTER TABLE aprima_cached_appointments ADD COLUMN IF NOT EXISTS end_time TIME",
-            "ALTER TABLE aprima_cached_appointments ADD COLUMN IF NOT EXISTS patient_name VARCHAR(255)",
-            "ALTER TABLE aprima_cached_appointments ADD COLUMN IF NOT EXISTS activity_type VARCHAR(16)",
-            "ALTER TABLE aprima_cached_appointments ADD COLUMN IF NOT EXISTS room_text VARCHAR(128)",
-            "ALTER TABLE aprima_cached_appointments ADD COLUMN IF NOT EXISTS service_site VARCHAR(255)",
-            "ALTER TABLE aprima_cached_appointments ADD COLUMN IF NOT EXISTS appointment_type VARCHAR(255)",
-            "ALTER TABLE aprima_cached_appointments ADD COLUMN IF NOT EXISTS reason_text TEXT",
-        ):
-            conn.execute(text(ddl))
+        if conn.execute(text("SELECT to_regclass('public.aprima_cached_appointments')")).scalar():
+            for ddl in (
+                "ALTER TABLE aprima_cached_appointments ADD COLUMN IF NOT EXISTS surgeon_id INTEGER REFERENCES surgeons(id)",
+                "ALTER TABLE aprima_cached_appointments ADD COLUMN IF NOT EXISTS location_id INTEGER REFERENCES locations(id)",
+                "ALTER TABLE aprima_cached_appointments ADD COLUMN IF NOT EXISTS schedule_card_id INTEGER REFERENCES schedule_cards(id)",
+                "ALTER TABLE aprima_cached_appointments ADD COLUMN IF NOT EXISTS session VARCHAR(2)",
+                "ALTER TABLE aprima_cached_appointments ADD COLUMN IF NOT EXISTS start_time TIME",
+                "ALTER TABLE aprima_cached_appointments ADD COLUMN IF NOT EXISTS end_time TIME",
+                "ALTER TABLE aprima_cached_appointments ADD COLUMN IF NOT EXISTS patient_name VARCHAR(255)",
+                "ALTER TABLE aprima_cached_appointments ADD COLUMN IF NOT EXISTS activity_type VARCHAR(16)",
+                "ALTER TABLE aprima_cached_appointments ADD COLUMN IF NOT EXISTS room_text VARCHAR(128)",
+                "ALTER TABLE aprima_cached_appointments ADD COLUMN IF NOT EXISTS service_site VARCHAR(255)",
+                "ALTER TABLE aprima_cached_appointments ADD COLUMN IF NOT EXISTS appointment_type VARCHAR(255)",
+                "ALTER TABLE aprima_cached_appointments ADD COLUMN IF NOT EXISTS reason_text TEXT",
+            ):
+                conn.execute(text(ddl))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS call_daily_assignments (
                 id SERIAL PRIMARY KEY,
@@ -67,9 +68,10 @@ def run_migration() -> None:
             "CREATE INDEX IF NOT EXISTS ix_call_daily_assignments_call_coverage_id ON call_daily_assignments(call_coverage_id)",
         ):
             conn.execute(text(ddl))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_aprima_cached_appointments_surgeon_id ON aprima_cached_appointments(surgeon_id)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_aprima_cached_appointments_location_id ON aprima_cached_appointments(location_id)"))
-        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_aprima_cached_appointments_schedule_card_id ON aprima_cached_appointments(schedule_card_id)"))
+        if conn.execute(text("SELECT to_regclass('public.aprima_cached_appointments')")).scalar():
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_aprima_cached_appointments_surgeon_id ON aprima_cached_appointments(surgeon_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_aprima_cached_appointments_location_id ON aprima_cached_appointments(location_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_aprima_cached_appointments_schedule_card_id ON aprima_cached_appointments(schedule_card_id)"))
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS day_off_schedule_cards (
                 id SERIAL PRIMARY KEY,
@@ -98,7 +100,7 @@ def run_migration() -> None:
                 source_system VARCHAR(32) NOT NULL,
                 source_record_key VARCHAR(128) NOT NULL,
                 fax_ingest_row_id INTEGER REFERENCES fax_ingest_rows(id) ON DELETE SET NULL,
-                aprima_appointment_id VARCHAR(36) REFERENCES aprima_cached_appointments(appointment_id) ON DELETE SET NULL,
+                aprima_appointment_id VARCHAR(36),
                 identity_key VARCHAR(512) NOT NULL,
                 is_active BOOLEAN NOT NULL DEFAULT TRUE,
                 created_at TIMESTAMP DEFAULT now(),
@@ -109,7 +111,7 @@ def run_migration() -> None:
         for ddl in (
             "ALTER TABLE schedule_card_activities ADD COLUMN IF NOT EXISTS end_time TIME",
             "ALTER TABLE schedule_card_activities ADD COLUMN IF NOT EXISTS fax_ingest_row_id INTEGER REFERENCES fax_ingest_rows(id) ON DELETE SET NULL",
-            "ALTER TABLE schedule_card_activities ADD COLUMN IF NOT EXISTS aprima_appointment_id VARCHAR(36) REFERENCES aprima_cached_appointments(appointment_id) ON DELETE SET NULL",
+            "ALTER TABLE schedule_card_activities ADD COLUMN IF NOT EXISTS aprima_appointment_id VARCHAR(36)",
             "ALTER TABLE schedule_card_activities ADD COLUMN IF NOT EXISTS or_block_instance_id INTEGER REFERENCES or_block_instances(id) ON DELETE SET NULL",
             "CREATE INDEX IF NOT EXISTS ix_schedule_card_activities_schedule_card_id ON schedule_card_activities(schedule_card_id)",
             "CREATE INDEX IF NOT EXISTS ix_schedule_card_activities_surgeon_id ON schedule_card_activities(surgeon_id)",
@@ -138,14 +140,17 @@ def _keep_card_as_only_deleting_parent(conn) -> None:
             "aprima_appointment_id",
             "schedule_card_activities_aprima_appointment_id_fkey",
             "FOREIGN KEY (aprima_appointment_id) REFERENCES aprima_cached_appointments(appointment_id) ON DELETE SET NULL",
-        ),
+        ) if conn.execute(text("SELECT to_regclass('public.aprima_cached_appointments')")).scalar() else None,
         (
             "or_block_instance_id",
             "schedule_card_activities_or_block_instance_id_fkey",
             "FOREIGN KEY (or_block_instance_id) REFERENCES or_block_instances(id) ON DELETE SET NULL",
         ),
     )
-    for column, constraint_name, definition in parents:
+    for item in parents:
+        if item is None:
+            continue
+        column, constraint_name, definition = item
         conn.execute(text(f"""
             DO $$
             DECLARE

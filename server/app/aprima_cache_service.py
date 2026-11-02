@@ -1,14 +1,12 @@
-"""CAL-side cache for Aprima patient appointments and meetings.
+"""Pull Aprima meetings and Surgery One patients onto the real tables.
 
-Aprima remains read-only. The hourly worker writes here; portal + native APIs
-prefer cache when fresh, with live Aprima fallback.
+Aprima stays read-only. Meetings land on the meetings list. A Surgery One
+patient lands on that surgeon's card when the card exists. The scratch list is gone.
 """
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
-import re
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
@@ -22,7 +20,7 @@ from .aprima_schedule_service import (
     main_office_site_tokens,
     weekday_range,
 )
-from .models import AprimaCachedAppointment, AprimaSyncState, Surgeon
+from .models import AprimaSyncState, Meeting, ScheduleCardActivity, Surgeon
 from .push import send_native_push_to_surgeon
 from .scheduling_gate_service import practice_today
 from .surgeon_visibility import surgeon_is_visible
@@ -151,21 +149,6 @@ def run_aprima_sync_job(*, notify: bool = True) -> dict:
         db.close()
 
 
-def _serialize_cached(row: AprimaCachedAppointment) -> dict:
-    return {
-        "id": row.appointment_id,
-        "date": row.date.isoformat() if row.date else "",
-        "start": row.start_time.strftime("%H:%M") if row.start_time else "",
-        "end": row.end_time.strftime("%H:%M") if row.end_time else "",
-        "patientName": row.patient_name or "",
-        "surgeonInitials": row.surgeon_initials or "",
-        "serviceSite": row.service_site or "",
-        "appointmentType": row.appointment_type or "",
-        "reason": row.reason_text or "",
-        "room": row.room_text or "",
-    }
-
-
 def cache_is_usable(db: Session) -> bool:
     state = get_sync_state(db)
     if state.last_status != "ok" or not state.last_finished_at:
@@ -173,48 +156,33 @@ def cache_is_usable(db: Session) -> bool:
     return (_utc_now() - state.last_finished_at) <= CACHE_MAX_AGE
 
 
-def cached_patient_appointments(db: Session, start_date: date, end_date: date) -> list[dict]:
+def _aprima_line_fingerprint(db: Session, initials: str, start_date: date, end_date: date) -> str:
+    key = (initials or "").strip().upper()
     rows = (
-        db.query(AprimaCachedAppointment)
+        db.query(ScheduleCardActivity)
+        .join(Surgeon, Surgeon.id == ScheduleCardActivity.surgeon_id)
         .filter(
-            AprimaCachedAppointment.kind == CACHE_KIND_PATIENT,
-            AprimaCachedAppointment.date >= start_date,
-            AprimaCachedAppointment.date <= end_date,
+            ScheduleCardActivity.source_system == "aprima",
+            ScheduleCardActivity.is_active == True,  # noqa: E712
+            ScheduleCardActivity.activity_date >= start_date,
+            ScheduleCardActivity.activity_date <= end_date,
         )
-        .order_by(AprimaCachedAppointment.date, AprimaCachedAppointment.appointment_id)
         .all()
     )
-    return [_serialize_cached(row) for row in rows]
-
-
-def cached_meetings(db: Session, start_date: date, end_date: date) -> list[dict]:
-    rows = (
-        db.query(AprimaCachedAppointment)
-        .filter(
-            AprimaCachedAppointment.kind == CACHE_KIND_MEETING,
-            AprimaCachedAppointment.date >= start_date,
-            AprimaCachedAppointment.date <= end_date,
-        )
-        .order_by(AprimaCachedAppointment.date, AprimaCachedAppointment.appointment_id)
-        .all()
-    )
-    out = []
-    for row in rows:
-        payload = _serialize_cached(row)
-        title = payload.get("reason") or payload.get("appointmentType") or "Meeting"
-        title = re.sub(r"(?i)^meeting\s*[-:]?\s*", "", title).strip() or "Meeting"
-        display_date = payload.get("date") or ""
-        try:
-            display_date = date.fromisoformat(display_date).strftime("%a, %b %-d")
-        except ValueError:
-            pass
-        out.append({
-            **payload,
-            "title": title,
-            "displayDate": display_date,
-            "source": "aprima",
+    mine = []
+    for line in rows:
+        if (line.surgeon.initials or "").strip().upper() != key:
+            continue
+        mine.append({
+            "id": line.source_record_key,
+            "date": line.activity_date.isoformat() if line.activity_date else "",
+            "start": line.start_time.strftime("%H:%M") if line.start_time else "",
+            "end": line.end_time.strftime("%H:%M") if line.end_time else "",
+            "patientName": line.patient_name or "",
+            "appointmentType": line.procedure or "",
+            "room": line.room_text or "",
         })
-    return out
+    return fingerprint_rows(mine)
 
 
 def patient_appointments_for_api(
@@ -223,38 +191,19 @@ def patient_appointments_for_api(
     end_date: date,
     surgeon: Surgeon | None = None,
 ) -> dict:
-    """Native Patients tab: cache-first, live Aprima fallback."""
+    """Native Patients tab reads Aprima live. Saved card lines stay the schedule."""
     warning = None
-    source = "cache"
-    synced_at = None
+    source = "live"
     state = get_sync_state(db)
-    if cache_is_usable(db):
-        rows = cached_patient_appointments(db, start_date, end_date)
-        synced_at = state.last_finished_at.isoformat() if state.last_finished_at else None
-    else:
-        source = "live"
-        try:
-            rows = fetch_patient_appointments(start_date, end_date)
-        except AprimaScheduleUnavailable as exc:
-            stale = cached_patient_appointments(db, start_date, end_date)
-            if stale:
-                rows = stale
-                source = "cache_stale"
-                warning = f"Showing last Aprima sync (live unavailable): {exc}"
-                synced_at = state.last_finished_at.isoformat() if state.last_finished_at else None
-            else:
-                rows = []
-                warning = str(exc)
-        except Exception as exc:  # noqa: BLE001
-            stale = cached_patient_appointments(db, start_date, end_date)
-            if stale:
-                rows = stale
-                source = "cache_stale"
-                warning = f"Showing last Aprima sync (live unavailable): {exc}"
-                synced_at = state.last_finished_at.isoformat() if state.last_finished_at else None
-            else:
-                rows = []
-                warning = f"Aprima temporarily unavailable: {exc}"
+    synced_at = state.last_finished_at.isoformat() if state.last_finished_at else None
+    try:
+        rows = fetch_patient_appointments(start_date, end_date)
+    except AprimaScheduleUnavailable as exc:
+        rows = []
+        warning = str(exc)
+    except Exception as exc:  # noqa: BLE001
+        rows = []
+        warning = f"Aprima temporarily unavailable: {exc}"
 
     if surgeon is not None:
         rows = [row for row in rows if appointment_belongs_to_surgeon(row, surgeon)]
@@ -269,7 +218,7 @@ def patient_appointments_for_api(
 
 
 def main_office_patients_by_weekday(db: Session, anchor: date | None = None) -> dict:
-    """Dashboard Surgery One week — cache-first, any clinic/hospital site."""
+    """Dashboard Surgery One week from the live Aprima pull."""
     week_start, week_end = weekday_range(anchor)
     tokens = main_office_site_tokens()
     payload = patient_appointments_for_api(db, week_start, week_end, surgeon=None)
@@ -329,45 +278,51 @@ def main_office_patients_by_weekday(db: Session, anchor: date | None = None) -> 
 
 
 def meetings_for_admin(db: Session, start_date: date, end_date: date) -> dict:
-    """Admin Meetings page Aprima merge — cache-first."""
+    """Admin Meetings page reads Aprima rows saved on the meetings list."""
     state = get_sync_state(db)
-    if cache_is_usable(db):
-        meetings = cached_meetings(db, start_date, end_date)
-        return {
-            "range": {"start": start_date.isoformat(), "end": end_date.isoformat()},
-            "meetings": meetings,
-            "warning": None,
-            "source": "cache",
-            "syncedAt": state.last_finished_at.isoformat() if state.last_finished_at else None,
-            "fingerprint": state.content_fingerprint or "",
-        }
-    live = fetch_aprima_meetings(start_date, end_date)
-    if live.get("warning") and not (live.get("meetings") or []):
-        stale = cached_meetings(db, start_date, end_date)
-        if stale:
-            return {
-                "range": {"start": start_date.isoformat(), "end": end_date.isoformat()},
-                "meetings": stale,
-                "warning": f"Showing last Aprima sync (live unavailable): {live.get('warning')}",
-                "source": "cache_stale",
-                "syncedAt": state.last_finished_at.isoformat() if state.last_finished_at else None,
-                "fingerprint": state.content_fingerprint or "",
-            }
+    saved = (
+        db.query(Meeting)
+        .filter(
+            Meeting.source_system == "aprima",
+            Meeting.date >= start_date,
+            Meeting.date <= end_date,
+        )
+        .order_by(Meeting.date, Meeting.start_time, Meeting.id)
+        .all()
+    )
+    meetings = []
+    for meeting in saved:
+        attendee = next((row for row in (meeting.attendees or []) if row.surgeon), None)
+        surgeon = attendee.surgeon if attendee else None
+        day_text = meeting.date.isoformat() if meeting.date else ""
+        try:
+            display_date = meeting.date.strftime("%a, %b %-d") if meeting.date else ""
+        except ValueError:
+            display_date = day_text
+        meetings.append({
+            "id": meeting.source_record_key or str(meeting.id),
+            "date": day_text,
+            "start": meeting.start_time.strftime("%H:%M") if meeting.start_time else "",
+            "end": meeting.end_time.strftime("%H:%M") if meeting.end_time else "",
+            "title": meeting.title or "Meeting",
+            "displayDate": display_date,
+            "source": "aprima",
+            "surgeonInitials": surgeon.initials if surgeon else "",
+            "surgeonName": surgeon.full_name if surgeon else "",
+            "serviceSite": meeting.location_text or "",
+            "room": "",
+            "reason": meeting.notes or "",
+            "patientName": "",
+            "appointmentType": "",
+        })
     return {
-        **live,
-        "source": "live",
-        "syncedAt": None,
+        "range": {"start": start_date.isoformat(), "end": end_date.isoformat()},
+        "meetings": meetings,
+        "warning": None,
+        "source": "schedule",
+        "syncedAt": state.last_finished_at.isoformat() if state.last_finished_at else None,
         "fingerprint": state.content_fingerprint or "",
     }
-
-
-def _surgeon_fingerprint(rows: list[dict], initials: str) -> str:
-    key = (initials or "").strip().upper()
-    mine = [
-        row for row in rows
-        if (row.get("surgeonInitials") or "").strip().upper() == key
-    ]
-    return fingerprint_rows(mine)
 
 
 def run_aprima_sync(
@@ -376,7 +331,7 @@ def run_aprima_sync(
     days_ahead: int = DEFAULT_SYNC_DAYS_AHEAD,
     notify: bool = True,
 ) -> dict:
-    """Pull Aprima into CAL cache. Never writes to Aprima."""
+    """Pull Aprima onto meetings and card lines. Never writes to Aprima."""
     state = get_sync_state(db)
     prior_fingerprint = state.content_fingerprint or ""
     started = _utc_now()
@@ -425,80 +380,64 @@ def run_aprima_sync(
         initials = (surgeon.initials or "").strip().upper()
         if not initials:
             continue
-        existing = cached_patient_appointments(db, window_start, window_end)
-        previous_patient_fp[initials] = _surgeon_fingerprint(existing, initials)
+        previous_patient_fp[initials] = _aprima_line_fingerprint(
+            db, initials, window_start, window_end
+        )
 
     now = _utc_now()
-    seen_ids: set[str] = set()
+    seen_patients: set[str] = set()
+    seen_meetings: set[str] = set()
 
-    def upsert(kind: str, rows: list[dict]) -> None:
+    def upsert(kind: str, rows: list[dict], seen: set[str]) -> None:
         from .schedule_activity_normalization import normalize_aprima_payload
 
         for row in rows:
             appt_id = str(row.get("id") or "").strip()
             if not appt_id:
                 continue
-            day_text = row.get("date") or ""
             try:
-                day = date.fromisoformat(day_text)
+                date.fromisoformat(row.get("date") or "")
             except ValueError:
                 continue
-            seen_ids.add(appt_id)
-            digest = row_content_hash(row)
-            existing = db.get(AprimaCachedAppointment, appt_id)
-            payload = json.dumps(row, separators=(",", ":"), sort_keys=True)
-            if existing:
-                existing.kind = kind
-                existing.date = day
-                existing.surgeon_initials = (row.get("surgeonInitials") or "")[:16]
-                existing.content_hash = digest
-                existing.payload_json = payload
-                existing.synced_at = now
-                normalize_aprima_payload(db, existing, row)
-            else:
-                cached = AprimaCachedAppointment(
-                    appointment_id=appt_id,
-                    kind=kind,
-                    date=day,
-                    surgeon_initials=(row.get("surgeonInitials") or "")[:16],
-                    content_hash=digest,
-                    payload_json=payload,
-                    synced_at=now,
-                )
-                db.add(cached)
-                normalize_aprima_payload(db, cached, row)
+            seen.add(appt_id)
+            normalize_aprima_payload(db, row, kind=kind)
 
-    upsert(CACHE_KIND_PATIENT, patients)
-    upsert(CACHE_KIND_MEETING, meeting_rows)
-    # Flush date moves before out-of-window SQL delete. Otherwise synchronize_session=False
-    # deletes the old DB row while the session still holds a dirty UPDATE → StaleDataError.
+    upsert(CACHE_KIND_PATIENT, patients, seen_patients)
+    upsert(CACHE_KIND_MEETING, meeting_rows, seen_meetings)
+    # Flush moves before the SQL delete so a meeting that changed date is not removed.
     db.flush()
 
-    window_rows = (
-        db.query(AprimaCachedAppointment)
-        .filter(
-            AprimaCachedAppointment.date >= window_start,
-            AprimaCachedAppointment.date <= window_end,
-        )
-        .all()
+    quiet_lines = db.query(ScheduleCardActivity).filter(
+        ScheduleCardActivity.source_system == "aprima",
+        ScheduleCardActivity.activity_date >= window_start,
+        ScheduleCardActivity.activity_date <= window_end,
     )
-    for row in window_rows:
-        if row.appointment_id not in seen_ids:
-            from .models import ScheduleCardActivity
-            db.query(ScheduleCardActivity).filter(
-                ScheduleCardActivity.source_system == "aprima",
-                ScheduleCardActivity.source_record_key == row.appointment_id,
-            ).update({ScheduleCardActivity.is_active: False}, synchronize_session=False)
-            db.delete(row)
+    if seen_patients:
+        quiet_lines = quiet_lines.filter(
+            ~ScheduleCardActivity.source_record_key.in_(list(seen_patients))
+        )
+    quiet_lines.update({ScheduleCardActivity.is_active: False}, synchronize_session=False)
 
-    stale_outside = db.query(AprimaCachedAppointment).filter(
-        (AprimaCachedAppointment.date < window_start) | (AprimaCachedAppointment.date > window_end)
+    quiet_meetings = db.query(Meeting).filter(
+        Meeting.source_system == "aprima",
+        Meeting.date >= window_start,
+        Meeting.date <= window_end,
     )
-    if seen_ids:
-        stale_outside = stale_outside.filter(
-            ~AprimaCachedAppointment.appointment_id.in_(list(seen_ids))
+    if seen_meetings:
+        quiet_meetings = quiet_meetings.filter(
+            ~Meeting.source_record_key.in_(list(seen_meetings))
         )
-    stale_outside.delete(synchronize_session=False)
+    quiet_meetings.delete(synchronize_session=False)
+    outside_meetings = db.query(Meeting).filter(
+        Meeting.source_system == "aprima",
+        (Meeting.date < window_start) | (Meeting.date > window_end),
+    )
+    if seen_meetings:
+        outside_meetings = outside_meetings.filter(
+            ~Meeting.source_record_key.in_(list(seen_meetings))
+        )
+    outside_meetings.delete(synchronize_session=False)
+    db.flush()
 
     all_fp = fingerprint_rows(patients + meeting_rows)
     state.last_finished_at = now
@@ -520,7 +459,7 @@ def run_aprima_sync(
             initials = (surgeon.initials or "").strip().upper()
             if not initials:
                 continue
-            new_fp = _surgeon_fingerprint(patients, initials)
+            new_fp = _aprima_line_fingerprint(db, initials, window_start, window_end)
             old_fp = previous_patient_fp.get(initials, "")
             if new_fp != old_fp:
                 changed_surgeons.append(initials)

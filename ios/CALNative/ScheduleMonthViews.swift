@@ -44,7 +44,7 @@ private struct MonthDotLegend: View {
       legendItem("O", "OR")
       legendItem("M", "Meeting")
       Spacer(minLength: 0)
-      Text("Call WG · ALT under date")
+      Text("Call WG ALT under date, backup bold")
         .foregroundStyle(.secondary)
     }
     .font(.caption2)
@@ -112,6 +112,8 @@ private struct MonthHeatmapCell: View {
 
   private var wg: String { cell.callInitials(group: "WG") }
   private var alt: String { cell.callInitials(group: "ALT") }
+  private var wgBackup: String { cell.backupCallInitials(group: "WG") }
+  private var altBackup: String { cell.backupCallInitials(group: "ALT") }
 
   var body: some View {
     Button(action: selectAction) {
@@ -131,14 +133,8 @@ private struct MonthHeatmapCell: View {
         }
         .frame(maxWidth: .infinity)
 
-        HStack(spacing: 2) {
-          MonthCallInitials(text: wg)
-          Text("·")
-            .font(.system(.caption2, design: .monospaced))
-            .foregroundStyle(ClinicalPalette.muted.opacity(wg.isEmpty && alt.isEmpty ? 0 : 0.55))
-          MonthCallInitials(text: alt)
-        }
-        .frame(maxWidth: .infinity)
+        MonthCallInitials(groups: [(wg, wgBackup), (alt, altBackup)])
+          .frame(maxWidth: .infinity)
       }
       .padding(.horizontal, 2)
       .padding(.vertical, 5)
@@ -163,15 +159,40 @@ private struct MonthHeatmapCell: View {
   }
 }
 
+/// Call initials under the date: each group's primary, then its backup in bold ("LW JD **NF**").
 private struct MonthCallInitials: View {
-  let text: String
+  let groups: [(primary: String, backup: String)]
+
+  private var line: Text {
+    var parts: [Text] = []
+    for group in groups {
+      if !group.primary.isEmpty {
+        parts.append(
+          Text(group.primary)
+            .fontWeight(.semibold)
+            .foregroundColor(.secondary)
+        )
+      }
+      if !group.backup.isEmpty {
+        parts.append(
+          Text(group.backup)
+            .fontWeight(.black)
+            .foregroundColor(ClinicalPalette.ink)
+        )
+      }
+    }
+    guard var joined = parts.first else { return Text(" ") }
+    for part in parts.dropFirst() {
+      joined = joined + Text(" ") + part
+    }
+    return joined
+  }
 
   var body: some View {
-    Text(text.isEmpty ? " " : text)
-      .font(.system(.caption2, design: .monospaced).weight(.semibold))
-      .foregroundStyle(.secondary)
+    line
+      .font(.system(.caption2, design: .monospaced))
       .lineLimit(1)
-      .minimumScaleFactor(0.65)
+      .minimumScaleFactor(0.5)
       .multilineTextAlignment(.center)
   }
 }

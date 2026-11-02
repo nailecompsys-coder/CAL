@@ -523,11 +523,21 @@ struct MonthCell: Identifiable {
   var pmCodes: [PeriodCode] = []
 
   /// On-call initials for one call group ("WG" / "ALT"); the covering surgeon when covered.
+  /// `isBackup` only means the viewer is that rotation's backup, so it must not hide the chip.
   func callInitials(group prefix: String) -> String {
-    assignments
-      .filter { !$0.isBackup && Self.matchesCallGroup($0, prefix: prefix) }
-      .map { $0.isCovered ? ($0.coveringInitials ?? $0.surgeon) : $0.surgeon }
-      .first ?? ""
+    callAssignment(group: prefix)
+      .map { $0.isCovered ? ($0.coveringInitials ?? $0.surgeon) : $0.surgeon } ?? ""
+  }
+
+  /// Backup on-call initials for one call group, or "" when the rotation has no backup.
+  func backupCallInitials(group prefix: String) -> String {
+    let value = callAssignment(group: prefix)?.backupInitials?
+      .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    return value
+  }
+
+  private func callAssignment(group prefix: String) -> ScheduleAssignment? {
+    assignments.first { Self.matchesCallGroup($0, prefix: prefix) }
   }
 
   private static func matchesCallGroup(_ assignment: ScheduleAssignment, prefix: String) -> Bool {

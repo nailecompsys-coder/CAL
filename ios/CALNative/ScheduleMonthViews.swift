@@ -44,7 +44,7 @@ private struct MonthDotLegend: View {
       legendItem("O", "OR")
       legendItem("M", "Meeting")
       Spacer(minLength: 0)
-      Text("Call WG ALT under date, backup bold")
+      Text("Call WG · ALT under date, backup bold")
         .foregroundStyle(.secondary)
     }
     .font(.caption2)
@@ -159,33 +159,40 @@ private struct MonthHeatmapCell: View {
   }
 }
 
-/// Call initials under the date: each group's primary, then its backup in bold ("LW JD **NF**").
+/// Call initials under the date, WG first then ALT (positional).
+/// No backup that day: the original "WG · ALT" with the separator.
+/// A backup that day: no separator; each group's primary then its backup in bold ("LW JD **NF**").
+/// An empty group shows "--" in backup mode so the remaining initials keep their position.
 private struct MonthCallInitials: View {
   let groups: [(primary: String, backup: String)]
 
+  private var hasBackup: Bool { groups.contains { !$0.backup.isEmpty } }
+  private var allEmpty: Bool { groups.allSatisfy { $0.primary.isEmpty && $0.backup.isEmpty } }
+
+  private func primaryText(_ value: String) -> Text {
+    Text(value.isEmpty ? (hasBackup ? "--" : " ") : value)
+      .fontWeight(.semibold)
+      .foregroundColor(.secondary)
+  }
+
   private var line: Text {
-    var parts: [Text] = []
+    if allEmpty { return Text(" ") }
+    var joined: Text?
     for group in groups {
-      if !group.primary.isEmpty {
-        parts.append(
-          Text(group.primary)
-            .fontWeight(.semibold)
-            .foregroundColor(.secondary)
-        )
-      }
+      var part = primaryText(group.primary)
       if !group.backup.isEmpty {
-        parts.append(
-          Text(group.backup)
-            .fontWeight(.black)
-            .foregroundColor(ClinicalPalette.ink)
-        )
+        part = part + Text(" ") + Text(group.backup).fontWeight(.black).foregroundColor(ClinicalPalette.ink)
+      }
+      if let prev = joined {
+        let separator = hasBackup
+          ? Text(" ")
+          : Text(" · ").foregroundColor(ClinicalPalette.muted.opacity(0.55))
+        joined = prev + separator + part
+      } else {
+        joined = part
       }
     }
-    guard var joined = parts.first else { return Text(" ") }
-    for part in parts.dropFirst() {
-      joined = joined + Text(" ") + part
-    }
-    return joined
+    return joined ?? Text(" ")
   }
 
   var body: some View {

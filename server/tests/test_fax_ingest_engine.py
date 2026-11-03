@@ -16,6 +16,7 @@ from app.models import (
     FaxIngestCandidate,
     FaxIngestCoverage,
     FaxRowDecision,
+    FaxRoomCode,
     Location,
     ORBlockAssignment,
     ORBlockInstance,
@@ -149,13 +150,31 @@ class FaxIngestEngineTest(unittest.TestCase):
             [(self.surgeon.id, date(2026, 9, 16))],
         )
 
-    def test_generic_room_on_na_is_reviewed_not_assigned(self):
+    def test_generic_room_on_na_is_placed_not_assigned(self):
+        # Don (Oct 29): NA = open time; placed on the card and flagged, card untouched.
         result = stage_reviewed_rows(self.db, external_fax_id=169, source_label="Fax 169", rows=[self.row(start_time=time(13, 30), room="AHMGGENSRG")])
         self.db.commit()
         decision = self.db.query(FaxRowDecision).one()
-        self.assertEqual(result["decisions"], {"unresolved": 1})
-        self.assertEqual(decision.reason_code, "no_block_for_facility")
+        self.assertEqual(result["decisions"], {"ready_with_warning": 1})
+        self.assertEqual(decision.reason_code, "placed_on_na_card")
         self.assertIsNone(decision.schedule_card.effective_location_id)
+
+    def test_placeholder_room_on_na_card_is_placed_and_flagged(self):
+        # Fax 371: CLMMFLGS rows on CJ's NA card (no location, no block) were held.
+        self.assertEqual(self.db.get(FaxRoomCode, "CLMMFLGS").kind, "placeholder")
+        result = stage_reviewed_rows(
+            self.db, external_fax_id=371, source_label="Fax 371",
+            rows=[self.row(start_time=time(13, 0), room="CLMMFLGS", row_type="clinic"),
+                  self.row(start_time=time(13, 10), room="CLMMFLGS", row_type="clinic", patient_name="Two, Patient")],
+        )
+        self.db.commit()
+        decisions = self.db.query(FaxRowDecision).all()
+        self.assertEqual(result["decisions"], {"ready_with_warning": 2})
+        self.assertEqual({d.reason_code for d in decisions}, {"placed_on_na_card"})
+        card = decisions[0].schedule_card
+        self.assertEqual((card.session, card.effective_state), ("pm", "na"))
+        self.assertIsNone(card.effective_location_id)
+        self.assertEqual(self.db.query(ScheduleCard).count(), 10)
 
     def test_placeholder_room_uses_the_block_not_an_earlier_room(self):
         self._block(self.ap_location, time(12, 0), time(17, 0))
@@ -250,7 +269,7 @@ class FaxIngestEngineTest(unittest.TestCase):
         staged = self.db.query(FaxIngestRow).one()
         self.assertIsNone(staged.source_location_id)
         self.assertIsNone(staged.extraction_flags)
-        self.assertEqual(self.db.query(FaxRowDecision).one().reason_code, "no_block_for_facility")
+        self.assertEqual(self.db.query(FaxRowDecision).one().reason_code, "placed_on_na_card")
 
     def test_two_blocks_leave_the_hospital_blank(self):
         self._block(self.location, time(7, 0), time(12, 0))

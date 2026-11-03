@@ -122,7 +122,7 @@ SELECT l.*,
          WHEN schedule_card_id IS NULL THEN 'unresolved'
          -- Don (Oct 29): an NA card is OPEN time. A placeholder-room row on an existing
          -- NA card with no location is placed on that card and flagged, never held.
-         WHEN source_location_id IS NULL AND effective_state = 'na' AND room_is_placeholder AND effective_location_id IS NULL AND baseline_location_id IS NULL THEN 'ready_with_warning'
+         WHEN source_location_id IS NULL AND effective_state = 'na' AND (room_is_placeholder OR trim(COALESCE(room_raw, '')) = '') AND effective_location_id IS NULL AND baseline_location_id IS NULL THEN 'ready_with_warning'
          WHEN source_location_id IS NULL THEN 'unresolved'
          WHEN effective_state = 'off' THEN 'ready_with_warning'
          WHEN COALESCE(trim(extraction_flags), '') <> '' OR CAST(strftime('%w', case_date) AS INTEGER) IN (0, 6) OR (room_location_id IS NULL AND block_location_count > 1) OR (room_location_id IS NULL AND NOT room_is_placeholder AND block_location_count = 1 AND COALESCE(effective_location_id, baseline_location_id) IS NOT NULL AND block_location_id <> COALESCE(effective_location_id, baseline_location_id)) THEN 'ready_with_warning'
@@ -133,7 +133,7 @@ SELECT l.*,
          WHEN surgeon_id IS NULL THEN 'unknown_surgeon'
          WHEN start_time IS NULL THEN 'missing_time'
          WHEN schedule_card_id IS NULL THEN 'missing_scaffold'
-         WHEN source_location_id IS NULL AND effective_state = 'na' AND room_is_placeholder AND effective_location_id IS NULL AND baseline_location_id IS NULL THEN 'placed_on_na_card'
+         WHEN source_location_id IS NULL AND effective_state = 'na' AND (room_is_placeholder OR trim(COALESCE(room_raw, '')) = '') AND effective_location_id IS NULL AND baseline_location_id IS NULL THEN 'placed_on_na_card'
          WHEN source_location_id IS NULL THEN 'no_block_for_facility'
          WHEN effective_state = 'off' THEN 'off_collision'
          WHEN COALESCE(trim(extraction_flags), '') <> '' THEN 'extraction_flagged'

@@ -212,7 +212,7 @@ SELECT row.id, resolution.schedule_card_id,
          WHEN 'missing_time' THEN 'The extractor handback has no usable start time.'
          WHEN 'missing_scaffold' THEN 'The permanent AM/PM card is missing; ingest cannot create one.'
          WHEN 'block_facility_unclear' THEN 'More than one assigned block fits this time; placed at the card location and flagged.'
-         WHEN 'placed_on_na_card' THEN 'Placeholder room on an existing NA (open) card with no location; placed on that card and flagged. Not a conflict.'
+         WHEN 'placed_on_na_card' THEN 'Placeholder or blank room on an existing NA (open) card with no location; placed on that card and flagged. Not a conflict.'
          WHEN 'no_block_for_facility' THEN 'No room, block or card location establishes the facility; held.'
          WHEN 'extraction_flagged' THEN 'The extractor flagged a doubt (procedure, room, label or OCR); placed and flagged, never held.'
          ELSE 'SQL resolved this row to the existing permanent card.'

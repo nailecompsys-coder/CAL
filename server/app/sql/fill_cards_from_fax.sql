@@ -18,7 +18,51 @@
 -- line keeps an MRN it already has; a null MRN is filled. A null incoming
 -- value does not erase a stored one.
 -- Statements are split on a line that is exactly: -- @@
+-- A deactivated bracketed duplicate may already own this fax's source key.
+-- That key would make the upsert turn the duplicate back on and skip the
+-- active line. Move the key aside when an active twin is the same patient
+-- on the same card, date, and start time. The duplicate stays inactive.
+-- The rekey below then gives the key to the active line.
 
+UPDATE schedule_card_activities
+SET source_record_key = source_record_key || '|inactive-' || CAST(id AS TEXT)
+WHERE source_system = 'fax'
+  AND is_active IS NOT TRUE
+  AND id IN (
+      SELECT inactive.id
+      FROM schedule_card_activities inactive
+      JOIN fax_ingest_rows fax_row
+        ON fax_row.surgeon_id = inactive.surgeon_id
+       AND fax_row.case_date = inactive.activity_date
+       AND cal_fax_name_key(inactive.identity_key) = cal_fax_name_key(
+           COALESCE(fax_row.patient_name, '') || '|' ||
+           CASE WHEN fax_row.start_time IS NULL THEN '' ELSE SUBSTR(CAST(fax_row.start_time AS TEXT), 1, 8) END ||
+           '|' || fax_row.row_type
+       )
+      JOIN fax_ingest_rows_applicable applicable ON applicable.fax_row_id = fax_row.id
+      JOIN fax_ingest_runs run ON run.id = fax_row.run_id
+      JOIN fax_documents document ON document.id = run.fax_document_id
+      WHERE applicable.run_id = :run_id
+        AND inactive.source_system = 'fax'
+        AND inactive.is_active IS NOT TRUE
+        AND inactive.source_record_key = CAST(document.external_fax_id AS TEXT) || '|' || fax_row.normalized_key
+        AND EXISTS (
+            SELECT 1
+            FROM schedule_card_activities active_line
+            WHERE active_line.source_system = 'fax'
+              AND active_line.is_active = TRUE
+              AND active_line.id <> inactive.id
+              AND active_line.schedule_card_id = inactive.schedule_card_id
+              AND active_line.activity_date = inactive.activity_date
+              AND (
+                  SUBSTR(CAST(active_line.start_time AS TEXT), 1, 8)
+                      = SUBSTR(CAST(inactive.start_time AS TEXT), 1, 8)
+                  OR (active_line.start_time IS NULL AND inactive.start_time IS NULL)
+              )
+              AND cal_fax_name_key(active_line.identity_key) = cal_fax_name_key(inactive.identity_key)
+        )
+  )
+-- @@
 UPDATE schedule_card_activities
 SET source_record_key = (
     SELECT CAST(document.external_fax_id AS TEXT) || '|' || fax_row.normalized_key
@@ -117,7 +161,29 @@ ON CONFLICT (source_system, source_record_key) DO UPDATE SET
     fax_ingest_row_id = excluded.fax_ingest_row_id,
     source_fax_id = excluded.source_fax_id,
     identity_key = excluded.identity_key,
-    is_active = TRUE,
+    -- A deactivated duplicate stays inactive when its active twin is on the
+    -- same card, date, and start time. Any other conflict is the line we mean
+    -- to keep, and it stays active.
+    is_active = CASE
+        WHEN schedule_card_activities.is_active IS NOT TRUE
+         AND EXISTS (
+             SELECT 1
+             FROM schedule_card_activities active_line
+             WHERE active_line.source_system = schedule_card_activities.source_system
+               AND active_line.is_active = TRUE
+               AND active_line.id <> schedule_card_activities.id
+               AND active_line.schedule_card_id = schedule_card_activities.schedule_card_id
+               AND active_line.activity_date = schedule_card_activities.activity_date
+               AND (
+                   SUBSTR(CAST(active_line.start_time AS TEXT), 1, 8)
+                       = SUBSTR(CAST(schedule_card_activities.start_time AS TEXT), 1, 8)
+                   OR (active_line.start_time IS NULL AND schedule_card_activities.start_time IS NULL)
+               )
+               AND cal_fax_name_key(active_line.identity_key) = cal_fax_name_key(schedule_card_activities.identity_key)
+         )
+        THEN schedule_card_activities.is_active
+        ELSE TRUE
+    END,
     -- Fill a missing MRN only. Never replace or clear one already stored.
     mrn = COALESCE(schedule_card_activities.mrn, excluded.mrn)
 -- @@

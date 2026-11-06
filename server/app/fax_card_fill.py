@@ -14,7 +14,7 @@ _STATEMENTS = [
     for part in Path(__file__).with_name("sql").joinpath("fill_cards_from_fax.sql").read_text().split("\n-- @@\n")
     if part.strip()
 ]
-_NEWER_FAX_WINS, _FILL, _ALREADY, _ACTIVE = _STATEMENTS
+_PARK_STALE_KEY, _NEWER_FAX_WINS, _FILL, _ALREADY, _ACTIVE = _STATEMENTS
 
 
 def fill_cards_from_fax_lines(db: Session, *, run_id: int) -> dict[str, int]:
@@ -25,6 +25,7 @@ def fill_cards_from_fax_lines(db: Session, *, run_id: int) -> dict[str, int]:
     """
     params = {"run_id": run_id}
     ensure_cal_fax_name_key(db)
+    db.execute(text(_PARK_STALE_KEY), params)
     db.execute(text(_NEWER_FAX_WINS), params)
     already = int(db.execute(text(_ALREADY), params).scalar() or 0)
     db.execute(text(_FILL), params)

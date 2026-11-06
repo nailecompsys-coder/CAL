@@ -34,6 +34,10 @@ Desk may send an optional string field `mrn` on each row of `POST /api/ingest/vi
 
 Missing, blank, or garbled values are stored as NULL. That does not change surgeon matching, AM/PM placement, holds, flags, card writes, deactivation, or notifications.
 
+The same digits are sometimes printed inside the patient name, either at the end (`Last, First [00123456]`) or embedded (`Last [00123456] First`). Visual-schedule ingest removes every `\s*\[\d+\]` group from the name before the candidate, the fax row, and the card line are stored. The name keeps its printed case. When the row's `mrn` is empty, those digits fill it (the last group of 1 to 64 digits if several are present, leading zeros kept). An `mrn` that already has digits is left as it is, on the row and on a matched card line.
+
+Identity comparison applies that same removal, then folds case and repeated spaces, to both the incoming row and the existing line. `Last, First [00123456]` and `Last, First` are one line, whichever side still has the brackets. A line written earlier with the brackets still in `identity_key` is updated in place. A missing MRN does not hold the row or add a flag. Surgeon, session, room, card, weekend, and OFF rules are unchanged.
+
 CAL copies the normalized digits through three columns:
 
 | Table | Column | Role |
@@ -42,7 +46,7 @@ CAL copies the normalized digits through three columns:
 | `fax_ingest_rows` | `mrn` | Scratch reading used by the fill. Indexed. |
 | `schedule_card_activities` | `mrn` | Line RVU and the hernia tracker look up. Indexed. |
 
-Schema change: `server/app/migrate_fax_mrn.py` (additive `TEXT` column and index only). Apply fills `schedule_card_activities.mrn` when the matched line's value is NULL. A later fax never overwrites or clears an MRN already stored. MRN is not part of `identity_key` or `normalized_key`. The Send-to-Calendar photo (`fax_restore_lines.mrn`) copies the previous value so undo puts that value back.
+Schema change: `server/app/migrate_fax_mrn.py` (additive `TEXT` column and index only). Apply fills `schedule_card_activities.mrn` when the matched line's value is NULL. A later fax never overwrites or clears an MRN already stored. The digits are not part of `identity_key` or `normalized_key`; a bracketed copy of them in the patient name is removed before `identity_key` is built. The Send-to-Calendar photo (`fax_restore_lines.mrn`) copies the previous value so undo puts that value back.
 
 Lookup by MRN. Bind `:mrn` as text (`00123456`, not an integer):
 

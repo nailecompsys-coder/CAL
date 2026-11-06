@@ -381,6 +381,9 @@ def run_migration() -> None:
         seed_fax_room_codes(conn)
         from .migrate_fax_mrn import ensure_mrn_columns
         ensure_mrn_columns(conn)
+        from .fax_ingest_engine import CAL_FAX_NAME_SQL
+        for statement in CAL_FAX_NAME_SQL:
+            conn.execute(text(statement))
         resolution = Path(__file__).with_name("sql").joinpath("resolve_fax_candidates.postgresql.sql").read_text()
         conn.execute(text("DROP VIEW IF EXISTS fax_ingest_candidate_resolutions"))
         conn.execute(text(f"CREATE VIEW fax_ingest_candidate_resolutions AS {resolution}"))

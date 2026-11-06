@@ -9,14 +9,14 @@ from __future__ import annotations
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from .fax_ingest_engine import ReviewedFaxRow, stage_reviewed_rows
+from .fax_ingest_engine import ReviewedFaxRow, ensure_cal_fax_name_key, stage_reviewed_rows
 
 SAME_ITEM = """
     a.is_active
     AND a.surgeon_id = r.surgeon_id
     AND a.activity_date = r.case_date
     AND a.activity_type = r.row_type
-    AND lower(trim(a.patient_name)) = lower(trim(r.patient_name))
+    AND cal_fax_name_key(a.patient_name) = cal_fax_name_key(r.patient_name)
     AND (
         substr(CAST(a.start_time AS TEXT), 1, 8) = substr(CAST(r.start_time AS TEXT), 1, 8)
         OR (a.start_time IS NULL AND r.start_time IS NULL)
@@ -67,6 +67,7 @@ def _plain(row) -> dict:
 
 def preview_reviewed_rows(db: Session, *, external_fax_id: int, source_label: str, rows: list[ReviewedFaxRow]) -> dict:
     try:
+        ensure_cal_fax_name_key(db)
         staged = stage_reviewed_rows(db, external_fax_id=external_fax_id, source_label=source_label, rows=rows)
         params = {"run_id": staged["runId"]}
         fax_rows = [_plain(row) for row in db.execute(text(FAX_ROWS_SQL), params).mappings()]

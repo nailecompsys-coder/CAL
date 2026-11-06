@@ -12,7 +12,8 @@ from dataclasses import dataclass, replace
 from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import text
+from sqlalchemy import event, text
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from .models import FaxDocument, FaxIngestCandidate, FaxIngestRun
@@ -171,6 +172,106 @@ def _text(value: str | None) -> str:
 
 
 _MRN_DIGITS = re.compile(r"^\d{1,64}$")
+# Trailing or embedded. The digits are an MRN; the brackets are not part of the name.
+_BRACKETED_MRN = re.compile(r"\s*\[([0-9]+)\]")
+
+# Postgres 16. SQLite tests register the same names as Python functions.
+# Display keeps the printed case. The comparison key also folds case.
+# name_key calls display_name, so display_name has to be created first.
+CAL_FAX_NAME_SQL = (
+    r"""
+CREATE OR REPLACE FUNCTION cal_fax_display_name(raw text) RETURNS text
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT btrim(regexp_replace(
+    regexp_replace(COALESCE(raw, ''), '\s*\[\d+\]', '', 'g'),
+    '\s+',
+    ' ',
+    'g'
+  ))
+$$
+""",
+    r"""
+CREATE OR REPLACE FUNCTION cal_fax_name_key(raw text) RETURNS text
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT lower(cal_fax_display_name(raw))
+$$
+""",
+)
+
+
+def strip_bracketed_mrn(value: str | None) -> tuple[str, str | None]:
+    """Remove every ``[digits]`` group. Return the cleaned text and the last MRN.
+
+    Groups longer than 64 digits are removed from the text and are not an MRN.
+    Case is preserved. Whitespace left behind is collapsed.
+    """
+    found: list[str] = []
+
+    def capture(match: re.Match[str]) -> str:
+        digits = match.group(1)
+        if len(digits) <= 64:
+            found.append(digits)
+        return ""
+
+    cleaned = _BRACKETED_MRN.sub(capture, value or "")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned, (found[-1] if found else None)
+
+
+def fax_display_name(value: str | None) -> str:
+    """Patient name stored on a line: brackets gone, case preserved."""
+    cleaned, _mrn = strip_bracketed_mrn(value)
+    return cleaned
+
+
+def fax_name_key(value: str | None) -> str:
+    """Identity comparison: strip bracketed MRNs, then case and whitespace."""
+    return fax_display_name(value).lower()
+
+
+def patient_name_and_mrn(patient_name: str | None, mrn: object) -> tuple[str, str | None]:
+    """Store the name without brackets. Fill mrn from those digits only when empty."""
+    clean_name, embedded = strip_bracketed_mrn(patient_name)
+    explicit = normalize_mrn(mrn)
+    if explicit is not None:
+        return clean_name, explicit
+    return clean_name, embedded
+
+
+def _install_sqlite_fax_name_key(dbapi_connection) -> None:
+    create = getattr(dbapi_connection, "create_function", None)
+    if create is None and hasattr(dbapi_connection, "driver_connection"):
+        dbapi_connection = dbapi_connection.driver_connection
+        create = getattr(dbapi_connection, "create_function", None)
+    if create is None:
+        return
+    create("cal_fax_display_name", 1, fax_display_name, deterministic=True)
+    create("cal_fax_name_key", 1, fax_name_key, deterministic=True)
+
+
+def ensure_cal_fax_name_key(db: Session) -> None:
+    """Make ``cal_fax_name_key`` available on this connection."""
+    bind = db.get_bind()
+    if bind is None:
+        return
+    if bind.dialect.name == "sqlite":
+        _install_sqlite_fax_name_key(db.connection().connection)
+        return
+    if bind.dialect.name == "postgresql":
+        for statement in CAL_FAX_NAME_SQL:
+            db.execute(text(statement))
+
+
+@event.listens_for(Engine, "connect")
+def _register_sqlite_fax_name_key(dbapi_connection, _connection_record) -> None:
+    module = type(dbapi_connection).__module__
+    if module != "sqlite3" and not module.startswith("sqlite3."):
+        return
+    _install_sqlite_fax_name_key(dbapi_connection)
 
 
 def normalize_mrn(value: object) -> str | None:
@@ -327,6 +428,9 @@ def stage_reviewed_rows(
         desk_row = row.source_row_number if row.source_row_number is not None else "none"
         if row.page in inherited_pages:
             desk_row = f"{desk_row}:surgeon_inherited_from_page:{inherited_pages[row.page]}"
+        # Brackets are an MRN printed in the name. Store the name without them.
+        # Digits fill mrn only when the row did not already carry one.
+        patient_name, mrn = patient_name_and_mrn(row.patient_name, row.mrn)
         db.add(FaxIngestCandidate(
             run_id=run.id,
             page_number=row.page,
@@ -337,13 +441,14 @@ def stage_reviewed_rows(
             start_time_raw=_raw_time(row.start_time),
             row_type_raw=_text(row.row_type).lower(),
             room_raw=_text(row.room),
-            patient_name_raw=_text(row.patient_name),
+            patient_name_raw=patient_name,
             procedure_raw=_text(row.procedure),
-            mrn=normalize_mrn(row.mrn),
+            mrn=mrn,
             extraction_flags=extraction_flags,
             evidence_ref=f"page:{row.page}:row:{source_row_number}:desk_row:{desk_row}",
         ))
     db.flush()
+    ensure_cal_fax_name_key(db)
     db.execute(text(_MATERIALIZE_ROWS), {"run_id": run.id})
     db.execute(text(_MATERIALIZE_DECISIONS), {"run_id": run.id})
     # SQL owns authoritative coverage. A Desk/OCR header may contain a validly

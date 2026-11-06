@@ -18,7 +18,198 @@
 -- line keeps an MRN it already has; a null MRN is filled. A null incoming
 -- value does not erase a stored one.
 -- Statements are split on a line that is exactly: -- @@
+-- A deactivated bracketed duplicate may already own this fax's source key.
+-- The key is resolved first. When that owner is inactive and an active line
+-- for the same surgeon, date, and patient name exists, move the key aside.
+-- Patient name is compared with cal_fax_name_key, so a bracketed copy and a
+-- clean copy are the same patient. Card, session, and start time are not
+-- required: a card move or a time edit is still that patient. The duplicate
+-- stays inactive. The next statement gives the key to the active line.
 
+UPDATE schedule_card_activities
+SET source_record_key = source_record_key || '|inactive-' || CAST(id AS TEXT)
+WHERE source_system = 'fax'
+  AND is_active IS NOT TRUE
+  AND id IN (
+      SELECT inactive.id
+      FROM schedule_card_activities inactive
+      JOIN fax_ingest_rows fax_row
+        ON fax_row.surgeon_id = inactive.surgeon_id
+       AND fax_row.case_date = inactive.activity_date
+       AND cal_fax_name_key(inactive.patient_name) = cal_fax_name_key(fax_row.patient_name)
+      JOIN fax_ingest_rows_applicable applicable ON applicable.fax_row_id = fax_row.id
+      JOIN fax_ingest_runs run ON run.id = fax_row.run_id
+      JOIN fax_documents document ON document.id = run.fax_document_id
+      WHERE applicable.run_id = :run_id
+        AND inactive.source_system = 'fax'
+        AND inactive.is_active IS NOT TRUE
+        AND inactive.source_record_key = CAST(document.external_fax_id AS TEXT) || '|' || fax_row.normalized_key
+        AND EXISTS (
+            SELECT 1
+            FROM schedule_card_activities active_line
+            WHERE active_line.source_system = 'fax'
+              AND active_line.is_active = TRUE
+              AND active_line.id <> inactive.id
+              AND active_line.surgeon_id = inactive.surgeon_id
+              AND active_line.activity_date = inactive.activity_date
+              AND cal_fax_name_key(active_line.patient_name) = cal_fax_name_key(inactive.patient_name)
+        )
+  )
+-- @@
+-- The parked key is free. Put it on the active twin for that surgeon, date,
+-- and patient name before the upsert, including when that twin already holds
+-- a different source key. When several active lines qualify, prefer the one
+-- whose start time matches this fax, then the inactive line's start time,
+-- then the same activity type, then the same card, then the lowest id.
+-- A different card or session does not leave the update on the inactive copy.
+
+UPDATE schedule_card_activities
+SET source_record_key = (
+    SELECT CAST(document.external_fax_id AS TEXT) || '|' || fax_row.normalized_key
+    FROM fax_ingest_rows_applicable applicable
+    JOIN fax_ingest_rows fax_row ON fax_row.id = applicable.fax_row_id
+    JOIN fax_ingest_runs run ON run.id = fax_row.run_id
+    JOIN fax_documents document ON document.id = run.fax_document_id
+    JOIN schedule_card_activities inactive
+      ON inactive.source_system = 'fax'
+     AND inactive.is_active IS NOT TRUE
+     AND inactive.surgeon_id = fax_row.surgeon_id
+     AND inactive.activity_date = fax_row.case_date
+     AND cal_fax_name_key(inactive.patient_name) = cal_fax_name_key(fax_row.patient_name)
+     AND inactive.source_record_key =
+         CAST(document.external_fax_id AS TEXT) || '|' || fax_row.normalized_key
+         || '|inactive-' || CAST(inactive.id AS TEXT)
+    WHERE applicable.run_id = :run_id
+      AND fax_row.surgeon_id = schedule_card_activities.surgeon_id
+      AND fax_row.case_date = schedule_card_activities.activity_date
+      AND cal_fax_name_key(fax_row.patient_name) = cal_fax_name_key(schedule_card_activities.patient_name)
+      AND (
+          CASE
+            WHEN SUBSTR(CAST(schedule_card_activities.start_time AS TEXT), 1, 8)
+                 = SUBSTR(CAST(fax_row.start_time AS TEXT), 1, 8)
+              OR (schedule_card_activities.start_time IS NULL AND fax_row.start_time IS NULL)
+            THEN '0' ELSE '1'
+          END
+          || CASE
+            WHEN SUBSTR(CAST(schedule_card_activities.start_time AS TEXT), 1, 8)
+                 = SUBSTR(CAST(inactive.start_time AS TEXT), 1, 8)
+              OR (schedule_card_activities.start_time IS NULL AND inactive.start_time IS NULL)
+            THEN '0' ELSE '1'
+          END
+          || CASE WHEN schedule_card_activities.activity_type = fax_row.row_type THEN '0' ELSE '1' END
+          || CASE WHEN schedule_card_activities.schedule_card_id = inactive.schedule_card_id THEN '0' ELSE '1' END
+          || SUBSTR(
+               '0000000000' || CAST(schedule_card_activities.id AS TEXT),
+               LENGTH('0000000000' || CAST(schedule_card_activities.id AS TEXT)) - 9,
+               10
+             )
+      ) = (
+          SELECT MIN(
+              CASE
+                WHEN SUBSTR(CAST(candidate.start_time AS TEXT), 1, 8)
+                     = SUBSTR(CAST(fax_row.start_time AS TEXT), 1, 8)
+                  OR (candidate.start_time IS NULL AND fax_row.start_time IS NULL)
+                THEN '0' ELSE '1'
+              END
+              || CASE
+                WHEN SUBSTR(CAST(candidate.start_time AS TEXT), 1, 8)
+                     = SUBSTR(CAST(inactive.start_time AS TEXT), 1, 8)
+                  OR (candidate.start_time IS NULL AND inactive.start_time IS NULL)
+                THEN '0' ELSE '1'
+              END
+              || CASE WHEN candidate.activity_type = fax_row.row_type THEN '0' ELSE '1' END
+              || CASE WHEN candidate.schedule_card_id = inactive.schedule_card_id THEN '0' ELSE '1' END
+              || SUBSTR(
+                   '0000000000' || CAST(candidate.id AS TEXT),
+                   LENGTH('0000000000' || CAST(candidate.id AS TEXT)) - 9,
+                   10
+                 )
+          )
+          FROM schedule_card_activities candidate
+          WHERE candidate.source_system = 'fax'
+            AND candidate.is_active = TRUE
+            AND candidate.surgeon_id = fax_row.surgeon_id
+            AND candidate.activity_date = fax_row.case_date
+            AND cal_fax_name_key(candidate.patient_name) = cal_fax_name_key(fax_row.patient_name)
+      )
+    ORDER BY fax_row.id
+    LIMIT 1
+)
+WHERE source_system = 'fax'
+  AND is_active = TRUE
+  AND id IN (
+      SELECT candidate.id
+      FROM fax_ingest_rows fax_row
+      JOIN fax_ingest_rows_applicable applicable ON applicable.fax_row_id = fax_row.id
+      JOIN fax_ingest_runs run ON run.id = fax_row.run_id
+      JOIN fax_documents document ON document.id = run.fax_document_id
+      JOIN schedule_card_activities inactive
+        ON inactive.source_system = 'fax'
+       AND inactive.is_active IS NOT TRUE
+       AND inactive.surgeon_id = fax_row.surgeon_id
+       AND inactive.activity_date = fax_row.case_date
+       AND cal_fax_name_key(inactive.patient_name) = cal_fax_name_key(fax_row.patient_name)
+       AND inactive.source_record_key =
+           CAST(document.external_fax_id AS TEXT) || '|' || fax_row.normalized_key
+           || '|inactive-' || CAST(inactive.id AS TEXT)
+      JOIN schedule_card_activities candidate
+        ON candidate.source_system = 'fax'
+       AND candidate.is_active = TRUE
+       AND candidate.surgeon_id = fax_row.surgeon_id
+       AND candidate.activity_date = fax_row.case_date
+       AND cal_fax_name_key(candidate.patient_name) = cal_fax_name_key(fax_row.patient_name)
+       AND (
+           CASE
+             WHEN SUBSTR(CAST(candidate.start_time AS TEXT), 1, 8)
+                  = SUBSTR(CAST(fax_row.start_time AS TEXT), 1, 8)
+               OR (candidate.start_time IS NULL AND fax_row.start_time IS NULL)
+             THEN '0' ELSE '1'
+           END
+           || CASE
+             WHEN SUBSTR(CAST(candidate.start_time AS TEXT), 1, 8)
+                  = SUBSTR(CAST(inactive.start_time AS TEXT), 1, 8)
+               OR (candidate.start_time IS NULL AND inactive.start_time IS NULL)
+             THEN '0' ELSE '1'
+           END
+           || CASE WHEN candidate.activity_type = fax_row.row_type THEN '0' ELSE '1' END
+           || CASE WHEN candidate.schedule_card_id = inactive.schedule_card_id THEN '0' ELSE '1' END
+           || SUBSTR(
+                '0000000000' || CAST(candidate.id AS TEXT),
+                LENGTH('0000000000' || CAST(candidate.id AS TEXT)) - 9,
+                10
+              )
+       ) = (
+           SELECT MIN(
+               CASE
+                 WHEN SUBSTR(CAST(best.start_time AS TEXT), 1, 8)
+                      = SUBSTR(CAST(fax_row.start_time AS TEXT), 1, 8)
+                   OR (best.start_time IS NULL AND fax_row.start_time IS NULL)
+                 THEN '0' ELSE '1'
+               END
+               || CASE
+                 WHEN SUBSTR(CAST(best.start_time AS TEXT), 1, 8)
+                      = SUBSTR(CAST(inactive.start_time AS TEXT), 1, 8)
+                   OR (best.start_time IS NULL AND inactive.start_time IS NULL)
+                 THEN '0' ELSE '1'
+               END
+               || CASE WHEN best.activity_type = fax_row.row_type THEN '0' ELSE '1' END
+               || CASE WHEN best.schedule_card_id = inactive.schedule_card_id THEN '0' ELSE '1' END
+               || SUBSTR(
+                    '0000000000' || CAST(best.id AS TEXT),
+                    LENGTH('0000000000' || CAST(best.id AS TEXT)) - 9,
+                    10
+                  )
+           )
+           FROM schedule_card_activities best
+           WHERE best.source_system = 'fax'
+             AND best.is_active = TRUE
+             AND best.surgeon_id = fax_row.surgeon_id
+             AND best.activity_date = fax_row.case_date
+             AND cal_fax_name_key(best.patient_name) = cal_fax_name_key(fax_row.patient_name)
+       )
+      WHERE applicable.run_id = :run_id
+  )
+-- @@
 UPDATE schedule_card_activities
 SET source_record_key = (
     SELECT CAST(document.external_fax_id AS TEXT) || '|' || fax_row.normalized_key
@@ -117,7 +308,24 @@ ON CONFLICT (source_system, source_record_key) DO UPDATE SET
     fax_ingest_row_id = excluded.fax_ingest_row_id,
     source_fax_id = excluded.source_fax_id,
     identity_key = excluded.identity_key,
-    is_active = TRUE,
+    -- A deactivated duplicate stays inactive when an active line for the same
+    -- surgeon, date, and patient name already exists. Card and start time may
+    -- differ. Any other conflict is the line we mean to keep, and it stays active.
+    is_active = CASE
+        WHEN schedule_card_activities.is_active IS NOT TRUE
+         AND EXISTS (
+             SELECT 1
+             FROM schedule_card_activities active_line
+             WHERE active_line.source_system = schedule_card_activities.source_system
+               AND active_line.is_active = TRUE
+               AND active_line.id <> schedule_card_activities.id
+               AND active_line.surgeon_id = schedule_card_activities.surgeon_id
+               AND active_line.activity_date = schedule_card_activities.activity_date
+               AND cal_fax_name_key(active_line.patient_name) = cal_fax_name_key(schedule_card_activities.patient_name)
+         )
+        THEN schedule_card_activities.is_active
+        ELSE TRUE
+    END,
     -- Fill a missing MRN only. Never replace or clear one already stored.
     mrn = COALESCE(schedule_card_activities.mrn, excluded.mrn)
 -- @@

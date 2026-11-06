@@ -256,9 +256,21 @@ class FaxMrnTest(unittest.TestCase):
         self.assertIn("ADD COLUMN IF NOT EXISTS mrn TEXT", source)
         self.assertNotIn("DROP COLUMN", source)
         self.assertNotIn("DROP TABLE", source)
-        fill = FILL_STATEMENTS[1]
+        fill = next(statement for statement in FILL_STATEMENTS if "ON CONFLICT" in statement)
         self.assertIn("COALESCE(schedule_card_activities.mrn, excluded.mrn)", fill)
         self.assertNotIn("mrn = excluded.mrn", fill)
+        self.assertIn("is_active IS NOT TRUE", fill)
+        parked = next(statement for statement in FILL_STATEMENTS if "|inactive-" in statement)
+        self.assertIn("active_line.is_active = TRUE", parked)
+        self.assertIn("cal_fax_name_key(inactive.patient_name)", parked)
+        self.assertNotIn("active_line.schedule_card_id = inactive.schedule_card_id", parked)
+        self.assertNotIn("active_line.start_time", parked)
+        retarget = next(
+            statement for statement in FILL_STATEMENTS
+            if "|inactive-" in statement and "fax_row.start_time" in statement
+        )
+        self.assertIn("candidate.is_active = TRUE", retarget)
+        self.assertNotIn("is_active = FALSE", "\n".join(FILL_STATEMENTS))
         for name in ("resolve_fax_candidates.postgresql.sql", "resolve_fax_candidates.sqlite.sql"):
             sql = (APP_DIR / "sql" / name).read_text().lower()
             self.assertNotIn("when mrn", sql)
@@ -419,28 +431,30 @@ class FaxMrnTest(unittest.TestCase):
             engine.dispose()
 
 
-    def _seed_prior_line(self, db, patient_name, *, identity_key, mrn=None, fax_id=190, at=time(8, 0)):
-        card = db.query(ScheduleCard).filter_by(date=DAY, session="am").one()
+    def _seed_prior_line(self, db, patient_name, *, identity_key, mrn=None, fax_id=190, at=time(8, 0),
+                         source_record_key=None, is_active=True, procedure="prior pass", session="am"):
+        card = db.query(ScheduleCard).filter_by(date=DAY, session=session).one()
         surgeon = db.query(Surgeon).one()
-        db.add(ScheduleCardActivity(
+        line = ScheduleCardActivity(
             schedule_card_id=card.id,
             surgeon_id=surgeon.id,
             location_id=card.effective_location_id,
             activity_date=DAY,
-            session="am",
+            session=session,
             activity_type="surgical",
             start_time=at,
             patient_name=patient_name,
             mrn=mrn,
-            procedure="prior pass",
+            procedure=procedure,
             source_system="fax",
-            source_record_key=f"{fax_id}|prior",
+            source_record_key=source_record_key or f"{fax_id}|prior",
             source_fax_id=fax_id,
             identity_key=identity_key,
-            is_active=True,
-        ))
+            is_active=is_active,
+        )
+        db.add(line)
         db.commit()
-        return db.query(ScheduleCardActivity).one().id
+        return line.id
 
     def _apply_one(self, db, patient, *, mrn=None, fax=191):
         staged = stage_reviewed_rows(
@@ -549,6 +563,242 @@ class FaxMrnTest(unittest.TestCase):
             self.assertEqual(lines["Sample, Patient"].procedure, "prior pass")
             self.assertEqual(lines["Sample, Patient"].source_fax_id, 190)
             self.assertEqual(lines["Other, Person"].source_fax_id, 191)
+        finally:
+            db.close()
+            engine.dispose()
+
+    def _plant_inactive_twin(self, db, *, run_id, active_mrn=None):
+        """Inactive bracketed copy already owns the incoming source key."""
+        fax_row = db.query(FaxIngestRow).filter_by(run_id=run_id).one()
+        incoming_key = f"191|{fax_row.normalized_key}"
+        active_id = self._seed_prior_line(
+            db,
+            "Sample, Patient",
+            identity_key="sample, patient|08:00:00|surgical",
+            mrn=active_mrn,
+            procedure="prior pass",
+        )
+        inactive_id = self._seed_prior_line(
+            db,
+            "Sample, Patient [00990011]",
+            identity_key="sample, patient [00990011]|08:00:00|surgical",
+            mrn="00990011",
+            fax_id=188,
+            source_record_key=incoming_key,
+            is_active=False,
+            procedure="bracketed copy",
+        )
+        return active_id, inactive_id, incoming_key
+
+    def test_inactive_bracketed_copy_is_not_reactivated(self):
+        engine, db = self._world()
+        try:
+            staged = stage_reviewed_rows(
+                db, external_fax_id=191, source_label="t",
+                source_received_at=datetime(2026, 10, 2, 12, 0),
+                rows=[self._row("Sample, Patient [00112233]", procedure="second pass")],
+            )
+            db.commit()
+            fax_row = db.query(FaxIngestRow).filter_by(run_id=staged["runId"]).one()
+            self.assertEqual(fax_row.patient_name, "Sample, Patient")
+            self.assertEqual(fax_row.mrn, "00112233")
+            self.assertIsNone(fax_row.extraction_flags)
+            active_id, inactive_id, incoming_key = self._plant_inactive_twin(db, run_id=staged["runId"])
+            result = apply_staged_snapshot(db, source_fax_id=191, run_id=staged["runId"])
+            lines = {line.id: line for line in db.query(ScheduleCardActivity).order_by(ScheduleCardActivity.id)}
+            self.assertEqual(set(lines), {active_id, inactive_id})
+            self.assertEqual(result["surgicalCreated"], 0)
+            self.assertEqual(result["linesDeactivated"], 0)
+            active = lines[active_id]
+            inactive = lines[inactive_id]
+            self.assertTrue(active.is_active)
+            self.assertEqual(active.patient_name, "Sample, Patient")
+            self.assertNotIn("[", active.patient_name)
+            self.assertEqual(active.procedure, "second pass")
+            self.assertEqual(active.mrn, "00112233")
+            self.assertEqual(active.source_fax_id, 191)
+            self.assertEqual(active.source_record_key, incoming_key)
+            self.assertFalse(inactive.is_active)
+            self.assertEqual(inactive.patient_name, "Sample, Patient [00990011]")
+            self.assertEqual(inactive.procedure, "bracketed copy")
+            self.assertEqual(inactive.mrn, "00990011")
+            self.assertNotEqual(inactive.source_record_key, incoming_key)
+            self.assertIn("|inactive-", inactive.source_record_key)
+        finally:
+            db.close()
+            engine.dispose()
+
+    def test_active_twin_keeps_its_mrn_when_duplicate_is_inactive(self):
+        engine, db = self._world()
+        try:
+            staged = stage_reviewed_rows(
+                db, external_fax_id=191, source_label="t",
+                source_received_at=datetime(2026, 10, 2, 12, 0),
+                rows=[self._row("Sample, Patient [00112233]", procedure="second pass")],
+            )
+            db.commit()
+            active_id, inactive_id, incoming_key = self._plant_inactive_twin(
+                db, run_id=staged["runId"], active_mrn="00998877",
+            )
+            apply_staged_snapshot(db, source_fax_id=191, run_id=staged["runId"])
+            lines = {line.id: line for line in db.query(ScheduleCardActivity).all()}
+            self.assertEqual(set(lines), {active_id, inactive_id})
+            self.assertEqual(lines[active_id].mrn, "00998877")
+            self.assertEqual(lines[active_id].procedure, "second pass")
+            self.assertTrue(lines[active_id].is_active)
+            self.assertEqual(lines[active_id].source_record_key, incoming_key)
+            self.assertFalse(lines[inactive_id].is_active)
+            self.assertEqual(lines[inactive_id].mrn, "00990011")
+        finally:
+            db.close()
+            engine.dispose()
+
+    def _stage_second_pass(self, db):
+        staged = stage_reviewed_rows(
+            db, external_fax_id=191, source_label="t",
+            source_received_at=datetime(2026, 10, 2, 12, 0),
+            rows=[self._row("Sample, Patient [00112233]", procedure="second pass")],
+        )
+        db.commit()
+        fax_row = db.query(FaxIngestRow).filter_by(run_id=staged["runId"]).one()
+        return staged, f"191|{fax_row.normalized_key}"
+
+    def test_active_twin_on_a_different_card_and_time_is_updated(self):
+        engine, db = self._world()
+        try:
+            staged, incoming_key = self._stage_second_pass(db)
+            active_id = self._seed_prior_line(
+                db, "Sample, Patient",
+                identity_key="sample, patient|13:00:00|surgical",
+                at=time(13, 0),
+                session="pm",
+                source_record_key="190|pm-card",
+                procedure="canonical",
+            )
+            inactive_id = self._seed_prior_line(
+                db, "Sample, Patient [00990011]",
+                identity_key="sample, patient [00990011]|08:00:00|surgical",
+                mrn="00990011",
+                fax_id=188,
+                source_record_key=incoming_key,
+                is_active=False,
+                procedure="bracketed copy",
+            )
+            result = apply_staged_snapshot(db, source_fax_id=191, run_id=staged["runId"])
+            lines = {line.id: line for line in db.query(ScheduleCardActivity).all()}
+            self.assertEqual(set(lines), {active_id, inactive_id})
+            self.assertEqual(result["surgicalCreated"], 0)
+            self.assertEqual(result["linesDeactivated"], 0)
+            active = lines[active_id]
+            inactive = lines[inactive_id]
+            self.assertTrue(active.is_active)
+            self.assertEqual(active.procedure, "second pass")
+            self.assertEqual(active.patient_name, "Sample, Patient")
+            self.assertEqual(active.mrn, "00112233")
+            self.assertEqual(active.source_fax_id, 191)
+            self.assertEqual(active.source_record_key, incoming_key)
+            self.assertEqual(active.session, "am")
+            self.assertEqual(active.start_time, time(8, 0))
+            self.assertFalse(any(line.source_record_key == "190|pm-card" for line in lines.values()))
+            self.assertFalse(inactive.is_active)
+            self.assertEqual(inactive.procedure, "bracketed copy")
+            self.assertEqual(inactive.patient_name, "Sample, Patient [00990011]")
+            self.assertEqual(inactive.mrn, "00990011")
+            self.assertEqual(inactive.session, "am")
+            self.assertIn("|inactive-", inactive.source_record_key)
+        finally:
+            db.close()
+            engine.dispose()
+
+    def test_time_edit_on_the_same_card_updates_the_active_twin(self):
+        engine, db = self._world()
+        try:
+            staged, incoming_key = self._stage_second_pass(db)
+            active_id = self._seed_prior_line(
+                db, "Sample, Patient",
+                identity_key="sample, patient|09:30:00|surgical",
+                at=time(9, 30),
+                source_record_key="190|edited-time",
+                procedure="canonical",
+            )
+            inactive_id = self._seed_prior_line(
+                db, "Sample, Patient [00990011]",
+                identity_key="sample, patient [00990011]|08:00:00|surgical",
+                mrn="00990011",
+                fax_id=188,
+                source_record_key=incoming_key,
+                is_active=False,
+                procedure="bracketed copy",
+            )
+            result = apply_staged_snapshot(db, source_fax_id=191, run_id=staged["runId"])
+            lines = {line.id: line for line in db.query(ScheduleCardActivity).all()}
+            self.assertEqual(set(lines), {active_id, inactive_id})
+            self.assertEqual(result["surgicalCreated"], 0)
+            active = lines[active_id]
+            self.assertEqual(active.procedure, "second pass")
+            self.assertEqual(active.start_time, time(8, 0))
+            self.assertEqual(active.source_record_key, incoming_key)
+            self.assertTrue(active.is_active)
+            self.assertFalse(any(line.source_record_key == "190|edited-time" for line in lines.values()))
+            inactive = lines[inactive_id]
+            self.assertFalse(inactive.is_active)
+            self.assertEqual(inactive.procedure, "bracketed copy")
+            self.assertEqual(inactive.start_time, time(8, 0))
+            self.assertIn("|inactive-", inactive.source_record_key)
+        finally:
+            db.close()
+            engine.dispose()
+
+    def test_start_time_match_beats_same_card_when_several_twins_exist(self):
+        engine, db = self._world()
+        try:
+            staged, incoming_key = self._stage_second_pass(db)
+            same_card_id = self._seed_prior_line(
+                db, "Sample, Patient",
+                identity_key="sample, patient|09:30:00|surgical",
+                at=time(9, 30),
+                session="am",
+                source_record_key="190|same-card",
+                procedure="same card",
+            )
+            same_time_id = self._seed_prior_line(
+                db, "Sample, Patient",
+                identity_key="sample, patient|08:00:00|surgical",
+                at=time(8, 0),
+                session="pm",
+                source_record_key="190|same-time",
+                procedure="same time",
+            )
+            inactive_id = self._seed_prior_line(
+                db, "Sample, Patient [00990011]",
+                identity_key="sample, patient [00990011]|08:00:00|surgical",
+                mrn="00990011",
+                fax_id=188,
+                source_record_key=incoming_key,
+                is_active=False,
+                procedure="bracketed copy",
+            )
+            result = apply_staged_snapshot(db, source_fax_id=191, run_id=staged["runId"])
+            lines = {line.id: line for line in db.query(ScheduleCardActivity).all()}
+            self.assertEqual(set(lines), {same_card_id, same_time_id, inactive_id})
+            self.assertEqual(result["surgicalCreated"], 0)
+            self.assertEqual(result["linesDeactivated"], 0)
+            chosen = lines[same_time_id]
+            other = lines[same_card_id]
+            inactive = lines[inactive_id]
+            self.assertEqual(chosen.procedure, "second pass")
+            self.assertEqual(chosen.source_record_key, incoming_key)
+            self.assertEqual(chosen.source_fax_id, 191)
+            self.assertTrue(chosen.is_active)
+            self.assertEqual(other.procedure, "same card")
+            self.assertEqual(other.source_record_key, "190|same-card")
+            self.assertEqual(other.start_time, time(9, 30))
+            self.assertEqual(other.session, "am")
+            self.assertEqual(other.source_fax_id, 190)
+            self.assertTrue(other.is_active)
+            self.assertFalse(inactive.is_active)
+            self.assertEqual(inactive.procedure, "bracketed copy")
+            self.assertIn("|inactive-", inactive.source_record_key)
         finally:
             db.close()
             engine.dispose()

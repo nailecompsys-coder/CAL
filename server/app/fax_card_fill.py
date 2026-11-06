@@ -7,6 +7,8 @@ from pathlib import Path
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from .fax_ingest_engine import ensure_cal_fax_name_key
+
 _STATEMENTS = [
     part.strip()
     for part in Path(__file__).with_name("sql").joinpath("fill_cards_from_fax.sql").read_text().split("\n-- @@\n")
@@ -22,6 +24,7 @@ def fill_cards_from_fax_lines(db: Session, *, run_id: int) -> dict[str, int]:
     never deactivates a line (rule 2), and the newer fax wins for a day (rule 5).
     """
     params = {"run_id": run_id}
+    ensure_cal_fax_name_key(db)
     db.execute(text(_NEWER_FAX_WINS), params)
     already = int(db.execute(text(_ALREADY), params).scalar() or 0)
     db.execute(text(_FILL), params)

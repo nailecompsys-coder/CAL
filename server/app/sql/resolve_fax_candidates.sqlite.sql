@@ -1,5 +1,6 @@
 -- mrn rides along on fax_ingest_candidates via c.* and is not read by surgeon,
--- session, location, card, or decision rules.
+-- session, location, card, or decision rules. A [digits] group in the patient
+-- name is ignored when two rows are compared. A missing MRN does not hold or flag.
 WITH base AS (
     SELECT c.*,
            date(c.case_date_raw) AS case_date,
@@ -104,7 +105,8 @@ SELECT l.*,
                 WHERE peer.run_id = l.run_id
                   AND peer.case_date = l.case_date
                   AND peer.start_time = l.start_time
-                  AND lower(trim(peer.patient_name_raw)) = lower(trim(l.patient_name_raw))
+                  -- Same patient when the only difference is a bracketed MRN, case, or spacing.
+                  AND cal_fax_name_key(peer.patient_name_raw) = cal_fax_name_key(l.patient_name_raw)
                   AND peer.block_location_count = 1
                 HAVING count(DISTINCT peer.block_location_id) = 1
             )

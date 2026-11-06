@@ -93,6 +93,7 @@ def run_migration() -> None:
                 start_time TIME,
                 end_time TIME,
                 patient_name VARCHAR(255) NOT NULL,
+                mrn TEXT,
                 procedure TEXT NOT NULL DEFAULT '',
                 room_text VARCHAR(128),
                 source_system VARCHAR(32) NOT NULL,

@@ -1,3 +1,5 @@
+-- mrn rides along on fax_ingest_candidates via c.* and is not read by surgeon,
+-- session, location, card, or decision rules.
 WITH base AS (
     SELECT c.*,
            CASE WHEN c.case_date_raw ~ '^\d{4}-\d{2}-\d{2}$' THEN c.case_date_raw::date END AS case_date,

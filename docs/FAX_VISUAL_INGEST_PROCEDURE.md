@@ -6,7 +6,7 @@ The latest **successfully applied** fax is authoritative for the surgeon/dates i
 
 1. Retain the original Kno2 PDF and its Desk ID.
 2. Render every PDF page to PNG. The extractor may use local OCR, Ollama, OpenAI, Claude, or another vision service. CAL does not require a particular vendor or a LlamaParse key. The extractor must return structured rows to the caller; an agent must not manually transcribe or silently repair the fax.
-3. Submit the extractor handback to `POST /api/ingest/visual-schedule`. Include extractor name/version/request ID, page and printed-row identity, surgeon text, date, time, row type, room, patient, procedure, and any extraction flag. Include explicit surgeon/date `coverage` when the fax covers a day with zero printed rows.
+3. Submit the extractor handback to `POST /api/ingest/visual-schedule`. Include extractor name/version/request ID, page and printed-row identity, surgeon text, date, time, row type, room, patient, procedure, and any extraction flag. Include optional `mrn` when the fax printed one (see Patient MRN below). Include explicit surgeon/date `coverage` when the fax covers a day with zero printed rows.
 4. CAL stores that handback in immutable `fax_ingest_candidates`. SQL views resolve the unique surgeon, AM/PM session, source location, permanent card, and decision status. SQL also owns applicable-row selection, ordering, deduplication, coverage, newest-fax overlap protection, and counts.
 5. Review the returned decisions. `ready` and `ready_with_warning` rows may apply. `unresolved` rows remain staged and do not prevent independent clean rows from applying. An OFF overlap or fixed-master/source-location difference remains visible as a warning only after the source location is resolved. An uncertain surgeon, time, facility, card, weekend row, or extractor-flagged row stays unresolved.
 6. Call `POST /api/ingest/fax/{source_fax_id}/apply-snapshot` with the staged run ID and the explicit authoritative-snapshot confirmation. CAL makes a backup, then one SQL transaction writes applicable rows to `schedule_card_activities` on existing cards. An apply failure leaves the prior live schedule intact.
@@ -25,8 +25,35 @@ Coverage is surgeon/date-specific. A missing line survives the first consecutive
 - Fax apply cannot add, delete, or change permanent AM/PM cards.
 - Past rows and weekend schedule rows do not apply. Past card detail cannot be deleted.
 - Routine fax ingest sends no surgeon or scheduler notification.
-- Logs, receipts, and documentation must not contain patient details.
+- Logs, receipts, and documentation must not contain patient details, including MRN.
 - `server/scripts/ingest_desk_fax.py` and `app/fax_candidate_reconciler.py` are a legacy historical preprocessor, not the supported SQL-owned handoff. Do not connect automation to them or describe them as production proof.
+
+## Patient MRN
+
+Desk may send an optional string field `mrn` on each row of `POST /api/ingest/visual-schedule`. The value on these faxes is the number in square brackets, for example `[00123456]`. CAL also accepts the same digits without brackets (1 to 64 digits). Leading zeros are kept: the column is text, and a JSON number is ignored (it would drop the zeros). The brackets have to wrap the whole value. `MRN [00123456]` is garbled and becomes NULL.
+
+Missing, blank, or garbled values are stored as NULL. That does not change surgeon matching, AM/PM placement, holds, flags, card writes, deactivation, or notifications.
+
+CAL copies the normalized digits through three columns:
+
+| Table | Column | Role |
+| --- | --- | --- |
+| `fax_ingest_candidates` | `mrn` | Immutable extractor handback. Indexed. |
+| `fax_ingest_rows` | `mrn` | Scratch reading used by the fill. Indexed. |
+| `schedule_card_activities` | `mrn` | Line RVU and the hernia tracker look up. Indexed. |
+
+Schema change: `server/app/migrate_fax_mrn.py` (additive `TEXT` column and index only). Apply fills `schedule_card_activities.mrn` when the matched line's value is NULL. A later fax never overwrites or clears an MRN already stored. MRN is not part of `identity_key` or `normalized_key`. The Send-to-Calendar photo (`fax_restore_lines.mrn`) copies the previous value so undo puts that value back.
+
+Lookup by MRN. Bind `:mrn` as text (`00123456`, not an integer):
+
+```sql
+SELECT id, schedule_card_id, surgeon_id, activity_date, session,
+       activity_type, start_time, patient_name, source_fax_id
+FROM schedule_card_activities
+WHERE mrn = :mrn
+  AND is_active = TRUE
+ORDER BY activity_date, start_time, id;
+```
 
 ## Release state
 

@@ -21,6 +21,7 @@ from . import migrate_schedule_template_week_pattern
 from . import migrate_schedule_build_backups
 from . import migrate_clinic_schedule_card_guard
 from . import migrate_schedule_cards
+from . import migrate_fax_mrn
 from . import migrate_fax_ingest
 from . import migrate_fax_restore
 from . import migrate_normalized_schedule_activity
@@ -82,6 +83,8 @@ async def lifespan(app: FastAPI):
         migrate_schedule_build_backups.run_migration()
         migrate_clinic_schedule_card_guard.run_migration()
         migrate_schedule_cards.run_migration()
+        # Columns first, so the fax resolution view rebuilt below can carry mrn.
+        migrate_fax_mrn.run_migration()
         migrate_fax_ingest.run_migration()
         migrate_fax_restore.run_migration()
         migrate_normalized_schedule_activity.run_migration()
@@ -93,6 +96,8 @@ async def lifespan(app: FastAPI):
         migrate_fax_line_memory.run_migration()
         migrate_call_builder.run_migration()
         migrate_push_sound.run_migration()
+        # A later migration may have created a line table. Add mrn if it is still missing.
+        migrate_fax_mrn.run_migration()
         db = SessionLocal()
         try:
             from .schedule_activity_normalization import backfill_normalized_schedule_activity

@@ -38,6 +38,7 @@ def run_migration():
                 start_time TIME,
                 end_time TIME,
                 patient_name VARCHAR(255) NOT NULL,
+                mrn TEXT,
                 procedure TEXT NOT NULL,
                 room_text VARCHAR(128),
                 source_system VARCHAR(32) NOT NULL,

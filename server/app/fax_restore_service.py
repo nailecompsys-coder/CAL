@@ -34,6 +34,7 @@ _COPIED_FIELDS = (
     "start_time",
     "end_time",
     "patient_name",
+    "mrn",
     "procedure",
     "room_text",
     "source_system",

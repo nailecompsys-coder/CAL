@@ -1,3 +1,5 @@
+-- mrn rides along on fax_ingest_candidates via c.* and is not read by surgeon,
+-- session, location, card, or decision rules.
 WITH base AS (
     SELECT c.*,
            date(c.case_date_raw) AS case_date,

@@ -689,6 +689,8 @@ class ScheduleCardActivity(Base):
     start_time = Column(Time)
     end_time = Column(Time)
     patient_name = Column(String(255), nullable=False)
+    # Text, not integer: fax MRNs keep leading zeros. Null until a fax supplies digits.
+    mrn = Column(Text, nullable=True, index=True)
     procedure = Column(Text, nullable=False, default="")
     room_text = Column(String(128))
     source_system = Column(String(32), nullable=False)
@@ -802,6 +804,8 @@ class FaxIngestCandidate(Base):
     row_type_raw = Column(String(32), nullable=False)
     room_raw = Column(String(255), nullable=False, default="")
     patient_name_raw = Column(String(255), nullable=False, default="")
+    # Normalized digit text from the extractor. Not used for placement.
+    mrn = Column(Text, nullable=True, index=True)
     procedure_raw = Column(Text, nullable=False, default="")
     extraction_flags = Column(Text)
     evidence_ref = Column(Text)
@@ -860,6 +864,8 @@ class FaxIngestRow(Base):
     room_text = Column(String(64), nullable=False, default="")
     patient_name = Column(String(255), nullable=False)
     procedure = Column(Text, nullable=False, default="")
+    # Copied from the candidate. Null when the fax had no usable MRN.
+    mrn = Column(Text, nullable=True, index=True)
     source_location_id = Column(Integer, ForeignKey("locations.id"), nullable=True)
     normalized_key = Column(String(512), nullable=False)
     extraction_flags = Column(Text, nullable=True)
@@ -934,6 +940,7 @@ class FaxRestoreLine(Base):
     start_time = Column(Time)
     end_time = Column(Time)
     patient_name = Column(String(255), nullable=False)
+    mrn = Column(Text, nullable=True)
     procedure = Column(Text, nullable=False, default="")
     room_text = Column(String(128))
     source_system = Column(String(32), nullable=False)

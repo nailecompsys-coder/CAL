@@ -34,6 +34,8 @@ class ReviewedFaxRow:
     procedure: str = ""
     extraction_flags: str | None = None
     source_row_number: int | None = None
+    # Raw extractor value. Stored only after normalize_mrn; never used for placement.
+    mrn: str | None = None
 
 
 def practice_today() -> date:
@@ -168,6 +170,26 @@ def _text(value: str | None) -> str:
     return re.sub(r"\s+", " ", value or "").strip()
 
 
+_MRN_DIGITS = re.compile(r"^\d{1,64}$")
+
+
+def normalize_mrn(value: object) -> str | None:
+    """Keep a digit MRN, including leading zeros. Anything else is missing.
+
+    Desk sends the bracketed number printed on the fax, such as ``[00123456]``,
+    or the same digits without brackets. A JSON number, letters, or any other
+    shape is stored as NULL and does not change placement, holds, or flags.
+    """
+    if not isinstance(value, str):
+        return None
+    raw = _text(value)
+    if len(raw) >= 2 and raw.startswith("[") and raw.endswith("]"):
+        raw = _text(raw[1:-1])
+    if _MRN_DIGITS.fullmatch(raw):
+        return raw
+    return None
+
+
 def _raw_date(value: date | str) -> str:
     return value.isoformat() if isinstance(value, date) else _text(value)
 
@@ -182,7 +204,7 @@ _MATERIALIZE_ROWS = """
 INSERT INTO fax_ingest_rows (
     run_id, candidate_id, page_number, source_row_number, surgeon_id,
     surgeon_initials, case_date, start_time, session, row_type, room_text,
-    patient_name, procedure, source_location_id, normalized_key, extraction_flags
+    patient_name, procedure, source_location_id, normalized_key, extraction_flags, mrn
 )
 SELECT
     run_id, id, page_number, source_row_number, surgeon_id,
@@ -191,7 +213,8 @@ SELECT
     trim(COALESCE(patient_name_raw, '')), trim(COALESCE(procedure_raw, '')),
     source_location_id,
     CAST(page_number AS TEXT) || '|' || CAST(source_row_number AS TEXT),
-    extraction_flags
+    extraction_flags,
+    mrn
 FROM fax_ingest_candidate_resolutions
 WHERE run_id = :run_id
   AND case_date IS NOT NULL
@@ -316,6 +339,7 @@ def stage_reviewed_rows(
             room_raw=_text(row.room),
             patient_name_raw=_text(row.patient_name),
             procedure_raw=_text(row.procedure),
+            mrn=normalize_mrn(row.mrn),
             extraction_flags=extraction_flags,
             evidence_ref=f"page:{row.page}:row:{source_row_number}:desk_row:{desk_row}",
         ))

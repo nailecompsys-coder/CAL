@@ -13,7 +13,7 @@ from datetime import date, datetime, time
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -53,9 +53,18 @@ class VisualFaxRowIn(BaseModel):
     room: str = ""
     patient_name: str
     procedure: str = ""
+    # Optional. String only, so a JSON number cannot drop leading zeros.
+    mrn: str | None = None
     visual_confidence: str = "reviewed"
     placement_status: str = "reviewed"
     notes: str = ""
+
+    @field_validator("mrn", mode="before")
+    @classmethod
+    def _mrn_stays_text(cls, value):
+        if value is None or isinstance(value, str):
+            return value
+        return None
 
 
 class FaxCoverageIn(BaseModel):
@@ -168,6 +177,7 @@ def _visual_row(item: VisualFaxRowIn, *, allow_unresolved: bool = False) -> Revi
         procedure=item.procedure or "",
         extraction_flags=((item.notes or "").strip() or "flagged") if item.visual_confidence == "flagged" else None,
         source_row_number=item.source_row_number,
+        mrn=item.mrn,
     )
 
 
@@ -213,6 +223,8 @@ def ingest_visual_schedule_route(
 
     This route deliberately cannot write schedule cards, legacy schedules, or
     notifications. It records facts and returns placement decisions only.
+    Optional per-row ``mrn`` is stored for later lookup and does not affect
+    placement, holds, or flags.
     """
     rows, skipped_past = _upcoming_rows(body, allow_unresolved=True)
     if not rows:

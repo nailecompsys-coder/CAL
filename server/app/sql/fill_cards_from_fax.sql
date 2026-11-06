@@ -9,6 +9,9 @@
 -- Don's rule 5: the newer fax wins for a day. An active line from an older
 -- fax with the same surgeon, day and identity (patient|time|type) is re-keyed
 -- to the newer fax's printed line so the upsert below updates it in place.
+-- mrn is text copied onto the line. It is not part of that identity. A matched
+-- line keeps an MRN it already has; a null MRN is filled. A null incoming
+-- value does not erase a stored one.
 -- Statements are split on a line that is exactly: -- @@
 
 UPDATE schedule_card_activities
@@ -56,7 +59,7 @@ INSERT INTO schedule_card_activities (
     schedule_card_id, surgeon_id, location_id, activity_date, session,
     activity_type, start_time, patient_name, procedure, room_text,
     source_system, source_record_key, fax_ingest_row_id, source_fax_id,
-    identity_key, is_active
+    identity_key, is_active, mrn
 )
 SELECT
     card.id,
@@ -78,7 +81,8 @@ SELECT
             WHEN fax_row.start_time IS NULL THEN ''
             ELSE SUBSTR(CAST(fax_row.start_time AS TEXT), 1, 8)
         END || '|' || fax_row.row_type,
-    TRUE
+    TRUE,
+    fax_row.mrn
 FROM fax_ingest_rows fax_row
 JOIN fax_ingest_rows_applicable applicable ON applicable.fax_row_id = fax_row.id
 JOIN fax_ingest_runs run ON run.id = fax_row.run_id
@@ -102,7 +106,9 @@ ON CONFLICT (source_system, source_record_key) DO UPDATE SET
     fax_ingest_row_id = excluded.fax_ingest_row_id,
     source_fax_id = excluded.source_fax_id,
     identity_key = excluded.identity_key,
-    is_active = TRUE
+    is_active = TRUE,
+    -- Fill a missing MRN only. Never replace or clear one already stored.
+    mrn = COALESCE(schedule_card_activities.mrn, excluded.mrn)
 -- @@
 SELECT count(*) AS already_there
 FROM schedule_card_activities activity

@@ -10,6 +10,8 @@ CAL does not require a LlamaParse key and does not depend on an agent rememberin
 
 CAL records each extractor row's normalized transport fields in immutable `fax_ingest_candidates`. SQL then owns surgeon matching, AM/PM placement, location and permanent-card selection, unresolved decisions, coverage, newest-fax protection, duplicate handling, two-covering-fax cancellation, counts, ordering, and the authoritative write to `schedule_card_activities`.
 
+Optional per-row `mrn` (text, leading zeros kept) is copied onto `fax_ingest_candidates.mrn`, `fax_ingest_rows.mrn`, and `schedule_card_activities.mrn`. It is not an input to placement, holds, or flags. A matched line with a NULL MRN is filled; an existing MRN is left as it is. See `docs/FAX_VISUAL_INGEST_PROCEDURE.md` (Patient MRN) for the payload field and the parameterized lookup. Migration: `server/app/migrate_fax_mrn.py`.
+
 There is no secondary `surgical_cases`, `clinic_schedules`, or `clinic_slots` schedule. Do not recreate one.
 
 ## Current implementation

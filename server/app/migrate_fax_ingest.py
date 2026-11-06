@@ -300,6 +300,7 @@ def run_migration() -> None:
                 row_type_raw VARCHAR(32) NOT NULL,
                 room_raw VARCHAR(255) NOT NULL DEFAULT '',
                 patient_name_raw VARCHAR(255) NOT NULL DEFAULT '',
+                mrn TEXT,
                 procedure_raw TEXT NOT NULL DEFAULT '',
                 extraction_flags TEXT,
                 evidence_ref TEXT,
@@ -378,6 +379,8 @@ def run_migration() -> None:
         """))
         from .fax_room_codes import seed_fax_room_codes
         seed_fax_room_codes(conn)
+        from .migrate_fax_mrn import ensure_mrn_columns
+        ensure_mrn_columns(conn)
         resolution = Path(__file__).with_name("sql").joinpath("resolve_fax_candidates.postgresql.sql").read_text()
         conn.execute(text("DROP VIEW IF EXISTS fax_ingest_candidate_resolutions"))
         conn.execute(text(f"CREATE VIEW fax_ingest_candidate_resolutions AS {resolution}"))

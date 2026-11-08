@@ -11,7 +11,6 @@ from sqlalchemy.orm import sessionmaker
 from app.day_off_card_normalization import backfill_day_off_card_links
 from app.migrate_fax_ingest import create_applicable_view
 from app.models import (
-    AprimaCachedAppointment,
     Base,
     DayOff,
     Location,
@@ -197,12 +196,7 @@ class ScheduleCardProjectionServiceTest(unittest.TestCase):
                         "serviceSite": "Clermont Business Office",
                         "appointmentType": "Follow Up",
                 }
-                cached = AprimaCachedAppointment(
-                    appointment_id=payload["id"], kind="patient", date=date(2026, 9, 23),
-                    content_hash=payload["id"], payload_json="{}",
-                )
-                db.add(cached)
-                normalize_aprima_payload(db, cached, payload)
+                normalize_aprima_payload(db, payload, kind="patient")
             db.commit()
 
             payload = card_grid_page_data(db, date(2026, 9, 21), date(2026, 9, 25))
@@ -252,12 +246,7 @@ class ScheduleCardProjectionServiceTest(unittest.TestCase):
                     "serviceSite": "Clermont Business Office",
                     "appointmentType": "Follow Up",
                 }
-            cached = AprimaCachedAppointment(
-                appointment_id=payload["id"], kind="patient", date=card.date,
-                content_hash="same-patient", payload_json="{}",
-            )
-            db.add(cached)
-            normalize_aprima_payload(db, cached, payload)
+            normalize_aprima_payload(db, payload, kind="patient")
             db.commit()
 
             payload = card_grid_page_data(db, date(2026, 9, 21), date(2026, 9, 25))

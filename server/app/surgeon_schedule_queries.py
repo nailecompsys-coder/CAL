@@ -2,7 +2,7 @@
 
 from datetime import date, timedelta
 
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, joinedload
 
 from .models import (
@@ -70,7 +70,10 @@ def meetings_for_surgeon_in_range(db: Session, surgeon_id: int, start_day: date,
             Meeting.date <= end_day,
             or_(
                 MeetingAttendee.surgeon_id == surgeon_id,
-                ~Meeting.attendees.any(),
+                and_(
+                    Meeting.source_system.is_distinct_from("aprima"),
+                    ~Meeting.attendees.any(),
+                ),
             ),
         )
         .distinct()

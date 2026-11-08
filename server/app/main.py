@@ -30,6 +30,8 @@ from . import migrate_clinic_list_onto_cards
 from . import migrate_day_off_same_surgeon
 from . import migrate_day_off_one_request
 from . import migrate_fax_line_memory
+from . import migrate_schedule_locks
+from . import migrate_aprima_onto_schedule
 from .routers import (
     admin_otp_audit,
     admin_block_or,
@@ -94,6 +96,8 @@ async def lifespan(app: FastAPI):
         migrate_day_off_same_surgeon.run_migration()
         migrate_day_off_one_request.run_migration()
         migrate_fax_line_memory.run_migration()
+        migrate_schedule_locks.run_migration()
+        migrate_aprima_onto_schedule.run_migration()
         migrate_call_builder.run_migration()
         migrate_push_sound.run_migration()
         # A later migration may have created a line table. Add mrn if it is still missing.

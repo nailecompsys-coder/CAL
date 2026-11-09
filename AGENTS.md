@@ -34,3 +34,14 @@ Read [the scheduling contract](docs/SCHEDULE_SOURCE_OF_TRUTH_RULES.md), [the fax
 - Preserve existing iPhone screens unless a change is explicitly requested. Native app changes require a TestFlight release; backend response changes with the existing contract do not.
 - Follow `CLAUDE.md` for deployment. Commit a safe completed slice; request Don's explicit confirmation before pushing or rebuilding production. Keep a rollback point.
 - Update `docs/CAL_CURRENT_STATE.md` after each completed release with the deployed commit, evidence, and unfinished work. Local `memory.md` is Git-ignored and cannot replace the shared record. Do not label a partial fix complete.
+
+## Cloud Agent local runtime
+
+Cloud Agents run the portal without Docker. Boot starts local PostgreSQL 16 and uvicorn from `server/.venv`.
+
+- Database: `surgical_cal` on `127.0.0.1:5432`, user `cal_user`, password `cal_local_dev_change_me` (the local placeholder already in `docker-compose.mac-dev.yml`).
+- API: `http://127.0.0.1:3005`. The process uses `DATABASE_URL`, `SECRET_KEY=local-cloud-agent-dev-secret`, `COOKIE_SECURE=false`, and `TZ=America/New_York`.
+- Python dependencies stay pinned in `server/requirements.txt`, including `bcrypt==4.0.1`.
+- A local portal user `caldev` / `cal-local-dev` is created on boot when that username is missing. It exists only in this Cloud Agent database.
+- Run `make test` with `server/.venv` and without `DATABASE_URL` exported. The suite uses in-memory SQLite, and a live `DATABASE_URL` changes tests that only call `setdefault`.
+- iOS and Android are separate lanes and are not started here.

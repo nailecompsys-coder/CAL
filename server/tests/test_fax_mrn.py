@@ -14,7 +14,6 @@ from sqlalchemy.orm import sessionmaker
 from app.fax_card_fill import _STATEMENTS as FILL_STATEMENTS
 from app.fax_ingest_engine import (
     ReviewedFaxRow,
-    fax_name_key,
     normalize_mrn,
     patient_name_and_mrn,
     stage_reviewed_rows,
@@ -86,69 +85,70 @@ class NormalizeMrnTest(unittest.TestCase):
             ingest_visual_schedule_route(body, db=Mock())
         self.assertEqual(stage.call_args.kwargs["rows"][0].mrn, "[00123456]")
 
-    def test_bracketed_mrn_in_the_name_is_stripped_and_kept(self):
-        clean, mrn = patient_name_and_mrn("Sample, Patient [00112233]", None)
-        self.assertEqual((clean, mrn), ("Sample, Patient", "00112233"))
+    def test_bracket_digits_fill_mrn_and_stay_in_the_name(self):
+        name, mrn = patient_name_and_mrn("Sample, Patient [00112233]", None)
+        self.assertEqual((name, mrn), ("Sample, Patient [00112233]", "00112233"))
         embedded, embedded_mrn = patient_name_and_mrn("Alpha [00445566] Beta", None)
-        self.assertEqual((embedded, embedded_mrn), ("Alpha Beta", "00445566"))
+        self.assertEqual((embedded, embedded_mrn), ("Alpha [00445566] Beta", "00445566"))
         self.assertEqual(
             patient_name_and_mrn("SAMPLE,  PATIENT [00112233]", None),
-            ("SAMPLE, PATIENT", "00112233"),
+            ("SAMPLE, PATIENT [00112233]", "00112233"),
         )
 
     def test_explicit_mrn_wins_and_long_or_non_digit_brackets_do_not_fill(self):
         self.assertEqual(
             patient_name_and_mrn("Sample, Patient [00112233]", "[00998877]"),
-            ("Sample, Patient", "00998877"),
+            ("Sample, Patient [00112233]", "00998877"),
         )
         self.assertEqual(
             patient_name_and_mrn("Sample, Patient [00112233]", "not-an-mrn"),
-            ("Sample, Patient", "00112233"),
+            ("Sample, Patient [00112233]", "00112233"),
         )
         self.assertEqual(
             patient_name_and_mrn("Sample, Patient [OR]", None),
             ("Sample, Patient [OR]", None),
         )
-        self.assertEqual(
-            patient_name_and_mrn("Sample, Patient [" + ("1" * 65) + "]", None)[0],
-            "Sample, Patient",
-        )
-        self.assertIsNone(patient_name_and_mrn("Sample, Patient [" + ("1" * 65) + "]", None)[1])
+        long_name = "Sample, Patient [" + ("1" * 65) + "]"
+        self.assertEqual(patient_name_and_mrn(long_name, None), (long_name, None))
         kept = "0" * 64
-        self.assertEqual(patient_name_and_mrn(f"Sample, Patient [{kept}]", None)[1], kept)
+        self.assertEqual(
+            patient_name_and_mrn(f"Sample, Patient [{kept}]", None),
+            (f"Sample, Patient [{kept}]", kept),
+        )
         self.assertEqual(
             patient_name_and_mrn("Sample, Patient [00112233] [00445566]", None),
-            ("Sample, Patient", "00445566"),
+            ("Sample, Patient [00112233] [00445566]", "00445566"),
         )
 
-    def test_name_key_matches_either_side_and_keeps_time(self):
-        bracketed = fax_name_key("SAMPLE,  PATIENT [00112233]|08:00:00|surgical")
-        clean = fax_name_key("Sample, Patient|08:00:00|surgical")
-        embedded = fax_name_key("Alpha [00445566] Beta|08:00:00|surgical")
-        self.assertEqual(bracketed, clean)
-        self.assertEqual(embedded, fax_name_key("alpha beta|08:00:00|surgical"))
-        self.assertNotEqual(clean, fax_name_key("Sample, Patient|09:00:00|surgical"))
-        self.assertNotEqual(clean, fax_name_key("Other, Person|08:00:00|surgical"))
-        self.assertNotEqual(
-            fax_name_key("Sample, Patient [OR]|08:00:00|surgical"),
-            clean,
-        )
-
-    def test_resolution_and_fill_normalize_both_sides(self):
+    def test_identity_sql_ignores_mrn_and_drops_name_functions(self):
         fill = (APP_DIR / "sql" / "fill_cards_from_fax.sql").read_text()
-        self.assertIn("cal_fax_name_key(schedule_card_activities.identity_key)", fill)
-        self.assertIn("cal_fax_name_key(activity.identity_key)", fill)
-        self.assertIn("cal_fax_display_name(fax_row.patient_name)", fill)
-        self.assertNotIn("identity_key = LOWER(COALESCE(fax_row.patient_name", fill)
+        self.assertIn(
+            "schedule_card_activities.identity_key = LOWER(COALESCE(fax_row.patient_name",
+            fill,
+        )
+        self.assertIn("activity.identity_key = LOWER(COALESCE(fax_row.patient_name", fill)
+        self.assertIn("COALESCE(NULLIF(TRIM(fax_row.patient_name), ''), 'Patient')", fill)
+        self.assertNotIn("cal_fax_name_key", fill)
+        self.assertNotIn("cal_fax_display_name", fill)
+        preview = (APP_DIR / "fax_preview.py").read_text()
+        self.assertIn("lower(trim(a.patient_name)) = lower(trim(r.patient_name))", preview)
+        self.assertNotIn("cal_fax_name_key", preview)
         for name in ("resolve_fax_candidates.postgresql.sql", "resolve_fax_candidates.sqlite.sql"):
             sql = (APP_DIR / "sql" / name).read_text()
             self.assertIn(
-                "cal_fax_name_key(peer.patient_name_raw) = cal_fax_name_key(l.patient_name_raw)",
+                "lower(trim(peer.patient_name_raw)) = lower(trim(l.patient_name_raw))",
                 sql,
             )
+            self.assertNotIn("cal_fax_name_key", sql)
             self.assertNotIn("when mrn", sql.lower())
         migration = (APP_DIR / "migrate_fax_ingest.py").read_text()
-        self.assertIn("CAL_FAX_NAME_SQL", migration)
+        view_at = migration.index("CREATE VIEW fax_ingest_candidate_resolutions")
+        name_at = migration.index("DROP FUNCTION IF EXISTS cal_fax_name_key(text)")
+        display_at = migration.index("DROP FUNCTION IF EXISTS cal_fax_display_name(text)")
+        self.assertLess(view_at, name_at)
+        self.assertLess(name_at, display_at)
+        self.assertNotIn("CASCADE", migration[name_at:display_at + 80])
+        self.assertNotIn("CAL_FAX_NAME_SQL", migration)
 
 
 class FaxMrnTest(unittest.TestCase):
@@ -455,35 +455,41 @@ class FaxMrnTest(unittest.TestCase):
         apply_staged_snapshot(db, source_fax_id=fax, run_id=staged["runId"])
         return staged_fact
 
-    def test_bracketed_existing_line_matches_clean_incoming(self):
+    def test_bracketed_existing_line_does_not_match_a_clean_name(self):
         engine, db = self._world()
         try:
             prior_id = self._seed_prior_line(
                 db,
-                "SAMPLE,  PATIENT [00112233]",
-                identity_key="sample,  patient [00112233]|08:00:00|surgical",
+                "SAMPLE, PATIENT [00112233]",
+                identity_key="sample, patient [00112233]|08:00:00|surgical",
+                mrn="00112233",
             )
             patient, mrn, flags, status, reason = self._apply_one(db, "Sample, Patient")
             self.assertEqual(patient, "Sample, Patient")
             self.assertIsNone(mrn)
             self.assertIsNone(flags)
             self.assertEqual((status, reason), ("ready", "existing_card"))
-            lines = db.query(ScheduleCardActivity).all()
-            self.assertEqual(len(lines), 1)
-            line = lines[0]
-            self.assertEqual(line.id, prior_id)
-            self.assertEqual(line.patient_name, "Sample, Patient")
-            self.assertNotIn("[", line.patient_name)
-            self.assertNotIn("00112233", line.identity_key)
-            self.assertIsNone(line.mrn)
-            self.assertEqual(line.procedure, "second pass")
-            self.assertEqual(line.source_fax_id, 191)
-            self.assertTrue(line.is_active)
+            lines = {line.id: line for line in db.query(ScheduleCardActivity).all()}
+            self.assertEqual(len(lines), 2)
+            prior = lines[prior_id]
+            self.assertEqual(prior.patient_name, "SAMPLE, PATIENT [00112233]")
+            self.assertEqual(prior.identity_key, "sample, patient [00112233]|08:00:00|surgical")
+            self.assertEqual(prior.mrn, "00112233")
+            self.assertEqual(prior.procedure, "prior pass")
+            self.assertEqual(prior.source_fax_id, 190)
+            self.assertTrue(prior.is_active)
+            added = next(line for line in lines.values() if line.id != prior_id)
+            self.assertEqual(added.patient_name, "Sample, Patient")
+            self.assertEqual(added.identity_key, "sample, patient|08:00:00|surgical")
+            self.assertIsNone(added.mrn)
+            self.assertEqual(added.procedure, "second pass")
+            self.assertEqual(added.source_fax_id, 191)
+            self.assertTrue(added.is_active)
         finally:
             db.close()
             engine.dispose()
 
-    def test_clean_existing_line_matches_bracketed_incoming(self):
+    def test_clean_existing_line_does_not_match_a_bracketed_name(self):
         engine, db = self._world()
         try:
             prior_id = self._seed_prior_line(
@@ -492,44 +498,69 @@ class FaxMrnTest(unittest.TestCase):
                 identity_key="alpha beta|08:00:00|surgical",
             )
             patient, mrn, flags, status, reason = self._apply_one(db, "Alpha [00445566] Beta")
-            self.assertEqual(patient, "Alpha Beta")
+            self.assertEqual(patient, "Alpha [00445566] Beta")
             self.assertEqual(mrn, "00445566")
             self.assertIsNone(flags)
             self.assertEqual((status, reason), ("ready", "existing_card"))
-            candidate = db.query(FaxIngestCandidate).filter_by(patient_name_raw="Alpha Beta").one()
+            candidate = db.query(FaxIngestCandidate).filter_by(patient_name_raw="Alpha [00445566] Beta").one()
             self.assertEqual(candidate.mrn, "00445566")
-            lines = db.query(ScheduleCardActivity).all()
-            self.assertEqual(len(lines), 1)
-            line = lines[0]
+            lines = {line.id: line for line in db.query(ScheduleCardActivity).all()}
+            self.assertEqual(len(lines), 2)
+            prior = lines[prior_id]
+            self.assertEqual(prior.patient_name, "Alpha Beta")
+            self.assertEqual(prior.procedure, "prior pass")
+            self.assertIsNone(prior.mrn)
+            self.assertEqual(prior.source_fax_id, 190)
+            added = next(line for line in lines.values() if line.id != prior_id)
+            self.assertEqual(added.patient_name, "Alpha [00445566] Beta")
+            self.assertIn("[00445566]", added.identity_key)
+            self.assertEqual(added.mrn, "00445566")
+            self.assertEqual(added.procedure, "second pass")
+            self.assertEqual(added.source_fax_id, 191)
+            self.assertTrue(added.is_active)
+        finally:
+            db.close()
+            engine.dispose()
+
+    def test_same_bracketed_name_updates_in_place_and_fills_an_empty_mrn(self):
+        engine, db = self._world()
+        try:
+            prior_id = self._seed_prior_line(
+                db,
+                "Sample, Patient [00112233]",
+                identity_key="sample, patient [00112233]|08:00:00|surgical",
+            )
+            patient, mrn, flags, status, _reason = self._apply_one(db, "Sample, Patient [00112233]")
+            self.assertEqual(patient, "Sample, Patient [00112233]")
+            self.assertEqual(mrn, "00112233")
+            self.assertIsNone(flags)
+            self.assertEqual(status, "ready")
+            line = db.query(ScheduleCardActivity).one()
             self.assertEqual(line.id, prior_id)
-            self.assertEqual(line.patient_name, "Alpha Beta")
-            self.assertNotIn("[", line.patient_name)
-            self.assertNotIn("00445566", line.identity_key)
-            self.assertEqual(line.mrn, "00445566")
+            self.assertEqual(line.patient_name, "Sample, Patient [00112233]")
+            self.assertIn("[00112233]", line.identity_key)
+            self.assertEqual(line.mrn, "00112233")
             self.assertEqual(line.procedure, "second pass")
             self.assertEqual(line.source_fax_id, 191)
         finally:
             db.close()
             engine.dispose()
 
-    def test_bracketed_incoming_name_does_not_overwrite_an_existing_mrn(self):
+    def test_same_bracketed_name_does_not_overwrite_a_stored_mrn(self):
         engine, db = self._world()
         try:
             prior_id = self._seed_prior_line(
                 db,
-                "Sample, Patient",
-                identity_key="sample, patient|08:00:00|surgical",
+                "Sample, Patient [00112233]",
+                identity_key="sample, patient [00112233]|08:00:00|surgical",
                 mrn="00998877",
             )
-            patient, mrn, flags, status, _reason = self._apply_one(db, "Sample, Patient [00112233]")
-            self.assertEqual(patient, "Sample, Patient")
-            self.assertEqual(mrn, "00112233")
-            self.assertEqual(status, "ready")
-            self.assertIsNone(flags)
+            self._apply_one(db, "Sample, Patient [00112233]", mrn="[00445566]")
             line = db.query(ScheduleCardActivity).one()
             self.assertEqual(line.id, prior_id)
-            self.assertEqual(line.patient_name, "Sample, Patient")
+            self.assertEqual(line.patient_name, "Sample, Patient [00112233]")
             self.assertEqual(line.mrn, "00998877")
+            self.assertEqual(line.procedure, "second pass")
         finally:
             db.close()
             engine.dispose()

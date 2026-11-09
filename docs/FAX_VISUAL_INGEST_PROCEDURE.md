@@ -34,9 +34,9 @@ Desk may send an optional string field `mrn` on each row of `POST /api/ingest/vi
 
 Missing, blank, or garbled values are stored as NULL. That does not change surgeon matching, AM/PM placement, holds, flags, card writes, deactivation, or notifications.
 
-The same digits are sometimes printed inside the patient name, either at the end (`Last, First [00123456]`) or embedded (`Last [00123456] First`). Visual-schedule ingest removes every `\s*\[\d+\]` group from the name before the candidate, the fax row, and the card line are stored. The name keeps its printed case. When the row's `mrn` is empty, those digits fill it (the last group of 1 to 64 digits if several are present, leading zeros kept). An `mrn` that already has digits is left as it is, on the row and on a matched card line.
+The same digits are sometimes printed inside the patient name, either at the end (`Last, First [00123456]`) or embedded (`Last [00123456] First`). When the row's `mrn` is empty, those digits are copied into the `mrn` column (the last group of 1 to 64 digits if several are present, leading zeros kept). The printed name is stored as it arrived, brackets included. An `mrn` that already has digits is left as it is, on the row and on a matched card line.
 
-Identity comparison applies that same removal, then folds case and repeated spaces, to both the incoming row and the existing line. `Last, First [00123456]` and `Last, First` are one line, whichever side still has the brackets. A line written earlier with the brackets still in `identity_key` is updated in place. A missing MRN does not hold the row or add a flag. Surgeon, session, room, card, weekend, and OFF rules are unchanged.
+MRN is storage only. It is not compared when a fax row is matched to a card line, and the bracketed digits are not removed from the name or from `identity_key`. `Last, First [00123456]` and `Last, First` are different lines. A missing MRN does not hold the row or add a flag. Surgeon, session, room, card, weekend, and OFF rules are unchanged.
 
 CAL copies the normalized digits through three columns:
 
@@ -46,7 +46,7 @@ CAL copies the normalized digits through three columns:
 | `fax_ingest_rows` | `mrn` | Scratch reading used by the fill. Indexed. |
 | `schedule_card_activities` | `mrn` | Line RVU and the hernia tracker look up. Indexed. |
 
-Schema change: `server/app/migrate_fax_mrn.py` (additive `TEXT` column and index only). Apply fills `schedule_card_activities.mrn` when the matched line's value is NULL. A later fax never overwrites or clears an MRN already stored. The digits are not part of `identity_key` or `normalized_key`; a bracketed copy of them in the patient name is removed before `identity_key` is built. The Send-to-Calendar photo (`fax_restore_lines.mrn`) copies the previous value so undo puts that value back.
+Schema change: `server/app/migrate_fax_mrn.py` (additive `TEXT` column and index only). Apply fills `schedule_card_activities.mrn` when the matched line's value is NULL. A later fax never overwrites or clears an MRN already stored. The digits are not part of `identity_key` or `normalized_key`, and a bracketed copy of them stays in the patient name. The Send-to-Calendar photo (`fax_restore_lines.mrn`) copies the previous value so undo puts that value back. `server/app/migrate_fax_ingest.py` drops `cal_fax_name_key` and `cal_fax_display_name` after replacing the resolution view, because those functions are no longer used.
 
 Lookup by MRN. Bind `:mrn` as text (`00123456`, not an integer):
 

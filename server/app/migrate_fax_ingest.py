@@ -381,12 +381,14 @@ def run_migration() -> None:
         seed_fax_room_codes(conn)
         from .migrate_fax_mrn import ensure_mrn_columns
         ensure_mrn_columns(conn)
-        from .fax_ingest_engine import CAL_FAX_NAME_SQL
-        for statement in CAL_FAX_NAME_SQL:
-            conn.execute(text(statement))
         resolution = Path(__file__).with_name("sql").joinpath("resolve_fax_candidates.postgresql.sql").read_text()
         conn.execute(text("DROP VIEW IF EXISTS fax_ingest_candidate_resolutions"))
         conn.execute(text(f"CREATE VIEW fax_ingest_candidate_resolutions AS {resolution}"))
+        # PR #19 created these for bracket-insensitive name matching. The view
+        # above no longer calls them. Drop the dependent function first, and
+        # do not use CASCADE: an unexpected remaining caller should fail here.
+        conn.execute(text("DROP FUNCTION IF EXISTS cal_fax_name_key(text)"))
+        conn.execute(text("DROP FUNCTION IF EXISTS cal_fax_display_name(text)"))
         old_list = conn.execute(text("SELECT to_regclass('public.surgical_cases')")).scalar()
         clinic_list = conn.execute(text("SELECT to_regclass('public.clinic_schedules')")).scalar()
         for statement in POSTGRES_RULES:

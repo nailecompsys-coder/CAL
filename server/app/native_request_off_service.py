@@ -194,6 +194,7 @@ def update_native_request_off(db: Session, surgeon: Surgeon, dayoff_id: int, pay
     row.end_time = end_t
     row.segments = json.dumps(segments)
     row.status = "pending"
+    row.approved_at = None
     row.admin_note = None
     db.commit()
     db.refresh(row)

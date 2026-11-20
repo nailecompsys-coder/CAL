@@ -498,8 +498,10 @@ class DayOff(Base):
     admin_note = Column(Text)  # admin's response
     review_findings = Column(Text)  # JSON list of system findings for scheduler approval review
     approved_by = Column(Integer, ForeignKey("admin_users.id"))
+    # When the request was entered (created_at) and approved (approved_at), both UTC.
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
+    approved_at = Column(DateTime, nullable=True)
 
     surgeon = relationship("Surgeon", back_populates="days_off")
 

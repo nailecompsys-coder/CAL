@@ -93,6 +93,9 @@
                 {{ d.start_date.strftime('%b %-d') }}{% if d.start_date != d.end_date %}–{{ d.end_date.strftime('%b %-d') }}{% endif %}
                 · {{ d.reason or 'Day Off' }}
               </p>
+              <p class="text-[10px] text-slate-400 truncate" title="When the request was entered (Eastern)">
+                Requested {{ d.created_at|eastern_time('%b %d %I:%M %p') }}
+              </p>
             </div>
             {% if findings %}
             <span class="text-[9px] font-bold text-amber-700 flex-shrink-0" title="{{ findings[0].message }}"><i class="fa-solid fa-triangle-exclamation"></i></span>
@@ -253,7 +256,8 @@
                 data-reason="{{ (bar.reason or '')|e }}"
                 data-notes="{{ (bar.notes or '')|e }}"
                 style="top: {{ 0.25 + (bar.lane|default(0)) * 1.65 }}rem; height: 1.4rem; left: calc({{ bar.leftPct }}% + 1px); width: calc({{ bar.widthPct }}% - 2px); --block-c: {% if bar.status == 'pending' %}var(--dayoff-pending){% elif (bar.reason or '')|lower|replace(' ', '') == 'nocall' %}var(--dayoff-nocall){% elif bar.isHalfDay %}var(--dayoff-half){% else %}var(--dayoff-approved){% endif %}; color:#1e293b;"
-                title="{{ row.surgeon.full_name }} · {{ bar.startIso }} → {{ bar.endIso }}{% if bar.session == 'am' %} · AM{% elif bar.session == 'pm' %} · PM{% elif bar.isHalfDay %} · Half day{% endif %}{% if bar.reason %} · {{ bar.reason }}{% endif %}">
+                data-stamps="{{ (bar.stamps or '')|e }}"
+                title="{{ row.surgeon.full_name }} · {{ bar.startIso }} → {{ bar.endIso }}{% if bar.session == 'am' %} · AM{% elif bar.session == 'pm' %} · PM{% elif bar.isHalfDay %} · Half day{% endif %}{% if bar.reason %} · {{ bar.reason }}{% endif %}{% if bar.stamps %} · {{ bar.stamps }}{% endif %}">
                 <span class="text-[10px] font-bold truncate block leading-[1.4rem]">
                   {% if bar.session == 'am' %}AM{% elif bar.session == 'pm' %}PM{% elif bar.spanDays > 1 %}{{ bar.labelStart }}–{{ bar.labelEnd }}{% else %}{{ bar.labelStart }}{% endif %}
                   {% if bar.session not in ('am', 'pm') and bar.isHalfDay %} · Half{% endif %}

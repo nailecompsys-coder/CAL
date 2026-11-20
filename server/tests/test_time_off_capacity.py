@@ -316,5 +316,21 @@ class TimeOffCapacityTest(unittest.TestCase):
         self.assertEqual(self.db.query(AdminNotification).filter_by(kind="time_off_red").count(), 0)
 
 
+    def test_approval_is_stamped_and_shown_in_eastern(self):
+        from datetime import datetime as _dt
+        from app.admin_dayoff_service import approve_dayoff, dayoff_stamps
+
+        row = self._off(self.docs[0], status="pending")
+        row.created_at = _dt(2026, 11, 20, 15, 5)  # 10:05 AM Eastern
+        self.db.commit()
+        self.assertEqual(dayoff_stamps(row), "Requested Nov 20 10:05 AM")
+        with patch("app.admin_dayoff_service.send_push_to_surgeon"), \
+             patch("app.admin_dayoff_service.send_time_off_decision_email", create=True):
+            approve_dayoff(self.db, row.id, approved_by=None)
+        self.db.refresh(row)
+        self.assertIsNotNone(row.approved_at)
+        self.assertIn("· Approved ", dayoff_stamps(row))
+
+
 if __name__ == "__main__":
     unittest.main()

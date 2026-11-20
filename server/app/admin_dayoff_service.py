@@ -2,7 +2,7 @@
 
 import calendar as calendar_lib
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime
 
 from sqlalchemy.orm import Session
 
@@ -149,6 +149,7 @@ def _bar_slice(
         "id": dayoff.id,
         "domId": f"{dayoff.id}-{clip_start.isoformat()}-{session}",
         "status": dayoff.status or "approved",
+        "stamps": dayoff_stamps(dayoff),
         "reason": dayoff.reason or "",
         "notes": dayoff.notes or "",
         "isHalfDay": is_half,
@@ -314,6 +315,21 @@ def dayoff_is_current_or_future(dayoff: DayOff, today: date | None = None) -> bo
     return bool(dayoff.end_date and dayoff.end_date >= today)
 
 
+def dayoff_stamps(dayoff: DayOff) -> str:
+    """'Requested Nov 20 10:05 AM · Approved Nov 21 9:00 AM' in Eastern time."""
+    from .jinja_env import _eastern_time
+
+    parts = []
+    if dayoff.created_at:
+        parts.append("Requested " + _eastern_time(dayoff.created_at, "%b %d %I:%M %p"))
+    if (dayoff.status or "") == "approved":
+        parts.append(
+            "Approved " + _eastern_time(dayoff.approved_at, "%b %d %I:%M %p")
+            if dayoff.approved_at else "Approved (time not recorded)"
+        )
+    return " · ".join(parts)
+
+
 def pending_conflict_map(db: Session, pending: list[DayOff]) -> dict[int, list[dict]]:
     """Full schedule findings for pending cards (not just clinic-group + raw call)."""
     from .scheduling_gate_service import build_dayoff_review_findings
@@ -370,6 +386,7 @@ def add_approved_dayoff(
         notes=notes or None,
         status="approved",
         approved_by=approved_by,
+        approved_at=datetime.utcnow(),
     )
     db.add(dayoff)
     db.commit()
@@ -406,6 +423,7 @@ def approve_dayoff(db: Session, dayoff_id: int, approved_by: int) -> list[str] |
         return None
     dayoff.status = "approved"
     dayoff.approved_by = approved_by
+    dayoff.approved_at = datetime.utcnow()
     from .day_off_card_normalization import sync_day_off_card_links
     sync_day_off_card_links(db, dayoff)
     surgeon = db.get(Surgeon, dayoff.surgeon_id)

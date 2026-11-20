@@ -99,6 +99,9 @@ def run_migration() -> None:
             conn.execute(text(
                 "ALTER TABLE surgeons ADD COLUMN IF NOT EXISTS time_off_exempt BOOLEAN NOT NULL DEFAULT FALSE"
             ))
+            # Don (Nov 20): stamp when a request is approved. Older approvals stay NULL.
+            if conn.execute(text("SELECT to_regclass('public.days_off')")).scalar() is not None:
+                conn.execute(text("ALTER TABLE days_off ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP"))
             conn.execute(text("ALTER TABLE clinic_groups ADD COLUMN IF NOT EXISTS yellow_at_off INTEGER"))
             conn.execute(text("ALTER TABLE clinic_groups ADD COLUMN IF NOT EXISTS red_at_off INTEGER"))
             conn.execute(text(

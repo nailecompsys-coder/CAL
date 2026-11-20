@@ -64,9 +64,8 @@ def create_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequ
             "emailed": emailed,
         }
 
+    # Never blocked: a red request is saved and Shannon gets a red alert.
     capacity = _capacity(db, surgeon, payload, segments, start_t, end_t)
-    if capacity.is_red:
-        return _red_response(db, surgeon, payload, capacity)
 
     overlap_note = day_off_overlap_advisory(
         db,
@@ -113,23 +112,28 @@ def create_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequ
     )
     db.commit()
     findings = store_dayoff_findings(db, row)
-    friendly = surgeon_friendly_conflict_message(findings)
-    if friendly:
-        warnings.append(friendly)
-    notify_admins(
-        "Pending Request" + (" (yellow)" if capacity.level == "yellow" else ""),
-        f"{surgeon.full_name} requested {payload.start_date.strftime('%b %-d')} to {payload.end_date.strftime('%b %-d')}."
-        + (f" {capacity.admin_message()}" if capacity.level else ""),
-        db,
-        kind="day_off_request",
-        payload={
-            "dayOffId": row.id,
-            "surgeonId": surgeon.id,
-            "startDate": payload.start_date.isoformat(),
-            "endDate": payload.end_date.isoformat(),
-        },
-        require_dayoff_opt_in=True,
-    )
+    if capacity.is_red:
+        # Saved anyway (the surgeon saw who is off first); Shannon gets the red alert.
+        warnings.insert(0, capacity.sent_red_message())
+        alert_red_request(db, surgeon, capacity, payload.start_date, payload.end_date, dayoff_id=row.id)
+    else:
+        friendly = surgeon_friendly_conflict_message(findings)
+        if friendly:
+            warnings.append(friendly)
+        notify_admins(
+            "Pending Request" + (" (yellow)" if capacity.level == "yellow" else ""),
+            f"{surgeon.full_name} requested {payload.start_date.strftime('%b %-d')} to {payload.end_date.strftime('%b %-d')}."
+            + (f" {capacity.admin_message()}" if capacity.level else ""),
+            db,
+            kind="day_off_request",
+            payload={
+                "dayOffId": row.id,
+                "surgeonId": surgeon.id,
+                "startDate": payload.start_date.isoformat(),
+                "endDate": payload.end_date.isoformat(),
+            },
+            require_dayoff_opt_in=True,
+        )
     send_native_push_to_surgeon(
         surgeon.id,
         "Days off request pending",
@@ -147,6 +151,7 @@ def create_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequ
         "request": serialize_day_off(row),
         "warnings": warnings[:3],
         "emailed": emailed,
+        "level": capacity.level or "clear",
     }
 
 
@@ -179,9 +184,6 @@ def update_native_request_off(db: Session, surgeon: Surgeon, dayoff_id: int, pay
     if already:
         raise HTTPException(409, "That day off is already filed for those dates.")
     capacity = _capacity(db, surgeon, payload, segments, start_t, end_t, exclude_id=row.id)
-    if capacity.is_red:
-        # Red: the edit is not saved; the earlier request stays as it was.
-        return _red_response(db, surgeon, payload, capacity)
 
     row.start_date = payload.start_date
     row.end_date = payload.end_date
@@ -208,9 +210,13 @@ def update_native_request_off(db: Session, surgeon: Surgeon, dayoff_id: int, pay
     )
     db.commit()
     findings = store_dayoff_findings(db, row)
-    friendly = surgeon_friendly_conflict_message(findings)
-    if friendly:
-        warnings.append(friendly)
+    if capacity.is_red:
+        warnings.insert(0, capacity.sent_red_message())
+        alert_red_request(db, surgeon, capacity, payload.start_date, payload.end_date, dayoff_id=row.id)
+    else:
+        friendly = surgeon_friendly_conflict_message(findings)
+        if friendly:
+            warnings.append(friendly)
     notify_admins(
         "Pending Request updated",
         f"{surgeon.full_name} updated request {payload.start_date.strftime('%b %-d')} to {payload.end_date.strftime('%b %-d')}.",
@@ -307,19 +313,9 @@ def _capacity(db, surgeon, payload, segments, start_t, end_t, *, exclude_id=None
     )
 
 
-def _red_response(db, surgeon, payload, capacity) -> dict:
-    """Chris's red: the request is not sent. The phone shows why; Shannon is alerted."""
-    alert_red_request(db, surgeon, capacity, payload.start_date, payload.end_date)
-    return {
-        "ok": False,
-        "request": None,
-        "warnings": [capacity.surgeon_message()],
-        "emailed": False,
-        "level": "red",
-    }
-
-
-def check_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequestOffInput, *, exclude_id=None) -> dict:
+def check_native_request_off(
+    db: Session, surgeon: Surgeon, payload: NativeRequestOffInput, *, exclude_id=None, show_choice: bool = False,
+) -> dict:
     """Preview for the request form: the color and the message, nothing saved."""
     _validate_request_dates(payload.start_date, payload.end_date, "requested")
     segments, start_t, end_t = _request_segments(payload)
@@ -328,8 +324,15 @@ def check_native_request_off(db: Session, surgeon: Surgeon, payload: NativeReque
         if not row or row.surgeon_id != surgeon.id:
             raise HTTPException(404, "Days off request not found")
     capacity = _capacity(db, surgeon, payload, segments, start_t, end_t, exclude_id=exclude_id)
+    level = capacity.level or "clear"
+    if level == "red" and not show_choice:
+        # Build 31 disables Submit on "red". Nothing is ever blocked, so older
+        # builds get the same message under the yellow color.
+        level = "yellow"
     return {
         "ok": True,
-        "level": capacity.level or "clear",
+        "level": level,
         "message": capacity.surgeon_message(),
+        "offList": capacity.off_list(),
+        "days": capacity.day_lines(),
     }

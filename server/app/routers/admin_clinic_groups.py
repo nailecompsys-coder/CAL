@@ -1,7 +1,8 @@
 """Settings → Time-off Groups.
 
 A group is a set of surgeons with two counts: how many off at once turns a
-request yellow, and how many turns it red (Chris's rule). "Whole practice"
+request yellow, and how many turns it red (Chris's rule). Nothing is blocked:
+red shows the surgeon who is off first and alerts Shannon when it is sent. "Whole practice"
 counts every active physician without a member list. Counting happens in
 sql/time_off_capacity.sql.
 
@@ -166,3 +167,17 @@ def delete_clinic_group(
     db.delete(group)
     db.commit()
     return RedirectResponse(f"{PAGE}?msg=deleted", status_code=303)
+
+
+@router.post("/clinic-groups/exempt")
+def save_time_off_exempt(
+    surgeon_ids: list[int] = Form(default=[]),
+    db: Session = Depends(get_db),
+    admin=Depends(get_current_admin),
+):
+    """Exempt surgeons are outside every time-off group rule (Chris: e.g. CJ)."""
+    chosen = set(surgeon_ids)
+    for surgeon in db.query(Surgeon).filter(Surgeon.is_active == True).all():  # noqa: E712
+        surgeon.time_off_exempt = surgeon.id in chosen
+    db.commit()
+    return RedirectResponse(f"{PAGE}?msg=saved", status_code=303)

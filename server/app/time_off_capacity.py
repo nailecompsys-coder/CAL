@@ -1,8 +1,9 @@
 """Time-off groups: yellow/red alerts when too many people would be off at once.
 
-Chris's rule (surgeon in charge): if two docs already have time off, a third
-overlapping request is yellow; if three are off, the next one is red and is not
-sent. The doctors talk first, then Shannon can enter it.
+Chris's rule (surgeon in charge): two doctors off at the same time is yellow.
+A third request is red: the surgeon sees who is already off (approved or
+pending) and either cancels to pick other dates or sends it anyway, which
+saves the request and gives Shannon a red alert to sort out.
 
 SQL (sql/time_off_capacity.sql) does the counting per group and half-day.
 This module picks the request's half-days, runs that SQL, and words the result.
@@ -43,6 +44,7 @@ class CapacityHit:
     yellow_at: int | None
     red_at: int | None
     other_ids: list[int] = field(default_factory=list)
+    other_status: dict[int, str] = field(default_factory=dict)
 
     @property
     def half_day_label(self) -> str:
@@ -53,6 +55,7 @@ class CapacityHit:
 class CapacityResult:
     hits: list[CapacityHit]
     initials: dict[int, str]
+    names_by_id: dict[int, str] = field(default_factory=dict)
 
     @property
     def level(self) -> str | None:
@@ -90,26 +93,89 @@ class CapacityResult:
         return f" (and {len(others)} more half-day{'s' if len(others) != 1 else ''})"
 
     def surgeon_message(self) -> str:
+        """Before the surgeon decides: what yellow or red means for this request."""
         hit = self.worst_hit()
         if not hit:
             return ""
         who = self.names(hit)
         if hit.level == "red":
             return (
-                f"Not sent: {hit.off_count} would be off {hit.half_day_label}{self._more(hit)} "
-                f"({hit.group_name}). Please talk with {who or 'the other doctors'} first. "
-                f"Shannon can enter it once you agree."
+                f"Red alert: you would make {hit.off_count} off {hit.half_day_label}{self._more(hit)}. "
+                f"Already off: {who or 'others'}. Cancel and pick other dates, "
+                f"or Send to Shannon and she will work it out."
             )
         return (
             f"Heads up: {who or 'others'} {'is' if len(hit.other_ids) == 1 else 'are'} already off "
-            f"{hit.half_day_label}{self._more(hit)} ({hit.group_name}: {hit.off_count} would be off). "
+            f"{hit.half_day_label}{self._more(hit)} ({hit.off_count} would be off). "
             f"Your request was sent to Shannon."
         )
+
+    def red_days_label(self) -> str:
+        """'Fri Dec 4 (3 off), Mon Dec 7 (3 off)' for the red days only."""
+        return ", ".join(
+            f"{line['label']} ({line['offCount']} off)"
+            for line in self.day_lines() if line["level"] == "red"
+        )
+
+    def sent_red_message(self) -> str:
+        """After the surgeon chose Send to Shannon."""
+        if not self.is_red:
+            return ""
+        return f"Sent with a red alert for {self.red_days_label()}. Shannon will work it out with you."
+
+    def day_lines(self) -> list[dict]:
+        """Each requested day that is yellow or red, in date order (Chris: line them up).
+
+        A day takes its worst half-day and group: the highest count and color, and
+        everyone else off that day.
+        """
+        days: dict[date, dict] = {}
+        for hit in self.hits:
+            line = days.setdefault(hit.day, {"level": None, "offCount": 0, "ids": set()})
+            if LEVEL_RANK[hit.level] > LEVEL_RANK[line["level"]]:
+                line["level"] = hit.level
+            line["offCount"] = max(line["offCount"], hit.off_count)
+            line["ids"].update(hit.other_ids)
+        out = []
+        for day in sorted(days):
+            line = days[day]
+            out.append({
+                "date": day.isoformat(),
+                "label": day.strftime("%a %b %-d"),
+                "level": line["level"],
+                "offCount": line["offCount"],
+                "others": sorted(self.initials.get(sid, "?") for sid in line["ids"]),
+            })
+        return out
+
+    def off_list(self) -> list[dict]:
+        """Who else is off during this request, for the phone's chip. No patient data."""
+        people: dict[int, dict] = {}
+        for hit in sorted(self.hits, key=lambda h: (h.day, h.session)):
+            for sid in hit.other_ids:
+                person = people.setdefault(sid, {
+                    "surgeonId": sid,
+                    "initials": self.initials.get(sid, "?"),
+                    "name": self.names_by_id.get(sid, ""),
+                    "status": "pending",
+                    "when": [],
+                })
+                if hit.other_status.get(sid) == "approved":
+                    person["status"] = "approved"
+                label = hit.half_day_label
+                if label not in person["when"]:
+                    person["when"].append(label)
+        out = []
+        for person in people.values():
+            out.append({**person, "when": _when_label(person["when"])})
+        return sorted(out, key=lambda p: (p["status"] != "approved", p["initials"]))
 
     def admin_message(self) -> str:
         hit = self.worst_hit()
         if not hit:
             return ""
+        if hit.level == "red" and len(self.hits) > 1:
+            return f"RED: {self.red_days_label()} in {hit.group_name}."
         who = self.names(hit)
         limit = hit.red_at if hit.level == "red" else hit.yellow_at
         return (
@@ -117,6 +183,18 @@ class CapacityResult:
             f"{self._more(hit)} in {hit.group_name} ({hit.level} at {limit})"
             f"{'; also off: ' + who if who else ''}."
         )
+
+
+def _when_label(half_days: list[str]) -> str:
+    """'Fri Nov 27 AM' + 'Fri Nov 27 PM' reads as 'Fri Nov 27'."""
+    by_day: dict[str, list[str]] = {}
+    for label in half_days:
+        day, session = label.rsplit(" ", 1)
+        by_day.setdefault(day, []).append(session)
+    return ", ".join(
+        day if {"AM", "PM"} <= set(sessions) else f"{day} {sessions[0]}"
+        for day, sessions in by_day.items()
+    )
 
 
 def _hidden_ids(db: Session) -> list[int]:
@@ -162,13 +240,16 @@ def _run(db: Session, request: DayOff, exclude_id: int | None) -> CapacityResult
                 red_at=row["red_at_off"],
             )
         if row["other_surgeon_id"] is not None:
-            hit.other_ids.append(int(row["other_surgeon_id"]))
+            sid = int(row["other_surgeon_id"])
+            hit.other_ids.append(sid)
+            hit.other_status[sid] = row["other_status"]
     other_ids = {sid for hit in hits.values() for sid in hit.other_ids}
-    initials = {
-        s.id: s.initials
-        for s in (db.query(Surgeon).filter(Surgeon.id.in_(other_ids)).all() if other_ids else [])
-    }
-    return CapacityResult(hits=list(hits.values()), initials=initials)
+    others = db.query(Surgeon).filter(Surgeon.id.in_(other_ids)).all() if other_ids else []
+    return CapacityResult(
+        hits=list(hits.values()),
+        initials={s.id: s.initials for s in others},
+        names_by_id={s.id: s.full_name for s in others},
+    )
 
 
 def check_new_request(
@@ -214,19 +295,25 @@ def alert_red_request(
     result: CapacityResult,
     start_date: date,
     end_date: date,
+    dayoff_id: int | None = None,
 ) -> None:
-    """A red request was not sent: tell the admins (Shannon) on the dashboard and by text."""
+    """The surgeon sent a red request anyway: Shannon gets a red alert and a text."""
     from .push import notify_admins
 
     span = start_date.strftime("%b %-d")
     if end_date != start_date:
         span += f" to {end_date.strftime('%b %-d')}"
+    already = ", ".join(
+        f"{p['initials']} ({p['status']})" for p in result.off_list()
+    )
     notify_admins(
         "Red alert: time off",
-        f"{surgeon.full_name} asked for {span} and was stopped. {result.admin_message()}",
+        f"{surgeon.full_name} sent a request for {span} anyway. {result.admin_message()}"
+        + (f" Already off: {already}." if already else ""),
         db,
         kind="time_off_red",
         payload={
+            "dayOffId": dayoff_id,
             "surgeonId": surgeon.id,
             "startDate": start_date.isoformat(),
             "endDate": end_date.isoformat(),
@@ -238,25 +325,30 @@ def alert_red_request(
 
 
 def capacity_findings(result: CapacityResult) -> list:
+    """One review finding per day for Shannon, red days first."""
     from .scheduling_guardrails_service import DayOffFinding
 
+    by_day: dict[date, list[CapacityHit]] = {}
+    for hit in result.hits:
+        by_day.setdefault(hit.day, []).append(hit)
     findings = []
-    seen = set()
-    for hit in sorted(result.hits, key=lambda h: (h.day, h.session, -LEVEL_RANK[h.level], h.group_name)):
-        key = (hit.group_id, hit.day, hit.session)
-        if key in seen:
-            continue
-        seen.add(key)
-        single = CapacityResult(hits=[hit], initials=result.initials)
+    for day, hits in by_day.items():
+        worst = sorted(hits, key=lambda h: (-LEVEL_RANK[h.level], -h.off_count, h.group_name))[0]
+        others = sorted({result.initials.get(sid, "?") for h in hits for sid in h.other_ids})
         findings.append(DayOffFinding(
-            severity=hit.level,
+            severity=worst.level,
             kind="time_off_capacity",
-            date=hit.day,
-            message=single.admin_message(),
+            date=day,
+            message=(
+                f"{'RED' if worst.level == 'red' else 'Yellow'}: {day.strftime('%a %b %-d')} · "
+                f"{worst.off_count} off in {worst.group_name}"
+                + (f"; also off: {', '.join(others)}" if others else "") + "."
+            ),
             # One summary for the surgeon, the same on every finding so it shows once.
             surgeon_message=result.surgeon_message(),
-            clinic_group_id=hit.group_id,
-            clinic_group_name=hit.group_name,
-            approved_initials=sorted({result.initials.get(sid, "?") for sid in hit.other_ids}),
+            clinic_group_id=worst.group_id,
+            clinic_group_name=worst.group_name,
+            approved_initials=others,
         ))
+    findings.sort(key=lambda f: (-LEVEL_RANK[f.severity], f.date))
     return findings

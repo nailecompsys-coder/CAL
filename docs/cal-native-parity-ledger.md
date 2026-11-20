@@ -4,6 +4,8 @@ Last updated: 2026-10-13
 
 Month Call backup (2026-11-02, TestFlight 2.0 (30)): Month Call line is exactly `WG - ALT` (real hyphen) with no backup, or `LL LL LL` with the backup initials bold and no separator. `isBackup` (viewer is the backup) no longer hides the chip, which had blanked the cell for the backup surgeon.
 
+Time-off chip (2026-11-20, unreleased, needs the next TestFlight build): the request form asks `POST /api/native/request-off/check?choice=1` and shows each requested day as Yellow or Red with its off count, then who is already off (Approved/Pending, dates). Red offers Change dates or Send to Shannon; the toolbar button reads Send. Nothing is blocked. Builds 31 and earlier get red reported as yellow, so Submit is never locked. Verified in the iOS Simulator against a local server with test data.
+
 Time-off groups (2026-11-20, TestFlight 2.0 (31)): the Request/Modify Time Off form calls `POST /api/native/request-off/check` (saves nothing) as dates, half-days or type change, and shows the yellow or red message in the Range section. Red disables Submit. The server still decides on Submit: a red request returns `ok: false` with the message, which builds 30 and earlier already display.
 
 Week meeting rows (2026-10-14, TestFlight 2.0 (29)): Week cards keep AM/PM master titles alone; meetings and extra places are separate rows (never `PM MN-OR · address`). Backend meetings-table rows always serialize as `type=meeting`.

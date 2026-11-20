@@ -72,6 +72,8 @@ async def lifespan(app: FastAPI):
     )
     with _database_startup_lock():
         Base.metadata.create_all(bind=engine)
+        # First: adds surgeons.time_off_exempt before any later step reads surgeons.
+        migrate_time_off_groups.run_migration()
         migrate_clinic_schedule_off.run_migration()
         migrate_surgeon_sort_order.run_migration()
         migrate_call_groups.run_migration()
@@ -97,7 +99,6 @@ async def lifespan(app: FastAPI):
         migrate_fax_line_memory.run_migration()
         migrate_call_builder.run_migration()
         migrate_push_sound.run_migration()
-        migrate_time_off_groups.run_migration()
         # A later migration may have created a line table. Add mrn if it is still missing.
         migrate_fax_mrn.run_migration()
         db = SessionLocal()

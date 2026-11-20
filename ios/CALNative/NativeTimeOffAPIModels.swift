@@ -52,9 +52,50 @@ struct NativeRequestOffResponse: Decodable {
 struct TimeOffCapacityPreview: Decodable, Equatable {
   let level: String
   let message: String
+  let offList: [TimeOffPersonOff]
+  let days: [TimeOffDayLine]
 
   var isRed: Bool { level == "red" }
   var isYellow: Bool { level == "yellow" }
+
+  enum CodingKeys: String, CodingKey {
+    case level
+    case message
+    case offList
+    case days
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    level = try container.decode(String.self, forKey: .level)
+    message = try container.decode(String.self, forKey: .message)
+    offList = try container.decodeIfPresent([TimeOffPersonOff].self, forKey: .offList) ?? []
+    days = try container.decodeIfPresent([TimeOffDayLine].self, forKey: .days) ?? []
+  }
+}
+
+/// One requested day at yellow or red: how many would be off and who else.
+struct TimeOffDayLine: Decodable, Equatable, Identifiable {
+  let date: String
+  let label: String
+  let level: String
+  let offCount: Int
+  let others: [String]
+
+  var id: String { date }
+  var isRed: Bool { level == "red" }
+}
+
+/// Someone else already off during the requested time (no patient data).
+struct TimeOffPersonOff: Decodable, Equatable, Identifiable {
+  let surgeonId: Int
+  let initials: String
+  let name: String
+  let status: String
+  let when: String
+
+  var id: Int { surgeonId }
+  var isApproved: Bool { status == "approved" }
 }
 
 struct TimeOffSubmitResult {

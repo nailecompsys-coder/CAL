@@ -74,13 +74,13 @@ struct TimeOffRequestForm: View {
             }
             .font(.body.weight(.semibold))
           } else {
-            Button(isSubmitting ? "Saving" : (isEditing ? "Save" : "Submit")) {
+            Button(isSubmitting ? "Saving" : (capacity?.isRed == true ? "Send" : (isEditing ? "Save" : "Submit"))) {
               Task {
                 await submit()
               }
             }
-            // Chris's red: talk with the other doctors first; Shannon can enter it.
-            .disabled(isSubmitting || store.sessionToken == nil || capacity?.isRed == true)
+            // Never blocked: on red the surgeon has already seen who is off.
+            .disabled(isSubmitting || store.sessionToken == nil)
           }
         }
       }
@@ -113,14 +113,12 @@ struct TimeOffRequestForm: View {
         }
 
         if let capacity, capacity.isRed || capacity.isYellow {
-          Label(capacity.message, systemImage: capacity.isRed ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill")
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(capacity.isRed ? Color.red : ClinicalPalette.warningText)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .liquidGlassCard(cornerRadius: 12, tint: capacity.isRed ? Color.red : ClinicalPalette.amber)
-            .accessibilityLabel(capacity.isRed ? "Red: \(capacity.message)" : "Yellow: \(capacity.message)")
+          TimeOffCapacityChip(
+            capacity: capacity,
+            isSubmitting: isSubmitting,
+            changeDates: { editingDate = .start },
+            send: { Task { await submit() } }
+          )
         }
 
         if let message {
@@ -530,5 +528,112 @@ private struct RequestSegmentRow: View {
       .pickerStyle(.segmented)
     }
     .padding(.vertical, 2)
+  }
+}
+
+
+/// Chris's rule: two off in a group is yellow, a third is red. Shows who is
+/// already off (approved or pending). Red offers Change dates or Send to Shannon.
+private struct TimeOffCapacityChip: View {
+  let capacity: TimeOffCapacityPreview
+  let isSubmitting: Bool
+  let changeDates: () -> Void
+  let send: () -> Void
+
+  private var tint: Color { capacity.isRed ? Color.red : ClinicalPalette.warningText }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Label(capacity.isRed ? "Red alert" : "Heads up", systemImage: capacity.isRed ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill")
+        .font(.subheadline.weight(.bold))
+        .foregroundStyle(tint)
+
+      // Day by day, so Dec 3 can be yellow while Dec 4-5 are red.
+      ForEach(capacity.days) { day in
+        HStack(spacing: 6) {
+          Circle()
+            .fill(day.isRed ? Color.red : ClinicalPalette.warningText)
+            .frame(width: 8, height: 8)
+          Text(day.label)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(ClinicalPalette.ink)
+          Text("· \(day.offCount) off")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          Spacer(minLength: 4)
+          Text(day.isRed ? "Red" : "Yellow")
+            .font(.caption2.weight(.bold))
+            .foregroundStyle(day.isRed ? Color.red : ClinicalPalette.warningText)
+        }
+        .accessibilityElement(children: .combine)
+      }
+
+      Text("Already off:")
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(ClinicalPalette.ink)
+        .padding(.top, 2)
+
+      ForEach(capacity.offList) { person in
+        HStack(spacing: 8) {
+          Text(person.initials)
+            .font(.caption2.weight(.black))
+            .frame(width: 28, height: 28)
+            .background(ClinicalPalette.porcelainChip, in: Circle())
+          VStack(alignment: .leading, spacing: 1) {
+            Text(person.name.isEmpty ? person.initials : person.name)
+              .font(.caption.weight(.semibold))
+              .foregroundStyle(ClinicalPalette.ink)
+            Text(person.when)
+              .font(.caption2)
+              .foregroundStyle(.secondary)
+          }
+          Spacer(minLength: 4)
+          Text(person.isApproved ? "Approved" : "Pending")
+            .font(.caption2.weight(.bold))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .foregroundStyle(person.isApproved ? ClinicalPalette.teal : ClinicalPalette.warningText)
+            .background((person.isApproved ? ClinicalPalette.teal : ClinicalPalette.warningText).opacity(0.14), in: Capsule())
+        }
+        .accessibilityElement(children: .combine)
+      }
+
+      if capacity.isRed {
+        HStack(spacing: 8) {
+          Button(action: changeDates) {
+            Text("Change dates")
+              .font(.subheadline.weight(.semibold))
+              .frame(maxWidth: .infinity)
+              .padding(.vertical, 9)
+              .background(ClinicalPalette.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+          }
+          .buttonStyle(.plain)
+
+          Button(action: send) {
+            Text(isSubmitting ? "Sending" : "Send to Shannon")
+              .font(.subheadline.weight(.semibold))
+              .foregroundStyle(.white)
+              .frame(maxWidth: .infinity)
+              .padding(.vertical, 9)
+              .background(Color.red, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+          }
+          .buttonStyle(.plain)
+          .disabled(isSubmitting)
+        }
+        Text("Send saves your request and gives Shannon a red alert to work out.")
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+      }
+    }
+    .padding(10)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .background(
+      (capacity.isRed ? Color.red : ClinicalPalette.amber).opacity(0.10),
+      in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+    )
+    .overlay(
+      RoundedRectangle(cornerRadius: 12, style: .continuous)
+        .stroke((capacity.isRed ? Color.red : ClinicalPalette.warningText).opacity(0.45), lineWidth: 1)
+    )
   }
 }

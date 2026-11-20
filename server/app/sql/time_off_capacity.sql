@@ -10,7 +10,7 @@
 --   hidden_ids   practice-manager / developer accounts that never count
 --
 -- One row per (group, half-day) at yellow or red, and one row per other person
--- off in it (other_surgeon_id NULL when the requester is the only one).
+-- off in it with approved/pending (other_surgeon_id NULL when the requester is alone).
 WITH candidate AS (
     SELECT card.id, card.date AS day, card.session
     FROM schedule_cards card
@@ -18,7 +18,7 @@ WITH candidate AS (
       AND card.surgeon_id = :surgeon_id
 ),
 requester AS (
-    SELECT s.id, COALESCE(s.staff_type, 'physician') AS staff_type
+    SELECT s.id, COALESCE(s.staff_type, 'physician') AS staff_type, s.time_off_exempt
     FROM surgeons s
     WHERE s.id = :surgeon_id
 ),
@@ -28,6 +28,8 @@ time_off_groups AS (
     WHERE g.is_active = TRUE
       AND g.group_type = 'people'
       AND (g.yellow_at_off IS NOT NULL OR g.red_at_off IS NOT NULL)
+      -- Exempt surgeons (e.g. CJ) are outside these rules.
+      AND (SELECT time_off_exempt FROM requester) = FALSE
       AND (
           (g.applies_to_all = TRUE AND (SELECT staff_type FROM requester) = 'physician')
           OR EXISTS (
@@ -37,8 +39,10 @@ time_off_groups AS (
       )
 ),
 others_off AS (
-    SELECT DISTINCT cand.day, cand.session, link.surgeon_id,
-           COALESCE(s.staff_type, 'physician') AS staff_type
+    -- One row per person and half-day. approved_rank 0 = approved, 1 = only pending.
+    SELECT cand.day, cand.session, link.surgeon_id,
+           COALESCE(s.staff_type, 'physician') AS staff_type,
+           min(CASE d.status WHEN 'approved' THEN 0 ELSE 1 END) AS approved_rank
     FROM candidate cand
     JOIN schedule_cards other_card
       ON other_card.date = cand.day
@@ -51,10 +55,12 @@ others_off AS (
       AND lower(trim(COALESCE(d.reason, ''))) <> 'no call'
       AND d.id <> :exclude_id
       AND s.is_active = TRUE
+      AND s.time_off_exempt = FALSE
       AND s.id NOT IN :hidden_ids
+    GROUP BY cand.day, cand.session, link.surgeon_id, COALESCE(s.staff_type, 'physician')
 ),
 group_others AS (
-    SELECT g.id AS group_id, cand.day, cand.session, o.surgeon_id
+    SELECT g.id AS group_id, cand.day, cand.session, o.surgeon_id, o.approved_rank
     FROM time_off_groups g
     CROSS JOIN candidate cand
     JOIN others_off o
@@ -86,7 +92,8 @@ leveled AS (
 )
 SELECT leveled.group_id, leveled.group_name, leveled.yellow_at_off, leveled.red_at_off,
        leveled.day, leveled.session, leveled.off_count, leveled.level,
-       go.surgeon_id AS other_surgeon_id
+       go.surgeon_id AS other_surgeon_id,
+       CASE go.approved_rank WHEN 0 THEN 'approved' WHEN 1 THEN 'pending' END AS other_status
 FROM leveled
 LEFT JOIN group_others go
   ON go.group_id = leveled.group_id

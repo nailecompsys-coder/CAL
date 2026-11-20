@@ -43,10 +43,11 @@ This is Don's current scheduling rule set for the master calendar, the surgeon a
 
 ## Time-off groups (Chris, surgeon in charge, November 2026)
 
-- Settings → Time-off Groups holds each group's members and two counts. CAL counts everyone in the group who is off (approved or pending) in the same AM or PM half-day, plus the new request. No Call and denied or cancelled requests do not count.
-- **Whole practice** covers every active physician: 3 off is **yellow**, 4 off is **red** (two already off makes a third request yellow; three off makes the next one red). Other groups carry their own numbers; LM and WG started from their old "max off" limit (one more is yellow, two more is red).
-- **Yellow:** the request is sent. The surgeon sees who else is off; Shannon sees it marked yellow.
-- **Red:** the surgeon's request (new or edited) is not sent. The surgeon is asked to talk with the others first, and the admins get a red alert on the dashboard and by text. Shannon can still enter the time off under Days Off once the doctors agree. Pending cards are recounted each time the page loads.
+- **Counted by group, not the whole practice.** Settings → Time-off Groups holds each group's members and two counts. In every AM and PM half-day of a request, CAL lines up everyone in the requester's groups who is off (approved or pending), plus the request itself. No Call and denied or cancelled requests do not count. Half-days count on their own: two off all day plus a third off only in the afternoon makes that afternoon three deep.
+- Groups default to **2 off = yellow, 3 off = red**. Example: A off Dec 2–5, B off Dec 4–5, C asks Dec 3–5 → Dec 3 is yellow (2 off), Dec 4–5 are red (3 off).
+- **Nothing is ever blocked.** Before Submit the surgeon sees each day's color and who is already off, marked Approved or Pending. Yellow is sent as usual. On red the surgeon chooses Change dates or Send to Shannon; a sent red request is saved and Shannon gets a red alert (dashboard and text) to work out.
+- **Exempt surgeons** (Christopher Johnson; JK to be confirmed) are outside these rules: their requests get no color and they never count toward anyone else's. Shannon maintains the exempt list on the same Settings page.
+- Group membership is maintained in Settings, not inferred. A Whole practice group exists but is off unless Shannon turns it on.
 
 ## Scheduler conflict alerts
 

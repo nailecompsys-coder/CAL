@@ -233,7 +233,7 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
                 response = native_request_off(body, db=db, auth=(requester, "token"))
 
             self.assertTrue(response["ok"])
-            self.assertTrue(any("Lake Mary" in warning for warning in response["warnings"]))
+            self.assertTrue(any("Heads up: LW is already off" in warning for warning in response["warnings"]))
             row = db.get(DayOff, response["request"]["id"])
             self.assertIsNotNone(row.review_findings)
             self.assertIn("time_off_capacity", row.review_findings)

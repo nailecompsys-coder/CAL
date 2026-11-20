@@ -162,10 +162,8 @@ def submit_request_off(db: Session, surgeon: Surgeon, start_date: str, end_date:
 
     from .time_off_capacity import alert_red_request, check_new_request
 
+    # Never blocked: red is saved below and Shannon gets a red alert.
     capacity = check_new_request(db, surgeon.id, start_date=start, end_date=end, reason=reason)
-    if capacity.is_red:
-        alert_red_request(db, surgeon, capacity, start, end)
-        return {"ok": False, "warn": capacity.surgeon_message()}
 
     advisory = day_off_overlap_advisory(db, surgeon.id, start, end)
 
@@ -187,6 +185,9 @@ def submit_request_off(db: Session, surgeon: Surgeon, start_date: str, end_date:
     db.refresh(dayoff)
     findings = store_dayoff_findings(db, dayoff)
     conflict_msgs: list[str] = []
+    if capacity.is_red:
+        conflict_msgs.append(capacity.sent_red_message())
+        alert_red_request(db, surgeon, capacity, start, end, dayoff_id=dayoff.id)
     if advisory:
         conflict_msgs.append(advisory)
     if findings:

@@ -473,9 +473,13 @@ struct NativeCALClient {
       notes: "",
       segments: segments
     )
-    if let excludeRequestId, let url = request.url,
-       var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
-      components.queryItems = [URLQueryItem(name: "dayoff_id", value: String(excludeRequestId))]
+    // choice=1: this build shows who is off with Change dates / Send to Shannon, so red stays red.
+    if let url = request.url, var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+      var items = [URLQueryItem(name: "choice", value: "1")]
+      if let excludeRequestId {
+        items.append(URLQueryItem(name: "dayoff_id", value: String(excludeRequestId)))
+      }
+      components.queryItems = items
       request.url = components.url
     }
     let data = try await perform(request)

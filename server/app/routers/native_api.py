@@ -233,12 +233,18 @@ def native_request_off(
 def native_request_off_check(
     body: NativeRequestOffBody,
     dayoff_id: int | None = None,
+    choice: int = 0,
     db: Session = Depends(get_db),
     auth=Depends(get_current_surgeon),
 ):
-    """Yellow/red preview before Submit. Saves nothing and alerts no one."""
+    """Yellow/red preview before Submit. Saves nothing and alerts no one.
+
+    ``choice=1`` (build 32+) gets "red" and shows Change dates / Send to Shannon.
+    """
     surgeon, _ = auth
-    return check_native_request_off(db, surgeon, _native_request_off_input(body), exclude_id=dayoff_id)
+    return check_native_request_off(
+        db, surgeon, _native_request_off_input(body), exclude_id=dayoff_id, show_choice=bool(choice),
+    )
 
 
 @router.put("/request-off/{dayoff_id}")

@@ -128,6 +128,9 @@ class Surgeon(Base):
     can_call_builder = Column(Boolean, default=False, server_default="false", nullable=False)
     # Native APNs/Expo custom sound filename in the iOS app bundle (e.g. bagpipes.wav). Null = default.
     push_sound = Column(String(64), nullable=True)
+    # Chris (Nov 20): exempt surgeons are outside the time-off group yellow/red rules.
+    # Their requests get no color and they never count toward anyone else's.
+    time_off_exempt = Column(Boolean, default=False, server_default="false", nullable=False)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
 

@@ -69,6 +69,13 @@ class TimeOffCapacityTest(unittest.TestCase):
                     baseline_state="na", effective_state="na", source="master",
                 ))
             self.docs.append(doc)
+        # Chris: counted by group. WG holds all six doctors at 2 yellow / 3 red.
+        self.wg = ClinicGroup(name="Winter Garden", abbreviation="WG", group_type="people",
+                              yellow_at_off=2, red_at_off=3, is_active=True)
+        self.db.add(self.wg)
+        self.db.flush()
+        for doc in self.docs:
+            self.db.add(ClinicGroupMember(clinic_group_id=self.wg.id, surgeon_id=doc.id))
         self.db.add(AdminUser(
             username="shannon", email="s@example.com", password_hash="x",
             is_active=True, notify_day_off_requests=True,
@@ -94,35 +101,57 @@ class TimeOffCapacityTest(unittest.TestCase):
     def _check(self, doc, **kwargs):
         return check_new_request(self.db, doc.id, start_date=DAY, end_date=DAY, **kwargs)
 
-    def test_seed_makes_whole_practice_three_and_four(self):
+    def test_seed_adds_whole_practice_turned_off(self):
         whole = self.db.query(ClinicGroup).filter_by(applies_to_all=True).one()
-        self.assertEqual((whole.name, whole.yellow_at_off, whole.red_at_off), ("Whole practice", 3, 4))
+        self.assertEqual((whole.name, whole.is_active, whole.yellow_at_off, whole.red_at_off),
+                         ("Whole practice", False, 2, 3))
 
-    def test_seed_carries_old_group_limits(self):
+    def test_seed_turns_off_first_release_whole_practice(self):
+        whole = self.db.query(ClinicGroup).filter_by(applies_to_all=True).one()
+        whole.is_active, whole.yellow_at_off, whole.red_at_off = True, 3, 4
+        self.db.commit()
+        with self.engine.begin() as conn:
+            seed_time_off_groups(conn)
+        self.db.refresh(whole)
+        self.assertEqual((whole.is_active, whole.yellow_at_off, whole.red_at_off), (False, 2, 3))
+        # Turned back on by Shannon at 2/3, it stays on.
+        whole.is_active = True
+        self.db.commit()
+        with self.engine.begin() as conn:
+            seed_time_off_groups(conn)
+        self.db.refresh(whole)
+        self.assertTrue(whole.is_active)
+
+    def test_seed_moves_old_switch_groups_to_two_and_three_once(self):
         lm = ClinicGroup(name="Lake Mary", abbreviation="LM", group_type="people",
                          enforce_day_off_limit=True, max_approved_off_per_day=1, is_active=True)
         self.db.add(lm)
         self.db.commit()
         with self.engine.begin() as conn:
             seed_time_off_groups(conn)
-            seed_time_off_groups(conn)  # repeat-safe
         self.db.refresh(lm)
-        self.assertEqual((lm.yellow_at_off, lm.red_at_off), (2, 3))
+        self.assertEqual((lm.yellow_at_off, lm.red_at_off, lm.enforce_day_off_limit), (2, 3, False))
+        lm.yellow_at_off, lm.red_at_off = 4, 5  # Shannon's later choice stays put
+        self.db.commit()
+        with self.engine.begin() as conn:
+            seed_time_off_groups(conn)
+        self.db.refresh(lm)
+        self.assertEqual((lm.yellow_at_off, lm.red_at_off), (4, 5))
         self.assertEqual(self.db.query(ClinicGroup).filter_by(applies_to_all=True).count(), 1)
 
     def test_chris_rule_clear_yellow_red(self):
         requester = self.docs[5]
         self.assertIsNone(self._check(requester).level)
-        self._off(self.docs[0])
-        self.assertIsNone(self._check(requester).level)
-        self._off(self.docs[1], status="pending")
+        self._off(self.docs[0], status="pending")
         result = self._check(requester)
         self.assertEqual(result.level, "yellow")
-        self.assertIn("CJ and NF", result.surgeon_message())
-        self._off(self.docs[2])
+        self.assertIn("CJ is already off", result.surgeon_message())
+        self._off(self.docs[1])
         result = self._check(requester)
         self.assertEqual(result.level, "red")
-        self.assertTrue(result.surgeon_message().startswith("Not sent: 4 would be off"))
+        self.assertTrue(result.surgeon_message().startswith("Red alert: you would make 3 off"))
+        people = {p["initials"]: p["status"] for p in result.off_list()}
+        self.assertEqual(people, {"CJ": "pending", "NF": "approved"})
 
     def test_no_call_denied_and_other_half_day_do_not_count(self):
         requester = self.docs[5]
@@ -133,8 +162,52 @@ class TimeOffCapacityTest(unittest.TestCase):
         # PM-only request: the two morning-only requests are a different half-day.
         pm = [{"date": DAY.isoformat(), "isFullDay": False, "start": "13:00", "end": "17:00"}]
         self.assertIsNone(self._check(requester, is_full_day=False, segments=pm).level)
-        # Full day overlaps the morning: CJ's No Call and NF's denied still do not count.
-        self.assertEqual(self._check(requester).level, "yellow")
+        # Full day overlaps the morning (AD and LW): 3 off. No Call and denied never count.
+        result = self._check(requester)
+        self.assertEqual(result.level, "red")
+        self.assertEqual({p["initials"] for p in result.off_list()}, {"AD", "LW"})
+
+    def test_dons_example_lines_up_each_day(self):
+        # A off Dec 2-5 (here DAY..DAY+3), B off the last two days, C asks DAY+1..DAY+3.
+        days = [DAY + timedelta(days=i) for i in range(6)]
+        days = [d for d in days if d.weekday() < 5][:4]
+        for doc in self.docs[:3]:
+            week = ScheduleCardWeek(surgeon_id=doc.id, week_start=days[-1] - timedelta(days=days[-1].weekday()), master_revision="t2")
+            self.db.add(week)
+            self.db.flush()
+            for d in days[1:]:
+                for session in ("am", "pm"):
+                    if not self.db.query(ScheduleCard).filter_by(surgeon_id=doc.id, date=d, session=session).first():
+                        self.db.add(ScheduleCard(week_id=week.id, surgeon_id=doc.id, date=d, session=session,
+                                                 baseline_state="na", effective_state="na", source="master"))
+        self.db.commit()
+        for doc, first in ((self.docs[0], days[0]), (self.docs[1], days[2])):
+            row = DayOff(surgeon_id=doc.id, start_date=first, end_date=days[3], status="approved", reason="Vacation")
+            self.db.add(row)
+            self.db.flush()
+            sync_day_off_card_links(self.db, row)
+        self.db.commit()
+        result = check_new_request(self.db, self.docs[2].id, start_date=days[1], end_date=days[3])
+        lines = [(line["date"], line["level"], line["offCount"]) for line in result.day_lines()]
+        self.assertEqual(lines, [
+            (days[1].isoformat(), "yellow", 2),
+            (days[2].isoformat(), "red", 3),
+            (days[3].isoformat(), "red", 3),
+        ])
+
+    def test_exempt_surgeon_gets_no_color_and_never_counts(self):
+        cj = self.docs[0]
+        cj.time_off_exempt = True
+        self.db.commit()
+        self._off(self.docs[1])
+        self._off(self.docs[2])
+        # CJ's own request: no color even with two others off.
+        self.assertIsNone(self._check(cj).level)
+        # CJ off does not count toward anyone else's.
+        self._off(cj)
+        result = self._check(self.docs[5])
+        self.assertEqual(result.level, "red")
+        self.assertEqual({p["initials"] for p in result.off_list()}, {"NF", "AD"})
 
     def test_member_group_uses_its_own_numbers(self):
         lm = ClinicGroup(name="Lake Mary", abbreviation="LM", group_type="people",
@@ -144,17 +217,19 @@ class TimeOffCapacityTest(unittest.TestCase):
         for doc in self.docs[:3]:
             self.db.add(ClinicGroupMember(clinic_group_id=lm.id, surgeon_id=doc.id))
         self.db.commit()
+        self.wg.is_active = False
+        self.db.commit()
         self._off(self.docs[0])
         result = self._check(self.docs[1])
         self.assertEqual(result.level, "yellow")
-        self.assertIn("Lake Mary", result.surgeon_message())
-        # Not a Lake Mary member: only Whole practice applies, 2 off is clear.
+        self.assertEqual({h.group_name for h in result.hits}, {"Lake Mary"})
+        # Not a Lake Mary member (WG and Whole practice are off): clear.
         self.assertIsNone(self._check(self.docs[4]).level)
         self._off(self.docs[1])
         self.assertEqual(self._check(self.docs[2]).level, "red")
 
     def test_saved_request_review_excludes_itself_and_shows_color(self):
-        for doc in self.docs[:3]:
+        for doc in self.docs[:2]:
             self._off(doc, status="pending")
         mine = self._off(self.docs[3], status="pending")
         self.assertEqual(check_day_off(self.db, mine).level, "red")
@@ -168,27 +243,30 @@ class TimeOffCapacityTest(unittest.TestCase):
     @patch("app.native_request_off_service.send_time_off_request_copy", return_value=False)
     @patch("app.native_request_off_service.send_native_push_to_surgeon")
     @patch("app.push.send_sms")
-    def test_red_iphone_request_is_not_saved_and_alerts_shannon(self, sms, push, email):
-        for doc in self.docs[:3]:
+    def test_red_is_never_blocked_saves_and_alerts_shannon(self, sms, push, email):
+        for doc in self.docs[:2]:
             self._off(doc)
         before = self.db.query(DayOff).count()
-        preview = check_native_request_off(self.db, self.docs[5], self._payload())
+        preview = check_native_request_off(self.db, self.docs[5], self._payload(), show_choice=True)
         self.assertEqual(preview["level"], "red")
+        self.assertEqual([p["initials"] for p in preview["offList"]], ["CJ", "NF"])
         self.assertEqual(self.db.query(AdminNotification).count(), 0)
+        # Build 31 locks Submit on "red"; older clients get the same message as yellow.
+        self.assertEqual(check_native_request_off(self.db, self.docs[5], self._payload())["level"], "yellow")
 
         result = create_native_request_off(self.db, self.docs[5], self._payload())
-        self.assertFalse(result["ok"])
-        self.assertIn("Please talk with", result["warnings"][0])
-        self.assertEqual(self.db.query(DayOff).count(), before)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["level"], "red")
+        self.assertTrue(result["warnings"][0].startswith("Sent with a red alert"))
+        self.assertEqual(self.db.query(DayOff).count(), before + 1)
         alert = self.db.query(AdminNotification).one()
         self.assertEqual((alert.kind, alert.title), ("time_off_red", "Red alert: time off"))
-        push.assert_not_called()
+        self.assertIn("CJ (approved)", alert.body)
 
     @patch("app.native_request_off_service.send_time_off_request_copy", return_value=False)
     @patch("app.native_request_off_service.send_native_push_to_surgeon")
     def test_yellow_iphone_request_is_saved_and_marked(self, push, email):
         self._off(self.docs[0])
-        self._off(self.docs[1])
         result = create_native_request_off(self.db, self.docs[5], self._payload())
         self.assertTrue(result["ok"])
         self.assertTrue(any("Heads up" in w for w in result["warnings"]))
@@ -198,8 +276,8 @@ class TimeOffCapacityTest(unittest.TestCase):
     @patch("app.native_request_off_service.send_time_off_request_copy", return_value=False)
     @patch("app.native_request_off_service.send_native_push_to_surgeon")
     @patch("app.push.send_sms")
-    def test_red_edit_leaves_the_old_request_unchanged(self, sms, push, email):
-        for doc in self.docs[:3]:
+    def test_red_edit_is_saved_and_alerts(self, sms, push, email):
+        for doc in self.docs[:2]:
             self._off(doc)
         other_day = _next_weekday(40)
         mine = DayOff(surgeon_id=self.docs[5].id, start_date=other_day, end_date=other_day,
@@ -207,9 +285,10 @@ class TimeOffCapacityTest(unittest.TestCase):
         self.db.add(mine)
         self.db.commit()
         result = update_native_request_off(self.db, self.docs[5], mine.id, self._payload())
-        self.assertFalse(result["ok"])
+        self.assertTrue(result["ok"])
         self.db.refresh(mine)
-        self.assertEqual(mine.start_date, other_day)
+        self.assertEqual(mine.start_date, DAY)
+        self.assertEqual(self.db.query(AdminNotification).filter_by(kind="time_off_red").count(), 1)
 
 
 if __name__ == "__main__":

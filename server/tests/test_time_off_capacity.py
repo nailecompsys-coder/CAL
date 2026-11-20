@@ -300,28 +300,21 @@ class TimeOffCapacityTest(unittest.TestCase):
         self.db.commit()
         self.assertEqual(self._check(self.docs[5]).level, "red")
 
-    def test_shannon_red_day_cards_start_tomorrow_and_clear(self):
-        from app.time_off_capacity import sync_red_day_alerts
-        admin = self.db.query(AdminUser).one()
+    def test_red_days_ahead_panel_rows_and_clear(self):
+        from app.time_off_capacity import red_day_runs
         for doc in self.docs[:3]:
             self._off(doc)
         self._book(self.docs[4], "clinic", 1)
         self._off(self.docs[4])
-        sync_red_day_alerts(self.db, admin.id)
-        cards = self.db.query(AdminNotification).filter_by(kind="time_off_red_day").all()
-        titles = sorted(c.title for c in cards)
-        self.assertEqual(titles, ["Red day: Winter Garden", "Red: MS has work booked during time off"])
-        self.assertTrue(any("1 visit booked while off" in c.body for c in cards))
-        sync_red_day_alerts(self.db, admin.id)  # no duplicates
-        self.assertEqual(self.db.query(AdminNotification).filter_by(kind="time_off_red_day").count(), 2)
-        # Fixed: one doctor's time off is denied and the clinic visit cancelled -> cards go away.
+        runs = red_day_runs(self.db, DAY)
+        names = sorted(r["group_name"] for r in runs)
+        self.assertEqual(names, ["MS has work booked during time off", "Winter Garden"])
         for doc in self.docs[:2]:
             self.db.query(DayOff).filter_by(surgeon_id=doc.id).one().status = "denied"
         from app.models import ScheduleCardActivity
         self.db.query(ScheduleCardActivity).update({"is_active": False})
         self.db.commit()
-        sync_red_day_alerts(self.db, admin.id)
-        self.assertEqual(self.db.query(AdminNotification).filter_by(kind="time_off_red_day").count(), 0)
+        self.assertEqual(red_day_runs(self.db, DAY), [])
 
     @patch("app.native_request_off_service.send_time_off_request_copy", return_value=False)
     @patch("app.native_request_off_service.send_native_push_to_surgeon")
@@ -382,18 +375,14 @@ class TimeOffCapacityTest(unittest.TestCase):
         self.assertIn("· Approved ", dayoff_stamps(row))
 
 
-    def test_any_admin_gets_red_day_cards_even_with_notices_off(self):
+    def test_old_red_day_cards_are_removed_panel_only(self):
         from app.time_off_capacity import sync_red_day_alerts
-        quiet = AdminUser(username="don", email="d@example.com", password_hash="x",
-                          is_active=True, notify_day_off_requests=False)
-        self.db.add(quiet)
+        admin = self.db.query(AdminUser).one()
+        self.db.add(AdminNotification(admin_user_id=admin.id, title="Red day: X", body="b",
+                                      kind="time_off_red_day", payload="{}"))
         self.db.commit()
-        for doc in self.docs[:3]:
-            self._off(doc)
-        sync_red_day_alerts(self.db, quiet.id)
-        self.assertEqual(
-            self.db.query(AdminNotification).filter_by(admin_user_id=quiet.id, kind="time_off_red_day").count(), 1)
-
+        sync_red_day_alerts(self.db, admin.id)
+        self.assertEqual(self.db.query(AdminNotification).filter_by(kind="time_off_red_day").count(), 0)
 
     def test_clinic_or_grid_shows_lines_on_off_na_card_and_flags_red(self):
         from app.schedule_card_projection_service import card_grid_page_data

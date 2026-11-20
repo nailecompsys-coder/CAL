@@ -528,72 +528,15 @@ def _run_label(run: dict) -> str:
 
 
 def sync_red_day_alerts(db: Session, admin_user_id: int) -> int:
-    """Give this admin one red card per red run from tomorrow on; drop cards no longer red.
+    """Red days ahead live only in the dashboard panel (Don: the notification
+    cards duplicated it). Remove any red-day cards made earlier."""
+    from .models import AdminNotification
 
-    Covers red days however they arose (approved before the rules, group changes,
-    Shannon approving a red request). Returns how many cards changed.
-    """
-    import json as _json
-
-    from .models import AdminNotification, AdminUser
-    from .scheduling_gate_service import practice_today
-
-    admin = db.get(AdminUser, admin_user_id)
-    # Don: any admin should see red days, whatever their notice settings.
-    wants = bool(admin and admin.is_active)
-    # Don: today is already known; alert from tomorrow on.
-    from datetime import timedelta
-    runs = red_day_runs(db, practice_today() + timedelta(days=1)) if wants else []
-    current = {run["key"]: run for run in runs}
-    existing = db.query(AdminNotification).filter(
+    removed = db.query(AdminNotification).filter(
         AdminNotification.admin_user_id == admin_user_id,
         AdminNotification.kind == RED_DAY_KIND,
-    ).all()
-    def card_fields(run: dict) -> tuple[str, str, str]:
-        if run["group_id"] < 0:
-            title = f"Red: {run['group_name']}"
-            body = f"{_run_label(run)}: {_booked_label(run.get('cases', 0), run.get('visits', 0))} while off."
-        else:
-            title = f"Red day: {run['group_name']}"
-            body = f"{_run_label(run)}: {run['off']} off ({', '.join(run['initials'])}). Red at {run['red_at']}."
-        payload = _json.dumps({
-            "key": run["key"],
-            "groupId": run["group_id"],
-            "surgeonId": -run["group_id"] if run["group_id"] < 0 else None,
-            "startDate": run["start"].isoformat(),
-            "endDate": run["end"].isoformat(),
-        })
-        return title, body, payload
-
-    seen: set[str] = set()
-    changed = 0
-    for row in existing:
-        try:
-            key = (_json.loads(row.payload or "{}") or {}).get("key")
-        except (TypeError, ValueError):
-            key = None
-        if key not in current or key in seen:
-            db.delete(row)
-            changed += 1
-            continue
-        seen.add(key)
-        # Keep the card, refresh its wording, counts and link.
-        title, body, payload = card_fields(current[key])
-        if (row.title, row.body, row.payload) != (title, body, payload):
-            row.title, row.body, row.payload = title, body, payload
-            changed += 1
-    for key, run in current.items():
-        if key in seen:
-            continue
-        title, body, payload = card_fields(run)
-        db.add(AdminNotification(
-            admin_user_id=admin_user_id,
-            title=title,
-            body=body,
-            kind=RED_DAY_KIND,
-            payload=payload,
-        ))
-        changed += 1
-    if changed:
+    ).delete(synchronize_session=False)
+    if removed:
         db.commit()
-    return changed
+    return removed
+

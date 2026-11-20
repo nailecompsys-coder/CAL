@@ -47,7 +47,7 @@ def notification_is_informational(row: AdminNotification | None) -> bool:
         return True
     if kind in _FIXABLE_KINDS:
         return False
-    if kind in {"day_off_request", "day_off_duplicate", "time_off_red"}:
+    if kind in {"day_off_request", "day_off_duplicate", "time_off_red", "time_off_red_day"}:
         return False
     return True
 

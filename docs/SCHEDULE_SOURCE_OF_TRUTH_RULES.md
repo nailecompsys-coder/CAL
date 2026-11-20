@@ -48,6 +48,10 @@ This is Don's current scheduling rule set for the master calendar, the surgeon a
 - **Nothing is ever blocked.** Before Submit the surgeon sees each day's color and who is already off, marked Approved or Pending. Yellow is sent as usual. On red the surgeon chooses Change dates or Send to Shannon; a sent red request is saved and Shannon gets a red alert (dashboard and text) to work out.
 - **Exempt surgeons** (Christopher Johnson; JK to be confirmed) are outside these rules: their requests get no color and they never count toward anyone else's. Shannon maintains the exempt list on the same Settings page.
 - Group membership is maintained in Settings, not inferred. A Whole practice group exists but is off unless Shannon turns it on.
+- **Booked work is red.** A request that lands on a half-day where that doctor already has an active clinic visit or OR case is red, whatever the off count. This applies to exempt doctors too (exempt only skips the off count).
+- **Inside the rules, approved on the spot (Don, Nov 20).** A doctor's time-off request that is not red is approved immediately with no Shannon step; the doctor gets the approval push and email at once. Red requests stay pending with a red alert. PA requests and No Call requests still go to Shannon. If an auto-approved request touches something else (call, other findings) Shannon gets an FYI.
+- **Red days ahead.** From tomorrow on, every red group-day and every time off that sits on booked work gives Shannon a red card on the dashboard and Notifications. Cards are grouped into runs of weekdays and clear on their own once the day is no longer red. Today is not re-alerted.
+- Each request records when it was entered and, once approved, when it was approved (Eastern on the portal).
 
 ## Scheduler conflict alerts
 

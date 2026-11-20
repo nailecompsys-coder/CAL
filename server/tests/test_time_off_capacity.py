@@ -265,13 +265,63 @@ class TimeOffCapacityTest(unittest.TestCase):
 
     @patch("app.native_request_off_service.send_time_off_request_copy", return_value=False)
     @patch("app.native_request_off_service.send_native_push_to_surgeon")
-    def test_yellow_iphone_request_is_saved_and_marked(self, push, email):
+    def test_yellow_doctor_request_is_approved_on_the_spot(self, push, email):
         self._off(self.docs[0])
-        result = create_native_request_off(self.db, self.docs[5], self._payload())
+        with patch("app.admin_dayoff_service.send_push_to_surgeon"), \
+             patch("app.admin_dayoff_service.send_time_off_decision_email", create=True):
+            result = create_native_request_off(self.db, self.docs[5], self._payload())
         self.assertTrue(result["ok"])
+        self.assertEqual(result["status"], "approved")
+        self.assertEqual(result["warnings"][0], "Approved: within the time-off rules.")
         self.assertTrue(any("Heads up" in w for w in result["warnings"]))
-        notice = self.db.query(AdminNotification).one()
-        self.assertEqual(notice.title, "Pending Request (yellow)")
+        # Inside the rules: nothing for Shannon to approve.
+        self.assertEqual(self.db.query(AdminNotification).filter_by(kind="day_off_request").count(), 0)
+
+    def _book(self, doc, kind="surgical", n=1):
+        from app.models import ScheduleCardActivity
+        card = self.db.query(ScheduleCard).filter_by(surgeon_id=doc.id, date=DAY, session="am").one()
+        for i in range(n):
+            self.db.add(ScheduleCardActivity(
+                schedule_card_id=card.id, surgeon_id=doc.id, activity_date=DAY, session="am",
+                activity_type=kind, patient_name=f"Patient {i}", procedure="", source_system="fax",
+                source_record_key=f"t|{doc.id}|{kind}|{i}", identity_key=f"t{doc.id}{kind}{i}", is_active=True,
+            ))
+        self.db.commit()
+
+    def test_booked_case_or_clinic_makes_request_red(self):
+        self._book(self.docs[5], "surgical", 2)
+        self._book(self.docs[5], "clinic", 3)
+        result = self._check(self.docs[5])
+        self.assertEqual(result.level, "red")
+        self.assertIn("2 cases and 3 visits booked", result.surgeon_message())
+        self.assertEqual(result.day_lines()[0]["booked"], "2 cases and 3 visits booked")
+        # Exempt doctors still get the booked-work red (only the off count is skipped).
+        self.docs[5].time_off_exempt = True
+        self.db.commit()
+        self.assertEqual(self._check(self.docs[5]).level, "red")
+
+    def test_shannon_red_day_cards_start_tomorrow_and_clear(self):
+        from app.time_off_capacity import sync_red_day_alerts
+        admin = self.db.query(AdminUser).one()
+        for doc in self.docs[:3]:
+            self._off(doc)
+        self._book(self.docs[4], "clinic", 1)
+        self._off(self.docs[4])
+        sync_red_day_alerts(self.db, admin.id)
+        cards = self.db.query(AdminNotification).filter_by(kind="time_off_red_day").all()
+        titles = sorted(c.title for c in cards)
+        self.assertEqual(titles, ["Red day: Winter Garden", "Red: MS has work booked during time off"])
+        self.assertTrue(any("1 visit booked while off" in c.body for c in cards))
+        sync_red_day_alerts(self.db, admin.id)  # no duplicates
+        self.assertEqual(self.db.query(AdminNotification).filter_by(kind="time_off_red_day").count(), 2)
+        # Fixed: one doctor's time off is denied and the clinic visit cancelled -> cards go away.
+        for doc in self.docs[:2]:
+            self.db.query(DayOff).filter_by(surgeon_id=doc.id).one().status = "denied"
+        from app.models import ScheduleCardActivity
+        self.db.query(ScheduleCardActivity).update({"is_active": False})
+        self.db.commit()
+        sync_red_day_alerts(self.db, admin.id)
+        self.assertEqual(self.db.query(AdminNotification).filter_by(kind="time_off_red_day").count(), 0)
 
     @patch("app.native_request_off_service.send_time_off_request_copy", return_value=False)
     @patch("app.native_request_off_service.send_native_push_to_surgeon")

@@ -36,7 +36,7 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
     def test_create_update_and_delete_native_request_off(self):
         db = self.Session()
         try:
-            surgeon = self._seed_surgeon(db)
+            surgeon = self._seed_surgeon(db, staff_type="staff")
             start = date.today() + timedelta(days=10)
             end = start + timedelta(days=2)
 
@@ -126,7 +126,7 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
     def test_create_request_saves_without_schedule_conflict_warning(self):
         db = self.Session()
         try:
-            surgeon = self._seed_surgeon(db)
+            surgeon = self._seed_surgeon(db, staff_type="staff")
             start = date.today() + timedelta(days=7)
             body = NativeRequestOffBody(
                 start_date=start,
@@ -151,7 +151,7 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
     def test_create_request_notifies_day_off_admins(self):
         db = self.Session()
         try:
-            surgeon = self._seed_surgeon(db)
+            surgeon = self._seed_surgeon(db, staff_type="staff")
             db.add(AdminUser(
                 username="shannon",
                 email="shannon@example.com",
@@ -244,7 +244,7 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
     def test_create_request_still_succeeds_when_email_fails(self):
         db = self.Session()
         try:
-            surgeon = self._seed_surgeon(db, email="")
+            surgeon = self._seed_surgeon(db, email="", staff_type="staff")
             start = date.today() + timedelta(days=3)
             body = NativeRequestOffBody(start_date=start, end_date=start, reason="Day Off", is_full_day=True)
 
@@ -330,12 +330,35 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
         finally:
             db.close()
 
-    def _seed_surgeon(self, db, first_name="Chris", last_name="Johnson", email="chris@example.com", sort_order=1):
+    def test_doctor_request_inside_the_rules_is_approved_on_the_spot(self):
+        db = self.Session()
+        try:
+            surgeon = self._seed_surgeon(db)
+            start = date.today() + timedelta(days=5)
+            body = NativeRequestOffBody(start_date=start, end_date=start, reason="Day Off", is_full_day=True)
+            with patch("app.native_request_off_service.send_native_push_to_surgeon"), \
+                 patch("app.admin_dayoff_service.send_push_to_surgeon") as approved_push, \
+                 patch("app.time_off_email_service.send_email", return_value=True) as emailed:
+                response = native_request_off(body, db=db, auth=(surgeon, "token"))
+            self.assertTrue(response["ok"])
+            self.assertEqual(response["status"], "approved")
+            self.assertEqual(response["warnings"][0], "Approved: within the time-off rules.")
+            row = db.query(DayOff).one()
+            self.assertEqual(row.status, "approved")
+            self.assertIsNotNone(row.approved_at)
+            approved_push.assert_called_once()
+            self.assertIn("Time off approved", emailed.call_args.kwargs["subject"])
+            self.assertEqual(db.query(AdminNotification).filter_by(kind="day_off_request").count(), 0)
+        finally:
+            db.close()
+
+    def _seed_surgeon(self, db, first_name="Chris", last_name="Johnson", email="chris@example.com", sort_order=1,
+                      staff_type="physician"):
         surgeon = Surgeon(
             first_name=first_name,
             last_name=last_name,
             email=email,
-            staff_type="physician",
+            staff_type=staff_type,
             sort_order=sort_order,
             is_active=True,
         )

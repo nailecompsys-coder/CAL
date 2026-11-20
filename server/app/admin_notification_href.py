@@ -167,6 +167,10 @@ def admin_notification_href(kind: str | None, payload: dict | None) -> str:
     kind = (kind or "").strip()
     if kind in {"day_off_request", "day_off_duplicate", "time_off_red"}:
         return _dayoff_href(payload)
+    if kind == "time_off_red_day":
+        start = payload.get("startDate")
+        end = payload.get("endDate") or start
+        return f"/admin/daysoff?gantt_start={start}&gantt_end={end}" if start else "/admin/daysoff"
     if kind == "schedule_flag":
         return _block_or_href(payload)
     if kind == "ingest_correction":

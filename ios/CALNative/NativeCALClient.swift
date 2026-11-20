@@ -511,7 +511,7 @@ struct NativeCALClient {
     if !result.ok {
       throw NativeCALError.requestRejected(result.warnings.joined(separator: " "))
     }
-    return TimeOffSubmitResult(warnings: result.warnings, emailed: result.emailed)
+    return TimeOffSubmitResult(warnings: result.warnings, emailed: result.emailed, status: result.status)
   }
 
   private func requestOffRequest(

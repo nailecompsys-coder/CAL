@@ -33,11 +33,14 @@ struct NativeRequestOffResponse: Decodable {
   let ok: Bool
   let warnings: [String]
   let emailed: Bool
+  /// "approved" when the request was inside the time-off rules; "pending" otherwise.
+  let status: String?
 
   enum CodingKeys: String, CodingKey {
     case ok
     case warnings
     case emailed
+    case status
   }
 
   init(from decoder: Decoder) throws {
@@ -45,6 +48,7 @@ struct NativeRequestOffResponse: Decodable {
     ok = try container.decode(Bool.self, forKey: .ok)
     warnings = try container.decodeIfPresent([String].self, forKey: .warnings) ?? []
     emailed = try container.decodeIfPresent(Bool.self, forKey: .emailed) ?? false
+    status = try container.decodeIfPresent(String.self, forKey: .status)
   }
 }
 
@@ -81,6 +85,22 @@ struct TimeOffDayLine: Decodable, Equatable, Identifiable {
   let level: String
   let offCount: Int
   let others: [String]
+  /// "2 cases booked" when the doctor already has clinic or OR work that day.
+  let booked: String
+
+  enum CodingKeys: String, CodingKey {
+    case date, label, level, offCount, others, booked
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    date = try container.decode(String.self, forKey: .date)
+    label = try container.decode(String.self, forKey: .label)
+    level = try container.decode(String.self, forKey: .level)
+    offCount = try container.decodeIfPresent(Int.self, forKey: .offCount) ?? 0
+    others = try container.decodeIfPresent([String].self, forKey: .others) ?? []
+    booked = try container.decodeIfPresent(String.self, forKey: .booked) ?? ""
+  }
 
   var id: String { date }
   var isRed: Bool { level == "red" }
@@ -101,4 +121,7 @@ struct TimeOffPersonOff: Decodable, Equatable, Identifiable {
 struct TimeOffSubmitResult {
   let warnings: [String]
   let emailed: Bool
+  var status: String? = nil
+
+  var isApproved: Bool { status == "approved" }
 }

@@ -26,12 +26,12 @@
         </thead>
         <tbody class="divide-y divide-slate-100">
           {% for row in admin_notifications %}
-          <tr class="{% if row.kind == 'time_off_red' %}bg-red-50{% elif not row.read_at %}bg-teal-50/40{% endif %} hover:bg-slate-50/70 align-top">
+          <tr class="{% if row.kind in ['time_off_red', 'time_off_red_day'] %}bg-red-50{% elif not row.read_at %}bg-teal-50/40{% endif %} hover:bg-slate-50/70 align-top">
             <td class="px-4 py-3 text-slate-500 whitespace-nowrap text-xs">
               {% if row.created_at %}{{ row.created_at.strftime('%b %d %H:%M') }}{% else %}—{% endif %}
             </td>
-            <td class="px-4 py-3 font-semibold {% if row.kind == 'time_off_red' %}text-red-700{% else %}text-slate-800{% endif %}">
-              {% if row.kind == 'time_off_red' %}<i class="fa-solid fa-circle-exclamation mr-1"></i>{% endif %}
+            <td class="px-4 py-3 font-semibold {% if row.kind in ['time_off_red', 'time_off_red_day'] %}text-red-700{% else %}text-slate-800{% endif %}">
+              {% if row.kind in ['time_off_red', 'time_off_red_day'] %}<i class="fa-solid fa-circle-exclamation mr-1"></i>{% endif %}
               {% if row.title == 'CAL request pending' %}Pending Request{% else %}{{ row.title }}{% endif %}
             </td>
             <td class="px-4 py-3 text-slate-600">

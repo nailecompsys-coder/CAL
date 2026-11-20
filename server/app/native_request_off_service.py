@@ -21,7 +21,7 @@ from .scheduling_gate_service import (
     surgeon_friendly_conflict_message,
 )
 from .scheduling_guardrails_service import store_dayoff_findings
-from .time_off_capacity import alert_red_request, check_new_request
+from .time_off_capacity import alert_red_request, auto_approvable, check_new_request
 from .time_off_email_service import send_time_off_canceled_email, send_time_off_request_copy
 
 
@@ -112,47 +112,7 @@ def create_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequ
     )
     db.commit()
     findings = store_dayoff_findings(db, row)
-    if capacity.is_red:
-        # Saved anyway (the surgeon saw who is off first); Shannon gets the red alert.
-        warnings.insert(0, capacity.sent_red_message())
-        alert_red_request(db, surgeon, capacity, payload.start_date, payload.end_date, dayoff_id=row.id)
-    else:
-        friendly = surgeon_friendly_conflict_message(findings)
-        if friendly:
-            warnings.append(friendly)
-        notify_admins(
-            "Pending Request" + (" (yellow)" if capacity.level == "yellow" else ""),
-            f"{surgeon.full_name} requested {payload.start_date.strftime('%b %-d')} to {payload.end_date.strftime('%b %-d')}."
-            + (f" {capacity.admin_message()}" if capacity.level else ""),
-            db,
-            kind="day_off_request",
-            payload={
-                "dayOffId": row.id,
-                "surgeonId": surgeon.id,
-                "startDate": payload.start_date.isoformat(),
-                "endDate": payload.end_date.isoformat(),
-            },
-            require_dayoff_opt_in=True,
-        )
-    send_native_push_to_surgeon(
-        surgeon.id,
-        "Days off request pending",
-        (
-            f"{payload.start_date.strftime('%b %-d')} request sent — overlap/conflict noted; Shannon will review."
-            if warnings
-            else f"{payload.start_date.strftime('%b %-d')} request sent for approval"
-        ),
-        db,
-        {"type": "day_off", "requestId": row.id},
-    )
-    emailed = send_time_off_request_copy(surgeon, payload, segments, warnings, updated=False)
-    return {
-        "ok": True,
-        "request": serialize_day_off(row),
-        "warnings": warnings[:3],
-        "emailed": emailed,
-        "level": capacity.level or "clear",
-    }
+    return _finish_request(db, surgeon, row, payload, segments, capacity, findings, warnings, updated=False)
 
 
 def update_native_request_off(db: Session, surgeon: Surgeon, dayoff_id: int, payload: NativeRequestOffInput) -> dict:
@@ -211,39 +171,7 @@ def update_native_request_off(db: Session, surgeon: Surgeon, dayoff_id: int, pay
     )
     db.commit()
     findings = store_dayoff_findings(db, row)
-    if capacity.is_red:
-        warnings.insert(0, capacity.sent_red_message())
-        alert_red_request(db, surgeon, capacity, payload.start_date, payload.end_date, dayoff_id=row.id)
-    else:
-        friendly = surgeon_friendly_conflict_message(findings)
-        if friendly:
-            warnings.append(friendly)
-    notify_admins(
-        "Pending Request updated",
-        f"{surgeon.full_name} updated request {payload.start_date.strftime('%b %-d')} to {payload.end_date.strftime('%b %-d')}.",
-        db,
-        kind="day_off_request",
-        payload={"dayOffId": row.id, "surgeonId": surgeon.id},
-        require_dayoff_opt_in=True,
-    )
-    send_native_push_to_surgeon(
-        surgeon.id,
-        "Days off request updated",
-        (
-            f"{payload.start_date.strftime('%b %-d')} request updated — overlap noted; Shannon will review."
-            if warnings
-            else f"{payload.start_date.strftime('%b %-d')} request updated and pending approval"
-        ),
-        db,
-        {"type": "day_off", "requestId": row.id},
-    )
-    emailed = send_time_off_request_copy(surgeon, payload, segments, warnings, updated=True)
-    return {
-        "ok": True,
-        "request": serialize_day_off(row),
-        "warnings": warnings[:3],
-        "emailed": emailed,
-    }
+    return _finish_request(db, surgeon, row, payload, segments, capacity, findings, warnings, updated=True)
 
 
 def cancel_native_request_off(db: Session, surgeon: Surgeon, dayoff_id: int) -> dict:
@@ -336,4 +264,88 @@ def check_native_request_off(
         "message": capacity.surgeon_message(),
         "offList": capacity.off_list(),
         "days": capacity.day_lines(),
+    }
+
+
+def _finish_request(db, surgeon, row, payload, segments, capacity, findings, warnings, *, updated: bool) -> dict:
+    """Don (Nov 20): inside the rules a doctor's request is approved on the spot.
+
+    Red: stays pending, Shannon gets the red alert. Doctor, not red, not No Call:
+    approved now (the same approval step Shannon uses, which tells the doctor).
+    PAs and No Call: pending for Shannon as before.
+    """
+    span = f"{payload.start_date.strftime('%b %-d')} to {payload.end_date.strftime('%b %-d')}"
+    other = [
+        f for f in findings
+        if (f.kind if hasattr(f, "kind") else f.get("kind")) != "time_off_capacity"
+    ]
+    if capacity.is_red:
+        warnings.insert(0, capacity.sent_red_message())
+        alert_red_request(db, surgeon, capacity, payload.start_date, payload.end_date, dayoff_id=row.id)
+        push_title = "Days off request updated" if updated else "Days off request pending"
+        push_body = f"{payload.start_date.strftime('%b %-d')} request sent with a red alert; Shannon will work it out."
+    elif auto_approvable(surgeon, payload.reason, capacity):
+        from .admin_dayoff_service import approve_dayoff
+
+        # Sends the doctor the "Days Off Approved" push and the decision email.
+        approve_dayoff(db, row.id, approved_by=None)
+        db.refresh(row)
+        warnings.insert(0, "Approved: within the time-off rules.")
+        if capacity.level == "yellow":
+            warnings.append(capacity.surgeon_message().replace(" Your request was sent to Shannon.", ""))
+        if other:
+            # Approved, but Shannon should see what else it touches (call, cases).
+            notify_admins(
+                "Time off approved automatically",
+                f"{surgeon.full_name}: {span}. Check: "
+                + " · ".join((f.message if hasattr(f, "message") else f.get("message", "")) for f in other[:3]),
+                db,
+                kind="day_off_auto_fyi",
+                payload={"dayOffId": row.id, "surgeonId": surgeon.id,
+                         "startDate": payload.start_date.isoformat(), "endDate": payload.end_date.isoformat(),
+                         "href": f"/admin/daysoff?focus={row.id}"},
+                require_dayoff_opt_in=True,
+            )
+        return {
+            "ok": True,
+            "request": serialize_day_off(row),
+            "warnings": warnings[:3],
+            "emailed": bool((surgeon.email or "").strip()),
+            "level": capacity.level or "clear",
+            "status": "approved",
+        }
+    else:
+        friendly = surgeon_friendly_conflict_message(findings)
+        if friendly:
+            warnings.append(friendly)
+        notify_admins(
+            ("Pending Request updated" if updated else "Pending Request")
+            + (" (yellow)" if capacity.level == "yellow" else ""),
+            f"{surgeon.full_name} {'updated request' if updated else 'requested'} {span}."
+            + (f" {capacity.admin_message()}" if capacity.level else ""),
+            db,
+            kind="day_off_request",
+            payload={
+                "dayOffId": row.id,
+                "surgeonId": surgeon.id,
+                "startDate": payload.start_date.isoformat(),
+                "endDate": payload.end_date.isoformat(),
+            },
+            require_dayoff_opt_in=True,
+        )
+        push_title = "Days off request updated" if updated else "Days off request pending"
+        push_body = (
+            f"{payload.start_date.strftime('%b %-d')} request sent — overlap/conflict noted; Shannon will review."
+            if warnings
+            else f"{payload.start_date.strftime('%b %-d')} request sent for approval"
+        )
+    send_native_push_to_surgeon(surgeon.id, push_title, push_body, db, {"type": "day_off", "requestId": row.id})
+    emailed = send_time_off_request_copy(surgeon, payload, segments, warnings, updated=updated)
+    return {
+        "ok": True,
+        "request": serialize_day_off(row),
+        "warnings": warnings[:3],
+        "emailed": emailed,
+        "level": capacity.level or "clear",
+        "status": row.status or "pending",
     }

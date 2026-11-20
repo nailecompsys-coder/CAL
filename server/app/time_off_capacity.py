@@ -32,6 +32,19 @@ _SQL = text(
 
 LEVEL_RANK = {None: 0, "yellow": 1, "red": 2}
 
+_BOOKED_SQL = text(
+    Path(__file__).with_name("sql").joinpath("time_off_booked.sql").read_text()
+).bindparams(bindparam("card_ids", expanding=True))
+
+
+def _booked_label(cases: int, visits: int) -> str:
+    parts = []
+    if cases:
+        parts.append(f"{cases} case{'s' if cases != 1 else ''}")
+    if visits:
+        parts.append(f"{visits} visit{'s' if visits != 1 else ''}")
+    return " and ".join(parts) + " booked"
+
 
 @dataclass
 class CapacityHit:
@@ -56,10 +69,13 @@ class CapacityResult:
     hits: list[CapacityHit]
     initials: dict[int, str]
     names_by_id: dict[int, str] = field(default_factory=dict)
+    # Don (Nov 20): clinic visits or OR cases already booked on the requested
+    # half-days make the request red. [{day, session, cases, visits}]
+    booked: list[dict] = field(default_factory=list)
 
     @property
     def level(self) -> str | None:
-        best = None
+        best = "red" if self.booked else None
         for hit in self.hits:
             if LEVEL_RANK[hit.level] > LEVEL_RANK[best]:
                 best = hit.level
@@ -92,9 +108,32 @@ class CapacityResult:
             return ""
         return f" (and {len(others)} more half-day{'s' if len(others) != 1 else ''})"
 
+    def booked_summary(self) -> str:
+        """'Fri Dec 4 (3 cases booked), Mon Dec 7 AM (12 visits booked)'."""
+        by_day: dict[date, dict] = {}
+        for b in self.booked:
+            entry = by_day.setdefault(b["day"], {"sessions": set(), "cases": 0, "visits": 0})
+            entry["sessions"].add(b["session"])
+            entry["cases"] += b["cases"]
+            entry["visits"] += b["visits"]
+        parts = []
+        for day in sorted(by_day):
+            e = by_day[day]
+            when = day.strftime("%a %b %-d") + ("" if e["sessions"] == {"am", "pm"} else " " + next(iter(e["sessions"])).upper())
+            parts.append(f"{when} ({_booked_label(e['cases'], e['visits'])})")
+        return ", ".join(parts)
+
     def surgeon_message(self) -> str:
         """Before the surgeon decides: what yellow or red means for this request."""
         hit = self.worst_hit()
+        if self.booked:
+            text_ = (
+                f"Red alert: you already have work booked {self.booked_summary()}. "
+                f"Cancel and pick other dates, or Send to Shannon and she will work it out."
+            )
+            if hit and hit.level == "red":
+                text_ += f" Also {hit.off_count} would be off {hit.half_day_label} ({self.names(hit)})."
+            return text_
         if not hit:
             return ""
         who = self.names(hit)
@@ -111,9 +150,9 @@ class CapacityResult:
         )
 
     def red_days_label(self) -> str:
-        """'Fri Dec 4 (3 off), Mon Dec 7 (3 off)' for the red days only."""
+        """'Fri Dec 4 (3 off), Mon Dec 7 (2 cases booked)' for the red days only."""
         return ", ".join(
-            f"{line['label']} ({line['offCount']} off)"
+            f"{line['label']} ({line['booked'] or str(line['offCount']) + ' off'})"
             for line in self.day_lines() if line["level"] == "red"
         )
 
@@ -131,11 +170,16 @@ class CapacityResult:
         """
         days: dict[date, dict] = {}
         for hit in self.hits:
-            line = days.setdefault(hit.day, {"level": None, "offCount": 0, "ids": set()})
+            line = days.setdefault(hit.day, {"level": None, "offCount": 0, "ids": set(), "cases": 0, "visits": 0})
             if LEVEL_RANK[hit.level] > LEVEL_RANK[line["level"]]:
                 line["level"] = hit.level
             line["offCount"] = max(line["offCount"], hit.off_count)
             line["ids"].update(hit.other_ids)
+        for b in self.booked:
+            line = days.setdefault(b["day"], {"level": None, "offCount": 1, "ids": set(), "cases": 0, "visits": 0})
+            line["level"] = "red"
+            line["cases"] += b["cases"]
+            line["visits"] += b["visits"]
         out = []
         for day in sorted(days):
             line = days[day]
@@ -143,8 +187,9 @@ class CapacityResult:
                 "date": day.isoformat(),
                 "label": day.strftime("%a %b %-d"),
                 "level": line["level"],
-                "offCount": line["offCount"],
+                "offCount": max(line["offCount"], 1),
                 "others": sorted(self.initials.get(sid, "?") for sid in line["ids"]),
+                "booked": _booked_label(line["cases"], line["visits"]) if (line["cases"] or line["visits"]) else "",
             })
         return out
 
@@ -172,6 +217,10 @@ class CapacityResult:
 
     def admin_message(self) -> str:
         hit = self.worst_hit()
+        if self.booked:
+            return f"RED: work already booked {self.booked_summary()}." + (
+                f" Also {hit.off_count} off {hit.half_day_label} in {hit.group_name}." if hit and hit.level == "red" else ""
+            )
         if not hit:
             return ""
         if hit.level == "red" and len(self.hits) > 1:
@@ -217,6 +266,10 @@ def _run(db: Session, request: DayOff, exclude_id: int | None) -> CapacityResult
     card_ids = _candidate_card_ids(db, request)
     if not card_ids:
         return CapacityResult(hits=[], initials={})
+    booked = []
+    for row in db.execute(_BOOKED_SQL, {"card_ids": card_ids}).mappings().all():
+        day = row["day"] if isinstance(row["day"], date) else date.fromisoformat(str(row["day"])[:10])
+        booked.append({"day": day, "session": row["session"], "cases": int(row["cases"] or 0), "visits": int(row["visits"] or 0)})
     rows = db.execute(_SQL, {
         "surgeon_id": request.surgeon_id,
         "card_ids": card_ids,
@@ -249,6 +302,7 @@ def _run(db: Session, request: DayOff, exclude_id: int | None) -> CapacityResult
         hits=list(hits.values()),
         initials={s.id: s.initials for s in others},
         names_by_id={s.id: s.full_name for s in others},
+        booked=booked,
     )
 
 
@@ -350,5 +404,175 @@ def capacity_findings(result: CapacityResult) -> list:
             clinic_group_name=worst.group_name,
             approved_initials=others,
         ))
+    booked_days: dict[date, dict] = {}
+    for b in result.booked:
+        e = booked_days.setdefault(b["day"], {"cases": 0, "visits": 0})
+        e["cases"] += b["cases"]
+        e["visits"] += b["visits"]
+    for day, e in booked_days.items():
+        findings.append(DayOffFinding(
+            severity="red",
+            kind="time_off_capacity",
+            date=day,
+            message=f"RED: {day.strftime('%a %b %-d')} · {_booked_label(e['cases'], e['visits'])} for this doctor.",
+            surgeon_message=result.surgeon_message(),
+        ))
     findings.sort(key=lambda f: (-LEVEL_RANK[f.severity], f.date))
     return findings
+
+
+# ---------------------------------------------------------------------------
+# Auto-approval and red days ahead (Don, Nov 20)
+# ---------------------------------------------------------------------------
+
+def auto_approvable(surgeon: Surgeon, reason: str, result: CapacityResult) -> bool:
+    """Inside the rules: a doctor's time off that is not red is approved on the spot.
+
+    PAs and No Call requests still go to Shannon. Red waits for Shannon.
+    """
+    if (getattr(surgeon, "staff_type", None) or "physician") != "physician":
+        return False
+    if (reason or "").strip().lower() == "no call":
+        return False
+    return not result.is_red
+
+
+_RED_DAYS_SQL = text(
+    Path(__file__).with_name("sql").joinpath("time_off_red_days.sql").read_text()
+)
+_BOOKED_DAYS_SQL = text(
+    Path(__file__).with_name("sql").joinpath("time_off_booked_days.sql").read_text()
+)
+
+RED_DAY_KIND = "time_off_red_day"
+
+
+def red_day_runs(db: Session, start: date) -> list[dict]:
+    """Red days from ``start`` on, merged into runs of consecutive weekdays per group."""
+    from datetime import timedelta
+
+    rows = db.execute(_RED_DAYS_SQL, {"start_day": start}).mappings().all()
+    days: dict[tuple[int, date], dict] = {}
+    for row in rows:
+        day = row["day"] if isinstance(row["day"], date) else date.fromisoformat(str(row["day"])[:10])
+        entry = days.setdefault((row["group_id"], day), {
+            "group_id": row["group_id"],
+            "group_name": row["group_name"],
+            "red_at": row["red_at_off"],
+            "day": day,
+            "off": 0,
+            "ids": set(),
+        })
+        entry["off"] = max(entry["off"], int(row["off_count"]))
+        entry["ids"].add(int(row["surgeon_id"]))
+    # Time off that sits on booked clinic or OR work is red for that doctor.
+    for row in db.execute(_BOOKED_DAYS_SQL, {"start_day": start}).mappings().all():
+        day = row["day"] if isinstance(row["day"], date) else date.fromisoformat(str(row["day"])[:10])
+        sid = int(row["surgeon_id"])
+        entry = days.setdefault((-sid, day), {
+            "group_id": -sid,
+            "group_name": "",
+            "red_at": None,
+            "day": day,
+            "off": 0,
+            "ids": {sid},
+            "cases": 0,
+            "visits": 0,
+        })
+        entry["cases"] = entry.get("cases", 0) + int(row["cases"] or 0)
+        entry["visits"] = entry.get("visits", 0) + int(row["visits"] or 0)
+
+    def next_weekday(d: date) -> date:
+        d += timedelta(days=1)
+        while d.weekday() >= 5:
+            d += timedelta(days=1)
+        return d
+
+    runs: list[dict] = []
+    for (group_id, day) in sorted(days, key=lambda k: (k[0], k[1])):
+        entry = days[(group_id, day)]
+        last = runs[-1] if runs else None
+        if last and last["group_id"] == group_id and next_weekday(last["end"]) == day:
+            last["end"] = day
+            last["off"] = max(last["off"], entry["off"])
+            last["ids"] |= entry["ids"]
+            last["cases"] = last.get("cases", 0) + entry.get("cases", 0)
+            last["visits"] = last.get("visits", 0) + entry.get("visits", 0)
+        else:
+            runs.append({**entry, "start": day, "end": day, "ids": set(entry["ids"])})
+    ids = {sid for run in runs for sid in run["ids"]}
+    initials = {s.id: s.initials for s in db.query(Surgeon).filter(Surgeon.id.in_(ids)).all()} if ids else {}
+    for run in runs:
+        run["initials"] = sorted(initials.get(sid, "?") for sid in run["ids"])
+        if run["group_id"] < 0:
+            run["group_name"] = f"{run['initials'][0]} has work booked during time off"
+        run["key"] = f"{run['group_id']}|{run['start'].isoformat()}|{run['end'].isoformat()}"
+    runs.sort(key=lambda r: (r["start"], r["group_name"]))
+    return runs
+
+
+def _run_label(run: dict) -> str:
+    start, end = run["start"], run["end"]
+    if start == end:
+        return start.strftime("%a %b %-d")
+    return f"{start.strftime('%a %b %-d')} – {end.strftime('%a %b %-d')}"
+
+
+def sync_red_day_alerts(db: Session, admin_user_id: int) -> int:
+    """Give this admin one red card per red run from tomorrow on; drop cards no longer red.
+
+    Covers red days however they arose (approved before the rules, group changes,
+    Shannon approving a red request). Returns how many cards changed.
+    """
+    import json as _json
+
+    from .models import AdminNotification, AdminUser
+    from .scheduling_gate_service import practice_today
+
+    admin = db.get(AdminUser, admin_user_id)
+    wants = bool(admin and admin.is_active and (admin.notify_day_off_requests is not False))
+    # Don: today is already known; alert from tomorrow on.
+    from datetime import timedelta
+    runs = red_day_runs(db, practice_today() + timedelta(days=1)) if wants else []
+    current = {run["key"]: run for run in runs}
+    existing = db.query(AdminNotification).filter(
+        AdminNotification.admin_user_id == admin_user_id,
+        AdminNotification.kind == RED_DAY_KIND,
+    ).all()
+    seen: set[str] = set()
+    changed = 0
+    for row in existing:
+        try:
+            key = (_json.loads(row.payload or "{}") or {}).get("key")
+        except (TypeError, ValueError):
+            key = None
+        if key not in current or key in seen:
+            db.delete(row)
+            changed += 1
+        else:
+            seen.add(key)
+    for key, run in current.items():
+        if key in seen:
+            continue
+        if run["group_id"] < 0:
+            title = f"Red: {run['group_name']}"
+            body = f"{_run_label(run)}: {_booked_label(run.get('cases', 0), run.get('visits', 0))} while off."
+        else:
+            title = f"Red day: {run['group_name']}"
+            body = f"{_run_label(run)}: {run['off']} off ({', '.join(run['initials'])}). Red at {run['red_at']}."
+        db.add(AdminNotification(
+            admin_user_id=admin_user_id,
+            title=title,
+            body=body,
+            kind=RED_DAY_KIND,
+            payload=_json.dumps({
+                "key": key,
+                "groupId": run["group_id"],
+                "startDate": run["start"].isoformat(),
+                "endDate": run["end"].isoformat(),
+            }),
+        ))
+        changed += 1
+    if changed:
+        db.commit()
+    return changed

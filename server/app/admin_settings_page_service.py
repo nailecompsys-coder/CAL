@@ -460,6 +460,9 @@ def _reconcile_admin_notification_feed(db: Session, admin_user_id: int) -> None:
     from .grok_lookahead_service import reconcile_stale_call_coverage_notifications
     reconcile_stale_call_coverage_notifications(db, admin_user_id)
     reconcile_bot_chatter_notifications(db, admin_user_id)
+    # Red days from today on (time-off groups): one red card per run, gone when fixed.
+    from .time_off_capacity import sync_red_day_alerts
+    sync_red_day_alerts(db, admin_user_id)
 
 
 def unread_admin_notification_count(db: Session, admin_user_id: int) -> int:

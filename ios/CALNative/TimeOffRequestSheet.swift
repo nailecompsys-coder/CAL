@@ -56,7 +56,7 @@ struct TimeOffRequestForm: View {
           }
         }
       }
-      .navigationTitle(receipt == nil ? (isEditing ? "Modify Time Off" : "Request Time Off") : (isEditing ? "Request Updated" : "Request Sent"))
+      .navigationTitle(receipt == nil ? (isEditing ? "Modify Time Off" : "Request Time Off") : (receipt?.isApproved == true ? "Time Off Approved" : (isEditing ? "Request Updated" : "Request Sent")))
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
@@ -213,7 +213,7 @@ struct TimeOffRequestForm: View {
           confirmationRow(title: "Note", value: receipt.notes)
         }
         Divider().opacity(0.45)
-        confirmationRow(title: "Status", value: "Pending approval")
+        confirmationRow(title: "Status", value: receipt.isApproved ? "Approved" : "Pending approval")
       }
 
       DashboardSection(title: "Days") {
@@ -320,7 +320,8 @@ struct TimeOffRequestForm: View {
         reason: reason,
         notes: notes.trimmingCharacters(in: .whitespacesAndNewlines),
         segments: segments,
-        warnings: result.warnings
+        warnings: result.warnings,
+        isApproved: result.isApproved
       )
     } catch {
       isSubmitting = false
@@ -420,6 +421,7 @@ private struct TimeOffReceipt {
   let notes: String
   let segments: [RequestSegment]
   let warnings: [String]
+  var isApproved: Bool = false
 
   var rangeLabel: String {
     let start = startDate.formatted(.dateTime.month(.abbreviated).day().year())
@@ -557,7 +559,7 @@ private struct TimeOffCapacityChip: View {
           Text(day.label)
             .font(.caption.weight(.semibold))
             .foregroundStyle(ClinicalPalette.ink)
-          Text("· \(day.offCount) off")
+          Text(day.booked.isEmpty ? "· \(day.offCount) off" : "· \(day.booked)")
             .font(.caption)
             .foregroundStyle(.secondary)
           Spacer(minLength: 4)
@@ -568,10 +570,12 @@ private struct TimeOffCapacityChip: View {
         .accessibilityElement(children: .combine)
       }
 
-      Text("Already off:")
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(ClinicalPalette.ink)
-        .padding(.top, 2)
+      if !capacity.offList.isEmpty {
+        Text("Already off:")
+          .font(.caption.weight(.semibold))
+          .foregroundStyle(ClinicalPalette.ink)
+          .padding(.top, 2)
+      }
 
       ForEach(capacity.offList) { person in
         HStack(spacing: 8) {

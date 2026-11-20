@@ -173,7 +173,7 @@
       {% for row in admin_notifications %}
       {% set payload = (row.payload|from_json) if row.payload else {} %}
       {% set is_fixable = row.kind in ['schedule_flag', 'ingest_correction', 'call_coverage_conflict', 'rules_engine_error'] %}
-      {% set is_red_alert = row.kind == 'time_off_red' %}
+      {% set is_red_alert = row.kind in ['time_off_red', 'time_off_red_day'] %}
       {% set notif_title = 'Pending Request' if row.title == 'CAL request pending' else row.title %}
       {% set dayoff_href = admin_notification_href(row.kind, payload) %}
       {% set card_href = '/admin/notifications/' ~ row.id ~ '/ack' if notification_is_informational(row) else dayoff_href %}

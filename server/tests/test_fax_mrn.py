@@ -257,8 +257,8 @@ class FaxMrnTest(unittest.TestCase):
         self.assertNotIn("DROP COLUMN", source)
         self.assertNotIn("DROP TABLE", source)
         fill = FILL_STATEMENTS[1]
-        self.assertIn("COALESCE(schedule_card_activities.mrn, excluded.mrn)", fill)
-        self.assertNotIn("mrn = excluded.mrn", fill)
+        self.assertIn("COALESCE(excluded.mrn, schedule_card_activities.mrn)", fill)
+        self.assertNotIn("mrn = excluded.mrn,", fill)
         for name in ("resolve_fax_candidates.postgresql.sql", "resolve_fax_candidates.sqlite.sql"):
             sql = (APP_DIR / "sql" / name).read_text().lower()
             self.assertNotIn("when mrn", sql)
@@ -327,7 +327,7 @@ class FaxMrnTest(unittest.TestCase):
             db.close()
             engine.dispose()
 
-    def test_existing_mrn_is_filled_when_null_and_never_overwritten(self):
+    def test_newer_fax_mrn_wins_and_missing_mrn_keeps_stored(self):
         engine, db = self._world()
         try:
             first = stage_reviewed_rows(
@@ -364,7 +364,7 @@ class FaxMrnTest(unittest.TestCase):
             self.assertEqual(db.query(ScheduleCard).count(), 4)
             lines = {line.patient_name: line for line in db.query(ScheduleCardActivity).all()}
             self.assertEqual(set(lines), {"Alpha, Patient", "Bravo, Patient", "Charlie, Patient"})
-            self.assertEqual(lines["Alpha, Patient"].mrn, "00111111")
+            self.assertEqual(lines["Alpha, Patient"].mrn, "00999999")
             self.assertEqual(lines["Bravo, Patient"].mrn, "00222222")
             self.assertEqual(lines["Charlie, Patient"].mrn, "00333333")
             self.assertTrue(all(line.procedure == "second pass" and line.is_active for line in lines.values()))
@@ -381,11 +381,37 @@ class FaxMrnTest(unittest.TestCase):
             db.commit()
             apply_staged_snapshot(db, source_fax_id=192, run_id=third["runId"])
             lines = {line.patient_name: line for line in db.query(ScheduleCardActivity).all()}
-            self.assertEqual(lines["Alpha, Patient"].mrn, "00111111")
+            self.assertEqual(lines["Alpha, Patient"].mrn, "00888888")
             self.assertEqual(lines["Bravo, Patient"].mrn, "00222222")
-            self.assertEqual(lines["Charlie, Patient"].mrn, "00333333")
+            self.assertEqual(lines["Charlie, Patient"].mrn, "00777777")
             self.assertTrue(all(line.procedure == "third pass" for line in lines.values()))
             self.assertEqual(db.query(AdminNotification).count(), 0)
+        finally:
+            db.close()
+            engine.dispose()
+
+    def test_corrected_resend_with_new_patient_never_keeps_old_mrn(self):
+        engine, db = self._world()
+        try:
+            first = stage_reviewed_rows(
+                db, external_fax_id=191, source_label="t",
+                source_received_at=datetime(2026, 10, 1, 12, 0),
+                rows=[self._row("Alpha, Patient", mrn="[00111111]")],
+            )
+            db.commit()
+            apply_staged_snapshot(db, source_fax_id=191, run_id=first["runId"])
+            # Same fax, same printed line, corrected reading names another patient.
+            for mrn, expected in ((None, None), ("[00555555]", "00555555")):
+                again = stage_reviewed_rows(
+                    db, external_fax_id=191, source_label="t",
+                    source_received_at=datetime(2026, 10, 1, 12, 0),
+                    rows=[self._row("Delta, Patient" if expected is None else "Echo, Patient", mrn=mrn)],
+                )
+                db.commit()
+                apply_staged_snapshot(db, source_fax_id=191, run_id=again["runId"])
+                line = db.query(ScheduleCardActivity).filter_by(is_active=True).one()
+                self.assertNotEqual(line.patient_name, "Alpha, Patient")
+                self.assertEqual(line.mrn, expected)
         finally:
             db.close()
             engine.dispose()
@@ -546,7 +572,7 @@ class FaxMrnTest(unittest.TestCase):
             db.close()
             engine.dispose()
 
-    def test_same_bracketed_name_does_not_overwrite_a_stored_mrn(self):
+    def test_same_bracketed_name_takes_the_newer_fax_mrn(self):
         engine, db = self._world()
         try:
             prior_id = self._seed_prior_line(
@@ -559,7 +585,8 @@ class FaxMrnTest(unittest.TestCase):
             line = db.query(ScheduleCardActivity).one()
             self.assertEqual(line.id, prior_id)
             self.assertEqual(line.patient_name, "Sample, Patient [00112233]")
-            self.assertEqual(line.mrn, "00998877")
+            # Copied from the newest Epic fax for the same patient.
+            self.assertEqual(line.mrn, "00445566")
             self.assertEqual(line.procedure, "second pass")
         finally:
             db.close()

@@ -11,9 +11,9 @@
 -- to the newer fax's printed line so the upsert below updates it in place.
 -- Identity is the printed name, the start time, and the row type. A bracketed
 -- MRN inside the name stays part of that printed name. mrn is a separate text
--- column. It is not compared, and a missing MRN does not hold or flag. A
--- matched line keeps an MRN it already has; a null MRN is filled. A null
--- incoming value does not erase a stored one.
+-- column copied from the Epic fax. It is not compared, and a missing MRN does
+-- not hold or flag. For the same patient the newer fax's MRN wins and a missing
+-- one keeps the stored value; a different patient never inherits the old MRN.
 -- Statements are split on a line that is exactly: -- @@
 
 UPDATE schedule_card_activities
@@ -109,8 +109,15 @@ ON CONFLICT (source_system, source_record_key) DO UPDATE SET
     source_fax_id = excluded.source_fax_id,
     identity_key = excluded.identity_key,
     is_active = TRUE,
-    -- Fill a missing MRN only. Never replace or clear one already stored.
-    mrn = COALESCE(schedule_card_activities.mrn, excluded.mrn)
+    -- MRN is copied from the Epic fax. Same patient: the newer fax's MRN wins,
+    -- and a fax without one keeps the stored value. A different patient on this
+    -- printed line (corrected resend) takes the fax's value, even NULL, so one
+    -- patient's MRN never stays on another patient's line.
+    mrn = CASE
+        WHEN LOWER(TRIM(schedule_card_activities.patient_name)) = LOWER(TRIM(excluded.patient_name))
+            THEN COALESCE(excluded.mrn, schedule_card_activities.mrn)
+        ELSE excluded.mrn
+    END
 -- @@
 SELECT count(*) AS already_there
 FROM schedule_card_activities activity

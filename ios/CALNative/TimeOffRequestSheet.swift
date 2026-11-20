@@ -14,6 +14,7 @@ struct TimeOffRequestForm: View {
   @State private var isSubmitting = false
   @State private var receipt: TimeOffReceipt?
   @State private var editingDate: RequestDateField?
+  @State private var capacity: TimeOffCapacityPreview?
 
   private let reasons = ["Day Off", "No Call", "Vacation", "CME", "Partial Day", "Medical"]
   private var isEditing: Bool { existing != nil }
@@ -78,7 +79,8 @@ struct TimeOffRequestForm: View {
                 await submit()
               }
             }
-            .disabled(isSubmitting || store.sessionToken == nil)
+            // Chris's red: talk with the other doctors first; Shannon can enter it.
+            .disabled(isSubmitting || store.sessionToken == nil || capacity?.isRed == true)
           }
         }
       }
@@ -110,6 +112,17 @@ struct TimeOffRequestForm: View {
             .foregroundStyle(ClinicalPalette.warningText)
         }
 
+        if let capacity, capacity.isRed || capacity.isYellow {
+          Label(capacity.message, systemImage: capacity.isRed ? "exclamationmark.octagon.fill" : "exclamationmark.triangle.fill")
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(capacity.isRed ? Color.red : ClinicalPalette.warningText)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .liquidGlassCard(cornerRadius: 12, tint: capacity.isRed ? Color.red : ClinicalPalette.amber)
+            .accessibilityLabel(capacity.isRed ? "Red: \(capacity.message)" : "Yellow: \(capacity.message)")
+        }
+
         if let message {
           Text(message)
             .font(.caption)
@@ -138,6 +151,21 @@ struct TimeOffRequestForm: View {
           startDate = newValue
         }
         normalizeSegments()
+      }
+
+      .task(id: capacityKey) {
+        // Wait for the picker to settle, then ask the server who else is off.
+        try? await Task.sleep(nanoseconds: 400_000_000)
+        guard !Task.isCancelled else { return }
+        let preview = await store.previewTimeOffRequest(
+          excludeRequestId: existing?.id,
+          startDate: startDate,
+          endDate: endDate,
+          reason: reason,
+          segments: segments
+        )
+        guard !Task.isCancelled else { return }
+        capacity = preview
       }
 
       DashboardSection(title: "Days") {
@@ -247,6 +275,12 @@ struct TimeOffRequestForm: View {
         .multilineTextAlignment(.trailing)
     }
     .padding(.vertical, 4)
+  }
+
+  /// Changes whenever the dates, half-days or type change, so the preview reruns.
+  private var capacityKey: String {
+    let days = segments.map { "\(dateKey($0.date)):\($0.isFullDay ? "full" : "\($0.start)-\($0.end)")" }
+    return ([reason] + days).joined(separator: "|")
   }
 
   private var rangeSummary: String {

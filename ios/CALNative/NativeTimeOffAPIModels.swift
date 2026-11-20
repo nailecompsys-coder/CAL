@@ -48,6 +48,15 @@ struct NativeRequestOffResponse: Decodable {
   }
 }
 
+/// Time-off groups preview: "clear", "yellow" or "red" plus the surgeon-facing message.
+struct TimeOffCapacityPreview: Decodable, Equatable {
+  let level: String
+  let message: String
+
+  var isRed: Bool { level == "red" }
+  var isYellow: Bool { level == "yellow" }
+}
+
 struct TimeOffSubmitResult {
   let warnings: [String]
   let emailed: Bool

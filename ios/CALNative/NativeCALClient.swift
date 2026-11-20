@@ -461,6 +461,27 @@ struct NativeCALClient {
     _ = try await perform(request)
   }
 
+  /// Yellow/red preview before Submit (time-off groups). Saves nothing on the server.
+  func checkRequestOff(token: String, excludeRequestId: Int?, startDate: Date, endDate: Date, reason: String, segments: [RequestSegment]) async throws -> TimeOffCapacityPreview {
+    var request = try requestOffRequest(
+      token: token,
+      method: "POST",
+      path: "/api/native/request-off/check",
+      startDate: startDate,
+      endDate: endDate,
+      reason: reason,
+      notes: "",
+      segments: segments
+    )
+    if let excludeRequestId, let url = request.url,
+       var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+      components.queryItems = [URLQueryItem(name: "dayoff_id", value: String(excludeRequestId))]
+      request.url = components.url
+    }
+    let data = try await perform(request)
+    return try JSONDecoder().decode(TimeOffCapacityPreview.self, from: data)
+  }
+
   private func sendRequestOff(
     token: String,
     method: String,
@@ -471,6 +492,34 @@ struct NativeCALClient {
     notes: String,
     segments: [RequestSegment]
   ) async throws -> TimeOffSubmitResult {
+    let request = try requestOffRequest(
+      token: token,
+      method: method,
+      path: path,
+      startDate: startDate,
+      endDate: endDate,
+      reason: reason,
+      notes: notes,
+      segments: segments
+    )
+    let data = try await perform(request)
+    let result = try JSONDecoder().decode(NativeRequestOffResponse.self, from: data)
+    if !result.ok {
+      throw NativeCALError.requestRejected(result.warnings.joined(separator: " "))
+    }
+    return TimeOffSubmitResult(warnings: result.warnings, emailed: result.emailed)
+  }
+
+  private func requestOffRequest(
+    token: String,
+    method: String,
+    path: String,
+    startDate: Date,
+    endDate: Date,
+    reason: String,
+    notes: String,
+    segments: [RequestSegment]
+  ) throws -> URLRequest {
     let url = baseURL.appendingPathComponent(path)
     let normalizedSegments = segments.isEmpty ? [RequestSegment(date: startDate, isFullDay: true, start: "07:00", end: "17:00")] : segments
     let firstPartial = normalizedSegments.first { !$0.isFullDay }
@@ -496,13 +545,7 @@ struct NativeCALClient {
         )
       }
     ))
-
-    let data = try await perform(request)
-    let result = try JSONDecoder().decode(NativeRequestOffResponse.self, from: data)
-    if !result.ok {
-      throw NativeCALError.requestRejected(result.warnings.joined(separator: " "))
-    }
-    return TimeOffSubmitResult(warnings: result.warnings, emailed: result.emailed)
+    return request
   }
 
   func submitCallCoverage(token: String, rotationId: Int, coveringSurgeonId: Int, notes: String = "") async throws -> NativeCallAssignmentResponse {

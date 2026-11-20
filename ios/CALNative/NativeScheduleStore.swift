@@ -460,6 +460,21 @@ final class NativeScheduleStore: ObservableObject {
     return result
   }
 
+  /// Yellow/red preview for the request form. Nil when it cannot be checked; the server still decides on Submit.
+  func previewTimeOffRequest(excludeRequestId: Int?, startDate: Date, endDate: Date, reason: String, segments: [RequestSegment]) async -> TimeOffCapacityPreview? {
+    guard let token = sessionToken, !token.isEmpty else {
+      return nil
+    }
+    return try? await client.checkRequestOff(
+      token: token,
+      excludeRequestId: excludeRequestId,
+      startDate: startDate,
+      endDate: endDate,
+      reason: reason,
+      segments: segments
+    )
+  }
+
   func updateTimeOffRequest(id: Int, startDate: Date, endDate: Date, reason: String, notes: String, segments: [RequestSegment]) async throws -> TimeOffSubmitResult {
     try requireWritableSession()
     guard let token = sessionToken, !token.isEmpty else {

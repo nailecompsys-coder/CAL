@@ -173,6 +173,7 @@
       {% for row in admin_notifications %}
       {% set payload = (row.payload|from_json) if row.payload else {} %}
       {% set is_fixable = row.kind in ['schedule_flag', 'ingest_correction', 'call_coverage_conflict', 'rules_engine_error'] %}
+      {% set is_red_alert = row.kind == 'time_off_red' %}
       {% set notif_title = 'Pending Request' if row.title == 'CAL request pending' else row.title %}
       {% set dayoff_href = admin_notification_href(row.kind, payload) %}
       {% set card_href = '/admin/notifications/' ~ row.id ~ '/ack' if notification_is_informational(row) else dayoff_href %}
@@ -204,9 +205,9 @@
         data-cal-href="{{ card_href | e }}"
         data-cal-kind="{{ row.kind | e }}"
         data-cal-informational="{{ '1' if notification_is_informational(row) else '0' }}"
-        class="rounded-lg border {% if row.read_at %}border-slate-100 bg-white/60{% else %}{% if is_fixable %}border-amber-200 bg-amber-50/80{% else %}border-teal-100 bg-teal-50/70{% endif %}{% endif %} px-2.5 py-1.5 block hover:border-teal-300 hover:bg-teal-50 transition-colors">
+        class="rounded-lg border {% if is_red_alert %}border-red-300 bg-red-50 hover:border-red-400{% elif row.read_at %}border-slate-100 bg-white/60{% else %}{% if is_fixable %}border-amber-200 bg-amber-50/80{% else %}border-teal-100 bg-teal-50/70{% endif %}{% endif %} px-2.5 py-1.5 block {% if not is_red_alert %}hover:border-teal-300 hover:bg-teal-50{% endif %} transition-colors">
         <div class="flex items-center justify-between gap-2">
-          <p class="text-xs font-bold text-slate-800 truncate">{{ notif_title }}</p>
+          <p class="text-xs font-bold {% if is_red_alert %}text-red-700{% else %}text-slate-800{% endif %} truncate">{% if is_red_alert %}<i class="fa-solid fa-circle-exclamation mr-1"></i>{% endif %}{{ notif_title }}</p>
           <p class="text-[10px] text-slate-400 whitespace-nowrap">{% if row.created_at %}{{ row.created_at.strftime('%b %d %H:%M') }}{% endif %}</p>
         </div>
         <p class="text-[11px] text-slate-600 mt-0.5 line-clamp-1">{{ row.body }}</p>
@@ -455,7 +456,11 @@
               {{ d.surgeon.initials }}
             </div>
             <div class="flex-1 min-w-0">
-              <p class="text-sm font-medium text-slate-800 truncate">{{ d.surgeon.full_name }}</p>
+              <p class="text-sm font-medium text-slate-800 truncate">{{ d.surgeon.full_name }}
+                {% set off_level = pending_off_levels.get(d.id) if pending_off_levels is defined else None %}
+                {% if off_level == 'red' %}<span class="ml-1 text-[10px] font-bold px-1.5 rounded-full bg-red-100 text-red-700" title="Too many off at once (time-off groups)">Red</span>
+                {% elif off_level == 'yellow' %}<span class="ml-1 text-[10px] font-bold px-1.5 rounded-full bg-amber-100 text-amber-800" title="Others already off at the same time">Yellow</span>{% endif %}
+              </p>
               <p class="text-xs text-slate-500">{{ d.start_date.strftime('%b %-d') }}{% if d.start_date != d.end_date %} – {{ d.end_date.strftime('%b %-d') }}{% endif %}{% if d.reason %} · {{ d.reason }}{% endif %}</p>
             </div>
             <div class="flex gap-1 flex-shrink-0">

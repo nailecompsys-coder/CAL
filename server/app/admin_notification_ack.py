@@ -47,7 +47,7 @@ def notification_is_informational(row: AdminNotification | None) -> bool:
         return True
     if kind in _FIXABLE_KINDS:
         return False
-    if kind in {"day_off_request", "day_off_duplicate"}:
+    if kind in {"day_off_request", "day_off_duplicate", "time_off_red"}:
         return False
     return True
 
@@ -78,7 +78,7 @@ def reconcile_bot_chatter_notifications(
 
 def _day_off_request_is_closed(db: Session, row: AdminNotification) -> bool:
     """True when the linked day-off is gone or no longer pending."""
-    if (row.kind or "").strip().lower() != "day_off_request":
+    if (row.kind or "").strip().lower() not in {"day_off_request", "time_off_red"}:
         return False
     try:
         payload = json.loads(row.payload or "{}") if row.payload else {}

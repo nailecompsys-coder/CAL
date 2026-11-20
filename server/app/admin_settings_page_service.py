@@ -70,7 +70,9 @@ def reconcile_stale_dayoff_notifications(db: Session, admin_user_id: int | None 
     """
     from .models import DayOff
 
-    q = db.query(AdminNotification).filter(AdminNotification.kind == "day_off_request")
+    # Red alerts (time_off_red) clear the same way: once Shannon approves or
+    # denies the request, or the surgeon cancels it.
+    q = db.query(AdminNotification).filter(AdminNotification.kind.in_(("day_off_request", "time_off_red")))
     if admin_user_id is not None:
         q = q.filter(AdminNotification.admin_user_id == admin_user_id)
     rows = q.all()

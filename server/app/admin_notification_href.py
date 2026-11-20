@@ -165,7 +165,7 @@ def admin_notification_href(kind: str | None, payload: dict | None) -> str:
     """Return the portal URL that opens the row / modal for this notification."""
     payload = payload if isinstance(payload, dict) else {}
     kind = (kind or "").strip()
-    if kind in {"day_off_request", "day_off_duplicate"}:
+    if kind in {"day_off_request", "day_off_duplicate", "time_off_red"}:
         return _dayoff_href(payload)
     if kind == "schedule_flag":
         return _block_or_href(payload)

@@ -291,5 +291,30 @@ class TimeOffCapacityTest(unittest.TestCase):
         self.assertEqual(self.db.query(AdminNotification).filter_by(kind="time_off_red").count(), 1)
 
 
+    @patch("app.native_request_off_service.send_time_off_request_copy", return_value=False)
+    @patch("app.native_request_off_service.send_native_push_to_surgeon")
+    @patch("app.push.send_sms")
+    def test_red_alert_links_to_request_stays_then_clears(self, sms, push, email):
+        from app.admin_notification_ack import notification_is_informational
+        from app.admin_notification_href import admin_notification_href
+        from app.admin_settings_page_service import recent_admin_notifications
+        import json as _json
+
+        for doc in self.docs[:2]:
+            self._off(doc)
+        result = create_native_request_off(self.db, self.docs[5], self._payload())
+        alert = self.db.query(AdminNotification).filter_by(kind="time_off_red").one()
+        admin_id = alert.admin_user_id
+        self.assertFalse(notification_is_informational(alert))
+        self.assertIn(f"focus={result['request']['id']}", admin_notification_href(alert.kind, _json.loads(alert.payload)))
+        self.assertIn(alert.id, [row.id for row in recent_admin_notifications(self.db, admin_id)])
+        # Shannon handles it: the red card goes away.
+        mine = self.db.get(DayOff, result["request"]["id"])
+        mine.status = "approved"
+        self.db.commit()
+        recent_admin_notifications(self.db, admin_id)
+        self.assertEqual(self.db.query(AdminNotification).filter_by(kind="time_off_red").count(), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

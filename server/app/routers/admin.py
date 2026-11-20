@@ -141,6 +141,10 @@ def dashboard(
         if surgeon_is_visible(row.surgeon)
     ]
 
+    # Time-off groups: Red/Yellow badge on the pending requests shown here.
+    from ..time_off_capacity import check_day_off
+    pending_off_levels = {row.id: check_day_off(db, row).level for row in pending_daysoff[:4]}
+
     upcoming_meetings = cal_meetings_in_range(db, today, week_end, limit=5)
     from ..admin_settings_page_service import recent_admin_notifications, unread_admin_notification_count
     admin_notifications = recent_admin_notifications(db, admin.id, limit=20)
@@ -176,6 +180,7 @@ def dashboard(
         no_call_today=no_call_today,
         no_call_ids=no_call_ids,
         pending_daysoff=pending_daysoff,
+        pending_off_levels=pending_off_levels,
         upcoming_meetings=upcoming_meetings,
         admin_notifications=admin_notifications,
         admin_unread_notifications=admin_unread_notifications,

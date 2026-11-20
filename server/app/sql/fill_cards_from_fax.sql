@@ -4,8 +4,8 @@
 -- on that card. The line remembers the fax number. The same fax and the
 -- same printed line keep the same key, so a later send updates that line.
 -- It does not choose a lead or edit schedule_cards.
--- Don's rule 2: fax ingest never deactivates a line. A line missing from a
--- later fax stays active; there is no absence bookkeeping and no retire step.
+-- Lines the latest fax no longer lists are switched off after this fill
+-- (fax_card_fill.retire_lines_not_on_latest_fax): only the latest fax is the truth.
 -- Don's rule 5: the newer fax wins for a day. An active line from an older
 -- fax with the same surgeon, day and identity (patient|time|type) is re-keyed
 -- to the newer fax's printed line so the upsert below updates it in place.

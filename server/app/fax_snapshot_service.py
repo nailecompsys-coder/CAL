@@ -19,7 +19,8 @@ from .models import (
     ScheduleCardActivity,
     ScheduleChangeEvent,
 )
-from .fax_card_fill import fill_cards_from_fax_lines
+from .fax_card_fill import fill_cards_from_fax_lines, lines_not_on_latest_fax, retire_lines_not_on_latest_fax
+from .practice_time import practice_today
 from .fax_off_day_conflicts import off_day_conflicts
 from .fax_ingest_engine import mark_fax_ingest_transaction, run_report
 from .fax_restore_service import replace_fax_warnings, save_fax_line_photo
@@ -186,19 +187,24 @@ def apply_staged_snapshot(
         conflict["date"] = conflict["date"].isoformat() if hasattr(conflict["date"], "isoformat") else str(conflict["date"])
         conflicts.append(conflict)
 
+    today = practice_today()
+    # Lines this fax will switch off go in the undo photo too, so Undo brings them back.
+    retiring = lines_not_on_latest_fax(
+        db, run_id=run.id, fax_id=source_fax_id, start=start, end=end, today=today,
+    )
     photo = save_fax_line_photo(
         db,
         source_fax_id=source_fax_id,
         run_id=run.id,
         covered={
-            (surgeon_id, case_date)
+            (surgeon_id, case_date if not isinstance(case_date, str) else date.fromisoformat(case_date[:10]))
             for surgeon_id, case_date in db.execute(text("""
                 SELECT surgeon_id, case_date
                 FROM fax_ingest_coverage
                 WHERE run_id = :run_id
                 ORDER BY surgeon_id, case_date
             """), {"run_id": run.id})
-        },
+        } | retiring,
     )
     # Rule 10 + Don's big rule: OFF / approved-OFF lines are entered and flagged
     # in CAL on the card (schedule_warnings). Ingest sends no notification at all.
@@ -229,6 +235,10 @@ def apply_staged_snapshot(
 
     report = run_report(db, run.id, lines_added=len(rows))
     filled = fill_cards_from_fax_lines(db, run_id=run.id)
+    # Only the latest fax is the source of truth: what it no longer lists comes off.
+    lines_deactivated = retire_lines_not_on_latest_fax(
+        db, run_id=run.id, fax_id=source_fax_id, start=start, end=end, today=today,
+    )
     created = filled["surgicalCreated"]
     updated = filled["surgicalUpdated"]
     cancelled = filled["surgicalCancelled"]
@@ -245,6 +255,7 @@ def apply_staged_snapshot(
             f"Applied fax {source_fax_id} line items; block cards unchanged. "
             f"cases created={created}, updated={updated}, cancelled={cancelled}, "
             f"kept on unapplied days={kept_by_database}; rows skipped={skipped_rows}; "
+            f"lines no longer on the fax switched off={lines_deactivated}; "
             f"clinic sessions={clinic_sessions}; conflicts={len(conflicts)}. "
             "No surgeon notification sent."
         ),
@@ -303,7 +314,7 @@ def apply_staged_snapshot(
         "cardsChanged": 0,
         "notificationsSent": 0,
         "offDayConflicts": off_conflicts,
-        "linesDeactivated": 0,
+        "linesDeactivated": lines_deactivated,
         "report": {**report, "conflictsFlagged": sum(c["lines"] for c in off_conflicts)},
         "derivativesRemoved": cleanup,
         "immutableSourcesRemoved": source_cleanup,

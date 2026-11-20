@@ -14,9 +14,9 @@ The latest **successfully applied** fax is authoritative for the surgeon/dates i
 
 ## Repeat faxes and cancellations
 
-Daily faxes overlap several days. Stable page/printed-row identity preserves two genuinely duplicated printed lines. Applying a new fax does not overwrite a line merely because the new fax repeats it.
+Only the latest fax is the source of truth (Don, Nov 20). Epic faxes come in batches of doctors, so it is per doctor: when a fax is applied, for each doctor **on that fax** and every date the fax covers (tomorrow on), any fax line that fax did not write is switched off (`is_active = FALSE`, kept for history). If Epic took a patient away, the line comes off and the count goes to zero. Doctors not on the fax are not touched. Manual (Shannon/admin) and Aprima lines are never touched. A doctor/day where the fax has a row CAL could not place keeps its existing lines until that row is fixed. The Send-to-Calendar photo includes the switched-off lines, so Undo puts them back. Stable page/printed-row identity still preserves two genuinely duplicated printed lines. Past days are never changed.
 
-Coverage is surgeon/date-specific. A missing line survives the first consecutive successfully applied covering fax that omits it. SQL deactivates it only after the second safe consecutive covering omission. Reappearance or an unresolved row resets the omission chain. A newer fax blocks only overlapping surgeon/date coverage, not unrelated dates or surgeons.
+`server/scripts/retire_superseded_fax_lines.py` applies the same rule once to existing data (dry run by default).
 
 ## Boundaries
 

@@ -203,7 +203,7 @@
         }
       }
     },
-    eventClassNames: info => [`event-${info.event.extendedProps.type}`, ...(info.event.extendedProps.has_conflict ? ['event-conflict'] : [])],
+    eventClassNames: info => [`event-${info.event.extendedProps.type}`, ...(info.event.extendedProps.type === 'dayoff' && info.event.extendedProps.status === 'pending' ? ['event-pending'] : []), ...(info.event.extendedProps.has_conflict ? ['event-conflict'] : [])],
     eventContent: info => {
       const event = info.event, props = event.extendedProps;
       const wrapper = node('div');

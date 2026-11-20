@@ -2,7 +2,7 @@
 {% block title %}Master Calendar{% endblock %}
 {% block head %}
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js" defer></script>
-<link rel="stylesheet" href="/static/css/admin_calendar.css?v={{ app_version|default('dev')|urlencode }}&b=3" />
+<link rel="stylesheet" href="/static/css/admin_calendar.css?v={{ app_version|default('dev')|urlencode }}&b=4" />
 {% endblock %}
 {% block content %}
 <section class="master-calendar" aria-labelledby="calendar-heading" data-calendar-live data-today="{{ today.isoformat() }}">
@@ -20,7 +20,7 @@
     <div class="calendar-context"><div><span class="calendar-scope" id="calendar-scope">All clinicians</span>
       <span class="calendar-status" id="calendar-status" role="status" aria-live="polite">Loading schedule…</span></div>
       <button type="button" id="calendar-retry" hidden>Retry</button>
-      <div class="calendar-legend" aria-label="Event types"><span class="legend-block">Clinic / OR</span><span class="legend-call">Call</span><span class="legend-meeting">Meeting</span><span class="legend-off">Time off</span></div>
+      <div class="calendar-legend" aria-label="Event types"><span class="legend-block">Clinic / OR</span><span class="legend-call">Call</span><span class="legend-meeting">Meeting</span><span class="legend-off">Time off</span><span class="legend-requested">Time off requested</span></div>
     </div>
     <div id="master-calendar"></div>
     <p class="calendar-footnote">Select an event for details. AM / PM blocks follow the master schedule; NA is an open block. Red marks a schedule conflict.</p>
@@ -32,4 +32,4 @@
   <div id="calendar-detail-body"></div>
 </dialog>
 {% endblock %}
-{% block scripts %}<script src="/static/admin_calendar.js?v={{ app_version|default('dev')|urlencode }}&b=4" defer></script>{% endblock %}
+{% block scripts %}<script src="/static/admin_calendar.js?v={{ app_version|default('dev')|urlencode }}&b=5" defer></script>{% endblock %}

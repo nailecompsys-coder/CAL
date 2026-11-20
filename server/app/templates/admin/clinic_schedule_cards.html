@@ -5,6 +5,11 @@
 <style>
   .schedule-card { height: 54px; border-radius: 6px; }
   .schedule-card--off .schedule-label { text-decoration: line-through; }
+  /* OFF with patients still booked: red flag. */
+  .schedule-card--booked-off { border-color: var(--alert-red); background: var(--alert-red-soft); color: var(--alert-red); border-width: 2px; }
+  .schedule-card--booked-off .schedule-count { color: var(--alert-red); font-weight: 800; }
+  /* Red-day cards link to #sched-cell-<doctor>-<date>: outline that cell. */
+  td[id^="sched-cell-"]:target { outline: 3px solid var(--alert-red); outline-offset: -3px; scroll-margin-top: 140px; scroll-margin-left: 240px; }
 </style>
 <header class="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between sticky top-0 z-10">
   <div>
@@ -62,18 +67,18 @@
         </td>
         {% for day in week_days %}
         {% set slots = card_grid.get(surgeon.id, {}).get(day, {}) %}
-        <td class="border border-slate-200 bg-white p-1.5 align-top">
+        <td id="sched-cell-{{ surgeon.id }}-{{ day.isoformat() }}" class="border border-slate-200 bg-white p-1.5 align-top">
           <div class="space-y-1">
           {% for session in ['am', 'pm'] %}
             {% set card = slots.get(session) %}
-            {% if card %}<a href="/admin/clinic-schedule?week_offset={{ week_offset }}&roster_card={{ card.card_id }}" title="Open {{ card.label }} roster" class="schedule-card flex items-center justify-between gap-2 border px-3 {% if card.is_off %}schedule-card--off border-slate-300 bg-white text-slate-700{% elif card.is_na %}border-dashed border-slate-300 bg-white text-slate-500{% else %}border-slate-300 text-slate-800{% endif %}"{% if not card.is_off and not card.is_na %} style="background-color: {{ card.location_color }};"{% endif %}>
+            {% if card %}<a href="/admin/clinic-schedule?week_offset={{ week_offset }}&roster_card={{ card.card_id }}" title="{% if card.booked_while_off %}OFF with {{ card.count_label }} booked{% else %}Open {{ card.label }} roster{% endif %}" class="schedule-card flex items-center justify-between gap-2 border px-3 {% if card.booked_while_off %}schedule-card--off schedule-card--booked-off{% elif card.is_off %}schedule-card--off border-slate-300 bg-white text-slate-700{% elif card.is_na %}border-dashed border-slate-300 bg-white text-slate-500{% else %}border-slate-300 text-slate-800{% endif %}"{% if not card.is_off and not card.is_na %} style="background-color: {{ card.location_color }};"{% endif %}>
             {% else %}<div class="schedule-card flex items-center justify-between gap-2 border border-dashed border-slate-300 bg-white px-3 text-slate-500">{% endif %}
               {% if card %}
               <div class="min-w-0">
                 <div class="schedule-label truncate text-xs font-extrabold">{{ card.label }}</div>
-                {% if card.count_label %}<div class="truncate text-[10px] font-semibold text-slate-500">{{ card.count_label }}</div>{% endif %}
+                {% if card.count_label %}<div class="schedule-count truncate text-[10px] font-semibold text-slate-500">{{ card.count_label }}</div>{% endif %}
               </div>
-              {% if card.is_off %}<span class="shrink-0 text-[10px] font-extrabold uppercase tracking-wide">OFF</span>{% endif %}
+              {% if card.booked_while_off %}<span class="shrink-0 text-[10px] font-extrabold uppercase tracking-wide"><i class="fa-solid fa-circle-exclamation mr-0.5"></i>OFF</span>{% elif card.is_off %}<span class="shrink-0 text-[10px] font-extrabold uppercase tracking-wide">OFF</span>{% endif %}
               {% else %}
               <span class="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">NA</span>
               {% endif %}

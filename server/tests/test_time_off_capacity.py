@@ -395,5 +395,25 @@ class TimeOffCapacityTest(unittest.TestCase):
             self.db.query(AdminNotification).filter_by(admin_user_id=quiet.id, kind="time_off_red_day").count(), 1)
 
 
+    def test_clinic_or_grid_shows_lines_on_off_na_card_and_flags_red(self):
+        from app.schedule_card_projection_service import card_grid_page_data
+        doc = self.docs[0]
+        self._off(doc)
+        self._book(doc, "clinic", 13)
+        self._book(doc, "surgical", 1)
+        cell = card_grid_page_data(self.db, DAY, DAY)["grid"][doc.id][DAY]["am"]
+        self.assertEqual(cell["label"], "NA")
+        self.assertEqual(cell["count"], 14)
+        self.assertEqual(cell["count_label"], "1 case · 13 visits")
+        self.assertTrue(cell["booked_while_off"])
+        # The next schedule takes them off: zero, and the flag clears.
+        from app.models import ScheduleCardActivity
+        self.db.query(ScheduleCardActivity).update({"is_active": False})
+        self.db.commit()
+        cell = card_grid_page_data(self.db, DAY, DAY)["grid"][doc.id][DAY]["am"]
+        self.assertEqual(cell["count"], 0)
+        self.assertFalse(cell["booked_while_off"])
+
+
 if __name__ == "__main__":
     unittest.main()

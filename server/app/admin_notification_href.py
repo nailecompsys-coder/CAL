@@ -168,9 +168,13 @@ def admin_notification_href(kind: str | None, payload: dict | None) -> str:
     if kind in {"day_off_request", "day_off_duplicate", "time_off_red"}:
         return _dayoff_href(payload)
     if kind == "time_off_red_day":
+        # Open the Clinics / OR week, on that doctor's cell when it is one doctor.
         start = payload.get("startDate")
-        end = payload.get("endDate") or start
-        return f"/admin/daysoff?gantt_start={start}&gantt_end={end}" if start else "/admin/daysoff"
+        if not start:
+            return "/admin/clinic-schedule"
+        surgeon_id = _as_int(payload.get("surgeonId"))
+        anchor = f"#sched-cell-{surgeon_id}-{start}" if surgeon_id else ""
+        return f"/admin/clinic-schedule?day={start}{anchor}"
     if kind == "schedule_flag":
         return _block_or_href(payload)
     if kind == "ingest_correction":

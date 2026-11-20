@@ -133,15 +133,23 @@ def card_grid_page_data(db: Session, start: date, end: date) -> dict:
             for row in activity_rows if not row["is_surgery"]
         ]
         roster_cases = [row for row in activity_rows if row["is_surgery"]]
-        unit = "case" if is_hospital else "visit"
-        activity_type = "surgical" if is_hospital else "clinic"
-        count = activity_counts.get((card.id, activity_type), 0)
+        # Every active line on the card counts, whatever the card's location or
+        # state (Don: if the cases are in the database, the screen shows them).
+        cases = activity_counts.get((card.id, "surgical"), 0)
+        visits = activity_counts.get((card.id, "clinic"), 0)
+        count = cases + visits
+        parts = []
+        if cases:
+            parts.append(f"{cases} case{'' if cases == 1 else 's'}")
+        if visits:
+            parts.append(f"{visits} visit{'' if visits == 1 else 's'}")
         if not location:
             label = "NA"
-            count_label = ""
+            count_label = " · ".join(parts)
         else:
             label = location.abbreviation or location.name
-            count_label = f"{count} {unit if count == 1 else unit + 's'}"
+            unit = "case" if is_hospital else "visit"
+            count_label = " · ".join(parts) or f"0 {unit}s"
         grid[card.surgeon_id][card.date][card.session] = {
             "card_id": card.id,
             "session": card.session,
@@ -149,6 +157,8 @@ def card_grid_page_data(db: Session, start: date, end: date) -> dict:
             "count_label": count_label,
             "count": count,
             "is_off": is_off,
+            # Red flag: OFF with patients still booked on the card.
+            "booked_while_off": is_off and count > 0,
             "is_na": not location,
             "location_id": location.id if location else None,
             "location_color": location.color if location else "#e2e8f0",

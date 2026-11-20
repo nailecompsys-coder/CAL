@@ -157,21 +157,21 @@
 
   {% if red_days_ahead %}
   <!-- Red days ahead (time-off rules), from tomorrow on. Every admin sees this. -->
-  <div class="bento-card clinical-panel p-3 ring-2 ring-red-300 bg-red-50/60" style="--i:3">
+  <div class="bento-card clinical-panel p-3 alert-red-panel" style="--i:3">
     <div class="flex items-center justify-between gap-3 mb-2">
       <div class="flex items-center gap-2">
-        <div class="w-6 h-6 rounded-lg bg-red-600 flex items-center justify-center flex-shrink-0">
+        <div class="w-6 h-6 rounded-lg alert-red-icon flex items-center justify-center flex-shrink-0">
           <i class="fa-solid fa-circle-exclamation text-white text-[11px]"></i>
         </div>
-        <h2 class="font-bold text-red-800 text-sm">Red days ahead</h2>
+        <h2 class="font-bold alert-red-text text-sm">Red days ahead</h2>
       </div>
-      <span class="text-[10px] font-bold text-red-700 bg-white border border-red-200 px-1.5 py-0.5 rounded-full">{{ red_days_ahead|length }}</span>
+      <span class="text-[10px] font-bold alert-red-badge px-1.5 py-0.5 rounded-full">{{ red_days_ahead|length }}</span>
     </div>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-1.5">
       {% for run in red_days_ahead %}
-      <a href="/admin/daysoff?gantt_start={{ run.start.isoformat() }}&gantt_end={{ run.end.isoformat() }}"
-         class="rounded-lg border border-red-200 bg-white px-2.5 py-1.5 block hover:border-red-400 transition-colors">
-        <p class="text-xs font-bold text-red-700 truncate">{{ run.label }}</p>
+      <a href="/admin/clinic-schedule?day={{ run.start.isoformat() }}{% if run.group_id < 0 %}#sched-cell-{{ -run.group_id }}-{{ run.start.isoformat() }}{% endif %}"
+         class="rounded-lg border alert-red-card px-2.5 py-1.5 block transition-colors">
+        <p class="text-xs font-bold alert-red-text truncate">{{ run.label }}</p>
         <p class="text-[11px] text-slate-700 mt-0.5">
           {% if run.group_id < 0 %}
             {{ run.initials|join(', ') }} off with
@@ -236,9 +236,9 @@
         data-cal-href="{{ card_href | e }}"
         data-cal-kind="{{ row.kind | e }}"
         data-cal-informational="{{ '1' if notification_is_informational(row) else '0' }}"
-        class="rounded-lg border {% if is_red_alert %}border-red-300 bg-red-50 hover:border-red-400{% elif row.read_at %}border-slate-100 bg-white/60{% else %}{% if is_fixable %}border-amber-200 bg-amber-50/80{% else %}border-teal-100 bg-teal-50/70{% endif %}{% endif %} px-2.5 py-1.5 block {% if not is_red_alert %}hover:border-teal-300 hover:bg-teal-50{% endif %} transition-colors">
+        class="rounded-lg border {% if is_red_alert %}alert-red-card-soft{% elif row.read_at %}border-slate-100 bg-white/60{% else %}{% if is_fixable %}border-amber-200 bg-amber-50/80{% else %}border-teal-100 bg-teal-50/70{% endif %}{% endif %} px-2.5 py-1.5 block {% if not is_red_alert %}hover:border-teal-300 hover:bg-teal-50{% endif %} transition-colors">
         <div class="flex items-center justify-between gap-2">
-          <p class="text-xs font-bold {% if is_red_alert %}text-red-700{% else %}text-slate-800{% endif %} truncate">{% if is_red_alert %}<i class="fa-solid fa-circle-exclamation mr-1"></i>{% endif %}{{ notif_title }}</p>
+          <p class="text-xs font-bold {% if is_red_alert %}alert-red-text{% else %}text-slate-800{% endif %} truncate">{% if is_red_alert %}<i class="fa-solid fa-circle-exclamation mr-1"></i>{% endif %}{{ notif_title }}</p>
           <p class="text-[10px] text-slate-400 whitespace-nowrap">{% if row.created_at %}{{ row.created_at.strftime('%b %d %H:%M') }}{% endif %}</p>
         </div>
         <p class="text-[11px] text-slate-600 mt-0.5 line-clamp-1">{{ row.body }}</p>
@@ -489,7 +489,7 @@
             <div class="flex-1 min-w-0">
               <p class="text-sm font-medium text-slate-800 truncate">{{ d.surgeon.full_name }}
                 {% set off_level = pending_off_levels.get(d.id) if pending_off_levels is defined else None %}
-                {% if off_level == 'red' %}<span class="ml-1 text-[10px] font-bold px-1.5 rounded-full bg-red-100 text-red-700" title="Too many off at once (time-off groups)">Red</span>
+                {% if off_level == 'red' %}<span class="ml-1 text-[10px] font-bold px-1.5 rounded-full alert-red-badge" title="Too many off at once (time-off groups)">Red</span>
                 {% elif off_level == 'yellow' %}<span class="ml-1 text-[10px] font-bold px-1.5 rounded-full bg-amber-100 text-amber-800" title="Others already off at the same time">Yellow</span>{% endif %}
               </p>
               <p class="text-xs text-slate-500">{{ d.start_date.strftime('%b %-d') }}{% if d.start_date != d.end_date %} – {{ d.end_date.strftime('%b %-d') }}{% endif %}{% if d.reason %} · {{ d.reason }}{% endif %}</p>

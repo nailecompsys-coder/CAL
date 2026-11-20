@@ -39,9 +39,16 @@ def clinic_schedule_page(
     roster_card: int | None = None,
     roster_day: str = "",
     roster_location: int | None = None,
+    day: str = "",
     db: Session = Depends(get_db),
     admin=Depends(get_current_admin),
 ):
+    # ?day=YYYY-MM-DD opens the week holding that day (red-day cards link here).
+    if day:
+        try:
+            week_offset = week_offset_for_date(date.fromisoformat(day))
+        except ValueError:
+            pass
     if month:
         try:
             first = date.fromisoformat(f"{month}-01")

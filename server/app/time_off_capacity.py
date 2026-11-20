@@ -549,6 +549,22 @@ def sync_red_day_alerts(db: Session, admin_user_id: int) -> int:
         AdminNotification.admin_user_id == admin_user_id,
         AdminNotification.kind == RED_DAY_KIND,
     ).all()
+    def card_fields(run: dict) -> tuple[str, str, str]:
+        if run["group_id"] < 0:
+            title = f"Red: {run['group_name']}"
+            body = f"{_run_label(run)}: {_booked_label(run.get('cases', 0), run.get('visits', 0))} while off."
+        else:
+            title = f"Red day: {run['group_name']}"
+            body = f"{_run_label(run)}: {run['off']} off ({', '.join(run['initials'])}). Red at {run['red_at']}."
+        payload = _json.dumps({
+            "key": run["key"],
+            "groupId": run["group_id"],
+            "surgeonId": -run["group_id"] if run["group_id"] < 0 else None,
+            "startDate": run["start"].isoformat(),
+            "endDate": run["end"].isoformat(),
+        })
+        return title, body, payload
+
     seen: set[str] = set()
     changed = 0
     for row in existing:
@@ -559,28 +575,23 @@ def sync_red_day_alerts(db: Session, admin_user_id: int) -> int:
         if key not in current or key in seen:
             db.delete(row)
             changed += 1
-        else:
-            seen.add(key)
+            continue
+        seen.add(key)
+        # Keep the card, refresh its wording, counts and link.
+        title, body, payload = card_fields(current[key])
+        if (row.title, row.body, row.payload) != (title, body, payload):
+            row.title, row.body, row.payload = title, body, payload
+            changed += 1
     for key, run in current.items():
         if key in seen:
             continue
-        if run["group_id"] < 0:
-            title = f"Red: {run['group_name']}"
-            body = f"{_run_label(run)}: {_booked_label(run.get('cases', 0), run.get('visits', 0))} while off."
-        else:
-            title = f"Red day: {run['group_name']}"
-            body = f"{_run_label(run)}: {run['off']} off ({', '.join(run['initials'])}). Red at {run['red_at']}."
+        title, body, payload = card_fields(run)
         db.add(AdminNotification(
             admin_user_id=admin_user_id,
             title=title,
             body=body,
             kind=RED_DAY_KIND,
-            payload=_json.dumps({
-                "key": key,
-                "groupId": run["group_id"],
-                "startDate": run["start"].isoformat(),
-                "endDate": run["end"].isoformat(),
-            }),
+            payload=payload,
         ))
         changed += 1
     if changed:

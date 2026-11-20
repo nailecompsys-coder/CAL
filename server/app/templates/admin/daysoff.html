@@ -69,7 +69,7 @@
       {% for d in pending %}
       {% set findings = conflict_map.get(d.id, []) %}
       {% set off_level = 'red' if findings|selectattr('severity', 'equalto', 'red')|list else ('yellow' if findings|selectattr('severity', 'equalto', 'yellow')|list else '') %}
-      <div class="clinical-glass pending-request-card rounded-xl {% if off_level == 'red' %}ring-2 ring-red-300{% elif findings %}ring-1 ring-amber-200{% endif %}"
+      <div class="clinical-glass pending-request-card rounded-xl {% if off_level == 'red' %}alert-red-ring{% elif findings %}ring-1 ring-amber-200{% endif %}"
            id="pending-request-{{ d.id }}"
            data-dayoff-id="{{ d.id }}"
            data-surgeon-id="{{ d.surgeon_id }}"
@@ -84,7 +84,7 @@
                 <p class="font-semibold text-slate-800 text-[11px] truncate">{{ d.surgeon.full_name }}</p>
                 <span class="text-[9px] font-bold px-1 rounded-full status-pending leading-3 flex-shrink-0">Pending</span>
                 {% if off_level == 'red' %}
-                <span class="text-[9px] font-bold px-1 rounded-full bg-red-100 text-red-700 leading-3 flex-shrink-0" title="Too many off at once (time-off groups)">Red</span>
+                <span class="text-[9px] font-bold px-1 rounded-full alert-red-badge leading-3 flex-shrink-0" title="Too many off at once (time-off groups)">Red</span>
                 {% elif off_level == 'yellow' %}
                 <span class="text-[9px] font-bold px-1 rounded-full bg-amber-100 text-amber-800 leading-3 flex-shrink-0" title="Others already off at the same time (time-off groups)">Yellow</span>
                 {% endif %}

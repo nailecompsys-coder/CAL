@@ -44,6 +44,7 @@ from .routers import (
 from . import migrate_call_groups
 from . import migrate_call_builder
 from . import migrate_push_sound
+from . import migrate_time_off_groups
 from . import migrate_grok_bot_rules
 
 
@@ -96,6 +97,7 @@ async def lifespan(app: FastAPI):
         migrate_fax_line_memory.run_migration()
         migrate_call_builder.run_migration()
         migrate_push_sound.run_migration()
+        migrate_time_off_groups.run_migration()
         # A later migration may have created a line table. Add mrn if it is still missing.
         migrate_fax_mrn.run_migration()
         db = SessionLocal()

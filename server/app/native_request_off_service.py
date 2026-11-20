@@ -21,6 +21,7 @@ from .scheduling_gate_service import (
     surgeon_friendly_conflict_message,
 )
 from .scheduling_guardrails_service import store_dayoff_findings
+from .time_off_capacity import alert_red_request, check_new_request
 from .time_off_email_service import send_time_off_canceled_email, send_time_off_request_copy
 
 
@@ -62,6 +63,10 @@ def create_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequ
             "warnings": warnings[:3],
             "emailed": emailed,
         }
+
+    capacity = _capacity(db, surgeon, payload, segments, start_t, end_t)
+    if capacity.is_red:
+        return _red_response(db, surgeon, payload, capacity)
 
     overlap_note = day_off_overlap_advisory(
         db,
@@ -112,8 +117,9 @@ def create_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequ
     if friendly:
         warnings.append(friendly)
     notify_admins(
-        "Pending Request",
-        f"{surgeon.full_name} requested {payload.start_date.strftime('%b %-d')} to {payload.end_date.strftime('%b %-d')}.",
+        "Pending Request" + (" (yellow)" if capacity.level == "yellow" else ""),
+        f"{surgeon.full_name} requested {payload.start_date.strftime('%b %-d')} to {payload.end_date.strftime('%b %-d')}."
+        + (f" {capacity.admin_message()}" if capacity.level else ""),
         db,
         kind="day_off_request",
         payload={
@@ -172,6 +178,10 @@ def update_native_request_off(db: Session, surgeon: Surgeon, dayoff_id: int, pay
     )
     if already:
         raise HTTPException(409, "That day off is already filed for those dates.")
+    capacity = _capacity(db, surgeon, payload, segments, start_t, end_t, exclude_id=row.id)
+    if capacity.is_red:
+        # Red: the edit is not saved; the earlier request stays as it was.
+        return _red_response(db, surgeon, payload, capacity)
 
     row.start_date = payload.start_date
     row.end_date = payload.end_date
@@ -280,3 +290,46 @@ def _validate_request_dates(start_date, end_date, action: str) -> None:
 
 def _request_segments(payload: NativeRequestOffInput):
     return request_segments(payload)
+
+
+def _capacity(db, surgeon, payload, segments, start_t, end_t, *, exclude_id=None):
+    return check_new_request(
+        db,
+        surgeon.id,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+        reason=payload.reason,
+        is_full_day=payload.is_full_day,
+        start_time=start_t,
+        end_time=end_t,
+        segments=segments,
+        exclude_id=exclude_id,
+    )
+
+
+def _red_response(db, surgeon, payload, capacity) -> dict:
+    """Chris's red: the request is not sent. The phone shows why; Shannon is alerted."""
+    alert_red_request(db, surgeon, capacity, payload.start_date, payload.end_date)
+    return {
+        "ok": False,
+        "request": None,
+        "warnings": [capacity.surgeon_message()],
+        "emailed": False,
+        "level": "red",
+    }
+
+
+def check_native_request_off(db: Session, surgeon: Surgeon, payload: NativeRequestOffInput, *, exclude_id=None) -> dict:
+    """Preview for the request form: the color and the message, nothing saved."""
+    _validate_request_dates(payload.start_date, payload.end_date, "requested")
+    segments, start_t, end_t = _request_segments(payload)
+    if exclude_id is not None:
+        row = db.get(DayOff, exclude_id)
+        if not row or row.surgeon_id != surgeon.id:
+            raise HTTPException(404, "Days off request not found")
+    capacity = _capacity(db, surgeon, payload, segments, start_t, end_t, exclude_id=exclude_id)
+    return {
+        "ok": True,
+        "level": capacity.level or "clear",
+        "message": capacity.surgeon_message(),
+    }

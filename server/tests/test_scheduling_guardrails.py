@@ -41,39 +41,7 @@ class SchedulingGuardrailsTest(unittest.TestCase):
         Base.metadata.drop_all(bind=self.engine)
         self.engine.dispose()
 
-    def test_clinic_group_capacity_warns_when_limit_reached(self):
-        db = self.Session()
-        try:
-            request_day = date.today() + timedelta(days=14)
-            group = ClinicGroup(
-                name="Winter Garden",
-                abbreviation="WG",
-                group_type="people",
-                enforce_day_off_limit=True,
-                max_approved_off_per_day=2,
-                is_active=True,
-            )
-            first = self._surgeon(db, "Chris", "Johnson", 1)
-            second = self._surgeon(db, "Alex", "Schroeder", 2)
-            requester = self._surgeon(db, "Lucy", "Woodley", 3)
-            db.add(group)
-            db.flush()
-            db.add_all([
-                ClinicGroupMember(clinic_group_id=group.id, surgeon_id=first.id),
-                ClinicGroupMember(clinic_group_id=group.id, surgeon_id=second.id),
-                ClinicGroupMember(clinic_group_id=group.id, surgeon_id=requester.id),
-                DayOff(surgeon_id=first.id, start_date=request_day, end_date=request_day, status="approved"),
-                DayOff(surgeon_id=second.id, start_date=request_day, end_date=request_day, status="approved"),
-            ])
-            db.commit()
-
-            findings = clinic_group_day_off_findings(db, requester, request_day, request_day)
-
-            self.assertEqual(len(findings), 1)
-            self.assertIn("Winter Garden allows 2 approved members", findings[0].message)
-            self.assertIn("Shannon will review", findings[0].surgeon_message)
-        finally:
-            db.close()
+    # Yellow/red time-off group counting is covered in test_time_off_capacity.py.
 
     def test_clinic_group_skips_capacity_when_limit_disabled(self):
         db = self.Session()

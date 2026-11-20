@@ -160,6 +160,13 @@ def submit_request_off(db: Session, surgeon: Surgeon, start_date: str, end_date:
             ),
         }
 
+    from .time_off_capacity import alert_red_request, check_new_request
+
+    capacity = check_new_request(db, surgeon.id, start_date=start, end_date=end, reason=reason)
+    if capacity.is_red:
+        alert_red_request(db, surgeon, capacity, start, end)
+        return {"ok": False, "warn": capacity.surgeon_message()}
+
     advisory = day_off_overlap_advisory(db, surgeon.id, start, end)
 
     dayoff = DayOff(
@@ -185,8 +192,9 @@ def submit_request_off(db: Session, surgeon: Surgeon, start_date: str, end_date:
     if findings:
         conflict_msgs.append(surgeon_friendly_conflict_message(findings))
     notify_admins(
-        "Pending Request",
-        f"{surgeon.full_name} requested {start.strftime('%b %-d')} to {end.strftime('%b %-d')}.",
+        "Pending Request" + (" (yellow)" if capacity.level == "yellow" else ""),
+        f"{surgeon.full_name} requested {start.strftime('%b %-d')} to {end.strftime('%b %-d')}."
+        + (f" {capacity.admin_message()}" if capacity.level else ""),
         db,
         kind="day_off_request",
         payload={"dayOffId": dayoff.id, "surgeonId": surgeon.id, "startDate": start.isoformat(), "endDate": end.isoformat()},

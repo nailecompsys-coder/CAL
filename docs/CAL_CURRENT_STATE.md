@@ -5,6 +5,7 @@ This tracked file records verified production facts and unfinished work. Update 
 ## Implemented locally, not released
 
 - No unreleased admin-dismissal or fax-ingest change remains. CAL `b1308ea` and Desk `018c92c` are pushed and deployed as described below.
+- November 20: time-off groups (Chris's yellow/red rule) and the fax MRN fix are committed locally, not pushed or deployed. Server and portal only: the existing TestFlight build already shows a red "not sent" message; a yellow/red preview before Submit (`POST /api/native/request-off/check`) needs a future TestFlight build. Verified with focused SQLite tests, the same tests and the migration on a temporary PostgreSQL, and a local portal render; the broad suite has only its 10 pre-existing failures. Not checked against production data or on a device.
 
 ## Production
 

@@ -10,7 +10,11 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models import AdminNotification, AdminUser, Base, ClinicGroup, ClinicGroupMember, DayOff, Surgeon
+from app.day_off_card_normalization import sync_day_off_card_links
+from app.models import (
+    AdminNotification, AdminUser, Base, ClinicGroup, ClinicGroupMember, DayOff,
+    ScheduleCard, ScheduleCardWeek, Surgeon,
+)
 from app.routers.native_api import (
     NativeRequestOffBody,
     native_cancel_request_off,
@@ -184,7 +188,7 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
         finally:
             db.close()
 
-    def test_create_request_warns_and_persists_clinic_group_findings(self):
+    def test_create_request_warns_yellow_and_persists_time_off_group_findings(self):
         db = self.Session()
         try:
             approved = self._seed_surgeon(db, "Lucy", "Woodley", "lucy@example.com", 1)
@@ -193,25 +197,35 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
                 name="Lake Mary",
                 abbreviation="LM",
                 group_type="people",
-                enforce_day_off_limit=True,
-                max_approved_off_per_day=1,
+                yellow_at_off=2,
+                red_at_off=3,
                 is_active=True,
             )
             db.add(group)
             db.flush()
+            start = date.today() + timedelta(days=9)
+            for doc in (approved, requester):
+                week = ScheduleCardWeek(surgeon_id=doc.id, week_start=start - timedelta(days=start.weekday()), master_revision="t")
+                db.add(week)
+                db.flush()
+                for session in ("am", "pm"):
+                    db.add(ScheduleCard(week_id=week.id, surgeon_id=doc.id, date=start, session=session,
+                                        baseline_state="na", effective_state="na", source="master"))
+            already_off = DayOff(
+                surgeon_id=approved.id,
+                start_date=start,
+                end_date=start,
+                reason="Approved",
+                status="approved",
+            )
             db.add_all([
                 ClinicGroupMember(clinic_group_id=group.id, surgeon_id=approved.id),
                 ClinicGroupMember(clinic_group_id=group.id, surgeon_id=requester.id),
-                DayOff(
-                    surgeon_id=approved.id,
-                    start_date=date.today() + timedelta(days=9),
-                    end_date=date.today() + timedelta(days=9),
-                    reason="Approved",
-                    status="approved",
-                ),
+                already_off,
             ])
+            db.flush()
+            sync_day_off_card_links(db, already_off)
             db.commit()
-            start = date.today() + timedelta(days=9)
             body = NativeRequestOffBody(start_date=start, end_date=start, reason="Day Off", is_full_day=True)
 
             with patch("app.native_request_off_service.send_native_push_to_surgeon"), \
@@ -222,7 +236,8 @@ class NativeRequestOffRoutesTest(unittest.TestCase):
             self.assertTrue(any("Lake Mary" in warning for warning in response["warnings"]))
             row = db.get(DayOff, response["request"]["id"])
             self.assertIsNotNone(row.review_findings)
-            self.assertIn("clinic_group_capacity", row.review_findings)
+            self.assertIn("time_off_capacity", row.review_findings)
+            self.assertIn('"severity": "yellow"', row.review_findings)
         finally:
             db.close()
 

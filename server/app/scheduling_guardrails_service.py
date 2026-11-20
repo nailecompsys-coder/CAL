@@ -90,66 +90,18 @@ def clinic_group_day_off_findings(
     end_date: date,
     exclude_dayoff_id: int | None = None,
 ) -> list[DayOffFinding]:
+    """Time-off group yellow/red findings for a full-day request (see time_off_capacity)."""
     if not surgeon:
         return []
+    from .time_off_capacity import capacity_findings, check_new_request
 
-    findings: list[DayOffFinding] = []
-    groups = [
-        group
-        for group in surgeon_clinic_groups(db, surgeon.id)
-        if group.enforce_day_off_limit
-    ]
-    current = start_date
-    while current <= end_date:
-        for group in groups:
-            approved = (
-                db.query(DayOff)
-                .join(Surgeon, DayOff.surgeon_id == Surgeon.id)
-                .join(ClinicGroupMember, ClinicGroupMember.surgeon_id == Surgeon.id)
-                .filter(
-                    ClinicGroupMember.clinic_group_id == group.id,
-                    Surgeon.is_active == True,  # noqa: E712
-                    DayOff.status.in_(("approved", "pending")),
-                    DayOff.start_date <= current,
-                    DayOff.end_date >= current,
-                )
-            )
-            if exclude_dayoff_id is not None:
-                approved = approved.filter(DayOff.id != exclude_dayoff_id)
-            approved_rows = [
-                row
-                for row in approved.options(joinedload(DayOff.surgeon)).all()
-                if surgeon_is_visible(row.surgeon)
-            ]
-            limit = max(1, int(group.max_approved_off_per_day or 1))
-            if len(approved_rows) < limit:
-                continue
-            initials = sorted({row.surgeon.initials for row in approved_rows if row.surgeon})
-            initials_text = ", ".join(initials)
-            day_label = current.strftime("%b %-d")
-            pending_n = sum(1 for row in approved_rows if row.status == "pending")
-            approved_n = len(approved_rows) - pending_n
-            detail = f"{approved_n} approved"
-            if pending_n:
-                detail += f", {pending_n} pending"
-            findings.append(DayOffFinding(
-                severity="warning",
-                kind="clinic_group_capacity",
-                date=current,
-                clinic_group_id=group.id,
-                clinic_group_name=group.name,
-                approved_initials=initials,
-                surgeon_message=(
-                    f"{group.name} already has {initials_text} off/pending on {day_label}. Shannon will review."
-                ),
-                message=(
-                    f"Clinic group capacity: {group.name} allows {limit} member"
-                    f"{'' if limit == 1 else 's'} off per day (approved + pending). "
-                    f"{day_label} already has {detail}: {initials_text}."
-                ),
-            ))
-        current += timedelta(days=1)
-    return findings
+    return capacity_findings(check_new_request(
+        db,
+        surgeon.id,
+        start_date=start_date,
+        end_date=end_date,
+        exclude_id=exclude_dayoff_id,
+    ))
 
 
 def dayoff_review_findings(db: Session, dayoff: DayOff) -> list[DayOffFinding]:

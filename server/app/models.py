@@ -988,6 +988,12 @@ class ClinicGroup(Base):
     group_type = Column(String(16), default="people", server_default="people", nullable=False)  # people | locations
     enforce_day_off_limit = Column(Boolean, default=False, server_default="false", nullable=False)
     max_approved_off_per_day = Column(Integer, default=1, server_default="1", nullable=False)
+    # Time-off groups (Chris's rule): count everyone off in a half-day, including
+    # the new request. Yellow warns; red stops the surgeon's request. NULL = no limit.
+    yellow_at_off = Column(Integer, nullable=True)
+    red_at_off = Column(Integer, nullable=True)
+    # True for "Whole practice": every active physician counts, no member list.
+    applies_to_all = Column(Boolean, default=False, server_default="false", nullable=False)
     is_active = Column(Boolean, default=True, server_default="true", nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 

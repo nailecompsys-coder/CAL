@@ -382,15 +382,13 @@ def build_dayoff_review_findings(
     db: Session,
     dayoff: DayOff,
 ) -> list[DayOffFinding]:
-    from .scheduling_guardrails_service import clinic_group_day_off_findings
+    from .time_off_capacity import capacity_findings, check_day_off
 
-    surgeon = dayoff.surgeon or db.get(Surgeon, dayoff.surgeon_id)
     findings: list[DayOffFinding] = []
     seen: set[str] = set()
 
-    for finding in clinic_group_day_off_findings(
-        db, surgeon, dayoff.start_date, dayoff.end_date, exclude_dayoff_id=dayoff.id
-    ):
+    # Time-off group yellow/red, counted per half-day from this request's own cards.
+    for finding in capacity_findings(check_day_off(db, dayoff)):
         key = f"{finding.kind}:{finding.date}:{finding.message}"
         if key not in seen:
             seen.add(key)

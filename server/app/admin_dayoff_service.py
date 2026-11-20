@@ -321,10 +321,8 @@ def pending_conflict_map(db: Session, pending: list[DayOff]) -> dict[int, list[d
 
     conflict_map = {}
     for dayoff in pending:
-        stored = decode_findings(dayoff.review_findings)
-        if stored:
-            conflict_map[dayoff.id] = stored
-            continue
+        # Recount every time: another request may have been approved or cancelled
+        # since this one was filed, so a stored yellow/red can be stale.
         conflict_map[dayoff.id] = finding_dicts(build_dayoff_review_findings(db, dayoff))
     return conflict_map
 

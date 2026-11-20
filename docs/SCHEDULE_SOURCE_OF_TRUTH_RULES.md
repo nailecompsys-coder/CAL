@@ -41,6 +41,13 @@ This is Don's current scheduling rule set for the master calendar, the surgeon a
 - Uncertain OCR identities, unresolved locations, missing times, and possible duplicates require review. Do not guess a patient, surgeon, room, or time to make a row fit.
 - Group OR capacity is separate from one surgeon's own block. A team/day view may show who is assigned where without exposing another surgeon's patient details.
 
+## Time-off groups (Chris, surgeon in charge, November 2026)
+
+- Settings → Time-off Groups holds each group's members and two counts. CAL counts everyone in the group who is off (approved or pending) in the same AM or PM half-day, plus the new request. No Call and denied or cancelled requests do not count.
+- **Whole practice** covers every active physician: 3 off is **yellow**, 4 off is **red** (two already off makes a third request yellow; three off makes the next one red). Other groups carry their own numbers; LM and WG started from their old "max off" limit (one more is yellow, two more is red).
+- **Yellow:** the request is sent. The surgeon sees who else is off; Shannon sees it marked yellow.
+- **Red:** the surgeon's request (new or edited) is not sent. The surgeon is asked to talk with the others first, and the admins get a red alert on the dashboard and by text. Shannon can still enter the time off under Days Off once the doctors agree. Pending cards are recounted each time the page loads.
+
 ## Scheduler conflict alerts
 
 - Each surgeon belongs to a scheduler group. Show the associated group beside the surgeon in the app so users can identify whom to contact about a conflict. The group-to-surgeon mapping must come from maintained app data, not an inference from a fax.

@@ -21,6 +21,7 @@ from ..native_misc_service import mark_alerts_read, save_push_token
 from ..aprima_cache_service import patient_appointments_for_api
 from ..aprima_schedule_service import AprimaScheduleUnavailable
 from ..native_request_off_service import (
+    check_native_request_off,
     NativeRequestOffInput,
     cancel_native_request_off as cancel_native_request_off_service,
     create_native_request_off,
@@ -226,6 +227,18 @@ def native_request_off(
 ):
     surgeon, _ = auth
     return create_native_request_off(db, surgeon, _native_request_off_input(body))
+
+
+@router.post("/request-off/check")
+def native_request_off_check(
+    body: NativeRequestOffBody,
+    dayoff_id: int | None = None,
+    db: Session = Depends(get_db),
+    auth=Depends(get_current_surgeon),
+):
+    """Yellow/red preview before Submit. Saves nothing and alerts no one."""
+    surgeon, _ = auth
+    return check_native_request_off(db, surgeon, _native_request_off_input(body), exclude_id=dayoff_id)
 
 
 @router.put("/request-off/{dayoff_id}")

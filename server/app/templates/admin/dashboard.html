@@ -155,6 +155,37 @@
     </div>
   </div>
 
+  {% if red_days_ahead %}
+  <!-- Red days ahead (time-off rules), from tomorrow on. Every admin sees this. -->
+  <div class="bento-card clinical-panel p-3 ring-2 ring-red-300 bg-red-50/60" style="--i:3">
+    <div class="flex items-center justify-between gap-3 mb-2">
+      <div class="flex items-center gap-2">
+        <div class="w-6 h-6 rounded-lg bg-red-600 flex items-center justify-center flex-shrink-0">
+          <i class="fa-solid fa-circle-exclamation text-white text-[11px]"></i>
+        </div>
+        <h2 class="font-bold text-red-800 text-sm">Red days ahead</h2>
+      </div>
+      <span class="text-[10px] font-bold text-red-700 bg-white border border-red-200 px-1.5 py-0.5 rounded-full">{{ red_days_ahead|length }}</span>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-1.5">
+      {% for run in red_days_ahead %}
+      <a href="/admin/daysoff?gantt_start={{ run.start.isoformat() }}&gantt_end={{ run.end.isoformat() }}"
+         class="rounded-lg border border-red-200 bg-white px-2.5 py-1.5 block hover:border-red-400 transition-colors">
+        <p class="text-xs font-bold text-red-700 truncate">{{ run.label }}</p>
+        <p class="text-[11px] text-slate-700 mt-0.5">
+          {% if run.group_id < 0 %}
+            {{ run.initials|join(', ') }} off with
+            {% if run.cases %}{{ run.cases }} case{{ '' if run.cases == 1 else 's' }}{% endif %}{% if run.cases and run.visits %} and {% endif %}{% if run.visits %}{{ run.visits }} visit{{ '' if run.visits == 1 else 's' }}{% endif %} booked
+          {% else %}
+            {{ run.group_name }}: {{ run.off }} off ({{ run.initials|join(', ') }}), red at {{ run.red_at }}
+          {% endif %}
+        </p>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
   {% if admin_notifications %}
   <div class="bento-card clinical-panel p-3" style="--i:4">
     <div class="flex items-center justify-between gap-3 mb-2">

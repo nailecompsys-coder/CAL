@@ -142,8 +142,12 @@ def dashboard(
     ]
 
     # Time-off groups: Red/Yellow badge on the pending requests shown here.
-    from ..time_off_capacity import check_day_off
+    from ..time_off_capacity import check_day_off, red_day_runs, run_label
     pending_off_levels = {row.id: check_day_off(db, row).level for row in pending_daysoff[:4]}
+    # Red days ahead, from tomorrow: shown to every admin, whatever their notice settings.
+    red_days_ahead = [
+        {**run, "label": run_label(run)} for run in red_day_runs(db, today + timedelta(days=1))
+    ]
 
     upcoming_meetings = cal_meetings_in_range(db, today, week_end, limit=5)
     from ..admin_settings_page_service import recent_admin_notifications, unread_admin_notification_count
@@ -181,6 +185,7 @@ def dashboard(
         no_call_ids=no_call_ids,
         pending_daysoff=pending_daysoff,
         pending_off_levels=pending_off_levels,
+        red_days_ahead=red_days_ahead,
         upcoming_meetings=upcoming_meetings,
         admin_notifications=admin_notifications,
         admin_unread_notifications=admin_unread_notifications,

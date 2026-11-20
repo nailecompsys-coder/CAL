@@ -382,5 +382,18 @@ class TimeOffCapacityTest(unittest.TestCase):
         self.assertIn("· Approved ", dayoff_stamps(row))
 
 
+    def test_any_admin_gets_red_day_cards_even_with_notices_off(self):
+        from app.time_off_capacity import sync_red_day_alerts
+        quiet = AdminUser(username="don", email="d@example.com", password_hash="x",
+                          is_active=True, notify_day_off_requests=False)
+        self.db.add(quiet)
+        self.db.commit()
+        for doc in self.docs[:3]:
+            self._off(doc)
+        sync_red_day_alerts(self.db, quiet.id)
+        self.assertEqual(
+            self.db.query(AdminNotification).filter_by(admin_user_id=quiet.id, kind="time_off_red_day").count(), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -351,8 +351,10 @@ def alert_red_request(
     end_date: date,
     dayoff_id: int | None = None,
 ) -> None:
-    """The surgeon sent a red request anyway: Shannon gets a red alert and a text."""
-    from .push import notify_admins
+    """A red request was saved: every active admin gets the red card (Don: any admin
+    should see it); admins with day-off notices on also get a text."""
+    from .push import notify_admins, send_sms
+    from .models import AdminUser
 
     span = start_date.strftime("%b %-d")
     if end_date != start_date:
@@ -373,9 +375,12 @@ def alert_red_request(
             "endDate": end_date.isoformat(),
             "level": "red",
         },
-        require_dayoff_opt_in=True,
-        urgent_sms=True,
+        require_dayoff_opt_in=False,
+        urgent_sms=False,
     )
+    for admin in db.query(AdminUser).filter(AdminUser.is_active == True).all():  # noqa: E712
+        if admin.notify_day_off_requests and admin.phone:
+            send_sms(admin.phone, f"Red alert: time off: {surgeon.full_name} {span}. {result.admin_message()}")
 
 
 def capacity_findings(result: CapacityResult) -> list:
@@ -511,6 +516,10 @@ def red_day_runs(db: Session, start: date) -> list[dict]:
     return runs
 
 
+def run_label(run: dict) -> str:
+    return _run_label(run)
+
+
 def _run_label(run: dict) -> str:
     start, end = run["start"], run["end"]
     if start == end:
@@ -530,7 +539,8 @@ def sync_red_day_alerts(db: Session, admin_user_id: int) -> int:
     from .scheduling_gate_service import practice_today
 
     admin = db.get(AdminUser, admin_user_id)
-    wants = bool(admin and admin.is_active and (admin.notify_day_off_requests is not False))
+    # Don: any admin should see red days, whatever their notice settings.
+    wants = bool(admin and admin.is_active)
     # Don: today is already known; alert from tomorrow on.
     from datetime import timedelta
     runs = red_day_runs(db, practice_today() + timedelta(days=1)) if wants else []
